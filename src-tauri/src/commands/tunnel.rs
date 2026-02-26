@@ -1,0 +1,64 @@
+use std::sync::Arc;
+use tokio::sync::Mutex;
+
+use serde::Deserialize;
+use tauri::State;
+
+use crate::models::ssh::{TunnelConfig, TunnelInfo};
+use crate::services::ssh_tunnel::SshTunnelEngine;
+
+pub type SshTunnelEngineState = Arc<Mutex<SshTunnelEngine>>;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TunnelOpenParams {
+    pub ssh_host: String,
+    pub ssh_port: u16,
+    pub ssh_username: String,
+    pub ssh_password: String,
+    pub local_port: u16,
+    pub remote_host: String,
+    pub remote_port: u16,
+}
+
+#[tauri::command]
+pub async fn tunnel_open(
+    tunnel_engine: State<'_, SshTunnelEngineState>,
+    params: TunnelOpenParams,
+) -> Result<TunnelInfo, String> {
+    let tunnel_id = uuid::Uuid::new_v4().to_string();
+
+    let config = TunnelConfig {
+        tunnel_id,
+        ssh_host: params.ssh_host,
+        ssh_port: params.ssh_port,
+        ssh_username: params.ssh_username,
+        ssh_password: params.ssh_password,
+        local_port: params.local_port,
+        remote_host: params.remote_host,
+        remote_port: params.remote_port,
+    };
+
+    let mut engine = tunnel_engine.lock().await;
+    engine.open_tunnel(config).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn tunnel_close(
+    tunnel_engine: State<'_, SshTunnelEngineState>,
+    tunnel_id: String,
+) -> Result<bool, String> {
+    let mut engine = tunnel_engine.lock().await;
+    engine
+        .close_tunnel(&tunnel_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn tunnel_list(
+    tunnel_engine: State<'_, SshTunnelEngineState>,
+) -> Result<Vec<TunnelInfo>, String> {
+    let engine = tunnel_engine.lock().await;
+    Ok(engine.list_tunnels())
+}
