@@ -5,16 +5,25 @@ mod utils;
 
 use commands::connection::{self, StorageState};
 use commands::db::{self, DbEngineState};
+use commands::db_backup;
 use commands::import;
+use commands::query_history;
+use commands::schema_compare;
 use commands::sftp::{self, SftpEngineState};
+use commands::file_editor;
+use commands::sync;
+use commands::sql_snippet;
+use commands::command_snippet;
 use commands::ssh::{self, SshEngineState};
 use commands::table_editor;
+use commands::terminal_recorder::{self, TerminalRecorderState};
 use commands::tunnel::{self, SshTunnelEngineState};
 use commands::transfer;
 use services::db_engine::DbEngine;
 use services::sftp_engine::SftpEngine;
 use services::ssh_engine::SshEngine;
 use services::ssh_tunnel::SshTunnelEngine;
+use services::terminal_recorder::TerminalRecorder;
 use services::storage::Storage;
 use services::transfer_manager::{TransferManager, TransferManagerState};
 use tauri::Manager;
@@ -30,22 +39,27 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
 
-            // Initialize DbEngine
-            let db_engine_state: DbEngineState = Arc::new(Mutex::new(DbEngine::new()));
+            // Initialize DbEngine — 不再需要 Mutex，内部使用 RwLock
+            let db_engine_state: DbEngineState = Arc::new(DbEngine::new());
             app.manage(db_engine_state);
 
-            // Initialize SshEngine
-            let ssh_engine_state: SshEngineState = Arc::new(Mutex::new(SshEngine::new()));
+            // Initialize SshEngine — 内部使用 RwLock，无需外层 Mutex
+            let ssh_engine_state: SshEngineState = Arc::new(SshEngine::new());
             app.manage(ssh_engine_state);
 
-            // Initialize SftpEngine
-            let sftp_engine_state: SftpEngineState = Arc::new(Mutex::new(SftpEngine::new()));
+            // Initialize SftpEngine — 内部使用 RwLock，无需外层 Mutex
+            let sftp_engine_state: SftpEngineState = Arc::new(SftpEngine::new());
             app.manage(sftp_engine_state);
 
             // Initialize SshTunnelEngine
             let tunnel_engine_state: SshTunnelEngineState =
                 Arc::new(Mutex::new(SshTunnelEngine::new()));
             app.manage(tunnel_engine_state);
+
+            // Initialize TerminalRecorder
+            let recorder_state: TerminalRecorderState =
+                Arc::new(Mutex::new(TerminalRecorder::new()));
+            app.manage(recorder_state);
 
             // Initialize TransferManager
             let transfer_manager = TransferManager::with_default_config();
@@ -60,19 +74,18 @@ pub fn run() {
                 mgr.start_scheduler(app_handle_for_scheduler);
             });
 
-            // Initialize SQLite storage (async)
-            tauri::async_runtime::spawn(async move {
-                match Storage::new().await {
-                    Ok(storage) => {
-                        let state: StorageState = Arc::new(Mutex::new(storage));
-                        handle.manage(state);
-                        log::info!("Storage initialized successfully");
-                    }
-                    Err(e) => {
-                        log::error!("Failed to initialize storage: {}", e);
-                    }
+            // Initialize SQLite storage (同步初始化，确保 setup 完成时 Storage 已就绪)
+            // Storage 内部使用 SqlitePool（线程安全），无需外层 Mutex
+            match tauri::async_runtime::block_on(Storage::new()) {
+                Ok(storage) => {
+                    let state: StorageState = Arc::new(storage);
+                    handle.manage(state);
+                    log::info!("Storage initialized successfully");
                 }
-            });
+                Err(e) => {
+                    log::error!("Failed to initialize storage: {}", e);
+                }
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -105,12 +118,19 @@ pub fn run() {
             db::db_get_columns,
             db::db_get_table_data,
             db::db_get_create_table,
+            db::db_cancel_query,
+            db::db_get_views,
+            db::db_get_procedures,
+            db::db_get_functions,
+            db::db_get_triggers,
+            db::db_get_object_definition,
             db::write_text_file,
             // SSH terminal
             ssh::ssh_connect,
             ssh::ssh_disconnect,
             ssh::ssh_send_data,
             ssh::ssh_resize,
+            ssh::ssh_exec_command,
             ssh::ssh_test_connection,
             ssh::ssh_test_connection_params,
             // SFTP file transfer
@@ -154,6 +174,44 @@ pub fn run() {
             table_editor::generate_alter_table_sql,
             table_editor::execute_ddl,
             table_editor::get_table_detail,
+            table_editor::get_table_ddl,
+            // Query history
+            query_history::save_query_history,
+            query_history::list_query_history,
+            query_history::delete_query_history,
+            query_history::clear_query_history,
+            // SQL snippets
+            sql_snippet::list_sql_snippets,
+            sql_snippet::create_sql_snippet,
+            sql_snippet::update_sql_snippet,
+            sql_snippet::delete_sql_snippet,
+            // Command snippets
+            command_snippet::list_command_snippets,
+            command_snippet::create_command_snippet,
+            command_snippet::update_command_snippet,
+            command_snippet::delete_command_snippet,
+            // Schema compare
+            schema_compare::schema_compare,
+            schema_compare::generate_migration_sql,
+            // Database backup/restore
+            db_backup::db_backup_database,
+            db_backup::db_restore_database,
+            // Terminal recording
+            terminal_recorder::start_recording,
+            terminal_recorder::stop_recording,
+            terminal_recorder::is_recording,
+            terminal_recorder::list_recordings,
+            terminal_recorder::read_recording,
+            terminal_recorder::export_recording,
+            // File editor & permissions & search
+            file_editor::sftp_read_file_content,
+            file_editor::sftp_write_file_content,
+            file_editor::sftp_chmod,
+            file_editor::sftp_search_files,
+            file_editor::sftp_cancel_search,
+            file_editor::local_read_file_content,
+            // Directory sync
+            sync::sync_compare,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

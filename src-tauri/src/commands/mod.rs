@@ -1,8 +1,17 @@
+pub mod command_snippet;
 pub mod connection;
 pub mod db;
+pub mod db_backup;
+pub mod file_editor;
 pub mod import;
+pub mod import_export;
+pub mod query_history;
+pub mod schema_compare;
 pub mod sftp;
+pub mod sql_snippet;
 pub mod ssh;
+pub mod sync;
 pub mod table_editor;
+pub mod terminal_recorder;
 pub mod transfer;
 pub mod tunnel;

@@ -1,6 +1,7 @@
 use linked_hash_map::LinkedHashMap;
 use regex::Regex;
 use sqlx::{mysql::MySqlPool, postgres::PgPool, Row};
+use std::sync::OnceLock;
 
 use crate::models::table_editor::{
     ColumnDefinition, DdlResult, ForeignKeyDefinition, IndexDefinition,
@@ -13,12 +14,20 @@ use crate::utils::error::AppError;
 // Identifier validation & quoting
 // ---------------------------------------------------------------------------
 
+static IDENTIFIER_RE: OnceLock<Regex> = OnceLock::new();
+
+fn identifier_regex() -> &'static Regex {
+    IDENTIFIER_RE.get_or_init(|| {
+        Regex::new(r"^[a-zA-Z_\u4e00-\u9fff][a-zA-Z0-9_\u4e00-\u9fff]*$")
+            .expect("identifier regex is valid")
+    })
+}
+
 fn is_valid_identifier(s: &str) -> bool {
     if s.is_empty() || s.len() > 128 {
         return false;
     }
-    let re = Regex::new(r"^[a-zA-Z_\u4e00-\u9fff][a-zA-Z0-9_\u4e00-\u9fff]*$").unwrap();
-    re.is_match(s)
+    identifier_regex().is_match(s)
 }
 
 fn validate_identifier(s: &str) -> Result<(), String> {
@@ -50,7 +59,12 @@ fn pg_escape_string(s: &str) -> String {
 // ---------------------------------------------------------------------------
 
 fn mysql_column_def(col: &ColumnDefinition) -> String {
-    let mut parts = vec![mysql_quote(&col.name), col.data_type.clone()];
+    let type_str = if let Some(ref len) = col.length {
+        format!("{}({})", col.data_type, len)
+    } else {
+        col.data_type.clone()
+    };
+    let mut parts = vec![mysql_quote(&col.name), type_str];
 
     if !col.nullable {
         parts.push("NOT NULL".to_string());
@@ -70,6 +84,10 @@ fn mysql_column_def(col: &ColumnDefinition) -> String {
         } else {
             parts.push(format!("DEFAULT '{}'", mysql_escape_string(dv)));
         }
+    }
+
+    if let Some(ref ou) = col.on_update {
+        parts.push(format!("ON UPDATE {}", ou));
     }
 
     if let Some(ref c) = col.comment {
@@ -173,7 +191,12 @@ fn pg_column_def(col: &ColumnDefinition, is_auto: bool) -> String {
             parts.push("SERIAL".to_string());
         }
     } else {
-        parts.push(col.data_type.clone());
+        let type_str = if let Some(ref len) = col.length {
+            format!("{}({})", col.data_type, len)
+        } else {
+            col.data_type.clone()
+        };
+        parts.push(type_str);
     }
 
     if !col.nullable {
@@ -609,9 +632,16 @@ async fn mysql_table_detail(
     let charset = collation.as_ref().and_then(|c| c.split('_').next().map(String::from));
 
     // Columns
+    // 注意：MySQL 8.0 的 information_schema 中部分列是 longtext/enum，
+    // sqlx 无法直接解码为 String，需要 CAST 转换
     let col_rows = sqlx::query(
-        "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT, \
-                EXTRA, COLUMN_COMMENT \
+        "SELECT CAST(COLUMN_NAME AS CHAR(200)) AS COLUMN_NAME, \
+                CAST(COLUMN_TYPE AS CHAR(500)) AS COLUMN_TYPE, \
+                CAST(IS_NULLABLE AS CHAR(10)) AS IS_NULLABLE, \
+                CAST(COLUMN_DEFAULT AS CHAR(1000)) AS COLUMN_DEFAULT, \
+                CAST(EXTRA AS CHAR(500)) AS EXTRA, \
+                CAST(COLUMN_KEY AS CHAR(10)) AS COLUMN_KEY, \
+                CAST(COLUMN_COMMENT AS CHAR(2000)) AS COLUMN_COMMENT \
          FROM information_schema.COLUMNS \
          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? \
          ORDER BY ORDINAL_POSITION"
@@ -625,12 +655,48 @@ async fn mysql_table_detail(
     let columns: Vec<ColumnDefinition> = col_rows.iter().map(|r| {
         let extra: String = r.try_get("EXTRA").unwrap_or_default();
         let comment: Option<String> = r.try_get("COLUMN_COMMENT").unwrap_or(None);
+        let column_type: String = r.try_get("COLUMN_TYPE").unwrap_or_default();
+        let column_key: String = r.try_get("COLUMN_KEY").unwrap_or_default();
+
+        // 解析 COLUMN_TYPE: "varchar(255)" -> ("VARCHAR", Some("255"))
+        // "decimal(10,2)" -> ("DECIMAL", Some("10,2"))
+        // "bigint" -> ("BIGINT", None)
+        // "bigint unsigned" -> ("BIGINT UNSIGNED", None)
+        // "int(11) unsigned" -> ("INT UNSIGNED", Some("11"))
+        let (data_type, length) = {
+            let re = Regex::new(r"^(\w+)(?:\((.+?)\))?(.*)$").unwrap();
+            if let Some(caps) = re.captures(&column_type) {
+                let base = caps[1].to_uppercase();
+                let len = caps.get(2).map(|m| m.as_str().to_string());
+                let suffix = caps.get(3).map(|m| m.as_str().trim().to_uppercase()).unwrap_or_default();
+                if suffix.is_empty() {
+                    (base, len)
+                } else {
+                    (format!("{} {}", base, suffix), len)
+                }
+            } else {
+                (column_type.to_uppercase(), None)
+            }
+        };
+
+        // 从 EXTRA 提取 ON UPDATE 值
+        let on_update = if extra.contains("on update") {
+            extra.split("on update ")
+                .nth(1)
+                .map(|s| s.trim().to_string())
+        } else {
+            None
+        };
+
         ColumnDefinition {
             name: r.try_get("COLUMN_NAME").unwrap_or_default(),
-            data_type: r.try_get("COLUMN_TYPE").unwrap_or_default(),
+            data_type,
+            length,
             nullable: r.try_get::<String, _>("IS_NULLABLE").unwrap_or_default() == "YES",
+            is_primary_key: column_key == "PRI",
             default_value: r.try_get("COLUMN_DEFAULT").unwrap_or(None),
             auto_increment: extra.contains("auto_increment"),
+            on_update,
             comment: comment.filter(|c| !c.is_empty()),
         }
     }).collect();
@@ -777,16 +843,50 @@ async fn pg_table_detail(
     .await
     .map_err(|e| AppError::Other(e.to_string()))?;
 
+    // Primary key columns
+    let pk_rows = sqlx::query(
+        "SELECT a.attname \
+         FROM pg_index ix \
+         JOIN pg_class t ON t.oid = ix.indrelid \
+         JOIN pg_namespace n ON n.oid = t.relnamespace \
+         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ANY(ix.indkey) \
+         WHERE n.nspname = $1 AND t.relname = $2 AND ix.indisprimary"
+    )
+    .bind(schema)
+    .bind(table)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(e.to_string()))?;
+
+    let pk_cols: Vec<String> = pk_rows.iter()
+        .map(|r| r.try_get::<String, _>("attname").unwrap_or_default())
+        .collect();
+
     let columns: Vec<ColumnDefinition> = col_rows.iter().map(|r| {
         let udt: String = r.try_get("udt_name").unwrap_or_default();
         let max_len: Option<i32> = r.try_get("character_maximum_length").unwrap_or(None);
+        let num_precision: Option<i32> = r.try_get("numeric_precision").unwrap_or(None);
+        let num_scale: Option<i32> = r.try_get("numeric_scale").unwrap_or(None);
         let col_default: Option<String> = r.try_get("column_default").unwrap_or(None);
+        let col_name: String = r.try_get("column_name").unwrap_or_default();
 
-        // Build a user-friendly type string
-        let data_type = if let Some(len) = max_len {
-            format!("{}({})", udt.to_uppercase(), len)
+        let data_type = udt.to_uppercase();
+
+        // 构建 length
+        let length = if let Some(len) = max_len {
+            Some(len.to_string())
+        } else if let Some(prec) = num_precision {
+            if let Some(scale) = num_scale {
+                if scale > 0 {
+                    Some(format!("{},{}", prec, scale))
+                } else {
+                    Some(prec.to_string())
+                }
+            } else {
+                Some(prec.to_string())
+            }
         } else {
-            udt.to_uppercase()
+            None
         };
 
         let auto_increment = col_default
@@ -802,13 +902,17 @@ async fn pg_table_detail(
         };
 
         let comment: Option<String> = r.try_get("column_comment").unwrap_or(None);
+        let is_primary_key = pk_cols.contains(&col_name);
 
         ColumnDefinition {
-            name: r.try_get("column_name").unwrap_or_default(),
+            name: col_name,
             data_type,
+            length,
             nullable: r.try_get::<String, _>("is_nullable").unwrap_or_default() == "YES",
+            is_primary_key,
             default_value,
             auto_increment,
+            on_update: None,
             comment: comment.filter(|c| !c.is_empty()),
         }
     }).collect();
@@ -932,4 +1036,58 @@ pub async fn get_table_detail(
         DriverPool::MySql(p) => mysql_table_detail(p, database, table).await,
         DriverPool::Postgres(p) => pg_table_detail(p, database, table).await,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Public: get_table_ddl dispatcher
+// ---------------------------------------------------------------------------
+
+pub async fn get_table_ddl(
+    pool: &DriverPool,
+    database: &str,
+    table: &str,
+) -> Result<String, AppError> {
+    match pool {
+        DriverPool::MySql(p) => mysql_table_ddl(p, database, table).await,
+        DriverPool::Postgres(p) => pg_table_ddl(p, database, table).await,
+    }
+}
+
+async fn mysql_table_ddl(pool: &MySqlPool, database: &str, table: &str) -> Result<String, AppError> {
+    let sql = format!("SHOW CREATE TABLE {}.{}", mysql_quote(database), mysql_quote(table));
+    let row = sqlx::query(&sql).fetch_one(pool).await
+        .map_err(|e| AppError::Database(e))?;
+    let ddl: String = row.try_get(1).unwrap_or_default();
+    Ok(ddl)
+}
+
+async fn pg_table_ddl(pool: &PgPool, database: &str, table: &str) -> Result<String, AppError> {
+    // PostgreSQL 没有 SHOW CREATE TABLE，需要从 information_schema 拼接
+    let detail = pg_table_detail(pool, database, table).await?;
+    let schema = database; // PG 中 database 参数实际是 schema
+    let mut lines: Vec<String> = Vec::new();
+    for col in &detail.columns {
+        let type_str = if let Some(ref len) = col.length {
+            format!("{}({})", col.data_type, len)
+        } else {
+            col.data_type.clone()
+        };
+        let mut parts = vec![pg_quote(&col.name), type_str];
+        if !col.nullable { parts.push("NOT NULL".to_string()); }
+        if let Some(ref dv) = col.default_value { parts.push(format!("DEFAULT {}", dv)); }
+        lines.push(format!("  {}", parts.join(" ")));
+    }
+    for idx in &detail.indexes {
+        let cols = idx.columns.iter().map(|c| pg_quote(c)).collect::<Vec<_>>().join(", ");
+        match idx.index_type.to_uppercase().as_str() {
+            "PRIMARY" => lines.push(format!("  PRIMARY KEY ({})", cols)),
+            "UNIQUE" => lines.push(format!("  CONSTRAINT {} UNIQUE ({})", pg_quote(&idx.name), cols)),
+            _ => {}
+        };
+    }
+    let mut ddl = format!("CREATE TABLE {}.{} (\n{}\n)", pg_quote(schema), pg_quote(&detail.name), lines.join(",\n"));
+    if let Some(ref comment) = detail.comment {
+        ddl.push_str(&format!(";\nCOMMENT ON TABLE {}.{} IS '{}'", pg_quote(schema), pg_quote(&detail.name), pg_escape_string(comment)));
+    }
+    Ok(ddl)
 }

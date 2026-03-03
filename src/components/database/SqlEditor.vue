@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, nextTick, toRef } from 'vue'
 import * as monaco from 'monaco-editor'
+import { format as formatSql } from 'sql-formatter'
 import { useTheme } from '@/composables/useTheme'
 import { useSettingsStore } from '@/stores/settings'
 import type { SchemaCache } from '@/types/database'
@@ -12,17 +13,19 @@ const props = withDefaults(
     language?: string
     readOnly?: boolean
     schema?: SchemaCache | null
+    driver?: string
   }>(),
   {
     modelValue: '',
     language: 'sql',
     readOnly: false,
     schema: null,
+    driver: undefined,
   },
 )
 
 // Register SQL completion provider
-useSqlCompletion(toRef(props, 'schema'))
+useSqlCompletion(toRef(props, 'schema'), toRef(props, 'driver'))
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
@@ -99,6 +102,18 @@ onMounted(async () => {
       }
     },
   })
+
+  // Shift+Alt+F -> format SQL
+  editor.addAction({
+    id: 'format-sql',
+    label: 'Format SQL',
+    keybindings: [
+      monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,
+    ],
+    run: () => {
+      formatDocument()
+    },
+  })
 })
 
 watch(activeThemeId, () => {
@@ -169,7 +184,32 @@ function insertText(text: string) {
   }
 }
 
-defineExpose({ getSelectedText, focus, insertText })
+function formatDocument() {
+  if (!editor) return
+  const model = editor.getModel()
+  if (!model) return
+
+  const language = props.driver === 'postgresql' ? 'postgresql' : 'mysql'
+  const currentValue = model.getValue()
+  try {
+    const formatted = formatSql(currentValue, {
+      language,
+      tabWidth: settingsStore.settings.editorTabSize,
+      keywordCase: 'upper',
+    })
+    // Use pushEditOperations to preserve undo history
+    editor.executeEdits('format', [
+      {
+        range: model.getFullModelRange(),
+        text: formatted,
+      },
+    ])
+  } catch {
+    // If formatting fails, silently ignore
+  }
+}
+
+defineExpose({ getSelectedText, focus, insertText, formatDocument })
 </script>
 
 <template>

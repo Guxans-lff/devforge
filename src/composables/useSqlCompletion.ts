@@ -1,6 +1,7 @@
-import { watch, onBeforeUnmount, type Ref } from 'vue'
+import { onBeforeUnmount, type Ref } from 'vue'
 import * as monaco from 'monaco-editor'
 import type { SchemaCache } from '@/types/database'
+import { getSnippetTemplates, getExtraFunctions } from '@/utils/sqlSnippets'
 
 // SQL keywords for completion
 const SQL_KEYWORDS = [
@@ -28,6 +29,63 @@ const SQL_FUNCTIONS = [
   'JSON_EXTRACT', 'JSON_OBJECT', 'JSON_ARRAY', 'ROW_NUMBER', 'RANK',
   'DENSE_RANK', 'LAG', 'LEAD', 'FIRST_VALUE', 'LAST_VALUE',
 ]
+
+// 模块级缓存：预构建静态建议项（不含 range，运行时合并）
+type PartialSuggestion = Omit<monaco.languages.CompletionItem, 'range'>
+
+const cachedKeywordSuggestions: PartialSuggestion[] = SQL_KEYWORDS.map(kw => ({
+  label: kw,
+  kind: monaco.languages.CompletionItemKind.Keyword,
+  insertText: kw,
+  sortText: '5_' + kw,
+}))
+
+const cachedFunctionSuggestions: PartialSuggestion[] = SQL_FUNCTIONS.map(fn => ({
+  label: fn,
+  kind: monaco.languages.CompletionItemKind.Function,
+  insertText: fn + '($0)',
+  insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+  detail: 'Function',
+  sortText: '4_' + fn,
+}))
+
+// 按 driver 缓存 snippet/extraFn 建议项
+const snippetCache = new Map<string, PartialSuggestion[]>()
+const extraFnCache = new Map<string, PartialSuggestion[]>()
+
+function getCachedSnippets(driverKey: string): PartialSuggestion[] {
+  let cached = snippetCache.get(driverKey)
+  if (!cached) {
+    cached = getSnippetTemplates(driverKey).map(s => ({
+      label: s.label,
+      kind: monaco.languages.CompletionItemKind.Snippet,
+      insertText: s.insertText,
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      detail: s.detail,
+      documentation: s.documentation,
+      sortText: '6_' + s.label,
+    }))
+    snippetCache.set(driverKey, cached)
+  }
+  return cached
+}
+
+function getCachedExtraFns(driverKey: string): PartialSuggestion[] {
+  let cached = extraFnCache.get(driverKey)
+  if (!cached) {
+    cached = getExtraFunctions(driverKey).map(fn => ({
+      label: fn.label,
+      kind: monaco.languages.CompletionItemKind.Function,
+      insertText: fn.insertText,
+      insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+      detail: fn.detail,
+      documentation: fn.documentation,
+      sortText: '4_' + fn.label,
+    }))
+    extraFnCache.set(driverKey, cached)
+  }
+  return cached
+}
 
 // Context detection: what kind of token precedes the cursor
 function getContextKeyword(textBeforeCursor: string): string | null {
@@ -57,7 +115,35 @@ function getContextKeyword(textBeforeCursor: string): string | null {
   return null
 }
 
-// Detect table alias or name from text like "FROM users u" or "JOIN orders o ON"
+// Extract table alias mappings from SQL text
+// Handles: FROM users u, FROM users AS u, JOIN orders o, JOIN orders AS o
+function extractTableAliases(text: string): Map<string, string> {
+  const aliasMap = new Map<string, string>()
+  // Clean string literals and comments
+  const cleaned = text
+    .replace(/'[^']*'/g, '')
+    .replace(/"[^"]*"/g, '')
+    .replace(/--.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+
+  const pattern = /(?:FROM|JOIN)\s+(?:`?(\w+)`?\.)?`?(\w+)`?\s+(?:AS\s+)?(\w+)/gi
+  let match
+  while ((match = pattern.exec(cleaned)) !== null) {
+    const tableName = match[2]
+    const alias = match[3]
+    if (alias) {
+      const upper = alias.toUpperCase()
+      // Skip SQL keywords that look like aliases
+      if (['ON', 'WHERE', 'SET', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'CROSS',
+        'FULL', 'JOIN', 'AND', 'OR', 'ORDER', 'GROUP', 'HAVING', 'LIMIT',
+        'UNION', 'INTO', 'VALUES', 'AS'].includes(upper)) continue
+      aliasMap.set(alias, tableName!)
+    }
+  }
+  return aliasMap
+}
+
+// Detect table names referenced in the query
 function extractTableContext(textBeforeCursor: string): string[] {
   const tablePattern = /(?:FROM|JOIN|UPDATE|INTO)\s+(?:`?(\w+)`?\.)?`?(\w+)`?/gi
   const tables: string[] = []
@@ -70,11 +156,10 @@ function extractTableContext(textBeforeCursor: string): string[] {
   return tables
 }
 
-export function useSqlCompletion(schema: Ref<SchemaCache | null>) {
+export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<string | undefined>) {
   let disposable: monaco.IDisposable | null = null
 
   function register() {
-    // Dispose previous registration
     disposable?.dispose()
 
     disposable = monaco.languages.registerCompletionItemProvider('sql', {
@@ -97,13 +182,13 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>) {
 
         const suggestions: monaco.languages.CompletionItem[] = []
         const currentSchema = schema.value
+        const currentDriver = driver?.value
 
-        // Check if we're after a dot (e.g., "database." or "table.")
+        // Check if we're after a dot (e.g., "database." or "table." or "alias.")
         const lineContent = model.getLineContent(position.lineNumber)
         const charBeforeWord = lineContent.charAt(word.startColumn - 2)
 
         if (charBeforeWord === '.') {
-          // Get the word before the dot
           const beforeDot = model.getWordAtPosition({
             lineNumber: position.lineNumber,
             column: word.startColumn - 1,
@@ -112,8 +197,7 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>) {
           if (beforeDot && currentSchema) {
             const prefix = beforeDot.word
 
-            // Could be database.table or table.column
-            // Try as database name first
+            // Try as database name first → suggest tables
             const db = currentSchema.databases.get(prefix)
             if (db) {
               for (const [tableName, tableSchema] of db.tables) {
@@ -130,11 +214,18 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>) {
               return { suggestions }
             }
 
-            // Try as table name - find columns
-            for (const [, db] of currentSchema.databases) {
-              const table = db.tables.get(prefix)
+            // Try as table alias → resolve to actual table name
+            const aliasMap = extractTableAliases(textUntilPosition)
+            const resolvedName = aliasMap.get(prefix) || prefix
+
+            // Try as table name → suggest columns
+            for (const [, dbSchema] of currentSchema.databases) {
+              const table = dbSchema.tables.get(resolvedName)
               if (table) {
                 for (const col of table.columns) {
+                  const typeDetail = col.nullable
+                    ? `${col.dataType} NULL`
+                    : `${col.dataType} NOT NULL`
                   suggestions.push({
                     label: col.name,
                     kind: col.isPrimaryKey
@@ -142,7 +233,7 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>) {
                       : monaco.languages.CompletionItemKind.Property,
                     insertText: col.name,
                     range,
-                    detail: col.dataType,
+                    detail: col.isPrimaryKey ? `🔑 ${typeDetail}` : typeDetail,
                     documentation: col.comment ?? undefined,
                   })
                 }
@@ -189,12 +280,18 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>) {
             }
           }
 
-          // Column names - prioritize columns from tables referenced in the query
+          // Column names - prioritize columns from referenced tables and aliases
           if (!context || context === 'column') {
             const referencedTables = extractTableContext(textUntilPosition)
+            const aliasMap = extractTableAliases(textUntilPosition)
+            // Also include alias-resolved table names
+            for (const [, tbl] of aliasMap) {
+              if (!referencedTables.includes(tbl)) {
+                referencedTables.push(tbl)
+              }
+            }
             const addedColumns = new Set<string>()
 
-            // First add columns from referenced tables (higher priority)
             for (const [, db] of currentSchema.databases) {
               for (const tblName of referencedTables) {
                 const table = db.tables.get(tblName)
@@ -202,6 +299,9 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>) {
                   for (const col of table.columns) {
                     if (!addedColumns.has(col.name)) {
                       addedColumns.add(col.name)
+                      const typeDetail = col.nullable
+                        ? `${col.dataType} NULL`
+                        : `${col.dataType} NOT NULL`
                       suggestions.push({
                         label: col.name,
                         kind: col.isPrimaryKey
@@ -209,7 +309,9 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>) {
                           : monaco.languages.CompletionItemKind.Property,
                         insertText: col.name,
                         range,
-                        detail: `${tblName}.${col.dataType}`,
+                        detail: col.isPrimaryKey
+                          ? `🔑 ${tblName}.${typeDetail}`
+                          : `${tblName}.${typeDetail}`,
                         documentation: col.comment ?? undefined,
                         sortText: context === 'column' ? '0_' + col.name : '3_' + col.name,
                       })
@@ -221,28 +323,25 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>) {
           }
         }
 
-        // SQL keywords (lower priority when context suggests tables/columns)
-        for (const kw of SQL_KEYWORDS) {
-          suggestions.push({
-            label: kw,
-            kind: monaco.languages.CompletionItemKind.Keyword,
-            insertText: kw,
-            range,
-            sortText: '5_' + kw,
-          })
+        // SQL code snippet templates（模块级缓存）
+        const driverKey = currentDriver ?? ''
+        for (const s of getCachedSnippets(driverKey)) {
+          suggestions.push({ ...s, range })
         }
 
-        // SQL functions
-        for (const fn of SQL_FUNCTIONS) {
-          suggestions.push({
-            label: fn,
-            kind: monaco.languages.CompletionItemKind.Function,
-            insertText: fn + '($0)',
-            insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-            range,
-            detail: 'Function',
-            sortText: '4_' + fn,
-          })
+        // MySQL/PG extra functions with signatures（模块级缓存）
+        for (const fn of getCachedExtraFns(driverKey)) {
+          suggestions.push({ ...fn, range })
+        }
+
+        // SQL keywords（模块级缓存）
+        for (const kw of cachedKeywordSuggestions) {
+          suggestions.push({ ...kw, range })
+        }
+
+        // SQL built-in functions（模块级缓存）
+        for (const fn of cachedFunctionSuggestions) {
+          suggestions.push({ ...fn, range })
         }
 
         return { suggestions }

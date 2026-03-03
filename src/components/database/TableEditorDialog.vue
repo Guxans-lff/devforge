@@ -66,7 +66,7 @@ const COMMON_TYPES = [
 const INDEX_TYPES = ['INDEX', 'UNIQUE', 'PRIMARY', 'FULLTEXT']
 
 function newColumn(): ColumnDefinition {
-  return { name: '', dataType: 'VARCHAR(255)', nullable: true, defaultValue: null, autoIncrement: false, comment: null }
+  return { name: '', dataType: 'VARCHAR(255)', length: null, nullable: true, isPrimaryKey: false, defaultValue: null, autoIncrement: false, onUpdate: null, comment: null }
 }
 
 function newIndex(): IndexDefinition {

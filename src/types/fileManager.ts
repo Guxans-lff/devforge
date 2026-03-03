@@ -48,3 +48,11 @@ export interface TransferTask {
   speed: number
   error: string | null
 }
+
+export interface SearchResult {
+  name: string
+  path: string
+  isDir: boolean
+  size: number
+  modified: number | null
+}

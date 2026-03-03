@@ -5,14 +5,21 @@ import { listen } from '@tauri-apps/api/event'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTransferStore } from '@/stores/transfer'
 import { useConnectionStore } from '@/stores/connections'
+import { useFileEditorStore } from '@/stores/file-editor'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import FilePane from '@/components/file-manager/FilePane.vue'
+import FileEditor from '@/components/file-manager/FileEditor.vue'
+import FileSearchPanel from '@/components/file-manager/FileSearchPanel.vue'
+import PermissionDialog from '@/components/file-manager/PermissionDialog.vue'
+import FileDiffView from '@/components/file-manager/FileDiffView.vue'
+import SyncPanel from '@/components/file-manager/SyncPanel.vue'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Loader2, Terminal as TerminalIcon } from 'lucide-vue-next'
+import { Loader2, Terminal as TerminalIcon, Search, PanelRightClose, PanelRightOpen, FolderSync } from 'lucide-vue-next'
 import * as sftpApi from '@/api/sftp'
+import { sftpChmod } from '@/api/file-editor'
 import { useToast } from '@/composables/useToast'
 import type { FileEntry } from '@/types/fileManager'
 
@@ -25,6 +32,7 @@ const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const transferStore = useTransferStore()
 const connectionStore = useConnectionStore()
+const fileEditorStore = useFileEditorStore()
 
 const connectionHost = computed(() => {
   const conn = connectionStore.connections.get(props.connectionId)
@@ -70,22 +78,37 @@ const remotePath = ref('/')
 const remoteEntries = ref<FileEntry[]>([])
 const remoteLoading = ref(false)
 
-let unlistenProgress: (() => void) | null = null
-let unlistenComplete: (() => void) | null = null
-let unlistenTransferComplete: (() => void) | null = null
+// Editor / Search / Permission panel state
+const showEditorPanel = ref(false)
+const showSearchPanel = ref(false)
+const showPermissionDialog = ref(false)
+const permissionTarget = ref<FileEntry | null>(null)
+
+// Diff view state
+const showDiffView = ref(false)
+const diffLocalPath = ref('')
+const diffRemotePath = ref('')
+
+// Sync dialog state
+const showSyncDialog = ref(false)
+
+let unlistenTransferComplete: any = null
 
 async function connect() {
   status.value = 'connecting'
+  connectionStore.updateConnectionStatus(props.connectionId, 'connecting')
   errorMessage.value = ''
 
   try {
     await sftpApi.sftpConnect(props.connectionId)
     status.value = 'connected'
+    connectionStore.updateConnectionStatus(props.connectionId, 'connected')
 
     // Load initial directories
     await Promise.all([loadLocal(), loadRemote()])
   } catch (e) {
     status.value = 'error'
+    connectionStore.updateConnectionStatus(props.connectionId, 'error', String(e))
     errorMessage.value = String(e)
   }
 }
@@ -400,15 +423,11 @@ async function handleDropToLocal(entries: FileEntry[], targetPath: string) {
 }
 
 // Handle external files dropped from OS
-async function handleDropExternalFiles(files: File[], targetPath: string, isRemote: boolean) {
+async function handleDropExternalFiles(files: File[], _targetPath: string, isRemote: boolean) {
 
   if (isRemote) {
     // Upload to remote
     for (const file of files) {
-      const remoteTarget = targetPath.endsWith('/')
-        ? `${targetPath}${file.name}`
-        : `${targetPath}/${file.name}`
-
       // Convert File to local path (need to save to temp first)
       // External file upload not yet implemented
       toast.error(t('toast.operationFailed'), `External file upload not supported: ${file.name}`)
@@ -419,17 +438,101 @@ async function handleDropExternalFiles(files: File[], targetPath: string, isRemo
   }
 }
 
+// ==================== 文件编辑 ====================
+
+async function handleEditFile(entry: FileEntry) {
+  try {
+    showEditorPanel.value = true
+    await fileEditorStore.openFile(props.connectionId, entry.path)
+  } catch (e) {
+    toast.error(t('toast.operationFailed'), String(e))
+  }
+}
+
+// ==================== 文件权限 ====================
+
+function handleShowPermissions(entry: FileEntry) {
+  permissionTarget.value = entry
+  showPermissionDialog.value = true
+}
+
+async function handleChmod(mode: number) {
+  if (!permissionTarget.value) return
+  try {
+    await sftpChmod(props.connectionId, permissionTarget.value.path, mode)
+    toast.success(t('toast.operationSuccess'))
+    showPermissionDialog.value = false
+    permissionTarget.value = null
+    await loadRemote()
+  } catch (e) {
+    toast.error(t('toast.operationFailed'), String(e))
+  }
+}
+
+// ==================== 文件搜索 ====================
+
+function toggleSearchPanel() {
+  showSearchPanel.value = !showSearchPanel.value
+}
+
+function handleSearchNavigate(path: string) {
+  handleRemoteNavigate(path)
+  showSearchPanel.value = false
+}
+
+// ==================== 文件对比 ====================
+
+function handleCompareFile(entry: FileEntry, side: 'local' | 'remote') {
+  if (side === 'remote') {
+    // 远程文件对比：用同名本地文件
+    const localFile = localPath.value.endsWith('/')
+      ? `${localPath.value}${entry.name}`
+      : `${localPath.value}/${entry.name}`
+    diffLocalPath.value = localFile
+    diffRemotePath.value = entry.path
+  } else {
+    // 本地文件对比：用同名远程文件
+    const remoteFile = remotePath.value.endsWith('/')
+      ? `${remotePath.value}${entry.name}`
+      : `${remotePath.value}/${entry.name}`
+    diffLocalPath.value = entry.path
+    diffRemotePath.value = remoteFile
+  }
+  showDiffView.value = true
+  showEditorPanel.value = false
+}
+
+// 传输完成后刷新防抖（批量传输时避免重复刷新）
+let refreshRemoteTimer: ReturnType<typeof setTimeout> | null = null
+let refreshLocalTimer: ReturnType<typeof setTimeout> | null = null
+
+function debouncedLoadRemote() {
+  if (refreshRemoteTimer) clearTimeout(refreshRemoteTimer)
+  refreshRemoteTimer = setTimeout(() => {
+    refreshRemoteTimer = null
+    loadRemote()
+  }, 500)
+}
+
+function debouncedLoadLocal() {
+  if (refreshLocalTimer) clearTimeout(refreshLocalTimer)
+  refreshLocalTimer = setTimeout(() => {
+    refreshLocalTimer = null
+    loadLocal()
+  }, 500)
+}
+
 onMounted(async () => {
-  // 监听传输完成事件，自动刷新文件列表
+  // 监听传输完成事件，自动刷新文件列表（防抖，批量传输时合并刷新）
   unlistenTransferComplete = await listen<{ id: string }>(
     'transfer://complete',
     (event) => {
       const task = transferStore.tasks.get(event.payload.id)
       if (task) {
         if (task.type === 'upload') {
-          loadRemote()
+          debouncedLoadRemote()
         } else {
-          loadLocal()
+          debouncedLoadLocal()
         }
       }
     },
@@ -453,21 +556,22 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(async () => {
-  if (unlistenProgress) unlistenProgress()
-  if (unlistenComplete) unlistenComplete()
+  if (refreshRemoteTimer) clearTimeout(refreshRemoteTimer)
+  if (refreshLocalTimer) clearTimeout(refreshLocalTimer)
   if (unlistenTransferComplete) unlistenTransferComplete()
   try {
     await sftpApi.sftpDisconnect(props.connectionId)
   } catch {
     // ignore
   }
+  connectionStore.updateConnectionStatus(props.connectionId, 'disconnected')
 })
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden">
+  <div class="flex h-full flex-col overflow-hidden bg-transparent">
     <!-- Toolbar -->
-    <div class="flex items-center gap-2 border-b border-border px-3 py-1.5">
+    <div class="flex items-center gap-2 border-b border-border/30 bg-background/50 backdrop-blur-md px-3 py-1.5">
       <TooltipProvider :delay-duration="300">
         <Tooltip>
           <TooltipTrigger as-child>
@@ -482,6 +586,52 @@ onBeforeUnmount(async () => {
           </TooltipTrigger>
           <TooltipContent side="bottom">
             <p>{{ t('fileManager.openTerminal') }}</p>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7 text-muted-foreground hover:text-foreground"
+              @click="toggleSearchPanel"
+            >
+              <Search class="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>{{ t('fileEditor.search') }}</p>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7 text-muted-foreground hover:text-foreground"
+              :class="showEditorPanel ? 'bg-accent' : ''"
+              @click="showEditorPanel = !showEditorPanel"
+            >
+              <component :is="showEditorPanel ? PanelRightClose : PanelRightOpen" class="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>{{ t('fileEditor.toggleEditor') }}</p>
+          </TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-7 w-7 text-muted-foreground hover:text-foreground"
+              @click="showSyncDialog = true"
+            >
+              <FolderSync class="h-3.5 w-3.5" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            <p>{{ t('sync.title') }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -551,6 +701,7 @@ onBeforeUnmount(async () => {
             @path-input="handleLocalNavigate"
             @drop-files="handleDropToLocal"
             @drop-external="(files) => handleDropExternalFiles(files, localPath, false)"
+            @compare-file="(entry) => handleCompareFile(entry, 'local')"
           />
         </Pane>
         <Pane :size="50" :min-size="25">
@@ -572,9 +723,40 @@ onBeforeUnmount(async () => {
             @path-input="handleRemoteNavigate"
             @drop-files="handleDropToRemote"
             @drop-external="(files) => handleDropExternalFiles(files, remotePath, true)"
+            @edit-file="handleEditFile"
+            @show-permissions="handleShowPermissions"
+            @compare-file="(entry) => handleCompareFile(entry, 'remote')"
           />
         </Pane>
       </Splitpanes>
+
+      <!-- 搜索面板（覆盖在右侧） -->
+      <div
+        v-if="showSearchPanel && status === 'connected'"
+        class="absolute right-0 top-0 z-20 h-full w-72 border-l border-border bg-background shadow-lg"
+      >
+        <FileSearchPanel
+          :connection-id="connectionId"
+          :current-path="remotePath"
+          @navigate="handleSearchNavigate"
+          @close="showSearchPanel = false"
+        />
+      </div>
+    </div>
+
+    <!-- 编辑器面板 -->
+    <div v-if="showEditorPanel && !showDiffView" class="border-t border-border" style="height: 45%">
+      <FileEditor />
+    </div>
+
+    <!-- 文件对比面板 -->
+    <div v-if="showDiffView" class="border-t border-border" style="height: 45%">
+      <FileDiffView
+        v-model:open="showDiffView"
+        :connection-id="connectionId"
+        :local-path="diffLocalPath"
+        :remote-path="diffRemotePath"
+      />
     </div>
 
     <!-- Delete Confirmation -->
@@ -587,23 +769,56 @@ onBeforeUnmount(async () => {
       variant="destructive"
       @confirm="executeDelete"
     />
+
+    <!-- 权限编辑对话框 -->
+    <PermissionDialog
+      v-model:open="showPermissionDialog"
+      :file-name="permissionTarget?.name ?? ''"
+      :current-permissions="permissionTarget?.permissions ?? null"
+      @confirm="handleChmod"
+    />
+
+    <!-- 目录同步对话框 -->
+    <SyncPanel
+      v-model:open="showSyncDialog"
+      :connection-id="connectionId"
+      :local-path="localPath"
+      :remote-path="remotePath"
+    />
   </div>
 </template>
 
 <style scoped>
 :deep(.splitpanes__splitter) {
-  background-color: hsl(var(--border));
+  background-color: transparent;
   position: relative;
-  transition: background-color 0.15s ease;
+  transition: all 0.2s ease;
+  z-index: 10;
 }
 
-:deep(.splitpanes__splitter:hover) {
-  background-color: hsl(var(--primary));
+:deep(.splitpanes__splitter::before) {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1px;
+  background-color: rgba(var(--color-border), 0.3);
+  transition: all 0.2s ease;
+}
+
+:deep(.splitpanes__splitter:hover::before) {
+  width: 2px;
+  background-color: rgba(var(--color-primary), 0.8);
+  box-shadow: 0 0 8px rgba(var(--color-primary), 0.5);
 }
 
 :deep(.splitpanes--vertical > .splitpanes__splitter) {
-  width: 3px;
-  min-width: 3px;
+  width: 9px;
+  min-width: 9px;
+  margin-left: -4px;
+  margin-right: -4px;
   cursor: col-resize;
 }
 

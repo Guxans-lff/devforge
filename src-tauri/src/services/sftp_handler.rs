@@ -32,9 +32,11 @@ impl SftpHandler {
         cancel_token: CancellationToken,
         app_handle: &AppHandle,
     ) -> Result<(), TransferError> {
-        // 创建文件分块器
-        let mut chunker = FileChunker::new(local_path.clone(), chunk_size)
-            .map_err(|e| TransferError::IoError(e.to_string()))?;
+        // 创建文件分块器（同步 I/O，在 spawn_blocking 中使用）
+        let chunker = std::sync::Arc::new(std::sync::Mutex::new(
+            FileChunker::new(local_path.clone(), chunk_size)
+                .map_err(|e| TransferError::IoError(e.to_string()))?,
+        ));
 
         // 打开远程文件（创建并写入模式）
         let mut remote_file = self.sftp
@@ -46,9 +48,18 @@ impl SftpHandler {
             .map_err(|e| TransferError::SftpError(e.to_string()))?;
 
         // 逐块上传
-        while let Some(chunk) = chunker.read_next_chunk()
+        loop {
+            // 在阻塞线程中读取文件块，避免阻塞 tokio 运行时
+            let chunker_clone = chunker.clone();
+            let chunk = tokio::task::spawn_blocking(move || {
+                chunker_clone.lock().expect("chunker mutex poisoned").read_next_chunk()
+            })
+            .await
             .map_err(|e| TransferError::IoError(e.to_string()))?
-        {
+            .map_err(|e| TransferError::IoError(e.to_string()))?;
+
+            let Some(chunk) = chunk else { break };
+
             // 检查是否取消
             if cancel_token.is_cancelled() {
                 // 删除不完整的远程文件

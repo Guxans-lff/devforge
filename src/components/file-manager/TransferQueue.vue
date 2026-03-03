@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTransferStore } from '@/stores/transfer'
-import { pauseTransfer, resumeTransfer, cancelTransfer } from '@/api/sftp'
+import { pauseTransfer, resumeTransfer, cancelTransfer, startUploadChunked, startDownloadChunked } from '@/api/sftp'
 import { useToast } from '@/composables/useToast'
+import { useNotification } from '@/composables/useNotification'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import Progress from '@/components/ui/progress.vue'
@@ -15,11 +16,19 @@ import {
   Pause,
   Play,
   X,
+  RotateCcw,
+  Trash2,
+  FileText,
+  Zap,
 } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const transferStore = useTransferStore()
 const toast = useToast()
+const notification = useNotification()
+
+// 跟踪每个传输任务的通知 ID
+const taskNotifications = ref<Map<string, string>>(new Map())
 
 const activeTasks = computed(() => Array.from(transferStore.tasks.values()))
 const hasActiveTasks = computed(() => activeTasks.value.length > 0)
@@ -59,7 +68,7 @@ async function handlePause(id: string) {
     await pauseTransfer(id)
     const task = transferStore.tasks.get(id)
     if (task) {
-      task.status = 'paused'
+      transferStore.tasks.set(id, { ...task, status: 'paused' })
       transferStore.tasks = new Map(transferStore.tasks)
     }
   } catch (error) {
@@ -73,7 +82,7 @@ async function handleResume(id: string) {
     if (!task) return
 
     await resumeTransfer(id, task.connectionId)
-    task.status = 'transferring'
+    transferStore.tasks.set(id, { ...task, status: 'transferring' })
     transferStore.tasks = new Map(transferStore.tasks)
   } catch (error) {
     toast.error(t('transfer.resumeFailed'), String(error))
@@ -92,23 +101,118 @@ async function handleCancel(id: string) {
 function handleClearCompleted() {
   transferStore.clearCompleted()
 }
+
+async function handleRetry(id: string) {
+  const task = transferStore.tasks.get(id)
+  if (!task) return
+
+  // 移除失败的任务
+  transferStore.removeTask(id)
+
+  // 创建新任务重新传输
+  const newId = crypto.randomUUID()
+  transferStore.addTask({
+    id: newId,
+    type: task.type,
+    fileName: task.fileName,
+    localPath: task.localPath,
+    remotePath: task.remotePath,
+    connectionId: task.connectionId,
+    totalBytes: task.totalBytes,
+  })
+
+  try {
+    if (task.type === 'upload') {
+      await startUploadChunked(newId, task.connectionId, task.localPath, task.remotePath)
+    } else {
+      await startDownloadChunked(newId, task.connectionId, task.remotePath, task.localPath)
+    }
+  } catch (error) {
+    toast.error(t('transfer.retryFailed'), String(error))
+  }
+}
+
+// 统计
+const transferringTasks = computed(() =>
+  activeTasks.value.filter(t => t.status === 'transferring'),
+)
+const totalSpeed = computed(() =>
+  transferringTasks.value.reduce((sum, t) => sum + t.speed, 0),
+)
+const totalRemaining = computed(() => {
+  const remaining = transferringTasks.value.reduce(
+    (sum, t) => sum + (t.totalBytes - t.transferredBytes),
+    0,
+  )
+  if (totalSpeed.value === 0) return '--'
+  return formatTime(remaining / totalSpeed.value)
+})
+const errorCount = computed(() =>
+  activeTasks.value.filter(t => t.status === 'error').length,
+)
+
+// 监听传输任务状态变化，显示通知
+watch(
+  () => transferStore.tasks,
+  (newTasks) => {
+    newTasks.forEach((task) => {
+      const notificationId = taskNotifications.value.get(task.id)
+
+      if (task.status === 'transferring') {
+        // 创建或更新进度通知
+        if (!notificationId) {
+          const id = notification.progress(
+            task.type === 'upload' ? t('transfer.uploading') : t('transfer.downloading'),
+            getProgress(task),
+            task.fileName
+          )
+          taskNotifications.value.set(task.id, id)
+        } else {
+          notification.updateProgress(notificationId, getProgress(task))
+        }
+      } else if (task.status === 'completed' && notificationId) {
+        // 完成时显示成功通知
+        notification.dismiss(notificationId)
+        taskNotifications.value.delete(task.id)
+        notification.success(
+          task.type === 'upload' ? t('transfer.uploadComplete') : t('transfer.downloadComplete'),
+          `${task.fileName} (${formatBytes(task.totalBytes)})`,
+          3000
+        )
+      } else if (task.status === 'error' && notificationId) {
+        // 失败时显示错误通知
+        notification.dismiss(notificationId)
+        taskNotifications.value.delete(task.id)
+        notification.error(
+          task.type === 'upload' ? t('transfer.uploadFailed') : t('transfer.downloadFailed'),
+          task.fileName,
+          true
+        )
+      }
+    })
+  },
+  { deep: true }
+)
 </script>
 
 <template>
   <div class="flex h-full flex-col">
     <!-- Header -->
-    <div class="flex items-center justify-between border-b border-border px-3 py-2">
-      <span class="text-xs font-medium text-muted-foreground">
-        {{ t('transfer.activeTransfers') }} ({{ activeTasks.length }})
-      </span>
+    <div class="flex items-center justify-between border-b border-border/10 px-3 py-1.5 bg-muted/5">
+      <div class="flex items-center gap-2">
+        <Zap class="h-3 w-3 text-primary animate-pulse" />
+        <span class="text-[11px] font-bold uppercase tracking-tight text-muted-foreground/60">
+          {{ t('transfer.activeTransfers') }} ({{ activeTasks.length }})
+        </span>
+      </div>
       <Button
         v-if="hasActiveTasks"
         variant="ghost"
         size="sm"
-        class="h-6 text-xs"
+        class="h-6 px-2 text-[10px] font-bold hover:bg-destructive/10 hover:text-destructive"
         @click="handleClearCompleted"
       >
-        <Trash2 class="mr-1 h-3 w-3" />
+        <Trash2 class="mr-1 h-2.5 w-2.5" />
         {{ t('transfer.clearCompleted') }}
       </Button>
     </div>
@@ -127,109 +231,154 @@ function handleClearCompleted() {
 
     <!-- Transfer List -->
     <ScrollArea v-else class="flex-1 h-full">
-      <div class="space-y-2 p-2">
+      <div class="space-y-1.5 p-2">
         <div
           v-for="task in activeTasks"
           :key="task.id"
-          class="rounded-md border border-border bg-card p-3"
+          class="relative group rounded-lg border border-border/20 bg-background/40 p-2.5 transition-all hover:bg-background/60 hover:border-border/40"
         >
           <!-- Task Header -->
-          <div class="mb-2 flex items-start justify-between gap-2">
-            <div class="flex min-w-0 flex-1 items-center gap-2">
-              <!-- Type Icon -->
-              <ArrowUp
-                v-if="task.type === 'upload'"
-                class="h-4 w-4 shrink-0 text-blue-500"
-              />
-              <ArrowDown v-else class="h-4 w-4 shrink-0 text-green-500" />
-
+          <div class="flex items-start justify-between gap-3">
+            <div class="flex min-w-0 flex-1 items-center gap-3">
+              <!-- Type Icon Container -->
+              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted/30 ring-1 ring-border/5 group-hover:bg-muted/50 transition-colors">
+                <ArrowUp
+                  v-if="task.type === 'upload'"
+                  class="h-4 w-4 text-primary"
+                />
+                <ArrowDown v-else class="h-4 w-4 text-emerald-500" />
+              </div>
+ 
               <!-- File Info -->
               <div class="min-w-0 flex-1">
-                <p class="truncate text-sm font-medium">{{ task.fileName }}</p>
-                <p class="truncate text-xs text-muted-foreground">
+                <div class="flex items-center gap-2">
+                   <p class="truncate text-[12px] font-bold text-foreground/80 group-hover:text-foreground transition-colors">{{ task.fileName }}</p>
+                   <span v-if="task.status === 'transferring'" class="text-[9px] font-black text-primary/60 bg-primary/5 px-1 rounded uppercase">LIVE</span>
+                </div>
+                <p class="truncate text-[10px] text-muted-foreground/60 font-medium">
                   {{ task.type === 'upload' ? task.localPath : task.remotePath }}
                 </p>
               </div>
             </div>
-
+ 
             <!-- Action Buttons -->
-            <div class="flex shrink-0 items-center gap-1">
+            <div class="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               <CheckCircle2
                 v-if="task.status === 'completed'"
-                class="h-4 w-4 text-green-500"
+                class="h-4 w-4 text-emerald-500"
               />
-              <XCircle
-                v-else-if="task.status === 'error'"
-                class="h-4 w-4 text-destructive"
-              />
+              <template v-else-if="task.status === 'error'">
+                <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-primary/10" @click="handleRetry(task.id)">
+                  <RotateCcw class="h-3 w-3" />
+                </Button>
+                <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-destructive/10 hover:text-destructive" @click="transferStore.removeTask(task.id)">
+                  <X class="h-3 w-3" />
+                </Button>
+              </template>
               <template v-else>
-                <!-- Pause Button -->
                 <Button
                   v-if="task.status === 'transferring'"
                   variant="ghost"
                   size="icon"
-                  class="h-6 w-6"
+                  class="h-7 w-7 rounded-full bg-muted/20 hover:bg-primary/10 hover:text-primary active:scale-90"
                   @click="handlePause(task.id)"
                 >
-                  <Pause class="h-3 w-3" />
+                  <Pause class="h-3.5 w-3.5 fill-current" />
                 </Button>
-                <!-- Resume Button -->
                 <Button
                   v-if="task.status === 'paused'"
                   variant="ghost"
                   size="icon"
-                  class="h-6 w-6"
+                  class="h-7 w-7 rounded-full bg-primary/10 text-primary hover:bg-primary/20 active:scale-90"
                   @click="handleResume(task.id)"
                 >
-                  <Play class="h-3 w-3" />
+                  <Play class="h-3.5 w-3.5 fill-current" />
                 </Button>
-                <!-- Cancel Button -->
                 <Button
                   v-if="task.status === 'transferring' || task.status === 'paused'"
                   variant="ghost"
                   size="icon"
-                  class="h-6 w-6"
+                  class="h-7 w-7 rounded-full bg-muted/20 hover:bg-destructive/10 hover:text-destructive active:scale-90"
                   @click="handleCancel(task.id)"
                 >
-                  <X class="h-3 w-3" />
+                  <X class="h-3.5 w-3.5" />
                 </Button>
               </template>
             </div>
           </div>
-
-          <!-- Progress Bar -->
-          <div class="mb-2">
-            <Progress
-              :model-value="getProgress(task)"
-              class="h-1.5"
-              :class="{
-                '[&>div]:bg-green-500': task.status === 'completed',
-                '[&>div]:bg-destructive': task.status === 'error',
-              }"
-            />
-          </div>
-
-          <!-- Transfer Stats -->
-          <div class="flex items-center justify-between text-xs text-muted-foreground">
-            <span>
-              {{ formatBytes(task.transferredBytes) }} / {{ formatBytes(task.totalBytes) }}
-              ({{ getProgress(task) }}%)
-            </span>
-            <span v-if="task.status === 'transferring'">
-              {{ formatSpeed(task.speed) }} · ETA {{ getETA(task) }}
-            </span>
-            <span v-else-if="task.status === 'paused'" class="text-yellow-500">
-              {{ t('transfer.paused') }}
-            </span>
-            <span v-else-if="task.status === 'completed'" class="text-green-500">
-              {{ t('transfer.completed') }}
-            </span>
-            <span v-else-if="task.status === 'error'" class="text-destructive">
-              {{ task.error || t('transfer.failed') }}
-            </span>
+ 
+          <!-- Progress Section -->
+          <div class="mt-3 space-y-1.5">
+            <!-- Progress Bar with Animation -->
+            <div class="relative h-1.5 w-full overflow-hidden rounded-full bg-muted/30">
+               <div 
+                 class="h-full transition-all duration-500 ease-out h-full"
+                 :class="[
+                   task.status === 'completed' ? 'bg-emerald-500' :
+                   task.status === 'error' ? 'bg-destructive' :
+                   task.status === 'paused' ? 'bg-amber-500' : 'bg-primary shadow-[0_0_8px_rgba(var(--color-primary),0.4)]'
+                 ]"
+                 :style="{ width: `${getProgress(task)}%` }"
+               >
+                 <!-- Flow Animation Overlay -->
+                 <div v-if="task.status === 'transferring'" class="absolute inset-0 w-full animate-progress-flow bg-[linear-gradient(90deg,transparent_0%,rgba(255,255,255,0.2)_50%,transparent_100%)] bg-[length:200%_100%]"></div>
+               </div>
+            </div>
+ 
+            <!-- Stats Grid -->
+            <div class="flex items-center justify-between text-[10px] font-bold tracking-tight">
+              <div class="flex items-center gap-2">
+                <span class="text-foreground/60">{{ formatBytes(task.transferredBytes) }}</span>
+                <span class="text-muted-foreground/30 text-[8px]">OF</span>
+                <span class="text-foreground/40">{{ formatBytes(task.totalBytes) }}</span>
+                <span class="ml-1 rounded bg-muted/40 px-1 py-0.5 text-foreground/70">{{ getProgress(task) }}%</span>
+              </div>
+              
+              <div class="flex items-center gap-2 transition-all">
+                <span v-if="task.status === 'transferring'" class="flex items-center gap-1.5 text-primary">
+                   <Zap class="h-2.5 w-2.5 animate-pulse" />
+                   {{ formatSpeed(task.speed) }}
+                   <span class="text-muted-foreground/40">•</span>
+                   <span class="text-foreground/70">ETA {{ getETA(task) }}</span>
+                </span>
+                <span v-else-if="task.status === 'paused'" class="text-amber-500 uppercase tracking-widest text-[9px]">{{ t('transfer.paused') }}</span>
+                <span v-else-if="task.status === 'completed'" class="text-emerald-500 uppercase tracking-widest text-[9px]">{{ t('transfer.completed') }}</span>
+                <span v-else-if="task.status === 'error'" class="text-destructive uppercase tracking-widest text-[9px]">{{ task.error || t('transfer.failed') }}</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </ScrollArea>
+
+    <!-- 统计栏 -->
+    <div
+      v-if="hasActiveTasks"
+      class="flex h-6 items-center justify-between border-t border-border/10 px-3 bg-muted/5 text-[9px] font-black uppercase tracking-tighter text-muted-foreground/40"
+    >
+      <div class="flex items-center gap-3">
+        <span>{{ activeTasks.length }} {{ t('transfer.tasks') }}</span>
+        <span v-if="transferringTasks.length > 0" class="flex items-center gap-1 text-primary/70">
+           <Zap class="h-2 w-2" />
+           {{ formatSpeed(totalSpeed) }}
+        </span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span v-if="transferringTasks.length > 0">ETA {{ totalRemaining }}</span>
+        <span v-if="errorCount > 0" class="text-destructive font-black">
+          {{ errorCount }} {{ t('transfer.failed') }}
+        </span>
+      </div>
+    </div>
   </div>
 </template>
+
+<style scoped>
+@keyframes progress-flow {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+.animate-progress-flow {
+  animation: progress-flow 3s linear infinite;
+}
+</style>

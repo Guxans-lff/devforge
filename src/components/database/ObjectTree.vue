@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, onActivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,15 @@ import {
   Code,
   Plus,
   Search,
+  X,
+  FolderOpen,
+  Folder,
+  Workflow,
+  Zap,
+  FunctionSquare,
+  GitCompareArrows,
+  HardDrive,
+  Upload,
 } from 'lucide-vue-next'
 import * as dbApi from '@/api/database'
 import type { DatabaseTreeNode } from '@/types/database'
@@ -41,6 +50,11 @@ const emit = defineEmits<{
   importData: [database: string, table: string, columns: string[]]
   createTable: [database: string]
   showCreateSql: [database: string, table: string]
+  showObjectDefinition: [database: string, name: string, objectType: string]
+  schemaUpdated: []
+  openSchemaCompare: []
+  backupDatabase: [database: string]
+  restoreDatabase: [database: string]
 }>()
 
 const { t } = useI18n()
@@ -49,8 +63,6 @@ const loading = ref(false)
 const searchQuery = ref('')
 const debouncedQuery = ref('')
 const searchCollapsedDbs = ref(new Set<string>())
-const TABLE_RENDER_LIMIT = 100
-const visibleTableLimit = ref(new Map<string, number>())
 
 // Debounce search input for performance with large table lists
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -59,51 +71,21 @@ watch(searchQuery, (val) => {
   searchTimer = setTimeout(() => {
     debouncedQuery.value = val
     searchCollapsedDbs.value = new Set()
-    visibleTableLimit.value = new Map()
   }, 200)
 })
 
-function getVisibleLimit(dbId: string): number {
-  return visibleTableLimit.value.get(dbId) ?? TABLE_RENDER_LIMIT
-}
 
-function showMoreTables(dbId: string) {
-  const current = getVisibleLimit(dbId)
-  const next = new Map(visibleTableLimit.value)
-  next.set(dbId, current + TABLE_RENDER_LIMIT)
-  visibleTableLimit.value = next
-}
-
-// Infinite scroll: auto-load more tables when sentinel enters viewport
-const sentinelObserver = ref<IntersectionObserver | null>(null)
-const sentinelRefs = new Map<string, HTMLElement>()
-
-function initObserver() {
-  sentinelObserver.value = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (entry.isIntersecting) {
-        const dbId = (entry.target as HTMLElement).dataset.dbId
-        if (dbId) showMoreTables(dbId)
-      }
-    }
-  }, { rootMargin: '100px' })
-}
-
-function observeSentinel(el: HTMLElement | null, dbId: string) {
-  if (!sentinelObserver.value) initObserver()
-  const prev = sentinelRefs.get(dbId)
-  if (prev) sentinelObserver.value!.unobserve(prev)
-  if (el) {
-    el.dataset.dbId = dbId
-    sentinelObserver.value!.observe(el)
-    sentinelRefs.set(dbId, el)
-  } else {
-    sentinelRefs.delete(dbId)
-  }
-}
 
 onBeforeUnmount(() => {
-  sentinelObserver.value?.disconnect()
+  if (searchTimer) clearTimeout(searchTimer)
+})
+
+onActivated(() => {
+  // KeepAlive 重新激活时重置状态，强制重新加载
+  searchQuery.value = ''
+  debouncedQuery.value = ''
+  treeNodes.value = []
+  loadDatabases()
 })
 
 const filteredNodes = computed(() => {
@@ -112,17 +94,18 @@ const filteredNodes = computed(() => {
   return treeNodes.value.map(dbNode => {
     const dbId = dbNode.id
     const isCollapsedByUser = searchCollapsedDbs.value.has(dbId)
-    // Check if database name matches
-    if (dbNode.label.toLowerCase().includes(q)) {
-      return { ...dbNode, isExpanded: !isCollapsedByUser }
-    }
-    // Filter children (tables) that match
+    const dbMatches = dbNode.label.toLowerCase().includes(q)
+    // 过滤匹配的子节点（表名或注释）
     const matchedChildren = dbNode.children?.filter(tblNode =>
       tblNode.label.toLowerCase().includes(q) ||
       (tblNode.meta?.comment ?? '').toLowerCase().includes(q)
     )
     if (matchedChildren && matchedChildren.length > 0) {
       return { ...dbNode, isExpanded: !isCollapsedByUser, children: matchedChildren }
+    }
+    // 数据库名匹配但无匹配子节点，显示数据库但不展开
+    if (dbMatches) {
+      return { ...dbNode, isExpanded: false, children: [] }
     }
     return null
   }).filter(Boolean) as DatabaseTreeNode[]
@@ -141,6 +124,7 @@ async function loadDatabases() {
       isLoading: false,
       meta: { database: db.name },
     }))
+    emit('schemaUpdated')
   } catch (e) {
     treeNodes.value = []
   } finally {
@@ -173,36 +157,121 @@ function toggleNode(node: DatabaseTreeNode) {
 
   // Fire-and-forget: expand immediately, load data in background
   if (node.type === 'database' && node.children && node.children.length === 0) {
-    loadTables(node)
-  } else if (node.type === 'table' && node.children && node.children.length === 0) {
+    loadDatabaseFolders(node)
+  } else if (node.type === 'folder' && node.children && node.children.length === 0) {
+    loadFolderChildren(node)
+  } else if ((node.type === 'table' || node.type === 'view') && node.children && node.children.length === 0) {
     loadColumns(node)
   }
 }
 
-async function loadTables(node: DatabaseTreeNode) {
+function createFolderNodes(database: string): DatabaseTreeNode[] {
+  return [
+    { id: `folder-tables-${database}`, label: t('objectTree.tables'), type: 'folder', folderType: 'tables', children: [], isExpanded: false, isLoading: false, meta: { database } },
+    { id: `folder-views-${database}`, label: t('objectTree.views'), type: 'folder', folderType: 'views', children: [], isExpanded: false, isLoading: false, meta: { database } },
+    { id: `folder-procedures-${database}`, label: t('objectTree.procedures'), type: 'folder', folderType: 'procedures', children: [], isExpanded: false, isLoading: false, meta: { database } },
+    { id: `folder-functions-${database}`, label: t('objectTree.functions'), type: 'folder', folderType: 'functions', children: [], isExpanded: false, isLoading: false, meta: { database } },
+    { id: `folder-triggers-${database}`, label: t('objectTree.triggers'), type: 'folder', folderType: 'triggers', children: [], isExpanded: false, isLoading: false, meta: { database } },
+  ]
+}
+
+async function loadDatabaseFolders(node: DatabaseTreeNode) {
+  const database = node.meta?.database
+  if (!database) return
+  node.isLoading = true
+  node.children = createFolderNodes(database)
+  node.isLoading = false
+}
+
+async function loadFolderChildren(node: DatabaseTreeNode) {
   const database = node.meta?.database
   if (!database) return
 
   node.isLoading = true
   try {
-    const tables = await dbApi.dbGetTables(props.connectionId, database)
-    node.children = tables.map((tbl) => ({
-      id: `tbl-${database}-${tbl.name}`,
-      label: tbl.name,
-      type: (tbl.tableType === 'VIEW' ? 'view' : 'table') as 'table' | 'view',
-      children: [],
-      isExpanded: false,
-      isLoading: false,
-      meta: {
-        database,
-        table: tbl.name,
-        comment: tbl.comment ?? undefined,
-      },
-    }))
+    switch (node.folderType) {
+      case 'tables': {
+        const tables = await dbApi.dbGetTables(props.connectionId, database)
+        node.children = tables
+          .filter(tbl => tbl.tableType !== 'VIEW')
+          .map((tbl) => ({
+            id: `tbl-${database}-${tbl.name}`,
+            label: tbl.name,
+            type: 'table' as const,
+            children: [],
+            isExpanded: false,
+            isLoading: false,
+            meta: { database, table: tbl.name, comment: tbl.comment ?? undefined },
+          }))
+        break
+      }
+      case 'views': {
+        const views = await dbApi.dbGetViews(props.connectionId, database)
+        node.children = views.map((v) => ({
+          id: `view-${database}-${v.name}`,
+          label: v.name,
+          type: 'view' as const,
+          children: [],
+          isExpanded: false,
+          isLoading: false,
+          meta: { database, table: v.name, objectType: 'VIEW' },
+        }))
+        break
+      }
+      case 'procedures': {
+        const procs = await dbApi.dbGetProcedures(props.connectionId, database)
+        node.children = procs.map((p) => ({
+          id: `proc-${database}-${p.name}`,
+          label: p.name,
+          type: 'table' as const,
+          meta: {
+            database,
+            objectType: 'PROCEDURE',
+            comment: p.comment ?? undefined,
+            definer: p.definer ?? undefined,
+            created: p.created ?? undefined,
+          },
+        }))
+        break
+      }
+      case 'functions': {
+        const funcs = await dbApi.dbGetFunctions(props.connectionId, database)
+        node.children = funcs.map((f) => ({
+          id: `func-${database}-${f.name}`,
+          label: f.name,
+          type: 'table' as const,
+          meta: {
+            database,
+            objectType: 'FUNCTION',
+            comment: f.comment ?? undefined,
+            definer: f.definer ?? undefined,
+            created: f.created ?? undefined,
+          },
+        }))
+        break
+      }
+      case 'triggers': {
+        const triggers = await dbApi.dbGetTriggers(props.connectionId, database)
+        node.children = triggers.map((tr) => ({
+          id: `trigger-${database}-${tr.name}`,
+          label: tr.name,
+          type: 'table' as const,
+          meta: {
+            database,
+            objectType: 'TRIGGER',
+            event: tr.event,
+            timing: tr.timing,
+            table: tr.tableName,
+          },
+        }))
+        break
+      }
+    }
   } catch {
     node.children = []
   } finally {
     node.isLoading = false
+    emit('schemaUpdated')
   }
 }
 
@@ -231,6 +300,7 @@ async function loadColumns(node: DatabaseTreeNode) {
     node.children = []
   } finally {
     node.isLoading = false
+    emit('schemaUpdated')
   }
 }
 
@@ -281,11 +351,24 @@ function handleShowCreateSql(node: DatabaseTreeNode) {
   }
 }
 
+function handleShowDefinition(node: DatabaseTreeNode) {
+  const database = node.meta?.database
+  const objectType = node.meta?.objectType
+  if (database && objectType) {
+    emit('showObjectDefinition', database, node.label, objectType)
+  }
+}
+
 function getNodeIcon(node: DatabaseTreeNode) {
   switch (node.type) {
     case 'database':
       return Database
+    case 'folder':
+      return node.isExpanded ? FolderOpen : Folder
     case 'table':
+      if (node.meta?.objectType === 'PROCEDURE') return Workflow
+      if (node.meta?.objectType === 'FUNCTION') return FunctionSquare
+      if (node.meta?.objectType === 'TRIGGER') return Zap
       return Table2
     case 'view':
       return Eye
@@ -321,9 +404,18 @@ defineExpose({ loadDatabases, treeNodes })
         <Search class="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
         <Input
           v-model="searchQuery"
-          class="h-6 pl-6 pr-2 text-xs"
+          class="h-6 pl-6 text-xs"
+          :class="searchQuery ? 'pr-6' : 'pr-2'"
           :placeholder="t('database.searchTables')"
+          @keydown.escape="searchQuery = ''"
         />
+        <button
+          v-if="searchQuery"
+          class="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-sm p-0.5 text-muted-foreground hover:text-foreground transition-colors"
+          @click="searchQuery = ''"
+        >
+          <X class="h-3 w-3" />
+        </button>
       </div>
     </div>
 
@@ -373,73 +465,154 @@ defineExpose({ loadDatabases, treeNodes })
                 <Plus class="h-3.5 w-3.5" />
                 {{ t('tableEditor.createTable') }}
               </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem class="gap-2 text-xs" @click="emit('openSchemaCompare')">
+                <GitCompareArrows class="h-3.5 w-3.5" />
+                {{ t('schemaCompare.title') }}
+              </ContextMenuItem>
+              <ContextMenuSeparator />
+              <ContextMenuItem class="gap-2 text-xs" @click="emit('backupDatabase', dbNode.meta!.database!)">
+                <HardDrive class="h-3.5 w-3.5" />
+                {{ t('backup.title') }}
+              </ContextMenuItem>
+              <ContextMenuItem class="gap-2 text-xs" @click="emit('restoreDatabase', dbNode.meta!.database!)">
+                <Upload class="h-3.5 w-3.5" />
+                {{ t('restore.title') }}
+              </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
 
-          <!-- Table nodes (with render limit for performance) -->
+          <!-- Folder / Table nodes -->
           <template v-if="dbNode.isExpanded && dbNode.children">
-            <template v-for="tblNode in dbNode.children.slice(0, getVisibleLimit(dbNode.id))" :key="tblNode.id">
-              <ContextMenu>
-                <ContextMenuTrigger as-child>
-                  <div
-                    class="group flex cursor-pointer items-center gap-1 py-1 pl-6 pr-2 text-xs hover:bg-muted/50 transition-colors"
-                    @click="toggleNode(tblNode)"
-                    @dblclick="handleDoubleClick(tblNode)"
-                  >
-                    <ChevronRight
-                      class="h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150"
-                      :class="{ 'rotate-90': tblNode.isExpanded }"
-                    />
-                    <Loader2 v-if="tblNode.isLoading" class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                    <component :is="getNodeIcon(tblNode)" v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span class="truncate">{{ tblNode.label }}</span>
-                    <span
-                      v-if="tblNode.meta?.comment"
-                      class="ml-auto truncate text-[10px] text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      {{ tblNode.meta.comment }}
-                    </span>
-                  </div>
-                </ContextMenuTrigger>
-                <ContextMenuContent class="w-48">
-                  <ContextMenuItem class="gap-2 text-xs" @click="handleEditTable(tblNode)">
-                    <Pencil class="h-3.5 w-3.5" />
-                    {{ t('tableEditor.alterTable') }}
-                  </ContextMenuItem>
-                  <ContextMenuItem class="gap-2 text-xs" @click="handleImportData(tblNode)">
-                    <FileUp class="h-3.5 w-3.5" />
-                    {{ t('dataImport.import') }}
-                  </ContextMenuItem>
-                  <ContextMenuSeparator />
-                  <ContextMenuItem class="gap-2 text-xs" @click="handleShowCreateSql(tblNode)">
-                    <Code class="h-3.5 w-3.5" />
-                    {{ t('database.showCreateTable') }}
-                  </ContextMenuItem>
-                </ContextMenuContent>
-              </ContextMenu>
-
-              <!-- Column nodes -->
-              <template v-if="tblNode.isExpanded && tblNode.children">
-                <div
-                  v-for="colNode in tblNode.children"
-                  :key="colNode.id"
-                  class="flex items-center gap-1 py-0.5 pl-10 pr-2 text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
+            <template v-for="folderNode in dbNode.children" :key="folderNode.id">
+              <!-- Folder node (Tables/Views/Procedures/Functions/Triggers) -->
+              <div
+                class="group flex cursor-pointer items-center gap-1 py-1 pl-6 pr-2 text-xs hover:bg-muted/50 transition-colors"
+                @click="toggleNode(folderNode)"
+              >
+                <ChevronRight
+                  class="h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150"
+                  :class="{ 'rotate-90': folderNode.isExpanded }"
+                />
+                <Loader2 v-if="folderNode.isLoading" class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                <component :is="getNodeIcon(folderNode)" v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span class="truncate">{{ folderNode.label }}</span>
+                <span
+                  v-if="folderNode.children && folderNode.children.length > 0"
+                  class="ml-auto shrink-0 text-[10px] text-muted-foreground/40 tabular-nums"
                 >
-                  <component :is="getNodeIcon(colNode)" class="h-3 w-3 shrink-0" :class="{ 'text-amber-500': colNode.meta?.isPrimaryKey }" />
-                  <span class="truncate">{{ colNode.label }}</span>
-                  <span class="ml-auto shrink-0 text-[10px] text-muted-foreground/50">
-                    {{ colNode.meta?.dataType }}
-                  </span>
-                </div>
+                  {{ folderNode.children.length }}
+                </span>
+              </div>
+
+              <!-- Folder children -->
+              <template v-if="folderNode.isExpanded && folderNode.children">
+                <template v-for="childNode in folderNode.children" :key="childNode.id">
+                  <!-- Table/View items (expandable for columns) -->
+                  <template v-if="folderNode.folderType === 'tables' || folderNode.folderType === 'views'">
+                    <ContextMenu>
+                      <ContextMenuTrigger as-child>
+                        <div
+                          class="group flex cursor-pointer items-center gap-1 py-1 pl-10 pr-2 text-xs hover:bg-muted/50 transition-colors"
+                          @click="toggleNode(childNode)"
+                          @dblclick="handleDoubleClick(childNode)"
+                        >
+                          <ChevronRight
+                            class="h-3 w-3 shrink-0 text-muted-foreground transition-transform duration-150"
+                            :class="{ 'rotate-90': childNode.isExpanded }"
+                          />
+                          <Loader2 v-if="childNode.isLoading" class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                          <component :is="getNodeIcon(childNode)" v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span class="truncate">{{ childNode.label }}</span>
+                          <span
+                            v-if="childNode.meta?.comment"
+                            class="ml-auto truncate text-[10px] text-muted-foreground/50 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            {{ childNode.meta.comment }}
+                          </span>
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent class="w-48">
+                        <template v-if="folderNode.folderType === 'tables'">
+                          <ContextMenuItem class="gap-2 text-xs" @click="handleEditTable(childNode)">
+                            <Pencil class="h-3.5 w-3.5" />
+                            {{ t('tableEditor.alterTable') }}
+                          </ContextMenuItem>
+                          <ContextMenuItem class="gap-2 text-xs" @click="handleImportData(childNode)">
+                            <FileUp class="h-3.5 w-3.5" />
+                            {{ t('dataImport.import') }}
+                          </ContextMenuItem>
+                          <ContextMenuSeparator />
+                          <ContextMenuItem class="gap-2 text-xs" @click="handleShowCreateSql(childNode)">
+                            <Code class="h-3.5 w-3.5" />
+                            {{ t('database.showCreateTable') }}
+                          </ContextMenuItem>
+                        </template>
+                        <template v-else>
+                          <ContextMenuItem class="gap-2 text-xs" @click="handleShowDefinition(childNode)">
+                            <Code class="h-3.5 w-3.5" />
+                            {{ t('objectTree.viewDefinition') }}
+                          </ContextMenuItem>
+                        </template>
+                      </ContextMenuContent>
+                    </ContextMenu>
+
+                    <!-- Column nodes -->
+                    <template v-if="childNode.isExpanded && childNode.children">
+                      <div
+                        v-for="colNode in childNode.children"
+                        :key="colNode.id"
+                        class="flex items-center gap-1 py-0.5 pl-14 pr-2 text-xs text-muted-foreground hover:bg-muted/50 transition-colors"
+                      >
+                        <component :is="getNodeIcon(colNode)" class="h-3 w-3 shrink-0" :class="{ 'text-amber-500': colNode.meta?.isPrimaryKey }" />
+                        <span class="truncate">{{ colNode.label }}</span>
+                        <span class="ml-auto shrink-0 text-[10px] text-muted-foreground/50">
+                          {{ colNode.meta?.dataType }}
+                        </span>
+                      </div>
+                    </template>
+                  </template>
+
+                  <!-- Procedure/Function/Trigger items (leaf nodes) -->
+                  <template v-else>
+                    <ContextMenu>
+                      <ContextMenuTrigger as-child>
+                        <div
+                          class="group flex cursor-pointer items-center gap-1 py-1 pl-10 pr-2 text-xs hover:bg-muted/50 transition-colors"
+                          @dblclick="handleShowDefinition(childNode)"
+                        >
+                          <component :is="getNodeIcon(childNode)" class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span class="truncate">{{ childNode.label }}</span>
+                          <!-- 触发器：显示 timing + event + 关联表 -->
+                          <template v-if="childNode.meta?.objectType === 'TRIGGER'">
+                            <span class="ml-auto shrink-0 text-[10px] text-muted-foreground/60">
+                              {{ childNode.meta.timing }} {{ childNode.meta.event }}
+                              <span v-if="childNode.meta.table" class="text-muted-foreground/40">on {{ childNode.meta.table }}</span>
+                            </span>
+                          </template>
+                          <!-- 存储过程/函数：hover 显示 definer -->
+                          <template v-else>
+                            <span
+                              v-if="childNode.meta?.definer"
+                              class="ml-auto shrink-0 truncate max-w-[120px] text-[10px] text-muted-foreground/40 opacity-0 group-hover:opacity-100 transition-opacity"
+                              :title="childNode.meta.definer"
+                            >
+                              {{ childNode.meta.definer }}
+                            </span>
+                          </template>
+                        </div>
+                      </ContextMenuTrigger>
+                      <ContextMenuContent class="w-48">
+                        <ContextMenuItem class="gap-2 text-xs" @click="handleShowDefinition(childNode)">
+                          <Code class="h-3.5 w-3.5" />
+                          {{ t('objectTree.viewDefinition') }}
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  </template>
+                </template>
               </template>
             </template>
-
-            <!-- Infinite scroll sentinel -->
-            <div
-              v-if="dbNode.children.length > getVisibleLimit(dbNode.id)"
-              :ref="(el) => observeSentinel(el as HTMLElement | null, dbNode.id)"
-              class="h-px"
-            />
           </template>
         </template>
       </div>

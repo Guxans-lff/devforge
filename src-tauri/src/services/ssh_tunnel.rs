@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use crate::models::ssh::{TunnelConfig, TunnelInfo};
+use crate::services::ssh_auth;
 use crate::utils::error::AppError;
 
 /// Minimal SSH client handler for tunnel connections.
@@ -48,6 +49,8 @@ impl SshTunnelEngine {
             self.close_tunnel(&config.tunnel_id).await?;
         }
 
+        let auth = config.to_auth_config();
+
         // Connect to SSH server
         let ssh_config = Arc::new(client::Config::default());
         let mut session =
@@ -55,16 +58,7 @@ impl SshTunnelEngine {
                 .await
                 .map_err(|e| AppError::Other(format!("SSH tunnel connection failed: {}", e)))?;
 
-        let authenticated = session
-            .authenticate_password(&config.ssh_username, &config.ssh_password)
-            .await
-            .map_err(|e| AppError::Other(format!("SSH tunnel auth error: {}", e)))?;
-
-        if !authenticated {
-            return Err(AppError::Other(
-                "SSH tunnel authentication failed: invalid credentials".to_string(),
-            ));
-        }
+        ssh_auth::authenticate(&mut session, &config.ssh_username, &auth).await?;
 
         let session = Arc::new(Mutex::new(session));
 

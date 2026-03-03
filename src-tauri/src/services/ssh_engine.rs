@@ -5,9 +5,11 @@ use async_trait::async_trait;
 use russh::client;
 use russh::{ChannelMsg, Disconnect};
 use tauri::{AppHandle, Emitter};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 
-use crate::models::ssh::SessionInfo;
+use crate::models::ssh::{AuthConfig, ProxyJumpConfig, SessionInfo};
+use crate::services::ssh_auth;
+use crate::services::terminal_recorder::SharedRecordingWriter;
 use crate::utils::error::AppError;
 
 /// Commands sent from Tauri commands to the per-session I/O task.
@@ -36,54 +38,59 @@ impl client::Handler for SshClient {
 struct SshSession {
     cmd_tx: mpsc::UnboundedSender<SessionCommand>,
     _connection_id: String,
+    recording_writer: SharedRecordingWriter,
 }
 
+/// SSH 引擎：内部使用 RwLock<HashMap> 实现 per-connection 级别锁定，
+/// 不同连接的操作互不阻塞。
 pub struct SshEngine {
-    sessions: HashMap<String, SshSession>,
+    sessions: RwLock<HashMap<String, SshSession>>,
 }
 
 impl SshEngine {
     pub fn new() -> Self {
         Self {
-            sessions: HashMap::new(),
+            sessions: RwLock::new(HashMap::new()),
         }
     }
 
     #[allow(clippy::too_many_arguments)]
     pub async fn connect(
-        &mut self,
+        &self,
         app_handle: &AppHandle,
         session_id: &str,
         connection_id: &str,
         host: &str,
         port: u16,
         username: &str,
-        password: &str,
+        auth: &AuthConfig,
+        proxy: Option<&ProxyJumpConfig>,
         cols: u32,
         rows: u32,
     ) -> Result<SessionInfo, AppError> {
-        // Clean up any existing session with this ID
-        if self.sessions.contains_key(session_id) {
+        // Clean up any existing session with this ID (短暂读锁检查)
+        if self.sessions.read().await.contains_key(session_id) {
             self.disconnect(session_id).await?;
         }
 
+        // 以下 SSH 握手过程不持有任何锁
         let config = Arc::new(client::Config::default());
         let handler = SshClient;
 
-        let mut session = client::connect(config, (host, port), handler)
-            .await
-            .map_err(|e| AppError::Other(format!("SSH connection failed: {}", e)))?;
-
-        let authenticated = session
-            .authenticate_password(username, password)
-            .await
-            .map_err(|e| AppError::Other(format!("SSH authentication error: {}", e)))?;
-
-        if !authenticated {
-            return Err(AppError::Other(
-                "Authentication failed: invalid username or password".to_string(),
-            ));
-        }
+        let (session, _proxy_handle) = if let Some(proxy) = proxy {
+            // 通过跳板机连接
+            let (target, proxy_h) = ssh_auth::connect_via_proxy(
+                proxy, host, port, username, auth, handler,
+            ).await?;
+            (target, Some(proxy_h))
+        } else {
+            // 直连
+            let mut sess = client::connect(config, (host, port), handler)
+                .await
+                .map_err(|e| AppError::Other(format!("SSH connection failed: {}", e)))?;
+            ssh_auth::authenticate(&mut sess, username, auth).await?;
+            (sess, None)
+        };
 
         let mut channel = session
             .channel_open_session()
@@ -103,65 +110,77 @@ impl SshEngine {
         // Create command channel for the I/O task
         let (cmd_tx, mut cmd_rx) = mpsc::unbounded_channel::<SessionCommand>();
 
+        // 录制写入器（初始为空，start_recording 时设置）
+        let recording_writer: SharedRecordingWriter = Arc::new(tokio::sync::Mutex::new(None));
+        let recording_writer_for_task = recording_writer.clone();
+
         let sid = session_id.to_string();
         let app = app_handle.clone();
 
         // Spawn I/O task that owns the channel exclusively
         tokio::spawn(async move {
+            // 保持跳板机连接存活（如果有的话）
+            let _proxy_keepalive = _proxy_handle;
+
             let output_event = format!("ssh://output/{}", sid);
             let status_event = format!("ssh://status/{}", sid);
 
             loop {
-                // Drain pending commands first (non-blocking)
-                loop {
-                    match cmd_rx.try_recv() {
-                        Ok(SessionCommand::Data(data)) => {
-                            if channel.data(&data[..]).await.is_err() {
+                tokio::select! {
+                    // 等待 SSH 通道数据（零轮询，事件驱动）
+                    msg = channel.wait() => {
+                        match msg {
+                            Some(ChannelMsg::Data { data }) => {
+                                if let Some(ref mut writer) = *recording_writer_for_task.lock().await {
+                                    writer.write_output(&data);
+                                }
+                                let _ = app.emit(&output_event, data.to_vec());
+                            }
+                            Some(ChannelMsg::ExtendedData { data, .. }) => {
+                                if let Some(ref mut writer) = *recording_writer_for_task.lock().await {
+                                    writer.write_output(&data);
+                                }
+                                let _ = app.emit(&output_event, data.to_vec());
+                            }
+                            Some(ChannelMsg::ExitStatus { .. }) | None => {
+                                let _ = app.emit(&status_event, "disconnected");
+                                break;
+                            }
+                            Some(ChannelMsg::Eof) => {
+                                let _ = app.emit(&status_event, "disconnected");
+                                break;
+                            }
+                            Some(_) => {}
+                        }
+                    }
+                    // 等待用户命令（键盘输入、窗口调整、关闭）
+                    cmd = cmd_rx.recv() => {
+                        match cmd {
+                            Some(SessionCommand::Data(data)) => {
+                                if let Some(ref mut writer) = *recording_writer_for_task.lock().await {
+                                    writer.write_input(&data);
+                                }
+                                if let Err(e) = channel.data(&data[..]).await {
+                                    log::warn!("SSH session {} data send failed: {}", sid, e);
+                                    let _ = app.emit(&status_event, "disconnected");
+                                    return;
+                                }
+                            }
+                            Some(SessionCommand::Resize(cols, rows)) => {
+                                let _ = channel.window_change(cols, rows, 0, 0).await;
+                            }
+                            Some(SessionCommand::Close) => {
+                                let _ = channel.close().await;
+                                let _ = app.emit(&status_event, "disconnected");
+                                return;
+                            }
+                            None => {
+                                let _ = channel.close().await;
                                 let _ = app.emit(&status_event, "disconnected");
                                 return;
                             }
                         }
-                        Ok(SessionCommand::Resize(cols, rows)) => {
-                            let _ = channel.window_change(cols, rows, 0, 0).await;
-                        }
-                        Ok(SessionCommand::Close) => {
-                            let _ = channel.close().await;
-                            let _ = app.emit(&status_event, "disconnected");
-                            return;
-                        }
-                        Err(mpsc::error::TryRecvError::Empty) => break,
-                        Err(mpsc::error::TryRecvError::Disconnected) => {
-                            let _ = channel.close().await;
-                            let _ = app.emit(&status_event, "disconnected");
-                            return;
-                        }
                     }
-                }
-
-                // Wait for SSH data with a short timeout so we can check commands again
-                match tokio::time::timeout(
-                    std::time::Duration::from_millis(5),
-                    channel.wait(),
-                )
-                .await
-                {
-                    Ok(Some(ChannelMsg::Data { data })) => {
-                        let _ = app.emit(&output_event, data.to_vec());
-                    }
-                    Ok(Some(ChannelMsg::ExtendedData { data, .. })) => {
-                        // stderr
-                        let _ = app.emit(&output_event, data.to_vec());
-                    }
-                    Ok(Some(ChannelMsg::ExitStatus { .. })) | Ok(None) => {
-                        let _ = app.emit(&status_event, "disconnected");
-                        break;
-                    }
-                    Ok(Some(ChannelMsg::Eof)) => {
-                        let _ = app.emit(&status_event, "disconnected");
-                        break;
-                    }
-                    Ok(Some(_)) => {} // Other channel messages, ignore
-                    Err(_) => {}      // Timeout, loop back to check commands
                 }
             }
 
@@ -177,20 +196,22 @@ impl SshEngine {
             connected_at: chrono::Utc::now().timestamp(),
         };
 
-        self.sessions.insert(
+        // 短暂写锁插入新会话
+        self.sessions.write().await.insert(
             session_id.to_string(),
             SshSession {
                 cmd_tx,
                 _connection_id: connection_id.to_string(),
+                recording_writer,
             },
         );
 
         Ok(info)
     }
 
-    pub fn send_data(&self, session_id: &str, data: &[u8]) -> Result<(), AppError> {
-        let session = self
-            .sessions
+    pub async fn send_data(&self, session_id: &str, data: &[u8]) -> Result<(), AppError> {
+        let sessions = self.sessions.read().await;
+        let session = sessions
             .get(session_id)
             .ok_or_else(|| AppError::Other(format!("No SSH session: {}", session_id)))?;
 
@@ -202,9 +223,9 @@ impl SshEngine {
         Ok(())
     }
 
-    pub fn resize(&self, session_id: &str, cols: u32, rows: u32) -> Result<(), AppError> {
-        let session = self
-            .sessions
+    pub async fn resize(&self, session_id: &str, cols: u32, rows: u32) -> Result<(), AppError> {
+        let sessions = self.sessions.read().await;
+        let session = sessions
             .get(session_id)
             .ok_or_else(|| AppError::Other(format!("No SSH session: {}", session_id)))?;
 
@@ -216,18 +237,25 @@ impl SshEngine {
         Ok(())
     }
 
-    pub async fn disconnect(&mut self, session_id: &str) -> Result<(), AppError> {
-        if let Some(session) = self.sessions.remove(session_id) {
+    pub async fn disconnect(&self, session_id: &str) -> Result<(), AppError> {
+        if let Some(session) = self.sessions.write().await.remove(session_id) {
             let _ = session.cmd_tx.send(SessionCommand::Close);
         }
         Ok(())
     }
 
     #[allow(dead_code)]
-    pub fn is_connected(&self, session_id: &str) -> bool {
+    pub async fn is_connected(&self, session_id: &str) -> bool {
         self.sessions
+            .read()
+            .await
             .get(session_id)
             .map(|s| !s.cmd_tx.is_closed())
             .unwrap_or(false)
+    }
+
+    /// 获取会话的录制写入器引用（用于 start_recording 时设置）
+    pub async fn get_recording_writer(&self, session_id: &str) -> Option<SharedRecordingWriter> {
+        self.sessions.read().await.get(session_id).map(|s| s.recording_writer.clone())
     }
 }

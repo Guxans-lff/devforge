@@ -1,10 +1,31 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sqlx::mysql::{MySqlColumn, MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow, MySqlSslMode};
 use sqlx::{Column, Row, TypeInfo};
 
-use crate::models::query::{ColumnDef, ColumnInfo, DatabaseInfo, QueryResult, TableInfo};
+use crate::models::query::{ColumnDef, ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo};
 use crate::utils::error::AppError;
+
+/// 取消当前用户在此连接池上的活跃查询（仅限当前用户，防止越权）
+pub async fn cancel_running_query(pool: &MySqlPool) -> Result<(), AppError> {
+    // 仅获取当前用户的活跃查询（排除 Sleep 和当前 PROCESSLIST 查询本身）
+    let rows: Vec<MySqlRow> = sqlx::query(
+        "SELECT ID FROM information_schema.PROCESSLIST WHERE COMMAND != 'Sleep' AND INFO IS NOT NULL AND INFO NOT LIKE '%PROCESSLIST%' AND USER = CURRENT_USER()"
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to get process list: {}", e)))?;
+
+    for row in &rows {
+        if let Ok(Some(id)) = row.try_get::<Option<i64>, _>("ID") {
+            // 使用参数化查询（KILL 不支持参数化，但 id 来自 i64 类型安全）
+            let _ = sqlx::query(&format!("KILL QUERY {}", id))
+                .execute(pool)
+                .await;
+        }
+    }
+    Ok(())
+}
 
 pub async fn connect(
     host: &str,
@@ -27,7 +48,8 @@ pub async fn connect(
     }
 
     let pool = MySqlPoolOptions::new()
-        .max_connections(5)
+        .max_connections(10)
+        .acquire_timeout(Duration::from_secs(10))
         .connect_with(options)
         .await
         .map_err(|e| AppError::Other(format!("MySQL connection failed: {}", e)))?;
@@ -92,6 +114,8 @@ pub async fn execute_select(
             execution_time_ms: elapsed,
             is_error: false,
             error: None,
+            total_count: None,
+            truncated: false,
         });
     }
 
@@ -123,6 +147,8 @@ pub async fn execute_select(
         execution_time_ms: elapsed,
         is_error: false,
         error: None,
+        total_count: None,
+        truncated: false,
     })
 }
 
@@ -145,6 +171,8 @@ pub async fn execute_non_select(
         execution_time_ms: elapsed,
         is_error: false,
         error: None,
+        total_count: None,
+        truncated: false,
     })
 }
 
@@ -265,11 +293,154 @@ pub async fn get_create_table(
     Ok(ddl)
 }
 
-pub fn build_table_data_sql(database: &str, table: &str, page_size: u32, offset: u32) -> String {
-    format!(
-        "SELECT * FROM `{}`.`{}` LIMIT {} OFFSET {}",
-        database, table, page_size, offset
+pub async fn get_views(
+    pool: &MySqlPool,
+    database: &str,
+) -> Result<Vec<ViewInfo>, AppError> {
+    let rows: Vec<MySqlRow> = sqlx::query(
+        "SELECT CAST(TABLE_NAME AS CHAR) as name,
+                CAST(DEFINER AS CHAR) as definer,
+                CAST(CHECK_OPTION AS CHAR) as check_option,
+                CAST(IS_UPDATABLE AS CHAR) as is_updatable
+         FROM information_schema.VIEWS
+         WHERE TABLE_SCHEMA = ?
+         ORDER BY TABLE_NAME",
     )
+    .bind(database)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to list views: {}", e)))?;
+
+    Ok(rows.iter().map(|row| ViewInfo {
+        name: get_string(row, "name"),
+        definer: get_opt_string(row, "definer"),
+        check_option: get_opt_string(row, "check_option"),
+        is_updatable: get_opt_string(row, "is_updatable"),
+    }).collect())
+}
+
+pub async fn get_routines(
+    pool: &MySqlPool,
+    database: &str,
+    routine_type: &str,
+) -> Result<Vec<RoutineInfo>, AppError> {
+    let rows: Vec<MySqlRow> = sqlx::query(
+        "SELECT CAST(ROUTINE_NAME AS CHAR) as name,
+                CAST(ROUTINE_TYPE AS CHAR) as routine_type,
+                CAST(DEFINER AS CHAR) as definer,
+                CAST(CREATED AS CHAR) as created,
+                CAST(LAST_ALTERED AS CHAR) as modified,
+                CAST(ROUTINE_COMMENT AS CHAR) as comment
+         FROM information_schema.ROUTINES
+         WHERE ROUTINE_SCHEMA = ? AND ROUTINE_TYPE = ?
+         ORDER BY ROUTINE_NAME",
+    )
+    .bind(database)
+    .bind(routine_type)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to list routines: {}", e)))?;
+
+    Ok(rows.iter().map(|row| RoutineInfo {
+        name: get_string(row, "name"),
+        routine_type: get_string(row, "routine_type"),
+        definer: get_opt_string(row, "definer"),
+        created: get_opt_string(row, "created"),
+        modified: get_opt_string(row, "modified"),
+        comment: get_opt_string(row, "comment"),
+    }).collect())
+}
+
+pub async fn get_triggers(
+    pool: &MySqlPool,
+    database: &str,
+) -> Result<Vec<TriggerInfo>, AppError> {
+    let rows: Vec<MySqlRow> = sqlx::query(
+        "SELECT CAST(TRIGGER_NAME AS CHAR) as name,
+                CAST(EVENT_MANIPULATION AS CHAR) as event,
+                CAST(ACTION_TIMING AS CHAR) as timing,
+                CAST(EVENT_OBJECT_TABLE AS CHAR) as table_name,
+                CAST(ACTION_STATEMENT AS CHAR) as statement
+         FROM information_schema.TRIGGERS
+         WHERE TRIGGER_SCHEMA = ?
+         ORDER BY TRIGGER_NAME",
+    )
+    .bind(database)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to list triggers: {}", e)))?;
+
+    Ok(rows.iter().map(|row| TriggerInfo {
+        name: get_string(row, "name"),
+        event: get_string(row, "event"),
+        timing: get_string(row, "timing"),
+        table_name: get_string(row, "table_name"),
+        statement: get_opt_string(row, "statement"),
+    }).collect())
+}
+
+pub async fn get_object_definition(
+    pool: &MySqlPool,
+    database: &str,
+    name: &str,
+    object_type: &str,
+) -> Result<String, AppError> {
+    let sql = match object_type {
+        "VIEW" => format!("SHOW CREATE VIEW `{}`.`{}`", database, name),
+        "PROCEDURE" => format!("SHOW CREATE PROCEDURE `{}`.`{}`", database, name),
+        "FUNCTION" => format!("SHOW CREATE FUNCTION `{}`.`{}`", database, name),
+        "TRIGGER" => format!("SHOW CREATE TRIGGER `{}`.`{}`", database, name),
+        _ => return Err(AppError::Other(format!("Unknown object type: {}", object_type))),
+    };
+
+    let row: MySqlRow = sqlx::query(&sql)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| AppError::Other(format!("Failed to get definition: {}", e)))?;
+
+    // SHOW CREATE xxx 结果列位置：
+    // VIEW: [View, Create View, ...]  → index 1
+    // PROCEDURE: [Procedure, sql_mode, Create Procedure, ...]  → index 2
+    // FUNCTION: [Function, sql_mode, Create Function, ...]  → index 2
+    // TRIGGER: [Trigger, sql_mode, SQL Original Statement, ...]  → index 2
+    let col_index = if object_type == "VIEW" { 1 } else { 2 };
+    let ddl: String = row
+        .try_get::<String, _>(col_index)
+        .or_else(|_| {
+            row.try_get::<Vec<u8>, _>(col_index)
+                .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        })
+        .unwrap_or_default();
+    Ok(ddl)
+}
+
+pub fn build_table_data_sql(database: &str, table: &str, page_size: u32, offset: u32, where_clause: Option<&str>, order_by: Option<&str>) -> String {
+    let mut sql = format!("SELECT * FROM `{}`.`{}`", database, table);
+    if let Some(w) = where_clause {
+        let w = w.trim();
+        if !w.is_empty() {
+            sql.push_str(&format!(" WHERE {}", w));
+        }
+    }
+    if let Some(o) = order_by {
+        let o = o.trim();
+        if !o.is_empty() {
+            sql.push_str(&format!(" ORDER BY {}", o));
+        }
+    }
+    sql.push_str(&format!(" LIMIT {} OFFSET {}", page_size, offset));
+    sql
+}
+
+pub fn build_table_count_sql(database: &str, table: &str, where_clause: Option<&str>) -> String {
+    let mut sql = format!("SELECT COUNT(*) AS cnt FROM `{}`.`{}`", database, table);
+    if let Some(w) = where_clause {
+        let w = w.trim();
+        if !w.is_empty() {
+            sql.push_str(&format!(" WHERE {}", w));
+        }
+    }
+    sql
 }
 
 /// Safely extract a String from a MySQL row column.

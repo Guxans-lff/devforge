@@ -16,26 +16,26 @@ export const nord: ThemeDefinition = {
     '--secondary': '#3b4252',
     '--secondary-foreground': '#d8dee9',
     '--muted': '#3b4252',
-    '--muted-foreground': '#7b88a1',
+    '--muted-foreground': '#8a98b5',  // 提高对比度：#7b88a1 -> #8a98b5
     '--accent': '#434c5e',
     '--accent-foreground': '#d8dee9',
     '--destructive': '#bf616a',
-    '--border': 'rgba(255, 255, 255, 0.08)',
-    '--input': 'rgba(255, 255, 255, 0.12)',
+    '--border': 'rgba(255, 255, 255, 0.12)',  // 提高边框可见度：0.08 -> 0.12
+    '--input': 'rgba(255, 255, 255, 0.18)',  // 提高输入框边框可见度：0.12 -> 0.18
     '--ring': '#88c0d0',
     '--df-success': '#a3be8c',
     '--df-warning': '#ebcb8b',
     '--df-info': '#81a1c1',
-    '--df-elevated': '#434c5e',
+    '--df-elevated': '#4c566a',  // 提高高度层级对比度：#434c5e -> #4c566a
     '--df-surface': '#3b4252',
-    '--df-overlay': 'rgba(0, 0, 0, 0.5)',
+    '--df-overlay': 'rgba(0, 0, 0, 0.65)',  // 提高遮罩不透明度：0.5 -> 0.65
     '--sidebar': '#3b4252',
     '--sidebar-foreground': '#d8dee9',
     '--sidebar-primary': '#88c0d0',
     '--sidebar-primary-foreground': '#2e3440',
-    '--sidebar-accent': '#434c5e',
+    '--sidebar-accent': '#4c566a',  // 提高侧边栏强调色对比度：#434c5e -> #4c566a
     '--sidebar-accent-foreground': '#d8dee9',
-    '--sidebar-border': 'rgba(255, 255, 255, 0.08)',
+    '--sidebar-border': 'rgba(255, 255, 255, 0.12)',  // 提高侧边栏边框可见度：0.08 -> 0.12
     '--sidebar-ring': '#88c0d0',
   },
   editor: {

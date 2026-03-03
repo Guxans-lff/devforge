@@ -7,10 +7,11 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import TransferQueue from '@/components/file-manager/TransferQueue.vue'
 import TransferHistory from '@/components/file-manager/TransferHistory.vue'
+import QueryHistoryPanel from '@/components/database/QueryHistoryPanel.vue'
 import {
   ChevronDown,
   ChevronUp,
-  FileOutput,
+  Clock,
   ScrollText,
   ArrowUpDown,
   History,
@@ -31,7 +32,7 @@ const activeTransferCount = computed(() => {
 })
 
 const panelTabs = [
-  { id: 'output' as const, labelKey: 'bottomPanel.output', icon: FileOutput },
+  { id: 'query-history' as const, labelKey: 'bottomPanel.queryHistory', icon: Clock },
   { id: 'log' as const, labelKey: 'bottomPanel.log', icon: ScrollText },
   { id: 'transfer' as const, labelKey: 'bottomPanel.transfer', icon: ArrowUpDown },
   { id: 'history' as const, labelKey: 'bottomPanel.history', icon: History },
@@ -40,61 +41,83 @@ const panelTabs = [
 
 <template>
   <div
-    class="flex flex-col border-t border-border bg-background transition-[height] duration-[var(--df-duration-normal)] ease-[var(--df-ease-out)]"
+    class="flex flex-col border-t border-border/20 bg-background/80 backdrop-blur-xl transition-all duration-300 ease-out-expo"
     :style="{
       height: workspace.panelState.bottomPanelCollapsed
-        ? '32px'
+        ? '28px'
         : `${workspace.panelState.bottomPanelHeight}px`,
     }"
   >
-    <!-- Panel Header -->
-    <div class="flex h-8 shrink-0 items-center justify-between border-b border-border px-2">
-      <div class="flex items-center gap-0.5">
-        <Button
-          v-for="tab in panelTabs"
-          :key="tab.id"
-          variant="ghost"
-          size="sm"
-          class="h-6 gap-1 px-2 text-xs"
-          :class="[
-            workspace.panelState.bottomPanelTab === tab.id && !workspace.panelState.bottomPanelCollapsed
-              ? 'bg-accent text-accent-foreground'
-              : 'text-muted-foreground hover:text-foreground',
-          ]"
-          @click="workspace.setBottomPanelTab(tab.id)"
-        >
-          <component :is="tab.icon" class="h-3 w-3" />
-          {{ t(tab.labelKey) }}
-          <span
-            v-if="tab.id === 'transfer' && activeTransferCount > 0"
-            class="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-medium text-primary-foreground"
+    <!-- Panel Header / Status Bar -->
+    <div 
+      class="flex h-7 shrink-0 items-center justify-between border-b border-border/10 px-2 transition-colors"
+      :class="workspace.panelState.bottomPanelCollapsed ? 'bg-transparent' : 'bg-muted/10'"
+    >
+      <div class="flex h-full items-center gap-1.5">
+        <!-- 药丸切换器 -->
+        <div class="flex h-[22px] items-center rounded-lg bg-muted/20 p-0.5 ring-1 ring-border/5">
+          <button
+            v-for="tab in panelTabs"
+            :key="tab.id"
+            class="relative flex h-full items-center gap-1.5 rounded-[6px] px-2 text-[11px] font-medium transition-all"
+            :class="[
+              workspace.panelState.bottomPanelTab === tab.id && !workspace.panelState.bottomPanelCollapsed
+                ? 'bg-background text-primary shadow-sm ring-1 ring-black/5 dark:ring-white/5'
+                : 'text-muted-foreground/60 hover:text-foreground/80 hover:bg-muted/10',
+            ]"
+            @click="workspace.setBottomPanelTab(tab.id); if(workspace.panelState.bottomPanelCollapsed) workspace.toggleBottomPanel()"
           >
-            {{ activeTransferCount }}
-          </span>
-        </Button>
+            <component 
+              :is="tab.icon" 
+              class="h-3 w-3" 
+              :class="{ 'animate-pulse text-primary': tab.id === 'transfer' && activeTransferCount > 0 }"
+            />
+            <span v-if="!workspace.panelState.bottomPanelCollapsed" class="whitespace-nowrap">{{ t(tab.labelKey) }}</span>
+            <span
+              v-if="tab.id === 'transfer' && activeTransferCount > 0"
+              class="inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary/20 px-1 text-[9px] font-bold text-primary"
+            >
+              {{ activeTransferCount }}
+            </span>
+          </button>
+        </div>
+
+        <!-- 垂直分割线 -->
+        <div class="h-3 w-[1px] bg-border/20 mx-1"></div>
+
+        <!-- 状态简讯 (仅折叠时或重点显示) -->
+        <div class="flex items-center gap-3 text-[11px] font-medium text-muted-foreground/50 transition-all duration-500">
+           <div class="flex items-center gap-1.5">
+             <div class="relative h-1.5 w-1.5 rounded-full bg-emerald-500">
+               <div class="absolute inset-0 animate-ping rounded-full bg-emerald-500 opacity-30"></div>
+             </div>
+             <span>{{ t('bottomPanel.ready') }}</span>
+           </div>
+           <span v-if="activeTransferCount > 0" class="flex items-center gap-1 text-primary/70 animate-in fade-in slide-in-from-left-2 duration-300">
+             <ArrowUpDown class="h-3 w-3 animate-bounce" style="animation-duration: 2s;" />
+             {{ activeTransferCount }} {{ t('transfer.tasks') }}
+           </span>
+        </div>
       </div>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-5 w-5 text-muted-foreground hover:text-foreground"
-        @click="workspace.toggleBottomPanel()"
-      >
-        <ChevronDown
-          v-if="!workspace.panelState.bottomPanelCollapsed"
-          class="h-3 w-3"
-        />
-        <ChevronUp v-else class="h-3 w-3" />
-      </Button>
+
+      <div class="flex items-center gap-1">
+        <button
+          class="flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground/40 transition-all hover:bg-muted/30 hover:text-foreground active:scale-90"
+          @click="workspace.toggleBottomPanel()"
+        >
+          <ChevronDown
+            v-if="!workspace.panelState.bottomPanelCollapsed"
+            class="h-3.5 w-3.5"
+          />
+          <ChevronUp v-else class="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
 
     <!-- Panel Content -->
     <div v-if="!workspace.panelState.bottomPanelCollapsed" class="flex-1 overflow-hidden">
-      <!-- Output Tab -->
-      <ScrollArea v-if="workspace.panelState.bottomPanelTab === 'output'" class="h-full">
-        <div class="p-2 font-mono text-xs text-muted-foreground">
-          <p>{{ t('bottomPanel.ready') }}</p>
-        </div>
-      </ScrollArea>
+      <!-- Query History Tab -->
+      <QueryHistoryPanel v-if="workspace.panelState.bottomPanelTab === 'query-history'" />
 
       <!-- Log Tab -->
       <ScrollArea v-else-if="workspace.panelState.bottomPanelTab === 'log'" class="h-full">

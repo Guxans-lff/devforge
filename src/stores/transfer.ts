@@ -46,10 +46,13 @@ export const useTransferStore = defineStore('transfer', () => {
         const { id, transferred, total, speed } = event.payload
         const task = tasks.value.get(id)
         if (task) {
-          task.transferredBytes = transferred
-          task.totalBytes = total
-          task.speed = speed
-          task.status = 'transferring'
+          tasks.value.set(id, {
+            ...task,
+            transferredBytes: transferred,
+            totalBytes: total,
+            speed,
+            status: 'transferring',
+          })
           // 节流：最多每 200ms 触发一次响应式更新
           pendingProgressUpdates = true
           if (!progressThrottleTimer) {
@@ -65,13 +68,11 @@ export const useTransferStore = defineStore('transfer', () => {
       (event) => {
         const task = tasks.value.get(event.payload.id)
         if (task) {
-          task.status = 'completed'
-          task.endTime = Date.now()
+          const completed = { ...task, status: 'completed' as const, endTime: Date.now() }
+          tasks.value.set(event.payload.id, completed)
           // 移到历史记录
-          history.value.unshift({ ...task })
-          if (history.value.length > 100) {
-            history.value = history.value.slice(0, 100)
-          }
+          const next = [{ ...completed }, ...history.value]
+          history.value = next.length > 100 ? next.slice(0, 100) : next
           // 触发响应式更新
           tasks.value = new Map(tasks.value)
           // 3秒后从活动列表移除
@@ -89,9 +90,12 @@ export const useTransferStore = defineStore('transfer', () => {
       (event) => {
         const task = tasks.value.get(event.payload.id)
         if (task) {
-          task.status = 'error'
-          task.error = event.payload.error
-          task.endTime = Date.now()
+          tasks.value.set(event.payload.id, {
+            ...task,
+            status: 'error',
+            error: event.payload.error,
+            endTime: Date.now(),
+          })
           // 触发响应式更新
           tasks.value = new Map(tasks.value)
         }

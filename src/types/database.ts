@@ -5,6 +5,8 @@ export interface QueryResult {
   executionTimeMs: number
   isError: boolean
   error: string | null
+  totalCount: number | null
+  truncated: boolean
 }
 
 export interface ColumnDef {
@@ -35,14 +37,39 @@ export interface DatabaseInfo {
   collation: string | null
 }
 
+export interface ViewInfo {
+  name: string
+  definer: string | null
+  checkOption: string | null
+  isUpdatable: string | null
+}
+
+export interface RoutineInfo {
+  name: string
+  routineType: string
+  definer: string | null
+  created: string | null
+  modified: string | null
+  comment: string | null
+}
+
+export interface TriggerInfo {
+  name: string
+  event: string
+  timing: string
+  tableName: string
+  statement: string | null
+}
+
 export interface DatabaseTreeNode {
   id: string
   label: string
-  type: 'database' | 'table' | 'view' | 'column'
+  type: 'database' | 'table' | 'view' | 'column' | 'folder'
   icon?: string
   children?: DatabaseTreeNode[]
   isLoading?: boolean
   isExpanded?: boolean
+  folderType?: 'tables' | 'views' | 'procedures' | 'functions' | 'triggers'
   meta?: {
     database?: string
     table?: string
@@ -50,6 +77,12 @@ export interface DatabaseTreeNode {
     isPrimaryKey?: boolean
     nullable?: boolean
     comment?: string
+    objectType?: string
+    routineType?: string
+    definer?: string
+    created?: string
+    event?: string
+    timing?: string
   }
 }
 

@@ -3,9 +3,13 @@ import { ref, watch } from 'vue'
 
 const STORAGE_KEY = 'devforge-settings'
 
+export type ShortcutCategory = 'connection' | 'tab' | 'editor' | 'view' | 'general'
+
 export interface ShortcutBinding {
   id: string
   keys: string  // e.g. "Ctrl+N", "Ctrl+Shift+T"
+  category: ShortcutCategory
+  description?: string  // 用于显示的描述
 }
 
 export interface AppSettings {
@@ -32,13 +36,51 @@ export interface AppSettings {
 }
 
 const defaultShortcuts: ShortcutBinding[] = [
-  { id: 'newConnection', keys: 'Ctrl+N' },
-  { id: 'newTab', keys: 'Ctrl+T' },
-  { id: 'closeTab', keys: 'Ctrl+W' },
-  { id: 'nextTab', keys: 'Ctrl+Tab' },
-  { id: 'settings', keys: 'Ctrl+,' },
-  { id: 'toggleSidebar', keys: 'Ctrl+B' },
-  { id: 'toggleBottomPanel', keys: 'Ctrl+`' },
+  // 连接管理 (8个)
+  { id: 'newConnection', keys: 'Ctrl+N', category: 'connection' },
+  { id: 'duplicateConnection', keys: 'Ctrl+Shift+N', category: 'connection' },
+  { id: 'editConnection', keys: 'Ctrl+E', category: 'connection' },
+  { id: 'disconnectConnection', keys: 'Ctrl+D', category: 'connection' },
+  { id: 'reconnectConnection', keys: 'Ctrl+R', category: 'connection' },
+  { id: 'refreshObjectTree', keys: 'F5', category: 'connection' },
+  { id: 'testConnection', keys: 'Ctrl+Shift+C', category: 'connection' },
+  { id: 'connectionInfo', keys: 'Ctrl+Shift+I', category: 'connection' },
+
+  // 标签页管理 (7个)
+  { id: 'newTab', keys: 'Ctrl+T', category: 'tab' },
+  { id: 'closeTab', keys: 'Ctrl+W', category: 'tab' },
+  { id: 'nextTab', keys: 'Ctrl+Tab', category: 'tab' },
+  { id: 'prevTab', keys: 'Ctrl+Shift+Tab', category: 'tab' },
+  { id: 'closeAllTabs', keys: 'Ctrl+Shift+W', category: 'tab' },
+  { id: 'reopenTab', keys: 'Ctrl+Shift+T', category: 'tab' },
+  { id: 'switchToTab1', keys: 'Ctrl+1', category: 'tab' },
+
+  // 编辑器操作 (10个)
+  { id: 'executeQuery', keys: 'Ctrl+Enter', category: 'editor' },
+  { id: 'executeCurrentLine', keys: 'Ctrl+Shift+Enter', category: 'editor' },
+  { id: 'explainQuery', keys: 'F8', category: 'editor' },
+  { id: 'commentLine', keys: 'Ctrl+/', category: 'editor' },
+  { id: 'formatSQL', keys: 'Ctrl+Shift+F', category: 'editor' },
+  { id: 'triggerAutocomplete', keys: 'Ctrl+Space', category: 'editor' },
+  { id: 'saveFile', keys: 'Ctrl+S', category: 'editor' },
+  { id: 'find', keys: 'Ctrl+F', category: 'editor' },
+  { id: 'replace', keys: 'Ctrl+H', category: 'editor' },
+  { id: 'gotoLine', keys: 'Ctrl+G', category: 'editor' },
+
+  // 视图控制 (6个)
+  { id: 'toggleSidebar', keys: 'Ctrl+B', category: 'view' },
+  { id: 'toggleBottomPanel', keys: 'Ctrl+`', category: 'view' },
+  { id: 'focusObjectTree', keys: 'Ctrl+Shift+E', category: 'view' },
+  { id: 'focusEditor', keys: 'Ctrl+Shift+D', category: 'view' },
+  { id: 'toggleMessageCenter', keys: 'Ctrl+Shift+M', category: 'view' },
+  { id: 'toggleFullscreen', keys: 'F11', category: 'view' },
+
+  // 通用操作 (5个)
+  { id: 'commandPalette', keys: 'Ctrl+P', category: 'general' },
+  { id: 'toggleTheme', keys: 'Ctrl+K T', category: 'general' },
+  { id: 'settings', keys: 'Ctrl+,', category: 'general' },
+  { id: 'help', keys: 'F1', category: 'general' },
+  { id: 'quit', keys: 'Ctrl+Q', category: 'general' },
 ]
 
 const defaults: AppSettings = {

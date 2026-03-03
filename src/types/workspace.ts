@@ -1,4 +1,4 @@
-export type TabType = 'database' | 'terminal' | 'file-manager' | 'settings' | 'welcome'
+export type TabType = 'database' | 'terminal' | 'file-manager' | 'settings' | 'welcome' | 'multi-exec' | 'terminal-player'
 
 export interface Tab {
   id: string
@@ -8,6 +8,7 @@ export interface Tab {
   connectionId?: string
   closable: boolean
   dirty?: boolean
+  meta?: Record<string, string>
 }
 
 export interface PanelState {
@@ -15,5 +16,14 @@ export interface PanelState {
   sidebarCollapsed: boolean
   bottomPanelHeight: number
   bottomPanelCollapsed: boolean
-  bottomPanelTab: 'output' | 'log' | 'transfer' | 'history'
+  bottomPanelTab: 'query-history' | 'log' | 'transfer' | 'history'
+}
+
+// 工作区快照 - 用于持久化
+export interface WorkspaceSnapshot {
+  version: number  // 快照版本，用于未来兼容性
+  tabs: Tab[]
+  activeTabId: string
+  panelState: PanelState
+  timestamp: number
 }

@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, defineAsyncComponent, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTransferStore } from '@/stores/transfer'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import TabBar from '@/components/layout/TabBar.vue'
 import BottomPanel from '@/components/layout/BottomPanel.vue'
+import CommandPalette from '@/components/layout/CommandPalette.vue'
 import WelcomeView from '@/views/WelcomeView.vue'
-import DatabaseView from '@/views/DatabaseView.vue'
-import TerminalView from '@/views/TerminalView.vue'
-import FileManagerView from '@/views/FileManagerView.vue'
-import SettingsView from '@/views/SettingsView.vue'
 import { useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
-import { Toaster } from 'vue-sonner'
+
+// 重型视图组件懒加载，减小首屏 bundle 体积
+const DatabaseView = defineAsyncComponent(() => import('@/views/DatabaseView.vue'))
+const TerminalView = defineAsyncComponent(() => import('@/views/TerminalView.vue'))
+const FileManagerView = defineAsyncComponent(() => import('@/views/FileManagerView.vue'))
+const SettingsView = defineAsyncComponent(() => import('@/views/SettingsView.vue'))
+const MultiExecView = defineAsyncComponent(() => import('@/views/MultiExecView.vue'))
+const TerminalPlayerView = defineAsyncComponent(() => import('@/views/TerminalPlayerView.vue'))
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
@@ -34,6 +38,10 @@ const activeTabComponent = computed(() => {
       return tab.connectionId ? FileManagerView : null
     case 'settings':
       return SettingsView
+    case 'multi-exec':
+      return MultiExecView
+    case 'terminal-player':
+      return TerminalPlayerView
     default:
       return null
   }
@@ -42,6 +50,9 @@ const activeTabComponent = computed(() => {
 const activeTabProps = computed(() => {
   const tab = workspace.activeTab
   if (!tab) return {}
+  if (tab.type === 'terminal-player' && tab.meta?.filePath) {
+    return { filePath: tab.meta.filePath }
+  }
   if (tab.connectionId) {
     return {
       connectionId: tab.connectionId,
@@ -68,12 +79,12 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-screen overflow-hidden bg-background">
+  <div class="flex h-screen w-screen overflow-hidden bg-muted/20 dark:bg-[#0c0c0e]">
     <!-- Sidebar -->
     <Sidebar />
 
-    <!-- Main Content Area -->
-    <div class="flex flex-1 flex-col overflow-hidden">
+    <!-- Main Content Area: Floating and elevated -->
+    <div class="flex flex-1 flex-col overflow-hidden bg-background sm:rounded-tl-xl border-t border-l border-border/40 shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.15)] dark:shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.6)] relative z-10 transition-all duration-300">
       <!-- Tab Bar -->
       <TabBar />
 
@@ -100,7 +111,7 @@ onMounted(() => {
       <BottomPanel />
     </div>
 
-    <!-- Toast Notifications -->
-    <Toaster position="top-right" :duration="3000" rich-colors close-button />
+    <!-- Command Palette -->
+    <CommandPalette />
   </div>
 </template>

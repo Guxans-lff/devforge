@@ -6,9 +6,12 @@ use serde::{Deserialize, Serialize};
 pub struct ColumnDefinition {
     pub name: String,
     pub data_type: String,
+    pub length: Option<String>,
     pub nullable: bool,
+    pub is_primary_key: bool,
     pub default_value: Option<String>,
     pub auto_increment: bool,
+    pub on_update: Option<String>,
     pub comment: Option<String>,
 }
 

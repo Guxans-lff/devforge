@@ -26,6 +26,7 @@ import {
   FolderOpen,
 } from 'lucide-vue-next'
 import { getAvailableDrives } from '@/api/sftp'
+import BookmarkManager from '@/components/file-manager/BookmarkManager.vue'
 
 const props = defineProps<{
   currentPath: string
@@ -51,14 +52,32 @@ const history = ref<string[]>([props.currentPath])
 const historyIndex = ref(0)
 let navigatingFromHistory = false
 
-// Bookmarks (stored in localStorage)
-const bookmarksKey = computed(() => `pathbar_bookmarks_${props.isRemote ? 'remote' : 'local'}`)
-const bookmarks = ref<Array<{ path: string; label: string }>>(loadBookmarks())
+// Bookmarks (stored in localStorage) — with group support
+const bookmarksKey = computed(() => `pathbar_bookmarks_v2_${props.isRemote ? 'remote' : 'local'}`)
 
-function loadBookmarks() {
+interface Bookmark {
+  path: string
+  label: string
+  group: string
+}
+
+const bookmarks = ref<Bookmark[]>(loadBookmarks())
+const showBookmarkManager = ref(false)
+
+function loadBookmarks(): Bookmark[] {
   try {
     const saved = localStorage.getItem(bookmarksKey.value)
-    return saved ? JSON.parse(saved) : []
+    if (!saved) {
+      // 迁移旧版数据
+      const oldKey = `pathbar_bookmarks_${props.isRemote ? 'remote' : 'local'}`
+      const old = localStorage.getItem(oldKey)
+      if (old) {
+        const oldData = JSON.parse(old) as Array<{ path: string; label: string }>
+        return oldData.map(b => ({ ...b, group: '' }))
+      }
+      return []
+    }
+    return JSON.parse(saved)
   } catch {
     return []
   }
@@ -67,6 +86,17 @@ function loadBookmarks() {
 function saveBookmarks() {
   localStorage.setItem(bookmarksKey.value, JSON.stringify(bookmarks.value))
 }
+
+// 按分组整理书签
+const groupedBookmarks = computed(() => {
+  const groups = new Map<string, Bookmark[]>()
+  for (const b of bookmarks.value) {
+    const g = b.group || ''
+    if (!groups.has(g)) groups.set(g, [])
+    groups.get(g)!.push(b)
+  }
+  return groups
+})
 
 // Watch for external path changes
 watch(() => props.currentPath, (newPath) => {
@@ -189,13 +219,11 @@ function goForward() {
 function toggleBookmark() {
   const index = bookmarks.value.findIndex(b => b.path === props.currentPath)
   if (index >= 0) {
-    // Remove bookmark
-    bookmarks.value.splice(index, 1)
+    bookmarks.value = [...bookmarks.value.slice(0, index), ...bookmarks.value.slice(index + 1)]
   } else {
-    // Add bookmark
     const pathParts = props.currentPath.split(/[/\\]/).filter(Boolean)
     const label = pathParts[pathParts.length - 1] || props.currentPath
-    bookmarks.value.push({ path: props.currentPath, label })
+    bookmarks.value = [...bookmarks.value, { path: props.currentPath, label, group: '' }]
   }
   saveBookmarks()
 }
@@ -208,11 +236,13 @@ function navigateToBookmark(path: string) {
 
 function removeBookmark(path: string, event: Event) {
   event.stopPropagation()
-  const index = bookmarks.value.findIndex(b => b.path === path)
-  if (index >= 0) {
-    bookmarks.value.splice(index, 1)
-    saveBookmarks()
-  }
+  bookmarks.value = bookmarks.value.filter(b => b.path !== path)
+  saveBookmarks()
+}
+
+function updateBookmarks(updated: Bookmark[]) {
+  bookmarks.value = updated
+  saveBookmarks()
 }
 </script>
 
@@ -359,7 +389,7 @@ function removeBookmark(path: string, event: Event) {
           <ChevronDown class="h-3 w-3" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" class="w-64">
+      <DropdownMenuContent align="end" class="w-64 max-h-80 overflow-auto">
         <DropdownMenuItem
           v-if="bookmarks.length === 0"
           disabled
@@ -368,30 +398,47 @@ function removeBookmark(path: string, event: Event) {
           {{ t('fileManager.noBookmarks') }}
         </DropdownMenuItem>
         <template v-else>
-          <DropdownMenuItem
-            v-for="bookmark in bookmarks"
-            :key="bookmark.path"
-            @click="navigateToBookmark(bookmark.path)"
-            class="flex items-center justify-between"
-          >
-            <div class="flex items-center gap-2 flex-1 min-w-0">
-              <FolderOpen class="h-4 w-4 shrink-0" />
-              <div class="flex flex-col min-w-0">
-                <span class="text-sm truncate">{{ bookmark.label }}</span>
-                <span class="text-xs text-muted-foreground truncate">{{ bookmark.path }}</span>
-              </div>
+          <template v-for="[group, items] in groupedBookmarks" :key="group">
+            <div v-if="group" class="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              {{ group }}
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-6 w-6 shrink-0 ml-2"
-              @click="removeBookmark(bookmark.path, $event)"
+            <DropdownMenuItem
+              v-for="bookmark in items"
+              :key="bookmark.path"
+              @click="navigateToBookmark(bookmark.path)"
+              class="flex items-center justify-between"
             >
-              <StarOff class="h-3 w-3" />
-            </Button>
-          </DropdownMenuItem>
+              <div class="flex items-center gap-2 flex-1 min-w-0">
+                <FolderOpen class="h-4 w-4 shrink-0" />
+                <div class="flex flex-col min-w-0">
+                  <span class="text-sm truncate">{{ bookmark.label }}</span>
+                  <span class="text-xs text-muted-foreground truncate">{{ bookmark.path }}</span>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-6 w-6 shrink-0 ml-2"
+                @click="removeBookmark(bookmark.path, $event)"
+              >
+                <StarOff class="h-3 w-3" />
+              </Button>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator v-if="group" />
+          </template>
         </template>
+        <DropdownMenuSeparator v-if="bookmarks.length > 0" />
+        <DropdownMenuItem @click="showBookmarkManager = true" class="text-xs">
+          {{ t('fileManager.manageBookmarks') }}
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+
+    <!-- Bookmark Manager Dialog -->
+    <BookmarkManager
+      v-model:open="showBookmarkManager"
+      :bookmarks="bookmarks"
+      @update="updateBookmarks"
+    />
   </div>
 </template>

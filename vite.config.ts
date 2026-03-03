@@ -22,4 +22,16 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
   },
+  build: {
+    target: 'esnext',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'monaco': ['monaco-editor'],
+          'xterm': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
+          'vue-vendor': ['vue', 'vue-router', 'pinia', 'vue-i18n'],
+        },
+      },
+    },
+  },
 })

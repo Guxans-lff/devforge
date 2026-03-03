@@ -30,11 +30,10 @@ pub async fn start_upload_chunked(
     }
 
     // 获取 SFTP 会话
-    let engine = sftp_engine.lock().await;
-    let sftp = engine
+    let sftp = sftp_engine
         .get_sftp_session(&connection_id)
+        .await
         .ok_or_else(|| format!("连接 '{}' 未建立", connection_id))?;
-    drop(engine); // 释放锁
 
     // 启动上传任务
     let manager = transfer_manager.lock().await;
@@ -69,11 +68,10 @@ pub async fn start_download_chunked(
     }
 
     // 获取 SFTP 会话
-    let engine = sftp_engine.lock().await;
-    let sftp = engine
+    let sftp = sftp_engine
         .get_sftp_session(&connection_id)
+        .await
         .ok_or_else(|| format!("连接 '{}' 未建立", connection_id))?;
-    drop(engine); // 释放锁
 
     // 启动下载任务
     let manager = transfer_manager.lock().await;
@@ -113,11 +111,10 @@ pub async fn resume_transfer(
     }
 
     // 获取 SFTP 会话
-    let engine = sftp_engine.lock().await;
-    let sftp = engine
+    let sftp = sftp_engine
         .get_sftp_session(&connection_id)
+        .await
         .ok_or_else(|| format!("连接 '{}' 未建立", connection_id))?;
-    drop(engine); // 释放锁
 
     // 恢复任务
     let manager = transfer_manager.lock().await;
@@ -151,11 +148,10 @@ pub async fn enqueue_batch_upload(
     }
 
     // 获取 SFTP 会话
-    let engine = sftp_engine.lock().await;
-    let sftp = engine
+    let sftp = sftp_engine
         .get_sftp_session(&connection_id)
+        .await
         .ok_or_else(|| format!("连接 '{}' 未建立", connection_id))?;
-    drop(engine);
 
     let mut task_ids = Vec::new();
     let manager = transfer_manager.lock().await;
@@ -191,11 +187,10 @@ pub async fn enqueue_batch_download(
     }
 
     // 获取 SFTP 会话
-    let engine = sftp_engine.lock().await;
-    let sftp = engine
+    let sftp = sftp_engine
         .get_sftp_session(&connection_id)
+        .await
         .ok_or_else(|| format!("连接 '{}' 未建立", connection_id))?;
-    drop(engine);
 
     let mut task_ids = Vec::new();
     let manager = transfer_manager.lock().await;
@@ -244,11 +239,10 @@ pub async fn upload_folder_recursive(
     }
 
     // Get SFTP session
-    let sftp_eng = sftp_engine.lock().await;
-    let sftp = sftp_eng
+    let sftp = sftp_engine
         .get_sftp_session(&connection_id)
+        .await
         .ok_or_else(|| format!("连接 '{}' 未建立", connection_id))?;
-    drop(sftp_eng);
 
     // Prepare batch upload
     let local_base = std::path::Path::new(&local_folder);
@@ -324,11 +318,10 @@ pub async fn download_folder_recursive(
     }
 
     // Get SFTP session
-    let sftp_eng = sftp_engine.lock().await;
-    let sftp = sftp_eng
+    let sftp = sftp_engine
         .get_sftp_session(&connection_id)
+        .await
         .ok_or_else(|| format!("连接 '{}' 未建立", connection_id))?;
-    drop(sftp_eng);
 
     // Prepare batch download
     let mut batch_files = Vec::new();

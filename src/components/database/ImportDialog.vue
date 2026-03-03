@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { open } from '@tauri-apps/plugin-dialog'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
 import { FileUp, Upload, Loader2, Check, X, ArrowRight, FileSpreadsheet } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
@@ -79,7 +79,7 @@ function detectFileType(path: string): string {
 }
 
 async function selectFile() {
-  const selected = await open({
+  const selected = await openDialog({
     multiple: false,
     filters: [
       { name: 'CSV', extensions: ['csv'] },
@@ -401,7 +401,7 @@ watch(() => props.targetTable, (val) => {
                   <ArrowRight class="size-3.5 text-muted-foreground shrink-0" />
                   <Select
                     :model-value="getMappingTarget(mapping.sourceColumn)"
-                    @update:model-value="(v) => setMappingTarget(mapping.sourceColumn, v)"
+                    @update:model-value="(v) => setMappingTarget(mapping.sourceColumn, v as string)"
                   >
                     <SelectTrigger class="h-7 text-xs">
                       <SelectValue :placeholder="t('dataImport.autoDetect')" />

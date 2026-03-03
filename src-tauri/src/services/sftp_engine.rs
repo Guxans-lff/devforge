@@ -6,8 +6,11 @@ use russh::client;
 use russh_sftp::client::SftpSession;
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::RwLock;
 
+use crate::models::ssh::{AuthConfig, ProxyJumpConfig};
 use crate::models::transfer::{FileEntry, FileInfo, TransferProgress, TransferResult};
+use crate::services::ssh_auth;
 use crate::utils::error::AppError;
 
 /// Minimal SSH client handler for SFTP connections (accepts all host keys).
@@ -31,50 +34,55 @@ struct SftpConnection {
     _connection_id: String,
     /// Keep the SSH session alive (dropped when connection is dropped).
     _ssh_session: client::Handle<SftpSshClient>,
+    /// Keep proxy session alive if connected via jump host.
+    _proxy_session: Option<Box<dyn std::any::Any + Send + Sync>>,
 }
 
+/// SFTP 引擎：内部使用 RwLock<HashMap> 实现 per-connection 级别锁定，
+/// 不同连接的操作互不阻塞。
 pub struct SftpEngine {
-    connections: HashMap<String, SftpConnection>,
+    connections: RwLock<HashMap<String, SftpConnection>>,
 }
 
 impl SftpEngine {
     pub fn new() -> Self {
         Self {
-            connections: HashMap::new(),
+            connections: RwLock::new(HashMap::new()),
         }
     }
 
     /// Connect SFTP to a remote host. Uses its own SSH connection (not shared with terminal).
     pub async fn connect(
-        &mut self,
+        &self,
         connection_id: &str,
         host: &str,
         port: u16,
         username: &str,
-        password: &str,
+        auth: &AuthConfig,
+        proxy: Option<&ProxyJumpConfig>,
     ) -> Result<(), AppError> {
-        // Disconnect existing session for this connection
-        if self.connections.contains_key(connection_id) {
+        // Disconnect existing session for this connection (短暂读锁检查)
+        if self.connections.read().await.contains_key(connection_id) {
             self.disconnect(connection_id).await?;
         }
 
+        // 以下 SSH/SFTP 握手过程不持有任何锁
         let config = Arc::new(client::Config::default());
         let handler = SftpSshClient;
 
-        let mut session = client::connect(config, (host, port), handler)
-            .await
-            .map_err(|e| AppError::Other(format!("SFTP SSH connection failed: {}", e)))?;
-
-        let authenticated = session
-            .authenticate_password(username, password)
-            .await
-            .map_err(|e| AppError::Other(format!("SFTP SSH auth error: {}", e)))?;
-
-        if !authenticated {
-            return Err(AppError::Other(
-                "Authentication failed: invalid username or password".to_string(),
-            ));
-        }
+        let (session, proxy_handle): (client::Handle<SftpSshClient>, Option<Box<dyn std::any::Any + Send + Sync>>) =
+            if let Some(proxy) = proxy {
+                let (target, proxy_h) = ssh_auth::connect_via_proxy(
+                    proxy, host, port, username, auth, handler,
+                ).await?;
+                (target, Some(Box::new(proxy_h)))
+            } else {
+                let mut sess = client::connect(config, (host, port), handler)
+                    .await
+                    .map_err(|e| AppError::Other(format!("SFTP SSH connection failed: {}", e)))?;
+                ssh_auth::authenticate(&mut sess, username, auth).await?;
+                (sess, None)
+            };
 
         let channel = session
             .channel_open_session()
@@ -90,26 +98,38 @@ impl SftpEngine {
             .await
             .map_err(|e| AppError::Other(format!("Failed to init SFTP session: {}", e)))?;
 
-        self.connections.insert(
+        // 短暂写锁插入新连接
+        self.connections.write().await.insert(
             connection_id.to_string(),
             SftpConnection {
                 sftp: Arc::new(sftp),
                 _connection_id: connection_id.to_string(),
                 _ssh_session: session,
+                _proxy_session: proxy_handle,
             },
         );
 
         Ok(())
     }
 
-    pub async fn disconnect(&mut self, connection_id: &str) -> Result<(), AppError> {
+    pub async fn disconnect(&self, connection_id: &str) -> Result<(), AppError> {
         // Dropping the SftpConnection will close the channel and SSH session
-        self.connections.remove(connection_id);
+        self.connections.write().await.remove(connection_id);
         Ok(())
     }
 
-    pub fn is_connected(&self, connection_id: &str) -> bool {
-        self.connections.contains_key(connection_id)
+    pub async fn is_connected(&self, connection_id: &str) -> bool {
+        self.connections.read().await.contains_key(connection_id)
+    }
+
+    /// 获取连接的 SFTP 会话 Arc（短暂持有读锁后释放）
+    async fn get_sftp(&self, connection_id: &str) -> Result<Arc<SftpSession>, AppError> {
+        self.connections
+            .read()
+            .await
+            .get(connection_id)
+            .map(|conn| conn.sftp.clone())
+            .ok_or_else(|| AppError::Other(format!("No SFTP session for connection: {}", connection_id)))
     }
 
     /// List entries in a remote directory.
@@ -118,9 +138,8 @@ impl SftpEngine {
         connection_id: &str,
         path: &str,
     ) -> Result<Vec<FileEntry>, AppError> {
-        let conn = self.get_conn(connection_id)?;
-        let entries = conn
-            .sftp
+        let sftp = self.get_sftp(connection_id).await?;
+        let entries = sftp
             .read_dir(path)
             .await
             .map_err(|e| AppError::Other(format!("SFTP read_dir failed: {}", e)))?;
@@ -172,9 +191,8 @@ impl SftpEngine {
         connection_id: &str,
         path: &str,
     ) -> Result<FileInfo, AppError> {
-        let conn = self.get_conn(connection_id)?;
-        let attrs = conn
-            .sftp
+        let sftp = self.get_sftp(connection_id).await?;
+        let attrs = sftp
             .metadata(path)
             .await
             .map_err(|e| AppError::Other(format!("SFTP stat failed: {}", e)))?;
@@ -205,9 +223,8 @@ impl SftpEngine {
         connection_id: &str,
         path: &str,
     ) -> Result<(), AppError> {
-        let conn = self.get_conn(connection_id)?;
-        conn.sftp
-            .create_dir(path)
+        let sftp = self.get_sftp(connection_id).await?;
+        sftp.create_dir(path)
             .await
             .map_err(|e| AppError::Other(format!("SFTP mkdir failed: {}", e)))?;
         Ok(())
@@ -219,9 +236,8 @@ impl SftpEngine {
         connection_id: &str,
         path: &str,
     ) -> Result<(), AppError> {
-        let conn = self.get_conn(connection_id)?;
-        conn.sftp
-            .remove_file(path)
+        let sftp = self.get_sftp(connection_id).await?;
+        sftp.remove_file(path)
             .await
             .map_err(|e| AppError::Other(format!("SFTP delete failed: {}", e)))?;
         Ok(())
@@ -233,9 +249,8 @@ impl SftpEngine {
         connection_id: &str,
         path: &str,
     ) -> Result<(), AppError> {
-        let conn = self.get_conn(connection_id)?;
-        conn.sftp
-            .remove_dir(path)
+        let sftp = self.get_sftp(connection_id).await?;
+        sftp.remove_dir(path)
             .await
             .map_err(|e| AppError::Other(format!("SFTP rmdir failed: {}", e)))?;
         Ok(())
@@ -248,15 +263,15 @@ impl SftpEngine {
         old_path: &str,
         new_path: &str,
     ) -> Result<(), AppError> {
-        let conn = self.get_conn(connection_id)?;
-        conn.sftp
-            .rename(old_path, new_path)
+        let sftp = self.get_sftp(connection_id).await?;
+        sftp.rename(old_path, new_path)
             .await
             .map_err(|e| AppError::Other(format!("SFTP rename failed: {}", e)))?;
         Ok(())
     }
 
     /// Download a remote file to a local path, emitting progress events.
+    /// 使用分块流式读取，避免大文件整体读入内存导致 OOM。
     pub async fn download(
         &self,
         connection_id: &str,
@@ -265,27 +280,14 @@ impl SftpEngine {
         transfer_id: &str,
         app_handle: &AppHandle,
     ) -> Result<(), AppError> {
-        let conn = self.get_conn(connection_id)?;
+        let sftp = self.get_sftp(connection_id).await?;
 
-        // Get file size for progress tracking
-        let attrs = conn
-            .sftp
+        // 获取文件大小用于进度跟踪
+        let attrs = sftp
             .metadata(remote_path)
             .await
             .map_err(|e| AppError::Other(format!("SFTP stat failed: {}", e)))?;
         let total_bytes = attrs.size.unwrap_or(0);
-
-        // Read file contents
-        let data = conn
-            .sftp
-            .read(remote_path)
-            .await
-            .map_err(|e| AppError::Other(format!("SFTP read failed: {}", e)))?;
-
-        // Write to local file
-        tokio::fs::write(local_path, &data)
-            .await
-            .map_err(|e| AppError::Other(format!("Local write failed: {}", e)))?;
 
         let file_name = remote_path
             .rsplit('/')
@@ -293,18 +295,60 @@ impl SftpEngine {
             .unwrap_or(remote_path)
             .to_string();
 
-        // Emit completion progress
-        let _ = app_handle.emit(
-            &format!("transfer://progress/{}", transfer_id),
-            TransferProgress {
-                transfer_id: transfer_id.to_string(),
-                file_name,
-                bytes_transferred: data.len() as u64,
-                total_bytes,
-                progress: 1.0,
-                speed: 0,
-            },
-        );
+        // 使用流式分块读取，避免大文件 OOM
+        use russh_sftp::protocol::OpenFlags;
+        use tokio::io::AsyncReadExt;
+
+        let mut remote_file = sftp
+            .open_with_flags(remote_path, OpenFlags::READ)
+            .await
+            .map_err(|e| AppError::Other(format!("SFTP open failed: {}", e)))?;
+
+        let mut local_file = tokio::fs::File::create(local_path)
+            .await
+            .map_err(|e| AppError::Other(format!("Local file create failed: {}", e)))?;
+
+        const CHUNK_SIZE: usize = 256 * 1024; // 256KB 分块
+        let mut buf = vec![0u8; CHUNK_SIZE];
+        let mut bytes_transferred: u64 = 0;
+        let mut last_emit = std::time::Instant::now();
+
+        loop {
+            let n = remote_file.read(&mut buf).await
+                .map_err(|e| AppError::Other(format!("SFTP read chunk failed: {}", e)))?;
+            if n == 0 {
+                break;
+            }
+
+            local_file.write_all(&buf[..n]).await
+                .map_err(|e| AppError::Other(format!("Local write failed: {}", e)))?;
+
+            bytes_transferred += n as u64;
+
+            // 每 200ms 发送一次进度事件，减少前端事件风暴
+            if last_emit.elapsed() >= std::time::Duration::from_millis(200) || bytes_transferred >= total_bytes {
+                let progress = if total_bytes > 0 {
+                    bytes_transferred as f64 / total_bytes as f64
+                } else {
+                    0.0
+                };
+                let _ = app_handle.emit(
+                    &format!("transfer://progress/{}", transfer_id),
+                    TransferProgress {
+                        transfer_id: transfer_id.to_string(),
+                        file_name: file_name.clone(),
+                        bytes_transferred,
+                        total_bytes,
+                        progress,
+                        speed: 0,
+                    },
+                );
+                last_emit = std::time::Instant::now();
+            }
+        }
+
+        local_file.flush().await
+            .map_err(|e| AppError::Other(format!("Local file flush failed: {}", e)))?;
 
         let _ = app_handle.emit(
             &format!("transfer://complete/{}", transfer_id),
@@ -319,6 +363,7 @@ impl SftpEngine {
     }
 
     /// Upload a local file to a remote path, emitting progress events.
+    /// 使用分块流式写入，避免大文件整体读入内存导致 OOM。
     pub async fn upload(
         &self,
         connection_id: &str,
@@ -327,14 +372,13 @@ impl SftpEngine {
         transfer_id: &str,
         app_handle: &AppHandle,
     ) -> Result<(), AppError> {
-        let conn = self.get_conn(connection_id)?;
+        let sftp = self.get_sftp(connection_id).await?;
 
-        // Read local file
-        let data = tokio::fs::read(local_path)
+        // 获取本地文件大小
+        let metadata = tokio::fs::metadata(local_path)
             .await
-            .map_err(|e| AppError::Other(format!("Local read failed: {}", e)))?;
-
-        let total_bytes = data.len() as u64;
+            .map_err(|e| AppError::Other(format!("Local file stat failed: {}", e)))?;
+        let total_bytes = metadata.len();
 
         let file_name = local_path
             .rsplit(['/', '\\'])
@@ -342,9 +386,15 @@ impl SftpEngine {
             .unwrap_or(local_path)
             .to_string();
 
-        // 使用 open + write 方式，可以创建文件
+        // 使用流式分块读取本地文件并写入远程
         use russh_sftp::protocol::OpenFlags;
-        let mut file = conn.sftp
+        use tokio::io::AsyncReadExt;
+
+        let mut local_file = tokio::fs::File::open(local_path)
+            .await
+            .map_err(|e| AppError::Other(format!("Local file open failed: {}", e)))?;
+
+        let mut remote_file = sftp
             .open_with_flags(
                 remote_path,
                 OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE,
@@ -352,22 +402,47 @@ impl SftpEngine {
             .await
             .map_err(|e| AppError::Other(format!("SFTP open failed: {}", e)))?;
 
-        file.write_all(&data)
-            .await
-            .map_err(|e| AppError::Other(format!("SFTP write failed: {}", e)))?;
+        const CHUNK_SIZE: usize = 256 * 1024; // 256KB 分块
+        let mut buf = vec![0u8; CHUNK_SIZE];
+        let mut bytes_transferred: u64 = 0;
+        let mut last_emit = std::time::Instant::now();
 
-        // Emit completion progress
-        let _ = app_handle.emit(
-            &format!("transfer://progress/{}", transfer_id),
-            TransferProgress {
-                transfer_id: transfer_id.to_string(),
-                file_name,
-                bytes_transferred: total_bytes,
-                total_bytes,
-                progress: 1.0,
-                speed: 0,
-            },
-        );
+        loop {
+            let n = local_file.read(&mut buf).await
+                .map_err(|e| AppError::Other(format!("Local read chunk failed: {}", e)))?;
+            if n == 0 {
+                break;
+            }
+
+            remote_file.write_all(&buf[..n]).await
+                .map_err(|e| AppError::Other(format!("SFTP write failed: {}", e)))?;
+
+            bytes_transferred += n as u64;
+
+            // 每 200ms 发送一次进度事件
+            if last_emit.elapsed() >= std::time::Duration::from_millis(200) || bytes_transferred >= total_bytes {
+                let progress = if total_bytes > 0 {
+                    bytes_transferred as f64 / total_bytes as f64
+                } else {
+                    0.0
+                };
+                let _ = app_handle.emit(
+                    &format!("transfer://progress/{}", transfer_id),
+                    TransferProgress {
+                        transfer_id: transfer_id.to_string(),
+                        file_name: file_name.clone(),
+                        bytes_transferred,
+                        total_bytes,
+                        progress,
+                        speed: 0,
+                    },
+                );
+                last_emit = std::time::Instant::now();
+            }
+        }
+
+        remote_file.flush().await
+            .map_err(|e| AppError::Other(format!("SFTP flush failed: {}", e)))?;
 
         let _ = app_handle.emit(
             &format!("transfer://complete/{}", transfer_id),
@@ -381,14 +456,8 @@ impl SftpEngine {
         Ok(())
     }
 
-    fn get_conn(&self, connection_id: &str) -> Result<&SftpConnection, AppError> {
-        self.connections
-            .get(connection_id)
-            .ok_or_else(|| AppError::Other(format!("No SFTP session for connection: {}", connection_id)))
-    }
-    
     /// 获取 SFTP 会话的 Arc 引用(用于传输管理器)
-    pub fn get_sftp_session(&self, connection_id: &str) -> Option<Arc<SftpSession>> {
-        self.connections.get(connection_id).map(|conn| conn.sftp.clone())
+    pub async fn get_sftp_session(&self, connection_id: &str) -> Option<Arc<SftpSession>> {
+        self.connections.read().await.get(connection_id).map(|conn| conn.sftp.clone())
     }
 }

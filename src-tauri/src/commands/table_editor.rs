@@ -26,8 +26,7 @@ pub async fn execute_ddl(
     connection_id: String,
     sql: String,
 ) -> Result<bool, String> {
-    let eng = engine.lock().await;
-    eng.execute_query(&connection_id, &sql)
+    engine.execute_query(&connection_id, &sql)
         .await
         .map_err(|e| e.to_string())?;
     Ok(true)
@@ -40,9 +39,21 @@ pub async fn get_table_detail(
     database: String,
     table: String,
 ) -> Result<TableDetail, String> {
-    let eng = engine.lock().await;
-    let pool = eng.get_pool(&connection_id).map_err(|e| e.to_string())?;
-    table_editor::get_table_detail(pool, &database, &table)
+    let pool = engine.get_pool(&connection_id).await.map_err(|e| e.to_string())?;
+    table_editor::get_table_detail(&pool, &database, &table)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[command]
+pub async fn get_table_ddl(
+    engine: State<'_, DbEngineState>,
+    connection_id: String,
+    database: String,
+    table: String,
+) -> Result<String, String> {
+    let pool = engine.get_pool(&connection_id).await.map_err(|e| e.to_string())?;
+    table_editor::get_table_ddl(&pool, &database, &table)
         .await
         .map_err(|e| e.to_string())
 }

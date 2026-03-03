@@ -38,6 +38,11 @@ pub enum TransferState {
     Failed { error: String },
 }
 
+/// 安全地获取 Mutex 锁（即使 mutex 被 poison 也不会 panic）
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// 传输任务
 pub struct TransferTask {
     #[allow(dead_code)]
@@ -62,16 +67,20 @@ impl TransferTask {
 
 impl Drop for TransferTask {
     fn drop(&mut self) {
-        // 确保资源被清理
-        let state = self.state.lock().unwrap();
-        if matches!(*state, TransferState::Running { .. } | TransferState::Paused { .. }) {
-            // 取消任务
-            self.cancel_token.cancel();
-            
-            // 清理临时文件
-            if let TransferType::Download { local_path, .. } = &self.task_type {
-                let _ = std::fs::remove_file(local_path);
+        // 使用 if let 替代 expect，防止 Drop 中的双重 panic 导致进程 abort
+        if let Ok(state) = self.state.lock() {
+            if matches!(*state, TransferState::Running { .. } | TransferState::Paused { .. }) {
+                // cancel_token.cancel() 是幂等的，可以安全调用
+                self.cancel_token.cancel();
+
+                // 清理临时文件
+                if let TransferType::Download { local_path, .. } = &self.task_type {
+                    let _ = std::fs::remove_file(local_path);
+                }
             }
+        } else {
+            // mutex 被 poison 时仍然尝试取消任务（cancel 是无锁操作）
+            self.cancel_token.cancel();
         }
     }
 }
@@ -143,17 +152,14 @@ impl TransferManager {
         app_handle: &AppHandle,
     ) {
         loop {
-            // 检查是否可以启动更多任务
-            let active_count = active_tasks.lock().unwrap().len();
+            // 检查是否可以启动更多任务（短暂持锁，立即释放）
+            let active_count = lock_or_recover(&active_tasks).len();
             if active_count >= config.max_concurrent_tasks {
                 break;
             }
 
-            // 获取下一个待处理任务
-            let pending = {
-                let mut queue = pending_queue.lock().unwrap();
-                queue.pop_front()
-            };
+            // 获取下一个待处理任务（短暂持锁，立即释放）
+            let pending = lock_or_recover(&pending_queue).pop_front();
 
             let Some(pending) = pending else {
                 break;
@@ -162,41 +168,38 @@ impl TransferManager {
             // 启动任务
             match pending.transfer_type {
                 TransferType::Upload { local_path, remote_path } => {
-                    let _ = Self::execute_upload(
+                    let _ = Self::execute_transfer(
                         pending.id,
-                        local_path,
-                        remote_path,
+                        TransferType::Upload { local_path, remote_path },
                         pending.sftp_session,
                         pending.total_bytes,
                         active_tasks.clone(),
                         config.clone(),
                         app_handle.clone(),
-                        None, // 不需要在这里传递 scheduler_tx，因为任务完成后会自动触发
+                        None,
                     ).await;
                 }
                 TransferType::Download { remote_path, local_path } => {
-                    let _ = Self::execute_download(
+                    let _ = Self::execute_transfer(
                         pending.id,
-                        remote_path,
-                        local_path,
+                        TransferType::Download { remote_path, local_path },
                         pending.sftp_session,
                         pending.total_bytes,
                         active_tasks.clone(),
                         config.clone(),
                         app_handle.clone(),
-                        None, // 不需要在这里传递 scheduler_tx，因为任务完成后会自动触发
+                        None,
                     ).await;
                 }
             }
         }
     }
 
-    /// 执行上传任务
+    /// 统一的传输任务执行（消除 execute_upload/execute_download 代码重复）
     #[allow(clippy::too_many_arguments)]
-    async fn execute_upload(
+    async fn execute_transfer(
         id: String,
-        local_path: PathBuf,
-        remote_path: String,
+        transfer_type: TransferType,
         sftp: Arc<SftpSession>,
         total_bytes: u64,
         active_tasks: Arc<Mutex<HashMap<String, Arc<TransferTask>>>>,
@@ -207,21 +210,15 @@ impl TransferManager {
         // 创建任务
         let task = Arc::new(TransferTask::new(
             id.clone(),
-            TransferType::Upload {
-                local_path: local_path.clone(),
-                remote_path: remote_path.clone(),
-            },
+            transfer_type.clone(),
             total_bytes,
         ));
 
-        // 添加到活动任务列表
-        {
-            let mut tasks = active_tasks.lock().unwrap();
-            tasks.insert(id.clone(), task.clone());
-        }
+        // 添加到活动任务列表（短暂持锁）
+        lock_or_recover(&active_tasks).insert(id.clone(), task.clone());
 
         // 更新状态为运行中
-        *task.state.lock().unwrap() = TransferState::Running { offset: 0 };
+        *lock_or_recover(&task.state) = TransferState::Running { offset: 0 };
 
         // 创建进度跟踪器
         let progress_tracker = Arc::new(ProgressTracker::new(
@@ -240,33 +237,47 @@ impl TransferManager {
         let task_id = id.clone();
         let chunk_size = config.chunk_size;
 
-        // 在后台任务中执行上传
+        // 在后台任务中执行传输
         tokio::spawn(async move {
-            let result = handler.upload_chunked(
-                local_path,
-                remote_path.clone(),
-                chunk_size,
-                progress_tracker,
-                cancel_token,
-                &app_handle,
-            ).await;
+            let result = match transfer_type {
+                TransferType::Upload { local_path, remote_path } => {
+                    handler.upload_chunked(
+                        local_path,
+                        remote_path,
+                        chunk_size,
+                        progress_tracker,
+                        cancel_token,
+                        &app_handle,
+                    ).await.map_err(|e| e.user_message())
+                }
+                TransferType::Download { remote_path, local_path } => {
+                    handler.download_chunked(
+                        remote_path,
+                        local_path,
+                        chunk_size,
+                        progress_tracker,
+                        cancel_token,
+                        &app_handle,
+                    ).await.map_err(|e| e.user_message())
+                }
+            };
 
             // 更新任务状态
             match result {
                 Ok(_) => {
-                    *task_state.lock().unwrap() = TransferState::Completed;
+                    *lock_or_recover(&task_state) = TransferState::Completed;
                 }
                 Err(e) => {
-                    *task_state.lock().unwrap() = TransferState::Failed {
-                        error: e.to_string(),
+                    *lock_or_recover(&task_state) = TransferState::Failed {
+                        error: e.clone(),
                     };
 
                     // 发送错误事件
                     let _ = app_handle.emit(
-                        "transfer:error",
+                        "transfer://error",
                         ErrorEvent {
                             id: task_id.clone(),
-                            error: e.to_string(),
+                            error: e,
                         },
                     );
                 }
@@ -274,101 +285,7 @@ impl TransferManager {
 
             // 延迟后移除任务
             tokio::time::sleep(Duration::from_secs(3)).await;
-            active_tasks.lock().unwrap().remove(&task_id);
-
-            // 通知调度器检查队列
-            if let Some(tx) = scheduler_tx {
-                let _ = tx.send(());
-            }
-        });
-
-        Ok(())
-    }
-
-    /// 执行下载任务
-    #[allow(clippy::too_many_arguments)]
-    async fn execute_download(
-        id: String,
-        remote_path: String,
-        local_path: PathBuf,
-        sftp: Arc<SftpSession>,
-        total_bytes: u64,
-        active_tasks: Arc<Mutex<HashMap<String, Arc<TransferTask>>>>,
-        config: TransferConfig,
-        app_handle: AppHandle,
-        scheduler_tx: Option<mpsc::UnboundedSender<()>>,
-    ) -> Result<(), String> {
-        // 创建任务
-        let task = Arc::new(TransferTask::new(
-            id.clone(),
-            TransferType::Download {
-                remote_path: remote_path.clone(),
-                local_path: local_path.clone(),
-            },
-            total_bytes,
-        ));
-
-        // 添加到活动任务列表
-        {
-            let mut tasks = active_tasks.lock().unwrap();
-            tasks.insert(id.clone(), task.clone());
-        }
-
-        // 更新状态为运行中
-        *task.state.lock().unwrap() = TransferState::Running { offset: 0 };
-
-        // 创建进度跟踪器
-        let progress_tracker = Arc::new(ProgressTracker::new(
-            id.clone(),
-            total_bytes,
-            Duration::from_millis(config.progress_emit_interval),
-            Duration::from_secs(config.speed_window_size),
-        ));
-
-        // 创建 SFTP 处理器
-        let handler = SftpHandler::new(sftp);
-
-        // 克隆需要的变量
-        let cancel_token = task.cancel_token.clone();
-        let task_state = task.state.clone();
-        let task_id = id.clone();
-        let chunk_size = config.chunk_size;
-
-        // 在后台任务中执行下载
-        tokio::spawn(async move {
-            let result = handler.download_chunked(
-                remote_path.clone(),
-                local_path,
-                chunk_size,
-                progress_tracker,
-                cancel_token,
-                &app_handle,
-            ).await;
-
-            // 更新任务状态
-            match result {
-                Ok(_) => {
-                    *task_state.lock().unwrap() = TransferState::Completed;
-                }
-                Err(e) => {
-                    *task_state.lock().unwrap() = TransferState::Failed {
-                        error: e.to_string(),
-                    };
-
-                    // 发送错误事件
-                    let _ = app_handle.emit(
-                        "transfer:error",
-                        ErrorEvent {
-                            id: task_id.clone(),
-                            error: e.to_string(),
-                        },
-                    );
-                }
-            }
-
-            // 延迟后移除任务
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            active_tasks.lock().unwrap().remove(&task_id);
+            lock_or_recover(&active_tasks).remove(&task_id);
 
             // 通知调度器检查队列
             if let Some(tx) = scheduler_tx {
@@ -396,7 +313,7 @@ impl TransferManager {
             total_bytes,
         };
 
-        self.pending_queue.lock().unwrap().push_back(pending);
+        lock_or_recover(&self.pending_queue).push_back(pending);
 
         // 通知调度器检查队列
         if let Some(tx) = &self.scheduler_tx {
@@ -406,12 +323,12 @@ impl TransferManager {
 
     /// 获取队列状态（活动任务数，待处理任务数）
     pub fn get_queue_status(&self) -> (usize, usize) {
-        let active = self.active_tasks.lock().unwrap().len();
-        let pending = self.pending_queue.lock().unwrap().len();
+        let active = lock_or_recover(&self.active_tasks).len();
+        let pending = lock_or_recover(&self.pending_queue).len();
         (active, pending)
     }
-    
-    /// 开始上传任务
+
+    /// 开始上传任务（委托给 execute_transfer）
     pub async fn start_upload(
         &self,
         id: String,
@@ -420,95 +337,23 @@ impl TransferManager {
         sftp: Arc<SftpSession>,
         app_handle: AppHandle,
     ) -> Result<(), String> {
-        // 获取文件大小
         let metadata = tokio::fs::metadata(&local_path)
             .await
             .map_err(|e| format!("Failed to get file metadata: {}", e))?;
-        let total_bytes = metadata.len();
-        
-        // 创建任务
-        let task = Arc::new(TransferTask::new(
-            id.clone(),
-            TransferType::Upload {
-                local_path: local_path.clone(),
-                remote_path: remote_path.clone(),
-            },
-            total_bytes,
-        ));
-        
-        // 添加到活动任务列表
-        {
-            let mut tasks = self.active_tasks.lock().unwrap();
-            tasks.insert(id.clone(), task.clone());
-        }
-        
-        // 更新状态为运行中
-        *task.state.lock().unwrap() = TransferState::Running { offset: 0 };
-        
-        // 创建进度跟踪器
-        let progress_tracker = Arc::new(ProgressTracker::new(
-            id.clone(),
-            total_bytes,
-            Duration::from_millis(self.config.progress_emit_interval),
-            Duration::from_secs(self.config.speed_window_size),
-        ));
-        
-        // 创建 SFTP 处理器
-        let handler = SftpHandler::new(sftp);
-        
-        // 克隆需要的变量
-        let cancel_token = task.cancel_token.clone();
-        let task_state = task.state.clone();
-        let active_tasks = self.active_tasks.clone();
-        let chunk_size = self.config.chunk_size;
-        let scheduler_tx = self.scheduler_tx.clone();
 
-        // 在后台任务中执行上传
-        tokio::spawn(async move {
-            let result = handler.upload_chunked(
-                local_path,
-                remote_path.clone(),
-                chunk_size,
-                progress_tracker,
-                cancel_token,
-                &app_handle,
-            ).await;
-
-            // 更新任务状态
-            match result {
-                Ok(_) => {
-                    *task_state.lock().unwrap() = TransferState::Completed;
-                }
-                Err(e) => {
-                    *task_state.lock().unwrap() = TransferState::Failed {
-                        error: e.user_message(),
-                    };
-
-                    // 发送错误事件
-                    let _ = app_handle.emit(
-                        "transfer://error",
-                        ErrorEvent {
-                            id: id.clone(),
-                            error: e.user_message(),
-                        },
-                    );
-                }
-            }
-
-            // 从活动任务列表中移除
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            active_tasks.lock().unwrap().remove(&id);
-
-            // 通知调度器检查队列
-            if let Some(tx) = scheduler_tx {
-                let _ = tx.send(());
-            }
-        });
-        
-        Ok(())
+        Self::execute_transfer(
+            id,
+            TransferType::Upload { local_path, remote_path },
+            sftp,
+            metadata.len(),
+            self.active_tasks.clone(),
+            self.config.clone(),
+            app_handle,
+            self.scheduler_tx.clone(),
+        ).await
     }
-    
-    /// 开始下载任务
+
+    /// 开始下载任务（委托给 execute_transfer）
     pub async fn start_download(
         &self,
         id: String,
@@ -517,102 +362,30 @@ impl TransferManager {
         sftp: Arc<SftpSession>,
         app_handle: AppHandle,
     ) -> Result<(), String> {
-        // 获取远程文件大小
         let metadata = sftp.metadata(&remote_path)
             .await
             .map_err(|e| format!("Failed to get remote file metadata: {}", e))?;
-        let total_bytes = metadata.size.unwrap_or(0);
-        
-        // 创建任务
-        let task = Arc::new(TransferTask::new(
-            id.clone(),
-            TransferType::Download {
-                remote_path: remote_path.clone(),
-                local_path: local_path.clone(),
-            },
-            total_bytes,
-        ));
-        
-        // 添加到活动任务列表
-        {
-            let mut tasks = self.active_tasks.lock().unwrap();
-            tasks.insert(id.clone(), task.clone());
-        }
-        
-        // 更新状态为运行中
-        *task.state.lock().unwrap() = TransferState::Running { offset: 0 };
-        
-        // 创建进度跟踪器
-        let progress_tracker = Arc::new(ProgressTracker::new(
-            id.clone(),
-            total_bytes,
-            Duration::from_millis(self.config.progress_emit_interval),
-            Duration::from_secs(self.config.speed_window_size),
-        ));
-        
-        // 创建 SFTP 处理器
-        let handler = SftpHandler::new(sftp);
-        
-        // 克隆需要的变量
-        let cancel_token = task.cancel_token.clone();
-        let task_state = task.state.clone();
-        let active_tasks = self.active_tasks.clone();
-        let chunk_size = self.config.chunk_size;
-        let scheduler_tx = self.scheduler_tx.clone();
 
-        // 在后台任务中执行下载
-        tokio::spawn(async move {
-            let result = handler.download_chunked(
-                remote_path,
-                local_path,
-                chunk_size,
-                progress_tracker,
-                cancel_token,
-                &app_handle,
-            ).await;
-
-            // 更新任务状态
-            match result {
-                Ok(_) => {
-                    *task_state.lock().unwrap() = TransferState::Completed;
-                }
-                Err(e) => {
-                    *task_state.lock().unwrap() = TransferState::Failed {
-                        error: e.user_message(),
-                    };
-
-                    // 发送错误事件
-                    let _ = app_handle.emit(
-                        "transfer://error",
-                        ErrorEvent {
-                            id: id.clone(),
-                            error: e.user_message(),
-                        },
-                    );
-                }
-            }
-
-            // 从活动任务列表中移除
-            tokio::time::sleep(Duration::from_secs(3)).await;
-            active_tasks.lock().unwrap().remove(&id);
-
-            // 通知调度器检查队列
-            if let Some(tx) = scheduler_tx {
-                let _ = tx.send(());
-            }
-        });
-        
-        Ok(())
+        Self::execute_transfer(
+            id,
+            TransferType::Download { remote_path, local_path },
+            sftp,
+            metadata.size.unwrap_or(0),
+            self.active_tasks.clone(),
+            self.config.clone(),
+            app_handle,
+            self.scheduler_tx.clone(),
+        ).await
     }
-    
+
     /// 暂停任务
     pub fn pause_task(&self, id: &str) -> Result<(), String> {
-        let tasks = self.active_tasks.lock().unwrap();
+        let tasks = lock_or_recover(&self.active_tasks);
         let task = tasks.get(id)
             .ok_or_else(|| format!("Task not found: {}", id))?;
-        
-        let mut state = task.state.lock().unwrap();
-        
+
+        let mut state = lock_or_recover(&task.state);
+
         // 只有运行中的任务可以暂停
         if let TransferState::Running { offset } = *state {
             *state = TransferState::Paused { offset };
@@ -622,7 +395,7 @@ impl TransferManager {
             Err(format!("Task {} is not running", id))
         }
     }
-    
+
     /// 恢复任务
     pub async fn resume_task(
         &self,
@@ -631,15 +404,15 @@ impl TransferManager {
         app_handle: AppHandle,
     ) -> Result<(), String> {
         let task = {
-            let tasks = self.active_tasks.lock().unwrap();
+            let tasks = lock_or_recover(&self.active_tasks);
             tasks.get(id)
                 .ok_or_else(|| format!("Task not found: {}", id))?
                 .clone()
         };
-        
+
         let offset = {
-            let mut state = task.state.lock().unwrap();
-            
+            let mut state = lock_or_recover(&task.state);
+
             // 只有暂停的任务可以恢复
             if let TransferState::Paused { offset } = *state {
                 *state = TransferState::Running { offset };
@@ -648,10 +421,10 @@ impl TransferManager {
                 return Err(format!("Task {} is not paused", id));
             }
         };
-        
+
         // 创建新的取消令牌
         let new_cancel_token = CancellationToken::new();
-        
+
         // 创建进度跟踪器
         let progress_tracker = Arc::new(ProgressTracker::new(
             id.to_string(),
@@ -659,17 +432,17 @@ impl TransferManager {
             Duration::from_millis(self.config.progress_emit_interval),
             Duration::from_secs(self.config.speed_window_size),
         ));
-        
+
         // 创建 SFTP 处理器
         let handler = SftpHandler::new(sftp);
-        
+
         // 克隆需要的变量
         let task_id = id.to_string();
         let task_type = task.task_type.clone();
         let task_state = task.state.clone();
         let active_tasks = self.active_tasks.clone();
         let chunk_size = self.config.chunk_size;
-        
+
         // 在后台任务中执行恢复
         tokio::spawn(async move {
             let result = match task_type {
@@ -696,17 +469,17 @@ impl TransferManager {
                     ).await
                 }
             };
-            
+
             // 更新任务状态
             match result {
                 Ok(_) => {
-                    *task_state.lock().unwrap() = TransferState::Completed;
+                    *lock_or_recover(&task_state) = TransferState::Completed;
                 }
                 Err(e) => {
-                    *task_state.lock().unwrap() = TransferState::Failed {
+                    *lock_or_recover(&task_state) = TransferState::Failed {
                         error: e.user_message(),
                     };
-                    
+
                     // 发送错误事件
                     let _ = app_handle.emit(
                         "transfer://error",
@@ -717,48 +490,47 @@ impl TransferManager {
                     );
                 }
             }
-            
+
             // 从活动任务列表中移除
             tokio::time::sleep(Duration::from_secs(3)).await;
-            active_tasks.lock().unwrap().remove(&task_id);
+            lock_or_recover(&active_tasks).remove(&task_id);
         });
-        
+
         Ok(())
     }
-    
+
     /// 取消任务
     pub fn cancel_task(&self, id: &str) -> Result<(), String> {
-        let mut tasks = self.active_tasks.lock().unwrap();
+        let mut tasks = lock_or_recover(&self.active_tasks);
         let task = tasks.remove(id)
             .ok_or_else(|| format!("Task not found: {}", id))?;
-        
+
         // 取消任务
         task.cancel_token.cancel();
-        
+
         // 清理文件
         match &task.task_type {
             TransferType::Upload { remote_path, .. } => {
-                // 注意：这里无法异步删除远程文件，需要在 SFTP 处理器中处理
                 log::warn!("Remote file cleanup for cancelled upload: {}", remote_path);
             }
             TransferType::Download { local_path, .. } => {
                 let _ = std::fs::remove_file(local_path);
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// 获取活动任务数量
     #[allow(dead_code)]
     pub fn active_task_count(&self) -> usize {
-        self.active_tasks.lock().unwrap().len()
+        lock_or_recover(&self.active_tasks).len()
     }
 
     /// 获取任务状态
     #[allow(dead_code)]
     pub fn get_task_state(&self, id: &str) -> Option<TransferState> {
-        let tasks = self.active_tasks.lock().unwrap();
-        tasks.get(id).map(|task| task.state.lock().unwrap().clone())
+        let tasks = lock_or_recover(&self.active_tasks);
+        tasks.get(id).map(|task| lock_or_recover(&task.state).clone())
     }
 }

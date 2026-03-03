@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use tauri::{AppHandle, Emitter};
 
 use crate::services::db_drivers::DriverPool;
@@ -53,8 +54,12 @@ pub struct ImportResult {
 const DEFAULT_BATCH_SIZE: usize = 100;
 const PREVIEW_ROWS: usize = 10;
 
-fn escape_sql_value(val: &str) -> String {
-    val.replace('\'', "''").replace('\\', "\\\\")
+fn escape_sql_value(val: &str) -> Cow<'_, str> {
+    if val.contains('\'') || val.contains('\\') {
+        Cow::Owned(val.replace('\'', "''").replace('\\', "\\\\"))
+    } else {
+        Cow::Borrowed(val)
+    }
 }
 
 pub fn preview_file(file_path: &str, file_type: &str) -> Result<ImportPreview, AppError> {
@@ -157,15 +162,26 @@ fn emit_progress(app_handle: &AppHandle, progress: &ImportProgress) {
     let _ = app_handle.emit("import://progress", progress);
 }
 
+fn quote_identifier(name: &str, is_postgres: bool) -> String {
+    if is_postgres {
+        // PostgreSQL: 双引号包裹，内部双引号双写转义
+        format!("\"{}\"", name.replace('"', "\"\""))
+    } else {
+        // MySQL: 反引号包裹，内部反引号双写转义
+        format!("`{}`", name.replace('`', "``"))
+    }
+}
+
 fn build_insert_sql(
     database: &str,
     table: &str,
     target_columns: &[String],
     batch: &[Vec<String>],
+    is_postgres: bool,
 ) -> String {
     let cols = target_columns
         .iter()
-        .map(|c| format!("`{}`", c))
+        .map(|c| quote_identifier(c, is_postgres))
         .collect::<Vec<_>>()
         .join(", ");
 
@@ -180,10 +196,13 @@ fn build_insert_sql(
         })
         .collect();
 
+    let db_quoted = quote_identifier(database, is_postgres);
+    let tbl_quoted = quote_identifier(table, is_postgres);
+
     format!(
-        "INSERT INTO `{}`.`{}` ({}) VALUES {}",
-        database,
-        table,
+        "INSERT INTO {}.{} ({}) VALUES {}",
+        db_quoted,
+        tbl_quoted,
         cols,
         rows.join(", ")
     )
@@ -194,6 +213,7 @@ pub async fn import_csv(
     pool: &DriverPool,
     app_handle: &AppHandle,
 ) -> Result<ImportResult, AppError> {
+    let is_postgres = matches!(pool, DriverPool::Postgres(_));
     let batch_size = config.batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
     let delimiter = config
         .delimiter
@@ -255,7 +275,7 @@ pub async fn import_csv(
         batch.push(row);
 
         if batch.len() >= batch_size {
-            let sql = build_insert_sql(&config.database, &config.table, &target_columns, &batch);
+            let sql = build_insert_sql(&config.database, &config.table, &target_columns, &batch, is_postgres);
             execute_sql_on_pool(pool, &sql).await?;
             imported_rows += batch.len();
             batch.clear();
@@ -270,7 +290,7 @@ pub async fn import_csv(
 
     // Flush remaining rows
     if !batch.is_empty() {
-        let sql = build_insert_sql(&config.database, &config.table, &target_columns, &batch);
+        let sql = build_insert_sql(&config.database, &config.table, &target_columns, &batch, is_postgres);
         execute_sql_on_pool(pool, &sql).await?;
         imported_rows += batch.len();
     }
@@ -290,6 +310,7 @@ pub async fn import_json(
     pool: &DriverPool,
     app_handle: &AppHandle,
 ) -> Result<ImportResult, AppError> {
+    let is_postgres = matches!(pool, DriverPool::Postgres(_));
     let batch_size = config.batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
     let content = tokio::fs::read_to_string(&config.file_path).await?;
     let parsed: serde_json::Value = serde_json::from_str(&content)?;
@@ -321,7 +342,7 @@ pub async fn import_json(
         batch.push(row);
 
         if batch.len() >= batch_size {
-            let sql = build_insert_sql(&config.database, &config.table, &target_columns, &batch);
+            let sql = build_insert_sql(&config.database, &config.table, &target_columns, &batch, is_postgres);
             execute_sql_on_pool(pool, &sql).await?;
             imported_rows += batch.len();
             batch.clear();
@@ -335,7 +356,7 @@ pub async fn import_json(
     }
 
     if !batch.is_empty() {
-        let sql = build_insert_sql(&config.database, &config.table, &target_columns, &batch);
+        let sql = build_insert_sql(&config.database, &config.table, &target_columns, &batch, is_postgres);
         execute_sql_on_pool(pool, &sql).await?;
         imported_rows += batch.len();
     }

@@ -71,6 +71,67 @@ impl Storage {
         .execute(&self.pool)
         .await?;
 
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS query_history (
+                id TEXT PRIMARY KEY,
+                connection_id TEXT NOT NULL,
+                connection_name TEXT,
+                database_name TEXT,
+                sql_text TEXT NOT NULL,
+                execution_time_ms INTEGER NOT NULL DEFAULT 0,
+                is_error INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                affected_rows INTEGER NOT NULL DEFAULT 0,
+                row_count INTEGER,
+                executed_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Indexes for query_history
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_qh_conn ON query_history(connection_id)")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_qh_time ON query_history(executed_at DESC)")
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_qh_sql ON query_history(sql_text COLLATE NOCASE)")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS sql_snippets (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                description TEXT,
+                sql_text TEXT NOT NULL,
+                category TEXT DEFAULT 'default',
+                tags TEXT,
+                connection_id TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Command snippets table
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS command_snippets (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                command TEXT NOT NULL,
+                description TEXT,
+                category TEXT DEFAULT 'default',
+                sort_order INTEGER DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
         Ok(())
     }
 
@@ -194,13 +255,15 @@ impl Storage {
     }
 
     pub async fn reorder_connections(&self, ids: &[String]) -> Result<(), AppError> {
+        let mut tx = self.pool.begin().await?;
         for (index, id) in ids.iter().enumerate() {
             sqlx::query("UPDATE connections SET sort_order = ? WHERE id = ?")
                 .bind(index as i32)
                 .bind(id)
-                .execute(&self.pool)
+                .execute(&mut *tx)
                 .await?;
         }
+        tx.commit().await?;
         Ok(())
     }
 
@@ -267,4 +330,360 @@ impl Storage {
 
         Ok(())
     }
+
+    // --- Query History ---
+
+    pub async fn save_query_history(
+        &self,
+        id: &str,
+        connection_id: &str,
+        connection_name: Option<&str>,
+        database_name: Option<&str>,
+        sql_text: &str,
+        execution_time_ms: i64,
+        is_error: bool,
+        error_message: Option<&str>,
+        affected_rows: i64,
+        row_count: Option<i64>,
+        executed_at: i64,
+    ) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO query_history (id, connection_id, connection_name, database_name, sql_text, execution_time_ms, is_error, error_message, affected_rows, row_count, executed_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(connection_id)
+        .bind(connection_name)
+        .bind(database_name)
+        .bind(sql_text)
+        .bind(execution_time_ms)
+        .bind(is_error as i32)
+        .bind(error_message)
+        .bind(affected_rows)
+        .bind(row_count)
+        .bind(executed_at)
+        .execute(&self.pool)
+        .await?;
+
+        // 高效清理：找到第 1000 条记录的时间戳，删除更早的记录（利用 idx_qh_time 索引）
+        let cutoff_row = sqlx::query(
+            "SELECT executed_at FROM query_history ORDER BY executed_at DESC LIMIT 1 OFFSET 1000",
+        )
+        .fetch_optional(&self.pool)
+        .await?;
+
+        if let Some(row) = cutoff_row {
+            let cutoff_time: i64 = row.get("executed_at");
+            sqlx::query("DELETE FROM query_history WHERE executed_at < ?")
+                .bind(cutoff_time)
+                .execute(&self.pool)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn list_query_history(
+        &self,
+        connection_id: Option<&str>,
+        search_text: Option<&str>,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<QueryHistoryRecord>, AppError> {
+        let mut sql = String::from(
+            "SELECT id, connection_id, connection_name, database_name, sql_text, execution_time_ms, is_error, error_message, affected_rows, row_count, executed_at FROM query_history WHERE 1=1",
+        );
+        let mut binds: Vec<String> = vec![];
+
+        if let Some(cid) = connection_id {
+            sql.push_str(" AND connection_id = ?");
+            binds.push(cid.to_string());
+        }
+        if let Some(search) = search_text {
+            sql.push_str(" AND sql_text LIKE ?");
+            binds.push(format!("%{}%", search));
+        }
+
+        sql.push_str(" ORDER BY executed_at DESC LIMIT ? OFFSET ?");
+
+        let mut query = sqlx::query(&sql);
+        for b in &binds {
+            query = query.bind(b);
+        }
+        query = query.bind(limit).bind(offset);
+
+        let rows = query.fetch_all(&self.pool).await?;
+
+        let records = rows
+            .iter()
+            .map(|row| QueryHistoryRecord {
+                id: row.get("id"),
+                connection_id: row.get("connection_id"),
+                connection_name: row.get("connection_name"),
+                database_name: row.get("database_name"),
+                sql_text: row.get("sql_text"),
+                execution_time_ms: row.get("execution_time_ms"),
+                is_error: row.get::<i32, _>("is_error") != 0,
+                error_message: row.get("error_message"),
+                affected_rows: row.get("affected_rows"),
+                row_count: row.get("row_count"),
+                executed_at: row.get("executed_at"),
+            })
+            .collect();
+
+        Ok(records)
+    }
+
+    pub async fn delete_query_history(&self, id: &str) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM query_history WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn clear_query_history(&self, connection_id: Option<&str>) -> Result<(), AppError> {
+        if let Some(cid) = connection_id {
+            sqlx::query("DELETE FROM query_history WHERE connection_id = ?")
+                .bind(cid)
+                .execute(&self.pool)
+                .await?;
+        } else {
+            sqlx::query("DELETE FROM query_history")
+                .execute(&self.pool)
+                .await?;
+        }
+        Ok(())
+    }
+
+    // --- SQL Snippets ---
+
+    pub async fn list_sql_snippets(
+        &self,
+        category: Option<&str>,
+        search: Option<&str>,
+    ) -> Result<Vec<SqlSnippetRecord>, AppError> {
+        let mut sql = String::from(
+            "SELECT id, title, description, sql_text, category, tags, connection_id, created_at, updated_at FROM sql_snippets WHERE 1=1",
+        );
+        let mut binds: Vec<String> = vec![];
+
+        if let Some(cat) = category {
+            sql.push_str(" AND category = ?");
+            binds.push(cat.to_string());
+        }
+        if let Some(s) = search {
+            sql.push_str(" AND (title LIKE ? OR sql_text LIKE ?)");
+            let pattern = format!("%{}%", s);
+            binds.push(pattern.clone());
+            binds.push(pattern);
+        }
+
+        sql.push_str(" ORDER BY updated_at DESC");
+
+        let mut query = sqlx::query(&sql);
+        for b in &binds {
+            query = query.bind(b);
+        }
+
+        let rows = query.fetch_all(&self.pool).await?;
+
+        let records = rows
+            .iter()
+            .map(|row| SqlSnippetRecord {
+                id: row.get("id"),
+                title: row.get("title"),
+                description: row.get("description"),
+                sql_text: row.get("sql_text"),
+                category: row.get("category"),
+                tags: row.get("tags"),
+                connection_id: row.get("connection_id"),
+                created_at: row.get("created_at"),
+                updated_at: row.get("updated_at"),
+            })
+            .collect();
+
+        Ok(records)
+    }
+
+    pub async fn create_sql_snippet(&self, record: &SqlSnippetRecord) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO sql_snippets (id, title, description, sql_text, category, tags, connection_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&record.id)
+        .bind(&record.title)
+        .bind(&record.description)
+        .bind(&record.sql_text)
+        .bind(&record.category)
+        .bind(&record.tags)
+        .bind(&record.connection_id)
+        .bind(record.created_at)
+        .bind(record.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn update_sql_snippet(&self, record: &SqlSnippetRecord) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE sql_snippets SET title = ?, description = ?, sql_text = ?, category = ?, tags = ?, connection_id = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(&record.title)
+        .bind(&record.description)
+        .bind(&record.sql_text)
+        .bind(&record.category)
+        .bind(&record.tags)
+        .bind(&record.connection_id)
+        .bind(record.updated_at)
+        .bind(&record.id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_sql_snippet(&self, id: &str) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM sql_snippets WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    // --- Command Snippets ---
+
+    pub async fn list_command_snippets(
+        &self,
+        category: Option<&str>,
+        search: Option<&str>,
+    ) -> Result<Vec<CommandSnippetRecord>, AppError> {
+        let mut sql = String::from(
+            "SELECT id, title, command, description, category, sort_order, created_at, updated_at FROM command_snippets WHERE 1=1",
+        );
+        let mut binds: Vec<String> = vec![];
+
+        if let Some(cat) = category {
+            sql.push_str(" AND category = ?");
+            binds.push(cat.to_string());
+        }
+        if let Some(s) = search {
+            sql.push_str(" AND (title LIKE ? OR command LIKE ? OR description LIKE ?)");
+            let pattern = format!("%{}%", s);
+            binds.push(pattern.clone());
+            binds.push(pattern.clone());
+            binds.push(pattern);
+        }
+
+        sql.push_str(" ORDER BY sort_order ASC, updated_at DESC");
+
+        let mut query = sqlx::query(&sql);
+        for b in &binds {
+            query = query.bind(b);
+        }
+
+        let rows = query.fetch_all(&self.pool).await?;
+        let records = rows
+            .iter()
+            .map(|row| {
+                use sqlx::Row;
+                CommandSnippetRecord {
+                    id: row.get("id"),
+                    title: row.get("title"),
+                    command: row.get("command"),
+                    description: row.get("description"),
+                    category: row.get("category"),
+                    sort_order: row.get("sort_order"),
+                    created_at: row.get("created_at"),
+                    updated_at: row.get("updated_at"),
+                }
+            })
+            .collect();
+        Ok(records)
+    }
+
+    pub async fn create_command_snippet(&self, record: &CommandSnippetRecord) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO command_snippets (id, title, command, description, category, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&record.id)
+        .bind(&record.title)
+        .bind(&record.command)
+        .bind(&record.description)
+        .bind(&record.category)
+        .bind(record.sort_order)
+        .bind(record.created_at)
+        .bind(record.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn update_command_snippet(&self, record: &CommandSnippetRecord) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE command_snippets SET title = ?, command = ?, description = ?, category = ?, sort_order = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(&record.title)
+        .bind(&record.command)
+        .bind(&record.description)
+        .bind(&record.category)
+        .bind(record.sort_order)
+        .bind(record.updated_at)
+        .bind(&record.id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn delete_command_snippet(&self, id: &str) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM command_snippets WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+}
+
+// --- Data models for query history and snippets ---
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryHistoryRecord {
+    pub id: String,
+    pub connection_id: String,
+    pub connection_name: Option<String>,
+    pub database_name: Option<String>,
+    pub sql_text: String,
+    pub execution_time_ms: i64,
+    pub is_error: bool,
+    pub error_message: Option<String>,
+    pub affected_rows: i64,
+    pub row_count: Option<i64>,
+    pub executed_at: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SqlSnippetRecord {
+    pub id: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub sql_text: String,
+    pub category: Option<String>,
+    pub tags: Option<String>,
+    pub connection_id: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandSnippetRecord {
+    pub id: String,
+    pub title: String,
+    pub command: String,
+    pub description: Option<String>,
+    pub category: Option<String>,
+    pub sort_order: i64,
+    pub created_at: i64,
+    pub updated_at: i64,
 }

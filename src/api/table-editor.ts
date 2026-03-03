@@ -16,3 +16,7 @@ export function executeDdl(connectionId: string, sql: string): Promise<boolean> 
 export function getTableDetail(connectionId: string, database: string, table: string): Promise<TableDetail> {
   return invoke('get_table_detail', { connectionId, database, table })
 }
+
+export function getTableDdl(connectionId: string, database: string, table: string): Promise<string> {
+  return invoke('get_table_ddl', { connectionId, database, table })
+}

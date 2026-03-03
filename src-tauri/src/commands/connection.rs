@@ -10,9 +10,9 @@ use crate::services::db_engine::DbEngine;
 use crate::services::storage::Storage;
 
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
-pub type StorageState = Arc<Mutex<Storage>>;
+/// Storage 内部使用 SqlitePool（本身线程安全且支持并发），无需外层 Mutex
+pub type StorageState = Arc<Storage>;
 
 // --- Connection CRUD ---
 
@@ -39,8 +39,7 @@ pub async fn create_connection(
         updated_at: now,
     };
 
-    let store = storage.lock().await;
-    store.create_connection(&conn).await.map_err(|e| e.to_string())?;
+    storage.create_connection(&conn).await.map_err(|e| e.to_string())?;
 
     if let Some(password) = req.password {
         if !password.is_empty() {
@@ -65,8 +64,7 @@ pub async fn update_connection(
     id: String,
     req: UpdateConnectionRequest,
 ) -> Result<Connection, String> {
-    let store = storage.lock().await;
-    let mut conn = store.get_connection(&id).await.map_err(|e| e.to_string())?;
+    let mut conn = storage.get_connection(&id).await.map_err(|e| e.to_string())?;
 
     if let Some(name) = req.name {
         conn.name = name;
@@ -91,7 +89,7 @@ pub async fn update_connection(
     }
 
     conn.updated_at = Utc::now().timestamp_millis();
-    store.update_connection(&conn).await.map_err(|e| e.to_string())?;
+    storage.update_connection(&conn).await.map_err(|e| e.to_string())?;
 
     if let Some(password) = req.password {
         if password.is_empty() {
@@ -117,8 +115,7 @@ pub async fn delete_connection(
     storage: State<'_, StorageState>,
     id: String,
 ) -> Result<bool, String> {
-    let store = storage.lock().await;
-    store.delete_connection(&id).await.map_err(|e| e.to_string())?;
+    storage.delete_connection(&id).await.map_err(|e| e.to_string())?;
     let _ = CredentialManager::delete(&id);
     Ok(true)
 }
@@ -127,8 +124,7 @@ pub async fn delete_connection(
 pub async fn list_connections(
     storage: State<'_, StorageState>,
 ) -> Result<Vec<Connection>, String> {
-    let store = storage.lock().await;
-    store.list_connections().await.map_err(|e| e.to_string())
+    storage.list_connections().await.map_err(|e| e.to_string())
 }
 
 #[command]
@@ -136,8 +132,7 @@ pub async fn get_connection_by_id(
     storage: State<'_, StorageState>,
     id: String,
 ) -> Result<Connection, String> {
-    let store = storage.lock().await;
-    store.get_connection(&id).await.map_err(|e| e.to_string())
+    storage.get_connection(&id).await.map_err(|e| e.to_string())
 }
 
 #[command]
@@ -145,8 +140,7 @@ pub async fn reorder_connections(
     storage: State<'_, StorageState>,
     ids: Vec<String>,
 ) -> Result<bool, String> {
-    let store = storage.lock().await;
-    store.reorder_connections(&ids).await.map_err(|e| e.to_string())?;
+    storage.reorder_connections(&ids).await.map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -155,9 +149,7 @@ pub async fn test_connection(
     storage: State<'_, StorageState>,
     id: String,
 ) -> Result<TestResult, String> {
-    let store = storage.lock().await;
-    let conn = store.get_connection(&id).await.map_err(|e| e.to_string())?;
-    drop(store);
+    let conn = storage.get_connection(&id).await.map_err(|e| e.to_string())?;
 
     let password = CredentialManager::get(&id)
         .map_err(|e| e.to_string())?
@@ -215,8 +207,7 @@ pub async fn test_connection_params(
 pub async fn list_groups(
     storage: State<'_, StorageState>,
 ) -> Result<Vec<ConnectionGroup>, String> {
-    let store = storage.lock().await;
-    store.list_groups().await.map_err(|e| e.to_string())
+    storage.list_groups().await.map_err(|e| e.to_string())
 }
 
 #[command]
@@ -231,8 +222,7 @@ pub async fn create_group(
         parent_id: None,
     };
 
-    let store = storage.lock().await;
-    store.create_group(&group).await.map_err(|e| e.to_string())?;
+    storage.create_group(&group).await.map_err(|e| e.to_string())?;
     Ok(group)
 }
 
@@ -241,8 +231,7 @@ pub async fn delete_group(
     storage: State<'_, StorageState>,
     id: String,
 ) -> Result<bool, String> {
-    let store = storage.lock().await;
-    store.delete_group(&id).await.map_err(|e| e.to_string())?;
+    storage.delete_group(&id).await.map_err(|e| e.to_string())?;
     Ok(true)
 }
 

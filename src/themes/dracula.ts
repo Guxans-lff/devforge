@@ -16,26 +16,26 @@ export const dracula: ThemeDefinition = {
     '--secondary': '#44475a',
     '--secondary-foreground': '#f8f8f2',
     '--muted': '#44475a',
-    '--muted-foreground': '#6272a4',
+    '--muted-foreground': '#7888c0',  // 提高对比度：#6272a4 -> #7888c0
     '--accent': '#44475a',
     '--accent-foreground': '#f8f8f2',
     '--destructive': '#ff5555',
-    '--border': 'rgba(255, 255, 255, 0.1)',
-    '--input': 'rgba(255, 255, 255, 0.15)',
+    '--border': 'rgba(255, 255, 255, 0.15)',  // 提高边框可见度：0.1 -> 0.15
+    '--input': 'rgba(255, 255, 255, 0.2)',  // 提高输入框边框可见度：0.15 -> 0.2
     '--ring': '#bd93f9',
     '--df-success': '#50fa7b',
     '--df-warning': '#f1fa8c',
     '--df-info': '#8be9fd',
-    '--df-elevated': '#44475a',
+    '--df-elevated': '#4d5066',  // 提高高度层级对比度：#44475a -> #4d5066
     '--df-surface': '#21222c',
-    '--df-overlay': 'rgba(0, 0, 0, 0.6)',
+    '--df-overlay': 'rgba(0, 0, 0, 0.7)',  // 提高遮罩不透明度：0.6 -> 0.7
     '--sidebar': '#21222c',
     '--sidebar-foreground': '#f8f8f2',
     '--sidebar-primary': '#bd93f9',
     '--sidebar-primary-foreground': '#282a36',
-    '--sidebar-accent': '#44475a',
+    '--sidebar-accent': '#4d5066',  // 提高侧边栏强调色对比度：#44475a -> #4d5066
     '--sidebar-accent-foreground': '#f8f8f2',
-    '--sidebar-border': 'rgba(255, 255, 255, 0.1)',
+    '--sidebar-border': 'rgba(255, 255, 255, 0.15)',  // 提高侧边栏边框可见度：0.1 -> 0.15
     '--sidebar-ring': '#bd93f9',
   },
   editor: {

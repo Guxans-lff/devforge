@@ -19,15 +19,15 @@ pub async fn import_data(
     app_handle: AppHandle,
     config: ImportConfig,
 ) -> Result<ImportResult, String> {
-    let eng = engine.lock().await;
-    let pool = eng
+    let pool = engine
         .get_pool(&config.connection_id)
+        .await
         .map_err(|e| e.to_string())?;
 
     let result = match config.file_type.as_str() {
-        "csv" => data_import::import_csv(&config, pool, &app_handle).await,
-        "json" => data_import::import_json(&config, pool, &app_handle).await,
-        "sql" => data_import::import_sql(&config, pool, &app_handle).await,
+        "csv" => data_import::import_csv(&config, &pool, &app_handle).await,
+        "json" => data_import::import_json(&config, &pool, &app_handle).await,
+        "sql" => data_import::import_sql(&config, &pool, &app_handle).await,
         other => return Err(format!("Unsupported file type: {}", other)),
     };
 

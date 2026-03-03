@@ -35,6 +35,13 @@ export function sshTestConnectionParams(params: {
   port: number
   username: string
   password: string
+  authMethod?: string
+  privateKeyPath?: string
+  passphrase?: string
 }): Promise<TestResult> {
   return invoke('ssh_test_connection_params', params)
+}
+
+export function sshExecCommand(connectionId: string, command: string): Promise<string> {
+  return invoke('ssh_exec_command', { connectionId, command })
 }

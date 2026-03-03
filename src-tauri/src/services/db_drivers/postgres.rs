@@ -1,10 +1,30 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sqlx::postgres::{PgColumn, PgConnectOptions, PgPool, PgPoolOptions, PgRow, PgSslMode};
 use sqlx::{Column, Row, TypeInfo};
 
-use crate::models::query::{ColumnDef, ColumnInfo, DatabaseInfo, QueryResult, TableInfo};
+use crate::models::query::{ColumnDef, ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo};
 use crate::utils::error::AppError;
+
+/// 取消当前连接上所有活跃查询
+pub async fn cancel_running_query(pool: &PgPool) -> Result<(), AppError> {
+    let rows: Vec<PgRow> = sqlx::query(
+        "SELECT pid FROM pg_stat_activity WHERE state = 'active' AND query NOT LIKE '%pg_stat_activity%' AND pid != pg_backend_pid()"
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to get active queries: {}", e)))?;
+
+    for row in &rows {
+        if let Ok(Some(pid)) = row.try_get::<Option<i32>, _>("pid") {
+            let _ = sqlx::query("SELECT pg_cancel_backend($1)")
+                .bind(pid)
+                .execute(pool)
+                .await;
+        }
+    }
+    Ok(())
+}
 
 pub async fn connect(
     host: &str,
@@ -27,7 +47,8 @@ pub async fn connect(
     }
 
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(10)
+        .acquire_timeout(Duration::from_secs(10))
         .connect_with(options)
         .await
         .map_err(|e| AppError::Other(format!("PostgreSQL connection failed: {}", e)))?;
@@ -92,6 +113,8 @@ pub async fn execute_select(
             execution_time_ms: elapsed,
             is_error: false,
             error: None,
+            total_count: None,
+            truncated: false,
         });
     }
 
@@ -123,6 +146,8 @@ pub async fn execute_select(
         execution_time_ms: elapsed,
         is_error: false,
         error: None,
+        total_count: None,
+        truncated: false,
     })
 }
 
@@ -145,6 +170,8 @@ pub async fn execute_non_select(
         execution_time_ms: elapsed,
         is_error: false,
         error: None,
+        total_count: None,
+        truncated: false,
     })
 }
 
@@ -315,11 +342,162 @@ pub async fn get_create_table(
     Ok(ddl)
 }
 
-pub fn build_table_data_sql(schema: &str, table: &str, page_size: u32, offset: u32) -> String {
-    format!(
-        "SELECT * FROM \"{}\".\"{}\" LIMIT {} OFFSET {}",
-        schema, table, page_size, offset
+pub async fn get_views(
+    pool: &PgPool,
+    schema: &str,
+) -> Result<Vec<ViewInfo>, AppError> {
+    let rows: Vec<PgRow> = sqlx::query(
+        "SELECT table_name as name,
+                view_definition as definer,
+                check_option as check_option,
+                is_updatable as is_updatable
+         FROM information_schema.views
+         WHERE table_schema = $1
+         ORDER BY table_name",
     )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to list views: {}", e)))?;
+
+    Ok(rows.iter().map(|row| ViewInfo {
+        name: row.try_get::<String, _>("name").unwrap_or_default(),
+        definer: row.try_get::<Option<String>, _>("definer").unwrap_or(None),
+        check_option: row.try_get::<Option<String>, _>("check_option").unwrap_or(None),
+        is_updatable: row.try_get::<Option<String>, _>("is_updatable").unwrap_or(None),
+    }).collect())
+}
+
+pub async fn get_routines(
+    pool: &PgPool,
+    schema: &str,
+    routine_type: &str,
+) -> Result<Vec<RoutineInfo>, AppError> {
+    let rows: Vec<PgRow> = sqlx::query(
+        "SELECT routine_name as name,
+                routine_type as routine_type,
+                '' as definer,
+                '' as created,
+                '' as modified,
+                '' as comment
+         FROM information_schema.routines
+         WHERE routine_schema = $1 AND routine_type = $2
+         ORDER BY routine_name",
+    )
+    .bind(schema)
+    .bind(routine_type)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to list routines: {}", e)))?;
+
+    Ok(rows.iter().map(|row| RoutineInfo {
+        name: row.try_get::<String, _>("name").unwrap_or_default(),
+        routine_type: row.try_get::<String, _>("routine_type").unwrap_or_default(),
+        definer: None,
+        created: None,
+        modified: None,
+        comment: None,
+    }).collect())
+}
+
+pub async fn get_triggers(
+    pool: &PgPool,
+    schema: &str,
+) -> Result<Vec<TriggerInfo>, AppError> {
+    let rows: Vec<PgRow> = sqlx::query(
+        "SELECT trigger_name as name,
+                event_manipulation as event,
+                action_timing as timing,
+                event_object_table as table_name,
+                action_statement as statement
+         FROM information_schema.triggers
+         WHERE trigger_schema = $1
+         ORDER BY trigger_name",
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to list triggers: {}", e)))?;
+
+    Ok(rows.iter().map(|row| TriggerInfo {
+        name: row.try_get::<String, _>("name").unwrap_or_default(),
+        event: row.try_get::<String, _>("event").unwrap_or_default(),
+        timing: row.try_get::<String, _>("timing").unwrap_or_default(),
+        table_name: row.try_get::<String, _>("table_name").unwrap_or_default(),
+        statement: row.try_get::<Option<String>, _>("statement").unwrap_or(None),
+    }).collect())
+}
+
+pub async fn get_object_definition(
+    pool: &PgPool,
+    schema: &str,
+    name: &str,
+    object_type: &str,
+) -> Result<String, AppError> {
+    let sql = match object_type {
+        "VIEW" => format!(
+            "SELECT pg_get_viewdef('\"{}\".\"{}\"', true) as def",
+            schema, name
+        ),
+        "FUNCTION" | "PROCEDURE" => {
+            // 获取函数/过程的完整定义
+            format!(
+                "SELECT pg_get_functiondef(p.oid) as def
+                 FROM pg_proc p
+                 JOIN pg_namespace n ON p.pronamespace = n.oid
+                 WHERE n.nspname = '{}' AND p.proname = '{}'
+                 LIMIT 1",
+                schema, name
+            )
+        }
+        "TRIGGER" => format!(
+            "SELECT pg_get_triggerdef(t.oid) as def
+             FROM pg_trigger t
+             JOIN pg_class c ON t.tgrelid = c.oid
+             JOIN pg_namespace n ON c.relnamespace = n.oid
+             WHERE n.nspname = '{}' AND t.tgname = '{}'
+             LIMIT 1",
+            schema, name
+        ),
+        _ => return Err(AppError::Other(format!("Unknown object type: {}", object_type))),
+    };
+
+    let row: PgRow = sqlx::query(&sql)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| AppError::Other(format!("Failed to get definition: {}", e)))?;
+
+    let def: String = row.try_get::<String, _>("def").unwrap_or_default();
+    Ok(def)
+}
+
+pub fn build_table_data_sql(schema: &str, table: &str, page_size: u32, offset: u32, where_clause: Option<&str>, order_by: Option<&str>) -> String {
+    let mut sql = format!("SELECT * FROM \"{}\".\"{}\"", schema, table);
+    if let Some(w) = where_clause {
+        let w = w.trim();
+        if !w.is_empty() {
+            sql.push_str(&format!(" WHERE {}", w));
+        }
+    }
+    if let Some(o) = order_by {
+        let o = o.trim();
+        if !o.is_empty() {
+            sql.push_str(&format!(" ORDER BY {}", o));
+        }
+    }
+    sql.push_str(&format!(" LIMIT {} OFFSET {}", page_size, offset));
+    sql
+}
+
+pub fn build_table_count_sql(schema: &str, table: &str, where_clause: Option<&str>) -> String {
+    let mut sql = format!("SELECT COUNT(*) AS cnt FROM \"{}\".\"{}\"", schema, table);
+    if let Some(w) = where_clause {
+        let w = w.trim();
+        if !w.is_empty() {
+            sql.push_str(&format!(" WHERE {}", w));
+        }
+    }
+    sql
 }
 
 fn pg_value_to_json(

@@ -60,8 +60,8 @@ export const useConnectionStore = defineStore('connections', () => {
       }
       connections.value = newMap
       groups.value = groupRecords
-    } catch {
-      // Connection loading failed — UI shows empty state
+    } catch (err) {
+      console.warn('Failed to load connections:', err)
     } finally {
       loading.value = false
     }

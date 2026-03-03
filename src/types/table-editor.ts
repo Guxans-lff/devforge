@@ -1,9 +1,12 @@
 export interface ColumnDefinition {
   name: string
   dataType: string
+  length: string | null
   nullable: boolean
-  defaultValue: string | null
+  isPrimaryKey: boolean
   autoIncrement: boolean
+  defaultValue: string | null
+  onUpdate: string | null
   comment: string | null
 }
 

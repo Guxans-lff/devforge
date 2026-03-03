@@ -1,8 +1,6 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { Locale } from '@/locales'
-
-const STORAGE_KEY = 'devforge-locale'
+import { loadLocale, type Locale } from '@/locales'
 
 export function useLocale() {
   const { locale } = useI18n()
@@ -14,9 +12,8 @@ export function useLocale() {
     },
   })
 
-  function setLocale(newLocale: Locale) {
-    locale.value = newLocale
-    localStorage.setItem(STORAGE_KEY, newLocale)
+  async function setLocale(newLocale: Locale) {
+    await loadLocale(newLocale)
     document.documentElement.lang = newLocale === 'zh-CN' ? 'zh' : 'en'
   }
 

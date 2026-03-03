@@ -1,14 +1,13 @@
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use tauri::State;
 
 use crate::commands::connection::StorageState;
 use crate::models::transfer::{FileEntry, FileInfo};
-use crate::services::credential::CredentialManager;
 use crate::services::sftp_engine::SftpEngine;
+use crate::services::ssh_auth;
 
-pub type SftpEngineState = Arc<Mutex<SftpEngine>>;
+pub type SftpEngineState = Arc<SftpEngine>;
 
 #[tauri::command]
 pub async fn sftp_connect(
@@ -16,31 +15,25 @@ pub async fn sftp_connect(
     storage: State<'_, StorageState>,
     connection_id: String,
 ) -> Result<bool, String> {
-    let storage = storage.lock().await;
     let conn = storage
         .get_connection(&connection_id)
         .await
         .map_err(|e| e.to_string())?;
 
-    let password = match CredentialManager::get(&connection_id) {
-        Ok(Some(pw)) => pw,
-        Ok(None) => {
-            return Err(format!(
-                "No password found for connection '{}'. Please edit the connection and set the password.",
-                conn.name
-            ))
-        }
-        Err(e) => return Err(format!("Failed to read credential: {}", e)),
-    };
+    let auth = ssh_auth::parse_auth_config(&connection_id, &conn.config_json)
+        .map_err(|e| e.to_string())?;
 
-    let mut engine = sftp_engine.lock().await;
-    engine
+    // 解析跳板机配置
+    let proxy = crate::commands::ssh::resolve_proxy_from_config(&storage, &conn.config_json).await?;
+
+    sftp_engine
         .connect(
             &connection_id,
             &conn.host,
             conn.port as u16,
             &conn.username,
-            &password,
+            &auth,
+            proxy.as_ref(),
         )
         .await
         .map_err(|e| e.to_string())?;
@@ -53,8 +46,7 @@ pub async fn sftp_disconnect(
     sftp_engine: State<'_, SftpEngineState>,
     connection_id: String,
 ) -> Result<bool, String> {
-    let mut engine = sftp_engine.lock().await;
-    engine
+    sftp_engine
         .disconnect(&connection_id)
         .await
         .map_err(|e| e.to_string())?;
@@ -67,8 +59,7 @@ pub async fn sftp_list_dir(
     connection_id: String,
     path: String,
 ) -> Result<Vec<FileEntry>, String> {
-    let engine = sftp_engine.lock().await;
-    engine
+    sftp_engine
         .list_dir(&connection_id, &path)
         .await
         .map_err(|e| e.to_string())
@@ -80,8 +71,7 @@ pub async fn sftp_stat(
     connection_id: String,
     path: String,
 ) -> Result<FileInfo, String> {
-    let engine = sftp_engine.lock().await;
-    engine
+    sftp_engine
         .stat(&connection_id, &path)
         .await
         .map_err(|e| e.to_string())
@@ -93,8 +83,7 @@ pub async fn sftp_mkdir(
     connection_id: String,
     path: String,
 ) -> Result<bool, String> {
-    let engine = sftp_engine.lock().await;
-    engine
+    sftp_engine
         .mkdir(&connection_id, &path)
         .await
         .map_err(|e| e.to_string())?;
@@ -108,14 +97,13 @@ pub async fn sftp_delete(
     path: String,
     is_dir: bool,
 ) -> Result<bool, String> {
-    let engine = sftp_engine.lock().await;
     if is_dir {
-        engine
+        sftp_engine
             .delete_dir(&connection_id, &path)
             .await
             .map_err(|e| e.to_string())?;
     } else {
-        engine
+        sftp_engine
             .delete_file(&connection_id, &path)
             .await
             .map_err(|e| e.to_string())?;
@@ -130,8 +118,7 @@ pub async fn sftp_rename(
     old_path: String,
     new_path: String,
 ) -> Result<bool, String> {
-    let engine = sftp_engine.lock().await;
-    engine
+    sftp_engine
         .rename(&connection_id, &old_path, &new_path)
         .await
         .map_err(|e| e.to_string())?;
@@ -148,8 +135,7 @@ pub async fn sftp_download(
 ) -> Result<String, String> {
     let transfer_id = uuid::Uuid::new_v4().to_string();
 
-    let engine = sftp_engine.lock().await;
-    engine
+    sftp_engine
         .download(
             &connection_id,
             &remote_path,
@@ -173,8 +159,7 @@ pub async fn sftp_upload(
 ) -> Result<String, String> {
     let transfer_id = uuid::Uuid::new_v4().to_string();
 
-    let engine = sftp_engine.lock().await;
-    engine
+    sftp_engine
         .upload(
             &connection_id,
             &local_path,
@@ -318,15 +303,14 @@ pub async fn sftp_list_recursive(
     connection_id: String,
     path: String,
 ) -> Result<Vec<(String, u64)>, String> {
-    let eng = engine.lock().await;
-
     // Check if connected
-    if !eng.is_connected(&connection_id) {
+    if !engine.is_connected(&connection_id).await {
         return Err(format!("No SFTP session for connection: {}", connection_id));
     }
 
-    let sftp = eng
+    let sftp = engine
         .get_sftp_session(&connection_id)
+        .await
         .ok_or_else(|| format!("No SFTP session for connection: {}", connection_id))?;
 
     let mut files = Vec::new();

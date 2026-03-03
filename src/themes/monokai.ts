@@ -16,26 +16,26 @@ export const monokai: ThemeDefinition = {
     '--secondary': '#3e3d32',
     '--secondary-foreground': '#f8f8f2',
     '--muted': '#3e3d32',
-    '--muted-foreground': '#75715e',
+    '--muted-foreground': '#8b8770',  // 提高对比度：#75715e -> #8b8770
     '--accent': '#49483e',
     '--accent-foreground': '#f8f8f2',
     '--destructive': '#f92672',
-    '--border': 'rgba(255, 255, 255, 0.1)',
-    '--input': 'rgba(255, 255, 255, 0.15)',
+    '--border': 'rgba(255, 255, 255, 0.15)',  // 提高边框可见度：0.1 -> 0.15
+    '--input': 'rgba(255, 255, 255, 0.2)',  // 提高输入框边框可见度：0.15 -> 0.2
     '--ring': '#a6e22e',
     '--df-success': '#a6e22e',
     '--df-warning': '#e6db74',
     '--df-info': '#66d9ef',
-    '--df-elevated': '#3e3d32',
+    '--df-elevated': '#49483e',  // 提高高度层级对比度：#3e3d32 -> #49483e
     '--df-surface': '#1e1f1c',
-    '--df-overlay': 'rgba(0, 0, 0, 0.6)',
+    '--df-overlay': 'rgba(0, 0, 0, 0.7)',  // 提高遮罩不透明度：0.6 -> 0.7
     '--sidebar': '#1e1f1c',
     '--sidebar-foreground': '#f8f8f2',
     '--sidebar-primary': '#a6e22e',
     '--sidebar-primary-foreground': '#272822',
-    '--sidebar-accent': '#3e3d32',
+    '--sidebar-accent': '#49483e',  // 提高侧边栏强调色对比度：#3e3d32 -> #49483e
     '--sidebar-accent-foreground': '#f8f8f2',
-    '--sidebar-border': 'rgba(255, 255, 255, 0.1)',
+    '--sidebar-border': 'rgba(255, 255, 255, 0.15)',  // 提高侧边栏边框可见度：0.1 -> 0.15
     '--sidebar-ring': '#a6e22e',
   },
   editor: {

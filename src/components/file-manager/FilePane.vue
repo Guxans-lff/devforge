@@ -33,6 +33,9 @@ import {
   Download,
   Upload,
   Loader2,
+  FileEdit,
+  Shield,
+  ArrowLeftRight,
 } from 'lucide-vue-next'
 import type { FileEntry } from '@/types/fileManager'
 
@@ -58,6 +61,9 @@ const emit = defineEmits<{
   dropFiles: [entries: FileEntry[], targetPath: string]
   dropExternal: [files: File[]]
   addBookmark: [path: string]
+  editFile: [entry: FileEntry]
+  showPermissions: [entry: FileEntry]
+  compareFile: [entry: FileEntry]
 }>()
 
 const { t } = useI18n()
@@ -100,6 +106,8 @@ watch(
 function handleDoubleClick(entry: FileEntry) {
   if (entry.isDir) {
     emit('navigate', entry.path)
+  } else if (props.panelId === 'remote') {
+    emit('editFile', entry)
   }
 }
 
@@ -463,11 +471,11 @@ function formatDate(timestamp: number | null): string {
           <ContextMenu v-if="entries[vRow.index]">
             <ContextMenuTrigger>
               <div
-                class="group flex cursor-pointer items-center gap-2 px-2 text-xs transition-colors duration-100 hover:bg-accent absolute left-0 right-0"
+                class="group flex cursor-pointer items-center gap-3 px-3 text-[13px] transition-all duration-200 hover:bg-muted/40 absolute left-1 right-1 rounded-md"
                 :style="{ height: `${ROW_HEIGHT}px`, transform: `translateY(${vRow.start}px)` }"
                 :class="{
-                  'bg-primary/10': isSelected(entries[vRow.index]!),
-                  'ring-2 ring-primary ring-inset': dragOverPath === entries[vRow.index]!.path && entries[vRow.index]!.isDir,
+                  'bg-primary/10 text-primary': isSelected(entries[vRow.index]!),
+                  'ring-2 ring-primary/60 shadow-[0_0_15px_rgba(var(--color-primary)/0.2)]': dragOverPath === entries[vRow.index]!.path && entries[vRow.index]!.isDir,
                 }"
                 draggable="true"
                 @click="handleClick(entries[vRow.index]!, $event)"
@@ -482,10 +490,10 @@ function formatDate(timestamp: number | null): string {
               >
                 <component
                   :is="entries[vRow.index]!.isDir ? Folder : File"
-                  class="h-3.5 w-3.5 shrink-0"
+                  class="h-4 w-4 shrink-0 transition-transform group-hover:scale-110"
                   :class="entries[vRow.index]!.isDir ? 'text-[var(--df-warning)]' : 'text-muted-foreground'"
                 />
-                <span class="flex-1 truncate">{{ entries[vRow.index]!.name }}</span>
+                <span class="flex-1 truncate group-hover:text-foreground transition-colors">{{ entries[vRow.index]!.name }}</span>
                 <span class="w-16 shrink-0 text-right text-muted-foreground">
                   {{ entries[vRow.index]!.isDir ? '' : formatSize(entries[vRow.index]!.size) }}
                 </span>
@@ -505,6 +513,13 @@ function formatDate(timestamp: number | null): string {
 
               <template v-else-if="selectedCount === 1">
                 <ContextMenuItem
+                  v-if="panelId === 'remote' && selectedItems[0] && !selectedItems[0].isDir"
+                  @click="selectedItems[0] && emit('editFile', selectedItems[0])"
+                >
+                  <FileEdit class="mr-2 h-4 w-4" />
+                  {{ t('sftp.editFile') }}
+                </ContextMenuItem>
+                <ContextMenuItem
                   v-if="showTransferAction === 'download' && selectedItems[0] && !selectedItems[0].isDir"
                   @click="handleTransferSelected"
                 >
@@ -522,6 +537,20 @@ function formatDate(timestamp: number | null): string {
                 <ContextMenuItem v-if="selectedItems[0]" @click="openRenameDialog(selectedItems[0])">
                   <Pencil class="mr-2 h-4 w-4" />
                   {{ t('fileManager.rename') }}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  v-if="panelId === 'remote' && selectedItems[0]"
+                  @click="emit('showPermissions', selectedItems[0])"
+                >
+                  <Shield class="mr-2 h-4 w-4" />
+                  {{ t('fileEditor.permissions') }}
+                </ContextMenuItem>
+                <ContextMenuItem
+                  v-if="selectedItems[0] && !selectedItems[0].isDir"
+                  @click="selectedItems[0] && emit('compareFile', selectedItems[0])"
+                >
+                  <ArrowLeftRight class="mr-2 h-4 w-4" />
+                  {{ t('fileEditor.compare') }}
                 </ContextMenuItem>
                 <ContextMenuSeparator />
                 <ContextMenuItem
