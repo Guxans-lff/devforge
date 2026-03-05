@@ -28,6 +28,7 @@ const emit = defineEmits<{
 // 延迟加载 Monaco Editor
 const isLoaded = ref(false)
 const SqlEditor = defineAsyncComponent(() => import('./SqlEditor.vue'))
+const editorRef = ref<InstanceType<typeof SqlEditor>>()
 
 onMounted(() => {
   // 延迟 100ms 加载编辑器，避免阻塞初始渲染
@@ -47,6 +48,25 @@ function handleExecute(sql: string) {
 function handleExecuteSelected(sql: string) {
   emit('executeSelected', sql)
 }
+
+// 透传 SqlEditor 暴露的方法
+function getSelectedText(): string {
+  return (editorRef.value as any)?.getSelectedText() ?? ''
+}
+
+function focus() {
+  (editorRef.value as any)?.focus()
+}
+
+function insertText(text: string) {
+  (editorRef.value as any)?.insertText(text)
+}
+
+function formatDocument() {
+  (editorRef.value as any)?.formatDocument()
+}
+
+defineExpose({ getSelectedText, focus, insertText, formatDocument })
 </script>
 
 <template>
@@ -65,6 +85,7 @@ function handleExecuteSelected(sql: string) {
     <!-- 实际编辑器 -->
     <SqlEditor
       v-if="isLoaded"
+      ref="editorRef"
       :model-value="modelValue"
       :language="language"
       :read-only="readOnly"

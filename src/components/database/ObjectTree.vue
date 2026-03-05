@@ -81,11 +81,9 @@ onBeforeUnmount(() => {
 })
 
 onActivated(() => {
-  // KeepAlive 重新激活时重置状态，强制重新加载
+  // KeepAlive 重新激活时仅重置搜索状态，保留已加载的树数据
   searchQuery.value = ''
   debouncedQuery.value = ''
-  treeNodes.value = []
-  loadDatabases()
 })
 
 const filteredNodes = computed(() => {
@@ -95,17 +93,33 @@ const filteredNodes = computed(() => {
     const dbId = dbNode.id
     const isCollapsedByUser = searchCollapsedDbs.value.has(dbId)
     const dbMatches = dbNode.label.toLowerCase().includes(q)
-    // 过滤匹配的子节点（表名或注释）
-    const matchedChildren = dbNode.children?.filter(tblNode =>
-      tblNode.label.toLowerCase().includes(q) ||
-      (tblNode.meta?.comment ?? '').toLowerCase().includes(q)
-    )
-    if (matchedChildren && matchedChildren.length > 0) {
-      return { ...dbNode, isExpanded: !isCollapsedByUser, children: matchedChildren }
+
+    // 深度搜索：遍历 folder 子节点内部的表/视图/存储过程等
+    const matchedFolders = dbNode.children?.map(folderNode => {
+      if (folderNode.type !== 'folder') {
+        // 非 folder 节点（兼容旧结构），直接匹配
+        const nameMatch = folderNode.label.toLowerCase().includes(q)
+        const commentMatch = (folderNode.meta?.comment ?? '').toLowerCase().includes(q)
+        return (nameMatch || commentMatch) ? folderNode : null
+      }
+      // folder 节点：过滤其子项
+      const matchedItems = folderNode.children?.filter(item =>
+        item.label.toLowerCase().includes(q) ||
+        (item.meta?.comment ?? '').toLowerCase().includes(q)
+      )
+      if (matchedItems && matchedItems.length > 0) {
+        // 保留原始 folder 引用的响应式属性，仅覆盖 children 和展开状态
+        return Object.assign({}, folderNode, { isExpanded: true, children: matchedItems })
+      }
+      return null
+    }).filter(Boolean) as DatabaseTreeNode[] | undefined
+
+    if (matchedFolders && matchedFolders.length > 0) {
+      return Object.assign({}, dbNode, { isExpanded: !isCollapsedByUser, children: matchedFolders })
     }
     // 数据库名匹配但无匹配子节点，显示数据库但不展开
     if (dbMatches) {
-      return { ...dbNode, isExpanded: false, children: [] }
+      return Object.assign({}, dbNode, { isExpanded: false, children: [] })
     }
     return null
   }).filter(Boolean) as DatabaseTreeNode[]
@@ -223,7 +237,7 @@ async function loadFolderChildren(node: DatabaseTreeNode) {
         node.children = procs.map((p) => ({
           id: `proc-${database}-${p.name}`,
           label: p.name,
-          type: 'table' as const,
+          type: 'procedure' as const,
           meta: {
             database,
             objectType: 'PROCEDURE',
@@ -239,7 +253,7 @@ async function loadFolderChildren(node: DatabaseTreeNode) {
         node.children = funcs.map((f) => ({
           id: `func-${database}-${f.name}`,
           label: f.name,
-          type: 'table' as const,
+          type: 'function' as const,
           meta: {
             database,
             objectType: 'FUNCTION',
@@ -255,7 +269,7 @@ async function loadFolderChildren(node: DatabaseTreeNode) {
         node.children = triggers.map((tr) => ({
           id: `trigger-${database}-${tr.name}`,
           label: tr.name,
-          type: 'table' as const,
+          type: 'trigger' as const,
           meta: {
             database,
             objectType: 'TRIGGER',
@@ -267,8 +281,9 @@ async function loadFolderChildren(node: DatabaseTreeNode) {
         break
       }
     }
-  } catch {
+  } catch (e) {
     node.children = []
+    console.error(`[ObjectTree] 加载 ${node.folderType} 失败:`, e)
   } finally {
     node.isLoading = false
     emit('schemaUpdated')
@@ -296,8 +311,9 @@ async function loadColumns(node: DatabaseTreeNode) {
         comment: col.comment ?? undefined,
       },
     }))
-  } catch {
+  } catch (e) {
     node.children = []
+    console.error(`[ObjectTree] 加载列信息失败:`, e)
   } finally {
     node.isLoading = false
     emit('schemaUpdated')
@@ -366,18 +382,27 @@ function getNodeIcon(node: DatabaseTreeNode) {
     case 'folder':
       return node.isExpanded ? FolderOpen : Folder
     case 'table':
-      if (node.meta?.objectType === 'PROCEDURE') return Workflow
-      if (node.meta?.objectType === 'FUNCTION') return FunctionSquare
-      if (node.meta?.objectType === 'TRIGGER') return Zap
       return Table2
     case 'view':
       return Eye
+    case 'procedure':
+      return Workflow
+    case 'function':
+      return FunctionSquare
+    case 'trigger':
+      return Zap
     case 'column':
       return node.meta?.isPrimaryKey ? KeyRound : Columns3
   }
 }
 
-defineExpose({ loadDatabases, treeNodes })
+function clearTree() {
+  treeNodes.value = []
+  searchQuery.value = ''
+  debouncedQuery.value = ''
+}
+
+defineExpose({ loadDatabases, treeNodes, clearTree })
 </script>
 
 <template>

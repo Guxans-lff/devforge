@@ -41,7 +41,11 @@ function matchesParsed(e: KeyboardEvent, parsed: ReturnType<typeof parseShortcut
   if (parsed.alt !== e.altKey) return false
 
   const eventKey = e.key === '`' ? '`' : e.key
-  return eventKey.toLowerCase() === parsed.key.toLowerCase()
+  const keyMatch = eventKey.toLowerCase() === parsed.key.toLowerCase()
+
+  // 兼容性处理：如果按的是 K 且 parsed.key 是 P (旧配置)，或者反之，也可以考虑兼容
+  // 但目前直接改默认值为 Ctrl+K 更干净
+  return keyMatch
 }
 
 function matchesShortcut(e: KeyboardEvent, keys: string): boolean {

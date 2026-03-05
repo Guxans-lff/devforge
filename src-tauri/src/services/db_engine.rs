@@ -191,12 +191,16 @@ impl DbEngine {
         // 构建分页查询和 COUNT 查询
         let (data_sql, count_sql) = match pool.as_ref() {
             DriverPool::MySql(_) => (
-                mysql::build_table_data_sql(database, table, page_size, offset, where_clause, order_by),
-                mysql::build_table_count_sql(database, table, where_clause),
+                mysql::build_table_data_sql(database, table, page_size, offset, where_clause, order_by)
+                    .map_err(|e| AppError::Other(e))?,
+                mysql::build_table_count_sql(database, table, where_clause)
+                    .map_err(|e| AppError::Other(e))?,
             ),
             DriverPool::Postgres(_) => (
-                postgres::build_table_data_sql(database, table, page_size, offset, where_clause, order_by),
-                postgres::build_table_count_sql(database, table, where_clause),
+                postgres::build_table_data_sql(database, table, page_size, offset, where_clause, order_by)
+                    .map_err(|e| AppError::Other(e))?,
+                postgres::build_table_count_sql(database, table, where_clause)
+                    .map_err(|e| AppError::Other(e))?,
             ),
         };
 

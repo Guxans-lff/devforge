@@ -158,167 +158,148 @@ const statusColorMap: Record<string, string> = {
 </script>
 
 <template>
-  <div class="relative flex h-full overflow-hidden bg-background/50 selection:bg-primary/20">
-    <!-- 灵动背景渐变 (Premium Mesh Gradient) -->
-    <div class="pointer-events-none absolute inset-0 overflow-hidden opacity-40 dark:opacity-20">
-      <div class="absolute -top-[10%] -left-[10%] w-[50%] h-[50%] animate-[blob_15s_infinite_ease-in-out] rounded-full bg-primary/20 mix-blend-multiply blur-3xl"></div>
-      <div class="absolute top-[10%] -right-[10%] w-[45%] h-[45%] animate-[blob_18s_infinite_ease-in-out_2s] rounded-full bg-indigo-500/15 mix-blend-multiply blur-3xl"></div>
-      <div class="absolute -bottom-[10%] left-[10%] w-[55%] h-[55%] animate-[blob_12s_infinite_ease-in-out_4s] rounded-full bg-emerald-500/10 mix-blend-multiply blur-3xl"></div>
-      <div class="absolute bottom-[20%] right-[20%] w-[40%] h-[40%] animate-[blob_20s_infinite_ease-in-out_6s] rounded-full bg-amber-500/10 mix-blend-multiply blur-3xl"></div>
-    </div>
+  <div class="relative flex h-full overflow-hidden bg-background selection:bg-primary/10">
+    <!-- 微弱的深度感背景 (Subtle Depth Background) -->
+    <div class="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,var(--color-primary-20),transparent_70%)] opacity-30"></div>
+    <div class="absolute inset-0 bg-[linear-gradient(rgba(128,128,128,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(128,128,128,0.03)_1px,transparent_1px)] bg-[size:32px_32px]"></div>
 
     <!-- 主容器 -->
-    <div class="relative z-10 m-auto flex w-full max-w-3xl flex-col gap-5 px-6 py-8">
+    <div class="relative z-10 m-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-12">
       
       <!-- Hero Section -->
-      <div class="flex flex-col items-center justify-center gap-3 text-center">
-        <div class="relative group cursor-default animate-in fade-in zoom-in-50 duration-1000">
-          <div class="absolute -inset-5 rounded-full bg-gradient-to-br from-primary/30 to-indigo-500/20 blur-2xl opacity-40 transition-opacity duration-1000 group-hover:opacity-100 animate-pulse"></div>
-          <div class="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-background/80 to-background/40 shadow-xl ring-1 ring-white/20 backdrop-blur-xl transition-all duration-700 group-hover:rotate-[360deg] group-hover:scale-105">
-            <Zap class="h-7 w-7 text-primary drop-shadow-[0_0_10px_rgba(var(--color-primary),0.5)]" />
+      <div class="flex flex-col items-start justify-center gap-1 animate-in fade-in slide-in-from-left-4 duration-700">
+        <div class="flex items-center gap-2.5">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-sm">
+            <Zap class="h-6 w-6" />
           </div>
-        </div>
-        
-        <div class="space-y-1">
-          <div class="flex items-center justify-center gap-2 animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-300 fill-mode-both">
-            <component :is="GreetingIcon" class="h-4 w-4 text-primary/60" />
-            <h1 class="text-2xl font-black tracking-tight text-foreground">
-              {{ greeting }}, <span class="bg-gradient-to-r from-primary to-indigo-500 bg-clip-text text-transparent">DevForge</span>
+          <div class="space-y-0">
+            <h1 class="text-2xl font-bold tracking-tight text-foreground">
+              {{ greeting }}, <span class="text-primary">DevForge</span>
             </h1>
+            <p class="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-widest">
+              {{ t('welcome.subtitle') }}
+            </p>
           </div>
-          <p class="text-xs font-semibold text-muted-foreground/70 max-w-sm animate-in fade-in slide-in-from-bottom-4 duration-1000 delay-500 fill-mode-both">
-            {{ t('welcome.subtitle') }}
-          </p>
         </div>
       </div>
 
-      <!-- 快速操作 (居中卡片式) -->
-      <div class="grid grid-cols-3 gap-3 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-700 fill-mode-both">
-        <button
-          v-for="(action, index) in quickActions"
-          :key="action.type"
-          class="group relative flex flex-col items-center gap-3 overflow-hidden rounded-2xl py-4 px-3 text-center transition-all duration-500 hover:-translate-y-1.5 border border-border/10 bg-background/40 backdrop-blur-xl shadow-lg hover:shadow-xl"
-          :class="[action.borderHover]"
-          :style="{ transitionDelay: `${index * 80}ms` }"
-          @click="handleQuickAction(action.type)"
-        >
-          <!-- 悬浮扫光 -->
-          <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/5 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 skew-x-12"></div>
-          
-          <!-- 图标 -->
-          <div class="relative flex h-10 w-10 items-center justify-center rounded-xl transition-all duration-500 group-hover:scale-110 group-hover:rotate-3 shadow-inner" :class="action.bg">
-            <component :is="action.icon" class="relative z-10 h-5 w-5" :class="action.color" />
-          </div>
-
-          <div class="relative z-10 flex flex-col gap-0.5">
-            <span class="text-xs font-black text-foreground group-hover:text-primary transition-colors">{{ t(`welcome.${action.type === 'file-manager' ? 'files' : action.type}`) }}</span>
-            <span class="text-[10px] font-bold text-muted-foreground/75 px-1 leading-snug">{{ t(`welcome.${action.type === 'file-manager' ? 'filesDesc' : action.type + 'Desc'}`) }}</span>
-          </div>
-        </button>
-      </div>
-
-      <!-- 最近连接 + 快捷键 -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 flex-1 min-h-0 animate-in fade-in slide-in-from-bottom-8 duration-1000 delay-700 fill-mode-both">
+      <!-- 内容网格 -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
         
-        <!-- 最近连接 -->
-        <div class="group/panel relative flex flex-col overflow-hidden rounded-2xl border border-border/10 bg-background/40 backdrop-blur-xl p-4 shadow-xl transition-all duration-500 hover:border-primary/20">
-          <div class="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover/panel:opacity-100 transition-opacity duration-500"></div>
+        <!-- 左侧：快速入口 -->
+        <div class="lg:col-span-8 flex flex-col gap-6 animate-in fade-in slide-in-from-bottom-6 duration-700 delay-200 fill-mode-both">
           
-          <div class="relative z-10 mb-3 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <div class="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
-                <Database class="h-3.5 w-3.5" />
-              </div>
-              <span class="text-[10px] font-black uppercase tracking-widest text-foreground/70">
-                {{ t('welcome.recentConnections') }}
-              </span>
-            </div>
+          <div class="grid grid-cols-3 gap-3">
             <button
-              class="group/btn flex items-center gap-1.5 rounded-full bg-primary px-2.5 py-1 text-[10px] font-bold text-primary-foreground shadow-lg shadow-primary/20 transition-all duration-300 hover:scale-105 active:scale-95"
-              @click="showConnectionDialog = true"
+              v-for="(action, index) in quickActions"
+              :key="action.type"
+              class="group relative flex flex-col items-start gap-4 rounded-xl border border-border bg-card p-4 transition-all duration-200 hover:border-primary/50 hover:shadow-md active:scale-[0.98]"
+              @click="handleQuickAction(action.type)"
             >
-              <Plus class="h-3 w-3" />
-              {{ t('welcome.newConn') }}
+              <div class="flex h-9 w-9 items-center justify-center rounded-lg border border-border transition-colors group-hover:border-primary/20 group-hover:bg-primary/5">
+                <component :is="action.icon" class="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+              </div>
+              <div class="flex flex-col gap-0.5 text-left">
+                <span class="text-xs font-bold text-foreground">{{ t(`welcome.${action.type === 'file-manager' ? 'files' : action.type}`) }}</span>
+                <span class="text-[10px] text-muted-foreground leading-tight">{{ t(`welcome.${action.type === 'file-manager' ? 'filesDesc' : action.type + 'Desc'}`) }}</span>
+              </div>
             </button>
           </div>
- 
-          <div v-if="recentConnections.length === 0" class="relative z-10 flex flex-1 flex-col items-center justify-center py-10 text-center">
-            <div class="relative mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-muted/20 ring-1 ring-border">
-              <Database class="h-6 w-6 text-muted-foreground/30" />
-            </div>
-            <p class="text-xs font-bold text-muted-foreground/70">{{ t('welcome.noConnections') }}</p>
-          </div>
- 
-          <div v-else class="relative z-10 flex flex-1 flex-col gap-2 overflow-y-auto pr-1 qr-scroll-area">
-            <button
-              v-for="(conn, idx) in recentConnections"
-              :key="conn.record.id"
-              class="group flex items-center gap-4 rounded-2xl border border-transparent bg-background/20 p-2.5 transition-all duration-300 hover:border-primary/20 hover:bg-background/60 hover:shadow-xl hover:-translate-y-0.5"
-              @click="openConnection(conn)"
-            >
-              <!-- Icon with status indicator overflow -->
-              <div class="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted/10 ring-1 ring-border/50 transition-all duration-500 group-hover:bg-primary/10 group-hover:scale-105 group-hover:rotate-3 shadow-inner">
-                <component 
-                  :is="conn.record.type === 'database' ? Database : (conn.record.type === 'ssh' ? Terminal : FolderOpen)" 
-                  class="h-5 w-5 text-muted-foreground/60 transition-colors group-hover:text-primary" 
-                />
-                <div class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background shadow-sm" :class="statusColorMap[conn.status] ?? 'bg-muted-foreground/40'" />
+
+          <!-- 最近连接面板 -->
+          <div class="flex flex-col rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+            <div class="flex items-center justify-between border-b border-border bg-muted/30 px-4 py-2.5">
+              <div class="flex items-center gap-2">
+                <Database class="h-3.5 w-3.5 text-muted-foreground" />
+                <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  {{ t('welcome.recentConnections') }}
+                </span>
               </div>
- 
-              <div class="min-w-0 flex-1 flex flex-col gap-0.5 text-left items-start">
-                <p class="truncate text-[13px] font-black tracking-tight text-foreground/90 group-hover:text-foreground">{{ conn.record.name }}</p>
-                <div class="flex items-center gap-2">
-                  <span class="text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-md bg-muted/20 text-muted-foreground/70 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
-                    {{ conn.record.type }}
-                  </span>
-                  <p class="truncate font-mono text-[10px] font-bold text-muted-foreground/40 group-hover:text-muted-foreground/60">{{ conn.record.host }}</p>
+              <button
+                class="flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1 text-[10px] font-bold text-background transition-all hover:opacity-90 active:scale-95"
+                @click="showConnectionDialog = true"
+              >
+                <Plus class="h-3 w-3" />
+                {{ t('welcome.newConn') }}
+              </button>
+            </div>
+
+            <div v-if="recentConnections.length === 0" class="flex flex-col items-center justify-center py-12 text-center">
+              <Database class="h-8 w-8 text-muted-foreground/20 mb-2" />
+              <p class="text-xs font-medium text-muted-foreground/60">{{ t('welcome.noConnections') }}</p>
+            </div>
+
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 p-2 gap-1 overflow-y-auto max-h-[220px] qr-scroll-area">
+              <button
+                v-for="conn in recentConnections"
+                :key="conn.record.id"
+                class="group flex items-center gap-3 rounded-lg border border-transparent p-2 transition-all hover:bg-muted/50 hover:border-border"
+                @click="openConnection(conn)"
+              >
+                <div class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border/50 bg-muted/20 group-hover:bg-background group-hover:border-primary/30 transition-all">
+                  <component 
+                    :is="conn.record.type === 'database' ? Database : (conn.record.type === 'ssh' ? Terminal : FolderOpen)" 
+                    class="h-4 w-4 text-muted-foreground transition-colors group-hover:text-primary" 
+                  />
+                  <div class="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-background" :class="statusColorMap[conn.status] ?? 'bg-muted-foreground/40'" />
+                </div>
+                <div class="min-w-0 flex-1 text-left items-start overflow-hidden">
+                  <p class="truncate text-[12px] font-semibold text-foreground/90">{{ conn.record.name }}</p>
+                  <p class="truncate font-mono text-[9px] text-muted-foreground/60">{{ conn.record.host }}</p>
+                </div>
+                <ArrowRight class="h-3 w-3 text-primary opacity-0 -translate-x-2 transition-all group-hover:opacity-100 group-hover:translate-x-0" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧：快捷键 + 状态 -->
+        <div class="lg:col-span-4 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-700 delay-400 fill-mode-both">
+          
+          <div class="flex flex-col rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+            <div class="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2.5">
+              <Keyboard class="h-3.5 w-3.5 text-muted-foreground" />
+              <span class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  {{ t('welcome.shortcuts') }}
+                </span>
+            </div>
+            
+            <div class="flex flex-col p-2">
+              <div
+                v-for="shortcut in shortcuts"
+                :key="shortcut.actionKey"
+                class="group flex items-center justify-between rounded-md p-2 transition-colors hover:bg-muted/30"
+              >
+                <span class="text-[11px] font-medium text-muted-foreground group-hover:text-foreground">{{ t(shortcut.actionKey) }}</span>
+                <div class="flex items-center gap-1">
+                  <kbd
+                    v-for="key in shortcut.keys"
+                    :key="key"
+                    class="flex h-5 min-w-[20px] items-center justify-center rounded border border-border bg-muted/50 px-1 text-[9px] font-bold text-muted-foreground shadow-xs"
+                  >
+                    {{ key }}
+                  </kbd>
                 </div>
               </div>
-              
-              <div class="flex h-7 w-7 items-center justify-center rounded-full text-primary opacity-0 -translate-x-2 transition-all duration-500 group-hover:bg-primary/10 group-hover:opacity-100 group-hover:translate-x-0">
-                <ArrowRight class="h-4 w-4" />
-              </div>
-            </button>
-          </div>
-        </div>
-
-        <!-- 快捷键 -->
-        <div class="relative flex flex-col rounded-2xl border border-border/10 bg-background/30 backdrop-blur-xl p-4 shadow-xl transition-all duration-500 hover:border-primary/10">
-          <div class="relative z-10 mb-4 flex items-center gap-2">
-            <div class="flex h-6 w-6 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
-              <Keyboard class="h-3.5 w-3.5" />
-            </div>
-            <span class="text-[10px] font-black uppercase tracking-widest text-foreground/70">
-                {{ t('welcome.shortcuts') }}
-              </span>
-          </div>
-          
-          <div class="relative z-10 flex flex-col gap-0.5">
-            <div
-              v-for="(shortcut, idx) in shortcuts"
-              :key="shortcut.actionKey"
-              class="group flex items-center justify-between rounded-lg p-1.5 transition-all hover:bg-background/60"
-            >
-              <span class="text-[11px] font-bold text-muted-foreground/70 group-hover:text-foreground">{{ t(shortcut.actionKey) }}</span>
-              <div class="flex items-center gap-1">
-                <kbd
-                  v-for="key in shortcut.keys"
-                  :key="key"
-                  class="flex min-w-[24px] items-center justify-center rounded-md border border-border/40 bg-background/60 px-1.5 py-0.5 text-[9px] font-black text-foreground/60 shadow-sm transition-all duration-300 group-hover:border-primary/50 group-hover:text-primary"
-                >
-                  {{ key }}
-                </kbd>
-              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      <!-- 版本号 -->
-      <div class="flex justify-center relative z-10 animate-in fade-in duration-1000 delay-[1000ms] fill-mode-both">
-        <div class="flex items-center gap-2 rounded-full border border-border/20 bg-background/30 px-4 py-1 backdrop-blur-lg transition-all hover:border-border/40">
-          <div class="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.6)]"></div>
-          <span class="text-[10px] font-bold text-muted-foreground/70 tracking-[0.12em] uppercase font-mono">DevForge <span class="text-primary font-black">v{{ appVersion }}</span></span>
+          <!-- 版本状态 -->
+          <div class="mt-auto flex flex-col gap-4">
+            <div class="flex items-center justify-between px-1">
+              <span class="text-[10px] font-bold text-muted-foreground/40 uppercase tracking-[0.2em]">System Status</span>
+              <div class="flex items-center gap-1.5">
+                <div class="h-1.5 w-1.5 rounded-full bg-emerald-500"></div>
+                <span class="text-[9px] font-bold text-emerald-500/80 uppercase">Ready</span>
+              </div>
+            </div>
+            <div class="rounded-xl border border-border bg-muted/10 p-4">
+              <p class="text-[10px] font-bold text-muted-foreground leading-relaxed text-wrap">
+                DevForge <span class="text-foreground">v{{ appVersion }}</span>. 
+                专业、高效、现代的数据库与终端管理工具。
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

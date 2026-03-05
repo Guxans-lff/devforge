@@ -314,7 +314,8 @@ pub async fn sftp_list_recursive(
         .ok_or_else(|| format!("No SFTP session for connection: {}", connection_id))?;
 
     let mut files = Vec::new();
-    collect_remote_files(sftp.as_ref(), &path, &mut files).await?;
+    const MAX_RECURSION_DEPTH: u32 = 20;
+    collect_remote_files(sftp.as_ref(), &path, &mut files, 0, MAX_RECURSION_DEPTH).await?;
     Ok(files)
 }
 
@@ -322,8 +323,13 @@ fn collect_remote_files<'a>(
     sftp: &'a russh_sftp::client::SftpSession,
     dir: &'a str,
     files: &'a mut Vec<(String, u64)>,
+    depth: u32,
+    max_depth: u32,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
     Box::pin(async move {
+        if depth >= max_depth {
+            return Err(format!("递归深度超过限制 ({})，可能存在循环引用: {}", max_depth, dir));
+        }
         let entries = sftp
             .read_dir(dir)
             .await
@@ -359,7 +365,7 @@ fn collect_remote_files<'a>(
                 let size = attrs.size.unwrap_or(0);
                 files.push((full_path, size));
             } else {
-                collect_remote_files(sftp, &full_path, files).await?;
+                collect_remote_files(sftp, &full_path, files, depth + 1, max_depth).await?;
             }
         }
 

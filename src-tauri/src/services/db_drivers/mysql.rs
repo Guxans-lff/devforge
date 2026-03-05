@@ -1,10 +1,11 @@
 use std::time::{Duration, Instant};
 
 use sqlx::mysql::{MySqlColumn, MySqlConnectOptions, MySqlPool, MySqlPoolOptions, MySqlRow, MySqlSslMode};
-use sqlx::{Column, Row, TypeInfo};
+use sqlx::{Column, Executor, Row, TypeInfo};
 
 use crate::models::query::{ColumnDef, ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo};
 use crate::utils::error::AppError;
+use super::{escape_mysql_ident, validate_sql_clause};
 
 /// 取消当前用户在此连接池上的活跃查询（仅限当前用户，防止越权）
 pub async fn cancel_running_query(pool: &MySqlPool) -> Result<(), AppError> {
@@ -107,14 +108,23 @@ pub async fn execute_select(
     let elapsed = start.elapsed().as_millis() as u64;
 
     if rows.is_empty() {
+        // 空结果时通过 describe 获取列定义，确保前端能渲染空表格
+        let columns = match pool.describe(sql).await {
+            Ok(desc) => desc.columns().iter().map(|col| ColumnDef {
+                name: col.name().to_string(),
+                data_type: col.type_info().name().to_string(),
+                nullable: true,
+            }).collect(),
+            Err(_) => vec![],
+        };
         return Ok(QueryResult {
-            columns: vec![],
+            columns,
             rows: vec![],
             affected_rows: 0,
             execution_time_ms: elapsed,
             is_error: false,
             error: None,
-            total_count: None,
+            total_count: Some(0),
             truncated: false,
         });
     }
@@ -277,7 +287,7 @@ pub async fn get_create_table(
     database: &str,
     table: &str,
 ) -> Result<String, AppError> {
-    let sql = format!("SHOW CREATE TABLE `{}`.`{}`", database, table);
+    let sql = format!("SHOW CREATE TABLE `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(table));
     let row: MySqlRow = sqlx::query(&sql)
         .fetch_one(pool)
         .await
@@ -386,10 +396,10 @@ pub async fn get_object_definition(
     object_type: &str,
 ) -> Result<String, AppError> {
     let sql = match object_type {
-        "VIEW" => format!("SHOW CREATE VIEW `{}`.`{}`", database, name),
-        "PROCEDURE" => format!("SHOW CREATE PROCEDURE `{}`.`{}`", database, name),
-        "FUNCTION" => format!("SHOW CREATE FUNCTION `{}`.`{}`", database, name),
-        "TRIGGER" => format!("SHOW CREATE TRIGGER `{}`.`{}`", database, name),
+        "VIEW" => format!("SHOW CREATE VIEW `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(name)),
+        "PROCEDURE" => format!("SHOW CREATE PROCEDURE `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(name)),
+        "FUNCTION" => format!("SHOW CREATE FUNCTION `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(name)),
+        "TRIGGER" => format!("SHOW CREATE TRIGGER `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(name)),
         _ => return Err(AppError::Other(format!("Unknown object type: {}", object_type))),
     };
 
@@ -414,33 +424,36 @@ pub async fn get_object_definition(
     Ok(ddl)
 }
 
-pub fn build_table_data_sql(database: &str, table: &str, page_size: u32, offset: u32, where_clause: Option<&str>, order_by: Option<&str>) -> String {
-    let mut sql = format!("SELECT * FROM `{}`.`{}`", database, table);
+pub fn build_table_data_sql(database: &str, table: &str, page_size: u32, offset: u32, where_clause: Option<&str>, order_by: Option<&str>) -> Result<String, String> {
+    let mut sql = format!("SELECT * FROM `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(table));
     if let Some(w) = where_clause {
         let w = w.trim();
         if !w.is_empty() {
+            validate_sql_clause(w)?;
             sql.push_str(&format!(" WHERE {}", w));
         }
     }
     if let Some(o) = order_by {
         let o = o.trim();
         if !o.is_empty() {
+            validate_sql_clause(o)?;
             sql.push_str(&format!(" ORDER BY {}", o));
         }
     }
     sql.push_str(&format!(" LIMIT {} OFFSET {}", page_size, offset));
-    sql
+    Ok(sql)
 }
 
-pub fn build_table_count_sql(database: &str, table: &str, where_clause: Option<&str>) -> String {
-    let mut sql = format!("SELECT COUNT(*) AS cnt FROM `{}`.`{}`", database, table);
+pub fn build_table_count_sql(database: &str, table: &str, where_clause: Option<&str>) -> Result<String, String> {
+    let mut sql = format!("SELECT COUNT(*) AS cnt FROM `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(table));
     if let Some(w) = where_clause {
         let w = w.trim();
         if !w.is_empty() {
+            validate_sql_clause(w)?;
             sql.push_str(&format!(" WHERE {}", w));
         }
     }
-    sql
+    Ok(sql)
 }
 
 /// Safely extract a String from a MySQL row column.

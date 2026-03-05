@@ -77,10 +77,11 @@ async function loadTunnels() {
   }
 }
 
-async function handleSelectConnection(connId: string) {
-  selectedConnectionId.value = connId
-  if (!connId) return
-  const state = connectionStore.connectionList.find((c) => c.record.id === connId)
+async function handleSelectConnection(connId: string | number | boolean | Record<string, any> | null) {
+  const id = String(connId ?? '')
+  selectedConnectionId.value = id
+  if (!id) return
+  const state = connectionStore.connectionList.find((c) => c.record.id === id)
   if (!state) return
   const record = state.record
   form.value.sshHost = record.host

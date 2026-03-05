@@ -369,7 +369,12 @@ function handleRemoteBatchDelete(entries: FileEntry[]) {
 async function handleDropToRemote(entries: FileEntry[], targetPath: string) {
   for (const entry of entries) {
     if (entry.isDir) {
-      // Upload folder recursively
+      // Upload folder recursively — 使用 targetPath 作为目标目录
+      const dirRemotePath = targetPath.endsWith('/')
+        ? `${targetPath}${entry.name}`
+        : `${targetPath}/${entry.name}`
+      await sftpApi.sftpMkdir(props.connectionId, dirRemotePath).catch(() => {})
+      // 递归上传子文件需要以 dirRemotePath 为目标
       await handleBatchUpload([entry])
     } else {
       // Upload single file

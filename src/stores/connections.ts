@@ -43,6 +43,8 @@ export const useConnectionStore = defineStore('connections', () => {
   })
 
   async function loadConnections() {
+    // 防止并发加载
+    if (loading.value) return
     loading.value = true
     try {
       const [records, groupRecords] = await Promise.all([

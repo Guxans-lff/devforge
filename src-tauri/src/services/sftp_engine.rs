@@ -61,10 +61,9 @@ impl SftpEngine {
         auth: &AuthConfig,
         proxy: Option<&ProxyJumpConfig>,
     ) -> Result<(), AppError> {
-        // Disconnect existing session for this connection (短暂读锁检查)
-        if self.connections.read().await.contains_key(connection_id) {
-            self.disconnect(connection_id).await?;
-        }
+        // 清理已存在的同 ID 连接（原子写锁移除，避免 read+disconnect 竞态）
+        // Dropping SftpConnection 会自动关闭 channel 和 SSH session
+        self.connections.write().await.remove(connection_id);
 
         // 以下 SSH/SFTP 握手过程不持有任何锁
         let config = Arc::new(client::Config::default());
@@ -299,56 +298,67 @@ impl SftpEngine {
         use russh_sftp::protocol::OpenFlags;
         use tokio::io::AsyncReadExt;
 
-        let mut remote_file = sftp
-            .open_with_flags(remote_path, OpenFlags::READ)
-            .await
-            .map_err(|e| AppError::Other(format!("SFTP open failed: {}", e)))?;
+        let download_result: Result<(), AppError> = async {
+            let mut remote_file = sftp
+                .open_with_flags(remote_path, OpenFlags::READ)
+                .await
+                .map_err(|e| AppError::Other(format!("SFTP open failed: {}", e)))?;
 
-        let mut local_file = tokio::fs::File::create(local_path)
-            .await
-            .map_err(|e| AppError::Other(format!("Local file create failed: {}", e)))?;
+            let mut local_file = tokio::fs::File::create(local_path)
+                .await
+                .map_err(|e| AppError::Other(format!("Local file create failed: {}", e)))?;
 
-        const CHUNK_SIZE: usize = 256 * 1024; // 256KB 分块
-        let mut buf = vec![0u8; CHUNK_SIZE];
-        let mut bytes_transferred: u64 = 0;
-        let mut last_emit = std::time::Instant::now();
+            const CHUNK_SIZE: usize = 256 * 1024; // 256KB 分块
+            let mut buf = vec![0u8; CHUNK_SIZE];
+            let mut bytes_transferred: u64 = 0;
+            let mut last_emit = std::time::Instant::now();
 
-        loop {
-            let n = remote_file.read(&mut buf).await
-                .map_err(|e| AppError::Other(format!("SFTP read chunk failed: {}", e)))?;
-            if n == 0 {
-                break;
+            loop {
+                let n = remote_file.read(&mut buf).await
+                    .map_err(|e| AppError::Other(format!("SFTP read chunk failed: {}", e)))?;
+                if n == 0 {
+                    break;
+                }
+
+                local_file.write_all(&buf[..n]).await
+                    .map_err(|e| AppError::Other(format!("Local write failed: {}", e)))?;
+
+                bytes_transferred += n as u64;
+
+                // 每 200ms 发送一次进度事件，减少前端事件风暴
+                if last_emit.elapsed() >= std::time::Duration::from_millis(200) || bytes_transferred >= total_bytes {
+                    let progress = if total_bytes > 0 {
+                        bytes_transferred as f64 / total_bytes as f64
+                    } else {
+                        0.0
+                    };
+                    let _ = app_handle.emit(
+                        &format!("transfer://progress/{}", transfer_id),
+                        TransferProgress {
+                            transfer_id: transfer_id.to_string(),
+                            file_name: file_name.clone(),
+                            bytes_transferred,
+                            total_bytes,
+                            progress,
+                            speed: 0,
+                        },
+                    );
+                    last_emit = std::time::Instant::now();
+                }
             }
 
-            local_file.write_all(&buf[..n]).await
-                .map_err(|e| AppError::Other(format!("Local write failed: {}", e)))?;
+            local_file.flush().await
+                .map_err(|e| AppError::Other(format!("Local file flush failed: {}", e)))?;
 
-            bytes_transferred += n as u64;
+            Ok(())
+        }.await;
 
-            // 每 200ms 发送一次进度事件，减少前端事件风暴
-            if last_emit.elapsed() >= std::time::Duration::from_millis(200) || bytes_transferred >= total_bytes {
-                let progress = if total_bytes > 0 {
-                    bytes_transferred as f64 / total_bytes as f64
-                } else {
-                    0.0
-                };
-                let _ = app_handle.emit(
-                    &format!("transfer://progress/{}", transfer_id),
-                    TransferProgress {
-                        transfer_id: transfer_id.to_string(),
-                        file_name: file_name.clone(),
-                        bytes_transferred,
-                        total_bytes,
-                        progress,
-                        speed: 0,
-                    },
-                );
-                last_emit = std::time::Instant::now();
-            }
+        // 下载失败时清理已创建的本地文件
+        if let Err(ref _e) = download_result {
+            let _ = tokio::fs::remove_file(local_path).await;
         }
 
-        local_file.flush().await
-            .map_err(|e| AppError::Other(format!("Local file flush failed: {}", e)))?;
+        download_result?;
 
         let _ = app_handle.emit(
             &format!("transfer://complete/{}", transfer_id),

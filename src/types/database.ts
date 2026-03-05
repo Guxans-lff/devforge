@@ -64,7 +64,7 @@ export interface TriggerInfo {
 export interface DatabaseTreeNode {
   id: string
   label: string
-  type: 'database' | 'table' | 'view' | 'column' | 'folder'
+  type: 'database' | 'table' | 'view' | 'column' | 'folder' | 'procedure' | 'function' | 'trigger'
   icon?: string
   children?: DatabaseTreeNode[]
   isLoading?: boolean

@@ -75,10 +75,14 @@ export const useTransferStore = defineStore('transfer', () => {
           history.value = next.length > 100 ? next.slice(0, 100) : next
           // 触发响应式更新
           tasks.value = new Map(tasks.value)
-          // 3秒后从活动列表移除
+          // 3秒后从活动列表移除（检查状态防止删除被复用的任务）
+          const completedId = event.payload.id
           setTimeout(() => {
-            tasks.value.delete(event.payload.id)
-            tasks.value = new Map(tasks.value)
+            const current = tasks.value.get(completedId)
+            if (current && current.status === 'completed') {
+              tasks.value.delete(completedId)
+              tasks.value = new Map(tasks.value)
+            }
           }, 3000)
         }
       },

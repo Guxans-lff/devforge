@@ -76,7 +76,7 @@ const defaultShortcuts: ShortcutBinding[] = [
   { id: 'toggleFullscreen', keys: 'F11', category: 'view' },
 
   // 通用操作 (5个)
-  { id: 'commandPalette', keys: 'Ctrl+P', category: 'general' },
+  { id: 'commandPalette', keys: 'Ctrl+K', category: 'general' },
   { id: 'toggleTheme', keys: 'Ctrl+K T', category: 'general' },
   { id: 'settings', keys: 'Ctrl+,', category: 'general' },
   { id: 'help', keys: 'F1', category: 'general' },
@@ -100,7 +100,14 @@ function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      return { ...defaults, ...JSON.parse(raw) }
+      const saved = JSON.parse(raw) as Partial<AppSettings>
+      // 合并快捷键：保留用户自定义的绑定，同时补充新增的默认快捷键
+      let mergedShortcuts = defaults.shortcuts
+      if (saved.shortcuts && Array.isArray(saved.shortcuts)) {
+        const savedMap = new Map(saved.shortcuts.map(s => [s.id, s]))
+        mergedShortcuts = defaultShortcuts.map(def => savedMap.get(def.id) ?? def)
+      }
+      return { ...defaults, ...saved, shortcuts: mergedShortcuts }
     }
   } catch {
     // ignore parse errors

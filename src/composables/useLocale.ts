@@ -17,9 +17,9 @@ export function useLocale() {
     document.documentElement.lang = newLocale === 'zh-CN' ? 'zh' : 'en'
   }
 
-  function toggleLocale() {
+  async function toggleLocale() {
     const next: Locale = currentLocale.value === 'zh-CN' ? 'en' : 'zh-CN'
-    setLocale(next)
+    await setLocale(next)
   }
 
   return { currentLocale, setLocale, toggleLocale }

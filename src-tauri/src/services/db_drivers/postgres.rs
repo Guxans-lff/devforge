@@ -1,10 +1,11 @@
 use std::time::{Duration, Instant};
 
 use sqlx::postgres::{PgColumn, PgConnectOptions, PgPool, PgPoolOptions, PgRow, PgSslMode};
-use sqlx::{Column, Row, TypeInfo};
+use sqlx::{Column, Executor, Row, TypeInfo};
 
 use crate::models::query::{ColumnDef, ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo};
 use crate::utils::error::AppError;
+use super::{escape_pg_ident, validate_sql_clause};
 
 /// 取消当前连接上所有活跃查询
 pub async fn cancel_running_query(pool: &PgPool) -> Result<(), AppError> {
@@ -106,14 +107,23 @@ pub async fn execute_select(
     let elapsed = start.elapsed().as_millis() as u64;
 
     if rows.is_empty() {
+        // 空结果时通过 describe 获取列定义，确保前端能渲染空表格
+        let columns = match pool.describe(sql).await {
+            Ok(desc) => desc.columns().iter().map(|col| ColumnDef {
+                name: col.name().to_string(),
+                data_type: col.type_info().name().to_string(),
+                nullable: true,
+            }).collect(),
+            Err(_) => vec![],
+        };
         return Ok(QueryResult {
-            columns: vec![],
+            columns,
             rows: vec![],
             affected_rows: 0,
             execution_time_ms: elapsed,
             is_error: false,
             error: None,
-            total_count: None,
+            total_count: Some(0),
             truncated: false,
         });
     }
@@ -307,7 +317,7 @@ pub async fn get_create_table(
 ) -> Result<String, AppError> {
     let columns = get_columns(pool, schema, table).await?;
 
-    let mut ddl = format!("CREATE TABLE \"{}\".\"{}\" (\n", schema, table);
+    let mut ddl = format!("CREATE TABLE \"{}\".\"{}\" (\n", escape_pg_ident(schema), escape_pg_ident(table));
 
     let col_defs: Vec<String> = columns
         .iter()
@@ -434,20 +444,21 @@ pub async fn get_object_definition(
     name: &str,
     object_type: &str,
 ) -> Result<String, AppError> {
+    let escaped_schema = schema.replace('\'', "''");
+    let escaped_name = name.replace('\'', "''");
     let sql = match object_type {
         "VIEW" => format!(
-            "SELECT pg_get_viewdef('\"{}\".\"{}\"', true) as def",
-            schema, name
+            "SELECT pg_get_viewdef('\"{}\".\"{}'', true) as def",
+            escape_pg_ident(schema), escape_pg_ident(name)
         ),
         "FUNCTION" | "PROCEDURE" => {
-            // 获取函数/过程的完整定义
             format!(
                 "SELECT pg_get_functiondef(p.oid) as def
                  FROM pg_proc p
                  JOIN pg_namespace n ON p.pronamespace = n.oid
                  WHERE n.nspname = '{}' AND p.proname = '{}'
                  LIMIT 1",
-                schema, name
+                escaped_schema, escaped_name
             )
         }
         "TRIGGER" => format!(
@@ -457,7 +468,7 @@ pub async fn get_object_definition(
              JOIN pg_namespace n ON c.relnamespace = n.oid
              WHERE n.nspname = '{}' AND t.tgname = '{}'
              LIMIT 1",
-            schema, name
+            escaped_schema, escaped_name
         ),
         _ => return Err(AppError::Other(format!("Unknown object type: {}", object_type))),
     };
@@ -471,33 +482,36 @@ pub async fn get_object_definition(
     Ok(def)
 }
 
-pub fn build_table_data_sql(schema: &str, table: &str, page_size: u32, offset: u32, where_clause: Option<&str>, order_by: Option<&str>) -> String {
-    let mut sql = format!("SELECT * FROM \"{}\".\"{}\"", schema, table);
+pub fn build_table_data_sql(schema: &str, table: &str, page_size: u32, offset: u32, where_clause: Option<&str>, order_by: Option<&str>) -> Result<String, String> {
+    let mut sql = format!("SELECT * FROM \"{}\".\"{}\"", escape_pg_ident(schema), escape_pg_ident(table));
     if let Some(w) = where_clause {
         let w = w.trim();
         if !w.is_empty() {
+            validate_sql_clause(w)?;
             sql.push_str(&format!(" WHERE {}", w));
         }
     }
     if let Some(o) = order_by {
         let o = o.trim();
         if !o.is_empty() {
+            validate_sql_clause(o)?;
             sql.push_str(&format!(" ORDER BY {}", o));
         }
     }
     sql.push_str(&format!(" LIMIT {} OFFSET {}", page_size, offset));
-    sql
+    Ok(sql)
 }
 
-pub fn build_table_count_sql(schema: &str, table: &str, where_clause: Option<&str>) -> String {
-    let mut sql = format!("SELECT COUNT(*) AS cnt FROM \"{}\".\"{}\"", schema, table);
+pub fn build_table_count_sql(schema: &str, table: &str, where_clause: Option<&str>) -> Result<String, String> {
+    let mut sql = format!("SELECT COUNT(*) AS cnt FROM \"{}\".\"{}\"", escape_pg_ident(schema), escape_pg_ident(table));
     if let Some(w) = where_clause {
         let w = w.trim();
         if !w.is_empty() {
+            validate_sql_clause(w)?;
             sql.push_str(&format!(" WHERE {}", w));
         }
     }
-    sql
+    Ok(sql)
 }
 
 fn pg_value_to_json(

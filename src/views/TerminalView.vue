@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connections'
@@ -24,7 +24,8 @@ const connectionStore = useConnectionStore()
 const terminalRef = ref<InstanceType<typeof TerminalPanel>>()
 const terminalRef2 = ref<InstanceType<typeof TerminalPanel>>()
 const sftpRef = ref<InstanceType<typeof SftpSidebar>>()
-const terminalStatus = ref('connecting')
+const terminalStatus1 = ref('connecting')
+const terminalStatus2 = ref('connecting')
 const sftpVisible = ref(false)
 const snippetsVisible = ref(false)
 const splitMode = ref<'none' | 'horizontal' | 'vertical'>('none')
@@ -32,13 +33,40 @@ const activePanel = ref<1 | 2>(1)
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'connecting' | 'error'
 
-function onStatusChange(status: string) {
-  terminalStatus.value = status
+// 汇总状态：任一终端 connected 则为 connected
+const terminalStatus = computed(() => {
+  if (splitMode.value === 'none') return terminalStatus1.value
+  if (terminalStatus1.value === 'connected' || terminalStatus2.value === 'connected') return 'connected'
+  if (terminalStatus1.value === 'connecting' || terminalStatus2.value === 'connecting') return 'connecting'
+  if (terminalStatus1.value === 'error' || terminalStatus2.value === 'error') return 'error'
+  return 'disconnected'
+})
+
+function onStatusChange1(status: string) {
+  terminalStatus1.value = status
+  syncConnectionStatus()
+}
+
+function onStatusChange2(status: string) {
+  terminalStatus2.value = status
+  syncConnectionStatus()
+}
+
+function syncConnectionStatus() {
+  const status = terminalStatus.value
   const valid: ConnectionStatus[] = ['connected', 'connecting', 'error', 'disconnected']
   if (valid.includes(status as ConnectionStatus)) {
     connectionStore.updateConnectionStatus(props.connectionId, status as ConnectionStatus)
   }
 }
+
+// 分屏模式切换时清理状态
+watch(splitMode, (mode) => {
+  if (mode === 'none') {
+    activePanel.value = 1
+    terminalStatus2.value = 'disconnected'
+  }
+})
 
 onBeforeUnmount(() => {
   connectionStore.updateConnectionStatus(props.connectionId, 'disconnected')
@@ -225,7 +253,7 @@ const activeSessionInfo = computed(() => {
                 ref="terminalRef"
                 :connection-id="connectionId"
                 :connection-name="connectionName"
-                @status-change="onStatusChange"
+                @status-change="onStatusChange1"
                 @cwd-change="handleCwdChange"
               />
             </div>
@@ -240,7 +268,7 @@ const activeSessionInfo = computed(() => {
                 ref="terminalRef2"
                 :connection-id="connectionId"
                 :connection-name="connectionName"
-                @status-change="onStatusChange"
+                @status-change="onStatusChange2"
                 @cwd-change="handleCwdChange"
               />
             </div>
@@ -253,7 +281,7 @@ const activeSessionInfo = computed(() => {
               ref="terminalRef"
               :connection-id="connectionId"
               :connection-name="connectionName"
-              @status-change="onStatusChange"
+              @status-change="onStatusChange1"
               @cwd-change="handleCwdChange"
             />
           </Pane>
@@ -272,7 +300,7 @@ const activeSessionInfo = computed(() => {
           ref="terminalRef"
           :connection-id="connectionId"
           :connection-name="connectionName"
-          @status-change="onStatusChange"
+          @status-change="onStatusChange1"
           @cwd-change="handleCwdChange"
         />
       </div>

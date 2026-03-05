@@ -43,7 +43,7 @@ const fileName = computed(() => props.filePath.split(/[/\\]/).pop() ?? '')
 
 function nextSpeed() {
   const idx = speedOptions.indexOf(speed.value)
-  speed.value = speedOptions[(idx + 1) % speedOptions.length]
+  speed.value = speedOptions[(idx + 1) % speedOptions.length] ?? 1
 }
 
 const progressPercent = computed(() =>
@@ -66,9 +66,9 @@ async function loadRecording() {
     const lines = content.trim().split('\n')
     if (lines.length === 0) return
 
-    const header = JSON.parse(lines[0])
-    const width = header.width || 120
-    const height = header.height || 40
+    const header = JSON.parse(lines[0]!) as { width?: number; height?: number; timestamp?: number }
+    const width = header.width ?? 120
+    const height = header.height ?? 40
     terminalSize.value = { width, height }
 
     if (header.timestamp) {
@@ -82,14 +82,14 @@ async function loadRecording() {
     events = []
     for (let i = 1; i < lines.length; i++) {
       try {
-        const parsed = JSON.parse(lines[i])
+        const parsed = JSON.parse(lines[i]!) as [number, string, string]
         events.push({ time: parsed[0], type: parsed[1], data: parsed[2] })
       } catch {
         // 跳过无效行
       }
     }
     eventCount.value = events.length
-    totalDuration.value = events.length > 0 ? events[events.length - 1].time : 0
+    totalDuration.value = events.length > 0 ? events[events.length - 1]!.time : 0
   } catch (e) {
     console.warn('加载录制失败:', e)
   } finally {
@@ -130,8 +130,8 @@ function scheduleNext() {
     playing.value = false
     return
   }
-  const event = events[eventIndex]
-  const prevTime = eventIndex > 0 ? events[eventIndex - 1].time : 0
+  const event = events[eventIndex]!
+  const prevTime = eventIndex > 0 ? events[eventIndex - 1]!.time : 0
   const delay = ((event.time - prevTime) / speed.value) * 1000
 
   playTimer = setTimeout(() => {
@@ -151,9 +151,9 @@ function seekTo(percent: number) {
   const targetTime = (percent / 100) * totalDuration.value
   eventIndex = 0
   for (let i = 0; i < events.length; i++) {
-    if (events[i].time > targetTime) break
-    if (events[i].type === 'o') {
-      terminal?.write(events[i].data)
+    if (events[i]!.time > targetTime) break
+    if (events[i]!.type === 'o') {
+      terminal?.write(events[i]!.data)
     }
     eventIndex = i + 1
   }

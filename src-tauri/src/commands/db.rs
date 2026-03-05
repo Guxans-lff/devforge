@@ -291,7 +291,7 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
         return Err("Write denied: path must be within Documents, Downloads, or Desktop directory".to_string());
     }
 
-    tokio::fs::write(&path, content.as_bytes())
+    tokio::fs::write(&target, content.as_bytes())
         .await
         .map_err(|e| format!("Failed to write file: {}", e))
 }

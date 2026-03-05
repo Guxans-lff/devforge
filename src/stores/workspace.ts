@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { Tab, PanelState, WorkspaceSnapshot } from '@/types/workspace'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
+import { useConnectionStore } from '@/stores/connections'
 
 const WORKSPACE_SNAPSHOT_KEY = 'devforge-workspace-snapshot'
 const SNAPSHOT_VERSION = 1
@@ -12,7 +13,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     {
       id: 'welcome',
       type: 'welcome',
-      title: 'Welcome',
+      title: 'Homepage',
       closable: false,
     },
   ])
@@ -45,10 +46,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const tab = tabs.value.find((t) => t.id === tabId)
     if (!tab || !tab.closable) return
 
-    // 关闭 database tab 时清理内部工作区状态
+    // 关闭 database tab 时清理内部工作区状态并断开连接
     if (tab.type === 'database' && tab.connectionId) {
       const dbWorkspaceStore = useDatabaseWorkspaceStore()
+      const connectionStore = useConnectionStore()
       dbWorkspaceStore.cleanup(tab.connectionId)
+      connectionStore.updateConnectionStatus(tab.connectionId, 'disconnected')
+      // 异步断开数据库连接，不阻塞 UI
+      import('@/api/database').then(({ dbDisconnect }) => {
+        dbDisconnect(tab.connectionId!).catch(() => { })
+      })
     }
 
     const index = tabs.value.findIndex((t) => t.id === tabId)
@@ -148,7 +155,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       validTabs.push({
         id: 'welcome',
         type: 'welcome',
-        title: 'Welcome',
+        title: 'Homepage',
         closable: false,
       })
     }

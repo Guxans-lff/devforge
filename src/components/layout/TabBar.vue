@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useMessageCenterStore } from '@/stores/message-center'
+import { useCommandPaletteStore } from '@/stores/command-palette'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -23,6 +24,7 @@ import MessageCenter from './MessageCenter.vue'
 
 const workspace = useWorkspaceStore()
 const messageCenter = useMessageCenterStore()
+const commandPalette = useCommandPaletteStore()
 const { t } = useI18n()
 
 const iconMap: Record<TabType, typeof Database> = {
@@ -67,7 +69,7 @@ function handleMiddleClick(event: MouseEvent, tabId: string) {
                 <!-- Active indicator handled by before pseudo-element -->
 
                 <component :is="getTabIcon(tab.type)" class="h-3.5 w-3.5 shrink-0" />
-                <span class="max-w-[120px] truncate">{{ tab.title }}</span>
+                <span class="max-w-[120px] truncate">{{ tab.type === 'welcome' ? t('tab.homepage') : tab.title }}</span>
 
                 <!-- Dirty indicator -->
                 <div
@@ -102,7 +104,7 @@ function handleMiddleClick(event: MouseEvent, tabId: string) {
           <TooltipTrigger as-child>
             <button
               class="flex h-7 items-center gap-2 rounded-md bg-muted/30 px-2 text-muted-foreground/60 transition-all hover:bg-muted/50 hover:text-foreground/80 active:scale-95"
-              @click="workspace.toggleCommandPalette()"
+              @click="commandPalette.toggle()"
             >
               <Search class="h-3.5 w-3.5" />
               <div class="flex items-center gap-0.5 text-[10px] font-bold opacity-60">

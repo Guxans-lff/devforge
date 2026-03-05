@@ -271,6 +271,11 @@ async function handleCancel() {
     await dbApi.dbCancelQuery(props.connectionId)
   } catch (_e) {
     // 静默处理
+  } finally {
+    // 确保取消后重置执行状态，防止按钮永久禁用
+    store.updateTabContext(props.connectionId, props.tabId, {
+      isExecuting: false,
+    })
   }
 }
 function handleFormat() {

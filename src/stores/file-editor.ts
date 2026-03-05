@@ -165,21 +165,31 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
     const file = openFiles.value.get(id)
     if (!file || !file.isDirty) return
 
+    // 记录本次保存的内容，用于 await 后比较
+    const savedContent = file.content
+
     openFiles.value.set(id, { ...file, isSaving: true })
     openFiles.value = new Map(openFiles.value)
 
     try {
-      await sftpWriteFileContent(file.connectionId, file.remotePath, file.content)
-      openFiles.value.set(id, {
-        ...file,
-        originalContent: file.content,
-        isDirty: false,
-        isSaving: false,
-      })
-      openFiles.value = new Map(openFiles.value)
+      await sftpWriteFileContent(file.connectionId, file.remotePath, savedContent)
+      // await 后重新读取最新状态，避免覆盖用户在保存期间的编辑
+      const current = openFiles.value.get(id)
+      if (current) {
+        openFiles.value.set(id, {
+          ...current,
+          originalContent: savedContent,
+          isDirty: current.content !== savedContent,
+          isSaving: false,
+        })
+        openFiles.value = new Map(openFiles.value)
+      }
     } catch (e) {
-      openFiles.value.set(id, { ...file, isSaving: false })
-      openFiles.value = new Map(openFiles.value)
+      const current = openFiles.value.get(id)
+      if (current) {
+        openFiles.value.set(id, { ...current, isSaving: false })
+        openFiles.value = new Map(openFiles.value)
+      }
       throw e
     }
   }

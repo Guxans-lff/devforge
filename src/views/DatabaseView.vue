@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, nextTick, onErrorCaptured } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick, onErrorCaptured } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
@@ -56,11 +56,9 @@ onErrorCaptured((err) => {
   return false
 })
 
-// 当前活动的内部 Tab（onMounted 保证 workspace 已初始化，computed 使用纯读取）
+// 当前活动的内部 Tab（使用 getOrCreate 确保 workspace 始终存在，避免 computed 在 onMounted 前求值时返回 undefined）
 const workspace = computed(() => {
-  const ws = dbWorkspaceStore.getWorkspace(props.connectionId)
-  // onMounted 中已调用 getOrCreate，此处应总是有值
-  return ws!
+  return dbWorkspaceStore.getOrCreate(props.connectionId)
 })
 const activeTab = computed(() => {
   const ws = workspace.value
@@ -136,6 +134,36 @@ onMounted(async () => {
   await connectAndLoad()
 })
 
+// KeepAlive 重新激活时：检查连接状态，断开则重连并刷新
+// 注意：closeTab 通过 store 更新状态为 disconnected，但本地 isConnected ref 不会被重置
+// 因此必须同时检查 store 中的实际连接状态
+onActivated(async () => {
+  const storeState = connectionStore.connections.get(props.connectionId)
+  const storeDisconnected = !storeState || storeState.status !== 'connected'
+
+  if (storeDisconnected) {
+    // 同步本地状态，并立即清除旧缓存数据，避免用户看到上次的内容
+    isConnected.value = false
+    schemaCache.value = null
+    objectTreeRef.value?.clearTree()
+
+    // 清除所有 query tab 的旧结果
+    const ws = workspace.value
+    for (const tab of ws.tabs) {
+      if (tab.type === 'query') {
+        dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, {
+          result: null,
+          tableBrowse: undefined,
+        })
+      }
+    }
+  }
+
+  if (!isConnected.value) {
+    await connectAndLoad()
+  }
+})
+
 onBeforeUnmount(async () => {
   if (schemaCacheTimer) {
     clearTimeout(schemaCacheTimer)
@@ -157,7 +185,7 @@ async function connectAndLoad() {
     // 连接成功后，如果当前活跃 tab 是报错状态，则清除错误结果
     const ws = workspace.value
     const activeQueryTab = ws.tabs.find((t) => t.id === ws.activeTabId)
-    if (activeQueryTab?.type === 'query' && activeQueryTab.context.result?.isError) {
+    if (activeQueryTab?.type === 'query' && (activeQueryTab.context as { result?: { isError?: boolean } }).result?.isError) {
       dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, {
         result: null,
       })
@@ -194,19 +222,27 @@ function quoteIdentifier(name: string): string {
 
 function handleSelectTable(database: string, table: string) {
   const ws = workspace.value
-  const activeQueryTab = ws.tabs.find((t) => t.id === ws.activeTabId && t.type === 'query')
   const q = quoteIdentifier
   const sql = `SELECT * FROM ${q(database)}.${q(table)};`
 
-  if (activeQueryTab) {
-    dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, {
-      sql,
-      tableBrowse: { database, table, currentPage: 1, pageSize: 200 },
-    })
-    nextTick(() => {
-      queryPanelRef.value?.browseTable(database, table)
-    })
+  // 优先使用当前激活的 query tab，否则找第一个 query tab，都没有则创建新的
+  let queryTab = ws.tabs.find((t) => t.id === ws.activeTabId && t.type === 'query')
+  if (!queryTab) {
+    queryTab = ws.tabs.find((t) => t.type === 'query')
   }
+  if (!queryTab) {
+    queryTab = dbWorkspaceStore.addQueryTab(props.connectionId)
+  }
+
+  // 切换到该 tab 并更新内容
+  dbWorkspaceStore.setActiveInnerTab(props.connectionId, queryTab.id)
+  dbWorkspaceStore.updateTabContext(props.connectionId, queryTab.id, {
+    sql,
+    tableBrowse: { database, table, currentPage: 1, pageSize: 200 },
+  })
+  nextTick(() => {
+    queryPanelRef.value?.browseTable(database, table)
+  })
 }
 
 function handleSelectDatabase(database: string) {

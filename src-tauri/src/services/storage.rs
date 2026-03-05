@@ -317,17 +317,20 @@ impl Storage {
     }
 
     pub async fn delete_group(&self, id: &str) -> Result<(), AppError> {
+        let mut tx = self.pool.begin().await?;
+
         // Ungroup connections in this group
         sqlx::query("UPDATE connections SET group_id = NULL WHERE group_id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
         sqlx::query("DELETE FROM connection_groups WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
 
+        tx.commit().await?;
         Ok(())
     }
 

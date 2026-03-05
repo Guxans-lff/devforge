@@ -403,32 +403,43 @@ impl TransferManager {
         sftp: Arc<SftpSession>,
         app_handle: AppHandle,
     ) -> Result<(), String> {
-        let task = {
-            let tasks = lock_or_recover(&self.active_tasks);
-            tasks.get(id)
-                .ok_or_else(|| format!("Task not found: {}", id))?
-                .clone()
-        };
-
-        let offset = {
-            let mut state = lock_or_recover(&task.state);
-
-            // 只有暂停的任务可以恢复
-            if let TransferState::Paused { offset } = *state {
-                *state = TransferState::Running { offset };
-                offset
-            } else {
-                return Err(format!("Task {} is not paused", id));
-            }
-        };
-
         // 创建新的取消令牌
         let new_cancel_token = CancellationToken::new();
+
+        let (task_type, task_state, total_bytes, offset) = {
+            let mut tasks = lock_or_recover(&self.active_tasks);
+            let task = tasks.get(id)
+                .ok_or_else(|| format!("Task not found: {}", id))?;
+
+            let offset = {
+                let mut state = lock_or_recover(&task.state);
+                if let TransferState::Paused { offset } = *state {
+                    *state = TransferState::Running { offset };
+                    offset
+                } else {
+                    return Err(format!("Task {} is not paused", id));
+                }
+            };
+
+            let result = (task.task_type.clone(), task.state.clone(), task.total_bytes, offset);
+
+            // 替换 task 实例以更新 cancel_token，保证后续 pause_task 能取消恢复后的任务
+            let new_task = Arc::new(TransferTask {
+                id: id.to_string(),
+                task_type: task.task_type.clone(),
+                state: task.state.clone(),
+                cancel_token: new_cancel_token.clone(),
+                total_bytes: task.total_bytes,
+            });
+            tasks.insert(id.to_string(), new_task);
+
+            result
+        };
 
         // 创建进度跟踪器
         let progress_tracker = Arc::new(ProgressTracker::new(
             id.to_string(),
-            task.total_bytes,
+            total_bytes,
             Duration::from_millis(self.config.progress_emit_interval),
             Duration::from_secs(self.config.speed_window_size),
         ));
@@ -438,8 +449,6 @@ impl TransferManager {
 
         // 克隆需要的变量
         let task_id = id.to_string();
-        let task_type = task.task_type.clone();
-        let task_state = task.state.clone();
         let active_tasks = self.active_tasks.clone();
         let chunk_size = self.config.chunk_size;
 

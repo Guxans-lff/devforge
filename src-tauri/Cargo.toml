@@ -25,7 +25,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Async runtime
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "fs", "time", "sync", "process", "net"] }
 tokio-util = "0.7"
 
 # Database (SQLite for local storage, MySQL/PostgreSQL for user connections)
@@ -58,9 +58,6 @@ linked-hash-map = "0.5"
 
 # Chrono for timestamps
 chrono = { version = "0.4", features = ["serde"] }
-
-# User directories
-dirs = "5"
 
 # CSV parsing for data import
 csv = "1.3"

@@ -26,10 +26,11 @@ export async function loadLocale(locale: Locale) {
     const mod = locale === 'en'
       ? await import('./en')
       : await import('./zh-CN')
-    i18n.global.setLocaleMessage(locale, mod.default)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    i18n.global.setLocaleMessage(locale, mod.default as any)
     loadedLocales.add(locale)
   }
-  i18n.global.locale.value = locale
+  ;(i18n.global.locale as unknown as { value: string }).value = locale
   localStorage.setItem('devforge-locale', locale)
 }
 

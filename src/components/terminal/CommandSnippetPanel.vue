@@ -58,7 +58,7 @@ const filteredSnippets = computed(() => {
   )
 })
 
-const categories = computed(() => {
+const _categories = computed(() => {
   const cats = new Set(snippets.value.map((s) => s.category || 'default'))
   return Array.from(cats)
 })

@@ -133,7 +133,8 @@ impl TerminalRecorder {
 
     /// 列出所有录制文件
     pub fn list_recordings() -> Result<Vec<RecordingInfo>, String> {
-        let dir = dirs::document_dir()
+        let dir = directories::UserDirs::new()
+            .and_then(|u| u.document_dir().map(|d| d.to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("."))
             .join("DevForge")
             .join("recordings");

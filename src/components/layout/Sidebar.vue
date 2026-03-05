@@ -60,6 +60,9 @@ const pendingDeleteName = ref('')
 
 onMounted(() => {
   connectionStore.loadConnections()
+
+  // 监听来自命令面板或其他地方的新建连接请求
+  window.addEventListener('devforge:new-connection', handleNewConnection)
 })
 
 const themeIcon = computed(() => {
@@ -167,16 +170,13 @@ function handleDoubleClick(conn: { record: ConnectionRecord }) {
     <!-- Header: 搜索 + 新建 -->
     <div v-if="!isCollapsed" class="flex items-center gap-1.5 px-3 pt-3 pb-2">
       <div class="group relative flex-1">
-        <Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60 transition-colors group-focus-within:text-primary/70" />
+        <Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50 transition-colors group-focus-within:text-primary" />
         <Input
-          class="h-8 border-border/40 bg-background/40 pl-8 pr-10 text-[12px] select-text shadow-[inset_0_1px_2px_rgba(0,0,0,0.03)] focus-visible:ring-primary/30 backdrop-blur-sm transition-all hover:bg-background/60"
+          class="h-7 border-border bg-background/50 pl-8 pr-10 text-[11px] select-text shadow-none focus-visible:ring-1 focus-visible:ring-primary/40 transition-all hover:bg-background/80"
           :placeholder="t('sidebar.searchConnections')"
           :model-value="connectionStore.searchQuery"
           @update:model-value="connectionStore.setSearchQuery($event as string)"
         />
-        <div class="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 rounded border border-border/50 bg-muted/30 px-1 py-0.5 text-[9px] font-bold text-muted-foreground/40 opacity-0 transition-opacity group-hover:opacity-100">
-          <span class="text-[8px]">/</span>
-        </div>
       </div>
       <TooltipProvider :delay-duration="300">
         <Tooltip>
@@ -184,13 +184,13 @@ function handleDoubleClick(conn: { record: ConnectionRecord }) {
             <Button
               variant="outline"
               size="icon"
-              class="h-8 w-8 shrink-0 border-border/40 bg-background/40 shadow-sm transition-all hover:bg-primary hover:text-primary-foreground hover:border-primary"
+              class="h-7 w-7 shrink-0 border-border bg-background/50 shadow-none transition-all hover:bg-primary hover:text-primary-foreground hover:border-primary"
               @click="handleNewConnection"
             >
-              <Plus class="h-4 w-4" />
+              <Plus class="h-3.5 w-3.5" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom" class="text-[11px] font-medium">{{ t('welcome.newConnection') }}</TooltipContent>
+          <TooltipContent side="bottom" class="text-[10px] font-medium">{{ t('welcome.newConnection') }}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
     </div>
@@ -209,25 +209,24 @@ function handleDoubleClick(conn: { record: ConnectionRecord }) {
       </TooltipProvider>
     </div>
 
-    <Separator />
+    <Separator class="opacity-50" />
 
     <!-- 连接列表 -->
     <ScrollArea class="flex-1">
-      <div v-if="!isCollapsed" class="p-1.5">
+      <div v-if="!isCollapsed" class="p-1">
         <!-- 空状态 -->
         <div
           v-if="connectionStore.connectionList.length === 0 && !connectionStore.loading"
           class="flex flex-col items-center justify-center py-10 text-center"
         >
-          <div class="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-muted/50">
-            <Database class="h-6 w-6 text-muted-foreground/40" />
+          <div class="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-muted/30">
+            <Database class="h-5 w-5 text-muted-foreground/30" />
           </div>
-          <p class="text-xs font-medium text-muted-foreground">{{ t('sidebar.noConnections') }}</p>
-          <p class="mt-1 text-[11px] text-muted-foreground/50">{{ t('sidebar.noConnectionsHint') }}</p>
+          <p class="text-xs font-semibold text-muted-foreground/80">{{ t('sidebar.noConnections') }}</p>
           <Button
             variant="outline"
             size="sm"
-            class="mt-4 h-7 text-xs"
+            class="mt-4 h-7 px-3 text-[11px]"
             @click="handleNewConnection"
           >
             <Plus class="mr-1.5 h-3 w-3" />
@@ -239,34 +238,30 @@ function handleDoubleClick(conn: { record: ConnectionRecord }) {
         <ContextMenu v-for="conn in connectionStore.filteredConnections" :key="conn.record.id">
           <ContextMenuTrigger>
             <div
-              class="group relative flex cursor-pointer items-center gap-3 rounded-xl px-2.5 py-2.5 transition-all duration-300 hover:bg-primary/5 active:scale-[0.98]"
+              class="group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 transition-all duration-200 hover:bg-accent active:bg-accent/80 border border-transparent hover:border-border/50"
               @dblclick="handleDoubleClick(conn)"
             >
-              <!-- 侧边高亮条 -->
-              <div class="absolute left-0 top-1/2 -translate-y-1/2 h-0 w-1 rounded-r-full bg-primary opacity-0 transition-all duration-300 group-hover:h-3 group-hover:opacity-100" />
-
               <!-- 类型图标 + 状态 -->
-              <div class="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ring-1 ring-border/30 transition-all duration-300 group-hover:shadow-md group-hover:ring-primary/20" 
-                   :class="[typeBadgeColors[conn.record.type] ?? 'bg-muted text-muted-foreground', 'from-white/10 to-transparent dark:from-white/5']">
-                <component :is="typeIcons[conn.record.type] ?? Database" class="h-4 w-4 drop-shadow-sm" />
+              <div class="relative flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border/20 transition-all duration-200" 
+                   :class="[typeBadgeColors[conn.record.type] ?? 'bg-muted text-muted-foreground']">
+                <component :is="typeIcons[conn.record.type] ?? Database" class="h-3.5 w-3.5" />
                 <!-- 状态指示灯 -->
-                <div class="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-background flex items-center justify-center overflow-hidden bg-background">
-                  <div v-if="conn.status === 'connected'" class="absolute inset-0 animate-ping opacity-40 bg-emerald-500"></div>
-                  <div class="relative h-2 w-2 rounded-full shadow-inner" :class="statusColors[conn.status] ?? 'bg-muted-foreground/30'" />
+                <div class="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border border-background flex items-center justify-center overflow-hidden bg-background">
+                  <div class="relative h-1.5 w-1.5 rounded-full" :class="statusColors[conn.status] ?? 'bg-muted-foreground/30'" />
                 </div>
               </div>
 
               <!-- 信息 -->
-              <div class="min-w-0 flex-1 flex flex-col justify-center">
-                <p class="truncate text-[13px] font-bold tracking-[-0.01em] text-foreground/90 transition-colors group-hover:text-primary">{{ conn.record.name }}</p>
-                <div class="flex items-center gap-1.5">
-                   <span class="text-[9px] font-black uppercase tracking-wider text-muted-foreground/70">{{ typeLabels[conn.record.type] ?? 'DB' }}</span>
-                   <p class="truncate text-[11px] font-medium text-muted-foreground/70 font-mono tracking-tight">{{ conn.record.host }}</p>
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-[12px] font-semibold text-foreground/90 group-hover:text-primary transition-colors">{{ conn.record.name }}</p>
+                <div class="flex items-center gap-1.5 overflow-hidden">
+                   <span class="text-[8px] font-bold uppercase tracking-wider text-muted-foreground/50 shrink-0">{{ typeLabels[conn.record.type] ?? 'DB' }}</span>
+                   <p class="truncate text-[10px] text-muted-foreground/60 font-mono tracking-tight">{{ conn.record.host }}</p>
                 </div>
               </div>
 
-              <!-- 悬浮滑入的箭头 -->
-              <ArrowRight class="h-3.5 w-3.5 text-primary/40 opacity-0 -translate-x-1 transition-all duration-300 group-hover:opacity-100 group-hover:translate-x-0 shrink-0" />
+              <!-- 悬挂指示器 -->
+              <div class="h-1 w-1 rounded-full bg-primary opacity-0 group-hover:opacity-60 transition-opacity" />
             </div>
           </ContextMenuTrigger>
           <ContextMenuContent class="w-48">

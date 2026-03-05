@@ -85,5 +85,10 @@ export function startPerformanceMonitoring() {
 
   observer.observe({ entryTypes: ['resource', 'measure'] })
 
+  // 页面卸载时自动清理 observer
+  window.addEventListener('beforeunload', () => {
+    observer.disconnect()
+  })
+
   return observer
 }

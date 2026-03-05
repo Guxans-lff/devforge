@@ -94,8 +94,11 @@ watch(() => commandPaletteStore.isOpen, (isOpen) => {
     :description="t('command.searchPlaceholder')"
   >
     <CommandInput :placeholder="t('command.searchPlaceholder')" />
-    <CommandList>
-      <CommandEmpty>{{ t('command.noResults') }}</CommandEmpty>
+    <CommandList class="max-h-[450px] p-2">
+      <CommandEmpty class="py-12 text-center text-sm text-muted-foreground">
+        <XCircle class="mx-auto mb-4 h-8 w-8 opacity-20" />
+        {{ t('command.noResults') }}
+      </CommandEmpty>
 
       <!-- 最近使用 -->
       <CommandGroup
@@ -160,10 +163,9 @@ watch(() => commandPaletteStore.isOpen, (isOpen) => {
         </CommandItem>
       </CommandGroup>
 
-      <!-- 视图 -->
       <CommandGroup
         v-if="groupedCommands.view.length > 0"
-        heading="View"
+        :heading="t('command.view')"
       >
         <CommandItem
           v-for="cmd in groupedCommands.view"
@@ -176,10 +178,9 @@ watch(() => commandPaletteStore.isOpen, (isOpen) => {
         </CommandItem>
       </CommandGroup>
 
-      <!-- 设置 -->
       <CommandGroup
         v-if="groupedCommands.settings.length > 0"
-        heading="Settings"
+        :heading="t('command.settings')"
       >
         <CommandItem
           v-for="cmd in groupedCommands.settings"
@@ -192,5 +193,21 @@ watch(() => commandPaletteStore.isOpen, (isOpen) => {
         </CommandItem>
       </CommandGroup>
     </CommandList>
+
+    <!-- Spotlight Footer -->
+    <div class="flex items-center gap-5 border-t border-border/40 bg-muted/10 px-6 py-3.5 text-[10px] text-muted-foreground/50 rounded-b-xl">
+      <div class="flex items-center gap-2">
+        <kbd class="flex h-5 min-w-5 items-center justify-center rounded-md border border-border/60 bg-muted/60 px-1.5 font-sans text-[10px] font-bold text-muted-foreground/80 shadow-[0_1px_0_1px_rgba(0,0,0,0.1)]">↵</kbd>
+        <span class="font-medium tracking-wide uppercase">{{ t('common.confirm') }}</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <kbd class="flex h-5 min-w-5 items-center justify-center rounded-md border border-border/60 bg-muted/60 px-1 font-sans text-[10px] font-bold text-muted-foreground/80 shadow-[0_1px_0_1px_rgba(0,0,0,0.1)]">↑↓</kbd>
+        <span class="font-medium tracking-wide uppercase">切换</span>
+      </div>
+      <div class="ml-auto flex items-center gap-2">
+        <kbd class="flex h-5 min-w-8 items-center justify-center rounded-md border border-border/60 bg-muted/60 px-1.5 font-sans text-[9px] font-bold text-muted-foreground/80 shadow-[0_1px_0_1px_rgba(0,0,0,0.1)]">ESC</kbd>
+        <span class="font-medium tracking-wide uppercase">{{ t('common.close') }}</span>
+      </div>
+    </div>
   </CommandDialog>
 </template>

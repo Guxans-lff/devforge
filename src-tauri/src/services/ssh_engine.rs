@@ -68,9 +68,9 @@ impl SshEngine {
         cols: u32,
         rows: u32,
     ) -> Result<SessionInfo, AppError> {
-        // Clean up any existing session with this ID (短暂读锁检查)
-        if self.sessions.read().await.contains_key(session_id) {
-            self.disconnect(session_id).await?;
+        // 清理已存在的同 ID 会话（原子写锁移除，避免 read+disconnect 竞态）
+        if let Some(old_session) = self.sessions.write().await.remove(session_id) {
+            let _ = old_session.cmd_tx.send(SessionCommand::Close);
         }
 
         // 以下 SSH 握手过程不持有任何锁

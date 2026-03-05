@@ -1,4 +1,4 @@
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch } from 'vue'
 import type { ThemeDefinition } from '@/types/theme'
 import { builtinThemes, getThemeById } from '@/themes'
 
@@ -50,6 +50,18 @@ function clearCssOverrides() {
   }
 }
 
+// 模块级别注册 watch，确保只注册一次（无论多少组件调用 useTheme）
+watch(activeThemeId, (id) => {
+  localStorage.setItem(THEME_ID_KEY, id)
+  const theme = getThemeById(id)
+  if (theme) {
+    applyTheme(theme)
+  }
+})
+
+// 模块加载时立即应用当前主题
+applyTheme(activeTheme.value)
+
 export function useTheme() {
   function setColorTheme(id: string) {
     const theme = getThemeById(id)
@@ -81,18 +93,6 @@ export function useTheme() {
       setColorTheme(darkThemes[0]?.id ?? 'default-dark')
     }
   }
-
-  watch(activeThemeId, (id) => {
-    localStorage.setItem(THEME_ID_KEY, id)
-    const theme = getThemeById(id)
-    if (theme) {
-      applyTheme(theme)
-    }
-  })
-
-  onMounted(() => {
-    applyTheme(activeTheme.value)
-  })
 
   return {
     themeMode,
