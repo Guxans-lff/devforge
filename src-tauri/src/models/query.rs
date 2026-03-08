@@ -13,6 +13,24 @@ pub struct QueryResult {
     pub truncated: bool,
 }
 
+/// 流式查询数据块（通过 Tauri Channel 逐批推送给前端）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryChunk {
+    /// 批次序号（从 0 开始）
+    pub chunk_index: u32,
+    /// 列定义（仅首批包含，后续批次为空数组）
+    pub columns: Vec<ColumnDef>,
+    /// 本批数据行
+    pub rows: Vec<Vec<serde_json::Value>>,
+    /// 是否为最后一批
+    pub is_last: bool,
+    /// 总耗时（ms），仅最后一批包含
+    pub total_time_ms: Option<u64>,
+    /// 错误信息（仅在执行失败时包含）
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ColumnDef {
@@ -49,6 +67,16 @@ pub struct DatabaseInfo {
     pub collation: Option<String>,
 }
 
+/// 连接结果：包含连接状态和预加载的数据库列表
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectResult {
+    /// 连接是否成功
+    pub success: bool,
+    /// 预加载的数据库列表（连接成功后立即获取，减少一次 IPC 往返）
+    pub databases: Vec<DatabaseInfo>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewInfo {
@@ -77,4 +105,151 @@ pub struct TriggerInfo {
     pub timing: String,
     pub table_name: String,
     pub statement: Option<String>,
+}
+
+
+/// 行变更类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangeType {
+    /// 更新已有行
+    Update,
+    /// 插入新行
+    Insert,
+    /// 删除已有行
+    Delete,
+}
+
+/// 单行数据变更
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RowChange {
+    /// 变更类型
+    pub change_type: ChangeType,
+    /// 目标数据库
+    pub database: String,
+    /// 目标表名
+    pub table: String,
+    /// 主键列名和对应的原始值（用于 WHERE 条件定位行）
+    /// Update 和 Delete 时必须提供
+    pub primary_keys: Vec<KeyValue>,
+    /// 变更的列名和新值
+    /// Update 和 Insert 时使用
+    pub values: Vec<ColumnValue>,
+}
+
+/// 主键列名-值对
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyValue {
+    pub column: String,
+    pub value: serde_json::Value,
+}
+
+/// 列名-新值对
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnValue {
+    pub column: String,
+    pub value: serde_json::Value,
+}
+
+/// 批量变更执行结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyChangesResult {
+    /// 是否全部成功
+    pub success: bool,
+    /// 受影响的总行数
+    pub affected_rows: u64,
+    /// 生成的 SQL 语句列表（用于审计）
+    pub generated_sql: Vec<String>,
+    /// 错误信息（失败时）
+    pub error: Option<String>,
+}
+
+// ===== 性能监控相关结构体 =====
+
+/// 服务器状态指标
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerStatus {
+    /// 每秒查询数
+    pub qps: f64,
+    /// 每秒事务数
+    pub tps: f64,
+    /// 活跃连接数
+    pub active_connections: u64,
+    /// 总连接数
+    pub total_connections: u64,
+    /// 缓冲池使用率（百分比）
+    pub buffer_pool_usage: f64,
+    /// 慢查询数
+    pub slow_queries: u64,
+    /// 服务器运行时间（秒）
+    pub uptime: u64,
+    /// 字节发送量
+    pub bytes_sent: u64,
+    /// 字节接收量
+    pub bytes_received: u64,
+    /// 原始状态变量（用于前端自定义展示）
+    pub raw_status: Vec<ServerVariable>,
+}
+
+/// 进程信息（SHOW PROCESSLIST 结果）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProcessInfo {
+    pub id: u64,
+    pub user: String,
+    pub host: String,
+    pub db: Option<String>,
+    pub command: String,
+    pub time: u64,
+    pub state: Option<String>,
+    pub info: Option<String>,
+}
+
+/// 服务器变量
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerVariable {
+    pub name: String,
+    pub value: String,
+}
+
+// ===== 用户权限管理相关结构体 =====
+
+/// MySQL 用户信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MysqlUser {
+    pub user: String,
+    pub host: String,
+    pub authentication_string: Option<String>,
+    pub plugin: Option<String>,
+    pub account_locked: Option<String>,
+    pub password_expired: Option<String>,
+}
+
+/// 创建用户请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateUserRequest {
+    pub username: String,
+    pub host: String,
+    pub password: String,
+    pub plugin: Option<String>,
+    /// 密码过期天数，None 表示不设置过期策略
+    pub password_expire_days: Option<u32>,
+}
+
+/// DDL 脚本生成选项
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptOptions {
+    /// 是否在 CREATE 语句中包含 IF NOT EXISTS
+    pub include_if_not_exists: bool,
+    /// 是否在 DROP 语句中包含 IF EXISTS
+    pub include_if_exists: bool,
 }

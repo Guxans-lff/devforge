@@ -234,6 +234,32 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     addInnerTab(connectionId, tab)
   }
 
+  /** 打开性能监控仪表盘标签页 */
+  function openPerformance(connectionId: string): void {
+    const tabId = `${connectionId}-performance`
+    const tab: InnerTab = {
+      id: tabId,
+      type: 'performance',
+      title: '性能监控',
+      closable: true,
+      context: { type: 'performance', activeSubTab: 'dashboard' },
+    }
+    addInnerTab(connectionId, tab)
+  }
+
+  /** 打开用户权限管理标签页 */
+  function openUserManagement(connectionId: string): void {
+    const tabId = `${connectionId}-user-management`
+    const tab: InnerTab = {
+      id: tabId,
+      type: 'user-management',
+      title: '用户管理',
+      closable: true,
+      context: { type: 'user-management' },
+    }
+    addInnerTab(connectionId, tab)
+  }
+
   return {
     workspaces,
     getOrCreate,
@@ -251,5 +277,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     openImport,
     openTableData,
     openSchemaCompare,
+    openPerformance,
+    openUserManagement,
   }
 })

@@ -80,7 +80,7 @@ async function browsePrivateKey() {
     <section class="space-y-4">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.networkLayer') || 'Network Protocol' }}</h3>
+        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.networkLayer') || t('connection.protocol') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
@@ -92,7 +92,7 @@ async function browsePrivateKey() {
               {{ t('connection.host') }}
               <span class="text-destructive font-black">*</span>
             </Label>
-            <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">Target Node</span>
+            <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.targetNode') }}</span>
           </div>
           <div class="relative group">
             <Globe class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/20 group-focus-within:text-primary transition-colors" />
@@ -130,7 +130,7 @@ async function browsePrivateKey() {
     <section class="space-y-4">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.authLayer') || 'Access Credentials' }}</h3>
+        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.authLayer') || t('connection.accessCredentials') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
@@ -142,7 +142,7 @@ async function browsePrivateKey() {
               {{ t('connection.username') }}
               <span class="text-destructive font-black">*</span>
             </Label>
-            <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">Login ID</span>
+            <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.loginId') }}</span>
           </div>
           <div class="relative group">
             <User class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/20 group-focus-within:text-primary transition-colors" />
@@ -252,14 +252,14 @@ async function browsePrivateKey() {
     <section class="space-y-4">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.targetLayer') || 'Target Environment' }}</h3>
+        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.targetLayer') || t('connection.targetEnvironment') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
       <div class="flex items-center justify-between p-3 bg-muted/10 border border-border/60 rounded-lg">
         <div class="space-y-0.5">
           <Label class="text-xs font-bold">{{ t('connection.proxyJump') }}</Label>
-          <p class="text-[10px] text-muted-foreground/60">{{ t('connection.proxyJumpDescription') || 'Connect through another SSH host' }}</p>
+          <p class="text-[10px] text-muted-foreground/60">{{ t('connection.proxyJumpDescription') || t('connection.proxyJumpHint') }}</p>
         </div>
         <Switch
           :checked="localValue.proxyJumpEnabled"

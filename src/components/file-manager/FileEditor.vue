@@ -139,6 +139,21 @@ watch(
   },
 )
 
+// 监听编辑器设置变化，实时同步到已打开的编辑器实例
+watch(
+  () => settingsStore.settings,
+  (s) => {
+    if (!editor) return
+    editor.updateOptions({
+      fontSize: s.editorFontSize,
+      tabSize: s.editorTabSize,
+      wordWrap: s.editorWordWrap ? 'on' : 'off',
+      minimap: { enabled: s.editorMinimap },
+    })
+  },
+  { deep: true },
+)
+
 async function handleSave() {
   const file = activeFile.value
   if (!file || !file.isDirty) return

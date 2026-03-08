@@ -8,6 +8,7 @@ const props = withDefaults(
     language?: string
     readOnly?: boolean
     schema?: SchemaCache | null
+    isLoadingSchema?: boolean
     driver?: string
   }>(),
   {
@@ -15,6 +16,7 @@ const props = withDefaults(
     language: 'sql',
     readOnly: false,
     schema: null,
+    isLoadingSchema: false,
     driver: undefined,
   },
 )
@@ -23,6 +25,8 @@ const emit = defineEmits<{
   'update:modelValue': [value: string]
   execute: [sql: string]
   executeSelected: [sql: string]
+  executeAll: [sql: string]
+  save: []
 }>()
 
 // 延迟加载 Monaco Editor
@@ -47,6 +51,16 @@ function handleExecute(sql: string) {
 
 function handleExecuteSelected(sql: string) {
   emit('executeSelected', sql)
+}
+
+/** 透传执行全部语句事件 */
+function handleExecuteAll(sql: string) {
+  emit('executeAll', sql)
+}
+
+/** 透传保存 SQL 片段事件 */
+function handleSave() {
+  emit('save')
 }
 
 // 透传 SqlEditor 暴露的方法
@@ -90,10 +104,13 @@ defineExpose({ getSelectedText, focus, insertText, formatDocument })
       :language="language"
       :read-only="readOnly"
       :schema="schema"
+      :is-loading-schema="isLoadingSchema"
       :driver="driver"
       @update:model-value="handleUpdate"
       @execute="handleExecute"
       @execute-selected="handleExecuteSelected"
+      @execute-all="handleExecuteAll"
+      @save="handleSave"
     />
   </div>
 </template>

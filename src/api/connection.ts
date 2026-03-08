@@ -22,6 +22,16 @@ export interface ConnectionGroupRecord {
   parentId: string | null
 }
 
+/** 从 configJson 中解析收藏状态 */
+export function parseIsFavorite(configJson: string): boolean {
+  try {
+    const config = JSON.parse(configJson)
+    return config.isFavorite === true
+  } catch {
+    return false
+  }
+}
+
 export interface CreateConnectionParams {
   name: string
   type: string
@@ -118,6 +128,23 @@ export function saveCredential(id: string, password: string): Promise<boolean> {
 
 export function deleteCredential(id: string): Promise<boolean> {
   return invoke('delete_credential', { id })
+}
+
+// --- 分组与收藏管理 ---
+
+/** 移动连接到指定分组（null 表示移到根级） */
+export function moveConnection(connectionId: string, targetGroupId: string | null): Promise<boolean> {
+  return invoke('move_connection', { connectionId, targetGroupId })
+}
+
+/** 切换连接的收藏状态，返回切换后的状态 */
+export function toggleFavorite(connectionId: string): Promise<boolean> {
+  return invoke('toggle_favorite', { connectionId })
+}
+
+/** 更新分组信息（名称、父级分组） */
+export function updateGroup(groupId: string, name: string, parentId?: string | null): Promise<ConnectionGroupRecord> {
+  return invoke('update_group', { groupId, name, parentId: parentId ?? null })
 }
 
 // --- App ---

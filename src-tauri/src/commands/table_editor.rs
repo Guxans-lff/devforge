@@ -26,7 +26,7 @@ pub async fn execute_ddl(
     connection_id: String,
     sql: String,
 ) -> Result<bool, String> {
-    engine.execute_query(&connection_id, &sql)
+    engine.execute_query(&connection_id, &sql, None)
         .await
         .map_err(|e| e.to_string())?;
     Ok(true)

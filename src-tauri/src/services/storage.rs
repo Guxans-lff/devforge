@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use chrono::Utc;
 use directories::ProjectDirs;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
@@ -331,6 +332,137 @@ impl Storage {
             .await?;
 
         tx.commit().await?;
+        Ok(())
+    }
+
+    /// 获取指定分组信息
+    pub async fn get_group(&self, id: &str) -> Result<ConnectionGroup, AppError> {
+        let row = sqlx::query(
+            "SELECT id, name, sort_order, parent_id FROM connection_groups WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| AppError::Other(format!("分组不存在: {}", id)))?;
+
+        Ok(ConnectionGroup {
+            id: row.get("id"),
+            name: row.get("name"),
+            sort_order: row.get("sort_order"),
+            parent_id: row.get("parent_id"),
+        })
+    }
+
+    /// 计算指定分组的嵌套深度（从该分组向上追溯到根级）
+    /// 返回值：根级分组深度为 1，子分组深度递增
+    pub async fn get_group_depth(&self, group_id: &str) -> Result<u32, AppError> {
+        let mut depth = 1u32;
+        let mut current_id = group_id.to_string();
+
+        loop {
+            let row = sqlx::query(
+                "SELECT parent_id FROM connection_groups WHERE id = ?",
+            )
+            .bind(&current_id)
+            .fetch_optional(&self.pool)
+            .await?;
+
+            match row {
+                Some(r) => {
+                    let parent_id: Option<String> = r.get("parent_id");
+                    match parent_id {
+                        Some(pid) if !pid.is_empty() => {
+                            depth += 1;
+                            current_id = pid;
+                        }
+                        _ => break,
+                    }
+                }
+                None => break,
+            }
+        }
+
+        Ok(depth)
+    }
+
+    /// 计算指定分组的最大子树深度（向下递归）
+    /// 返回值：无子分组时为 0，有子分组时返回最深子树层数
+    /// 注意：async fn 不支持直接递归，需要使用 Box::pin 包装
+    pub fn get_max_children_depth<'a>(
+        &'a self,
+        group_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32, AppError>> + Send + 'a>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id FROM connection_groups WHERE parent_id = ?",
+            )
+            .bind(group_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+            if rows.is_empty() {
+                return Ok(0);
+            }
+
+            let mut max_depth = 0u32;
+            for row in &rows {
+                let child_id: String = row.get("id");
+                let child_depth = self.get_max_children_depth(&child_id).await?;
+                max_depth = max_depth.max(child_depth + 1);
+            }
+
+            Ok(max_depth)
+        })
+    }
+
+    /// 检查 target_id 是否是 group_id 的后代（防止循环引用）
+    /// 注意：async fn 不支持直接递归，需要使用 Box::pin 包装
+    pub fn is_descendant_of<'a>(
+        &'a self,
+        group_id: &'a str,
+        target_id: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, AppError>> + Send + 'a>> {
+        Box::pin(async move {
+            let rows = sqlx::query(
+                "SELECT id FROM connection_groups WHERE parent_id = ?",
+            )
+            .bind(group_id)
+            .fetch_all(&self.pool)
+            .await?;
+
+            for row in &rows {
+                let child_id: String = row.get("id");
+                if child_id == target_id {
+                    return Ok(true);
+                }
+                if self.is_descendant_of(&child_id, target_id).await? {
+                    return Ok(true);
+                }
+            }
+
+            Ok(false)
+        })
+    }
+
+    /// 更新连接的 group_id（移动连接到指定分组）
+    pub async fn move_connection_to_group(
+        &self,
+        connection_id: &str,
+        group_id: Option<&str>,
+    ) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE connections SET group_id = ?, updated_at = ? WHERE id = ?",
+        )
+        .bind(group_id)
+        .bind(Utc::now().timestamp_millis())
+        .bind(connection_id)
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::ConnectionNotFound(connection_id.to_string()));
+        }
+
         Ok(())
     }
 

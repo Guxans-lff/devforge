@@ -1,6 +1,7 @@
 use std::time::{Duration, Instant};
 
-use sqlx::postgres::{PgColumn, PgConnectOptions, PgPool, PgPoolOptions, PgRow, PgSslMode};
+use sqlx::postgres::{PgColumn, PgConnectOptions, PgConnection, PgPool, PgPoolOptions, PgRow, PgSslMode};
+use sqlx::pool::PoolConnection;
 use sqlx::{Column, Executor, Row, TypeInfo};
 
 use crate::models::query::{ColumnDef, ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo};
@@ -140,7 +141,7 @@ pub async fn execute_select(
 
     let data_rows: Vec<Vec<serde_json::Value>> = rows
         .iter()
-        .map(|row| {
+        .map(|row: &PgRow| {
             row.columns()
                 .iter()
                 .enumerate()
@@ -168,6 +169,211 @@ pub async fn execute_non_select(
 ) -> Result<QueryResult, AppError> {
     let result = sqlx::query(sql)
         .execute(pool)
+        .await
+        .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?;
+
+    let elapsed = start.elapsed().as_millis() as u64;
+
+    Ok(QueryResult {
+        columns: vec![],
+        rows: vec![],
+        affected_rows: result.rows_affected(),
+        execution_time_ms: elapsed,
+        is_error: false,
+        error: None,
+        total_count: None,
+        truncated: false,
+    })
+}
+
+/// 在指定 schema 上下文中执行 SELECT 查询
+///
+/// 关键修复：接收 owned PgPool（内部是 Arc，clone 廉价），
+/// 使整个函数的 Future 满足 Send + 'static，可安全用于 tokio::spawn。
+pub async fn execute_select_in_database(
+    pool: PgPool,
+    database: String,
+    sql: String,
+    start: Instant,
+) -> Result<QueryResult, AppError> {
+    let mut conn = pool.acquire().await.map_err(AppError::Database)?;
+
+    // SET search_path 走 raw_sql 文本协议
+    let set_sql = format!("SET search_path TO \"{}\"", database.replace('"', "\"\""));
+    {
+        let c: &mut sqlx::PgConnection = &mut *conn;
+        sqlx::raw_sql(&set_sql).execute(&mut *c).await.map_err(|e| {
+            AppError::Other(format!("切换数据库失败: {}", e))
+        })?;
+    }
+
+    let rows: Vec<PgRow> = {
+        let c: &mut PgConnection = &mut *conn;
+        sqlx::raw_sql(&sql)
+            .fetch_all(c)
+            .await
+            .map_err(|e| AppError::Other(format!("Query failed: {}", e)))?
+    };
+
+    let elapsed = start.elapsed().as_millis() as u64;
+
+    if rows.is_empty() {
+        return Ok(QueryResult {
+            columns: vec![],
+            rows: vec![],
+            affected_rows: 0,
+            execution_time_ms: elapsed,
+            is_error: false,
+            error: None,
+            total_count: Some(0),
+            truncated: false,
+        });
+    }
+
+    let columns: Vec<ColumnDef> = rows[0]
+        .columns()
+        .iter()
+        .map(|col: &PgColumn| ColumnDef {
+            name: col.name().to_string(),
+            data_type: col.type_info().name().to_string(),
+            nullable: true,
+        })
+        .collect();
+
+    let data_rows: Vec<Vec<serde_json::Value>> = rows
+        .iter()
+        .map(|row: &PgRow| {
+            row.columns()
+                .iter()
+                .enumerate()
+                .map(|(i, col)| pg_value_to_json(row, i, col.type_info().name()))
+                .collect()
+        })
+        .collect();
+
+    Ok(QueryResult {
+        columns,
+        rows: data_rows,
+        affected_rows: 0,
+        execution_time_ms: elapsed,
+        is_error: false,
+        error: None,
+        total_count: None,
+        truncated: false,
+    })
+}
+
+/// 在指定 schema 上下文中执行非 SELECT 语句
+///
+/// 接收 owned PgPool，使 Future 满足 Send + 'static。
+/// 完全自包含：acquire + SET search_path + execute 全在一个函数体内完成。
+pub async fn execute_non_select_in_database(
+    pool: PgPool,
+    database: String,
+    sql: String,
+    start: Instant,
+) -> Result<QueryResult, AppError> {
+    let mut conn = pool.acquire().await.map_err(AppError::Database)?;
+
+    // SET search_path 走 Executor::execute 文本协议
+    let set_sql = format!("SET search_path TO \"{}\"", database.replace('"', "\"\""));
+    conn.execute(set_sql.as_str())
+        .await
+        .map_err(|e| AppError::Other(format!("切换数据库失败: {}", e)))?;
+
+    let result: sqlx::postgres::PgQueryResult = {
+        let c: &mut PgConnection = &mut *conn;
+        sqlx::raw_sql(&sql)
+            .execute(c)
+            .await
+            .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?
+    };
+
+    let elapsed = start.elapsed().as_millis() as u64;
+
+    Ok(QueryResult {
+        columns: vec![],
+        rows: vec![],
+        affected_rows: result.rows_affected(),
+        execution_time_ms: elapsed,
+        is_error: false,
+        error: None,
+        total_count: None,
+        truncated: false,
+    })
+}
+
+/// 在专用连接上执行 SELECT 查询（用于事务内操作）
+///
+/// 与 execute_select 逻辑相同，但使用 PoolConnection 而非连接池
+pub async fn execute_select_on_conn(
+    conn: &mut PoolConnection<sqlx::Postgres>,
+    sql: &str,
+    start: Instant,
+) -> Result<QueryResult, AppError> {
+    let rows: Vec<PgRow> = sqlx::query(sql)
+        .fetch_all(&mut **conn)
+        .await
+        .map_err(|e| AppError::Other(format!("Query failed: {}", e)))?;
+
+    let elapsed = start.elapsed().as_millis() as u64;
+
+    if rows.is_empty() {
+        return Ok(QueryResult {
+            columns: vec![],
+            rows: vec![],
+            affected_rows: 0,
+            execution_time_ms: elapsed,
+            is_error: false,
+            error: None,
+            total_count: Some(0),
+            truncated: false,
+        });
+    }
+
+    let columns: Vec<ColumnDef> = rows[0]
+        .columns()
+        .iter()
+        .map(|col: &PgColumn| ColumnDef {
+            name: col.name().to_string(),
+            data_type: col.type_info().name().to_string(),
+            nullable: true,
+        })
+        .collect();
+
+    let data_rows: Vec<Vec<serde_json::Value>> = rows
+        .iter()
+        .map(|row: &PgRow| {
+            row.columns()
+                .iter()
+                .enumerate()
+                .map(|(i, col)| pg_value_to_json(row, i, col.type_info().name()))
+                .collect()
+        })
+        .collect();
+
+    Ok(QueryResult {
+        columns,
+        rows: data_rows,
+        affected_rows: 0,
+        execution_time_ms: elapsed,
+        is_error: false,
+        error: None,
+        total_count: None,
+        truncated: false,
+    })
+}
+
+/// 在专用连接上执行非 SELECT 语句（用于事务内操作）
+///
+/// 与 execute_non_select 逻辑相同，但使用 PoolConnection 而非连接池
+pub async fn execute_non_select_on_conn(
+    conn: &mut PoolConnection<sqlx::Postgres>,
+    sql: &str,
+    start: Instant,
+) -> Result<QueryResult, AppError> {
+    let result = sqlx::query(sql)
+        .execute(&mut **conn)
         .await
         .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?;
 
@@ -235,7 +441,7 @@ pub async fn get_tables(
 
     let tables = rows
         .iter()
-        .map(|row| {
+        .map(|row: &PgRow| {
             let raw_type: String = row.try_get("table_type").unwrap_or_default();
             TableInfo {
                 name: row.try_get::<String, _>("name").unwrap_or_default(),
@@ -292,7 +498,7 @@ pub async fn get_columns(
 
     let columns = rows
         .iter()
-        .map(|row| {
+        .map(|row: &PgRow| {
             let nullable_str: String = row.try_get("nullable").unwrap_or_default();
             ColumnInfo {
                 name: row.try_get::<String, _>("name").unwrap_or_default(),
@@ -315,7 +521,7 @@ pub async fn get_create_table(
     schema: &str,
     table: &str,
 ) -> Result<String, AppError> {
-    let columns = get_columns(pool, schema, table).await?;
+    let columns: Vec<ColumnInfo> = get_columns(pool, schema, table).await?;
 
     let mut ddl = format!("CREATE TABLE \"{}\".\"{}\" (\n", escape_pg_ident(schema), escape_pg_ident(table));
 

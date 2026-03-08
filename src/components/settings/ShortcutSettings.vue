@@ -11,16 +11,91 @@ import { RotateCcw } from 'lucide-vue-next'
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
-// Map shortcut IDs to i18n keys
+// 可自定义快捷键的 ID 到 i18n key 的映射（完整覆盖所有快捷键）
 const shortcutLabels: Record<string, string> = {
+  // 连接管理
   newConnection: 'shortcutNewConnection',
+  duplicateConnection: 'shortcutDuplicateConnection',
+  editConnection: 'shortcutEditConnection',
+  disconnectConnection: 'shortcutDisconnectConnection',
+  reconnectConnection: 'shortcutReconnectConnection',
+  refreshObjectTree: 'shortcutRefreshObjectTree',
+  testConnection: 'shortcutTestConnection',
+  connectionInfo: 'shortcutConnectionInfo',
+  // 标签页管理
   newTab: 'shortcutNewTab',
   closeTab: 'shortcutCloseTab',
   nextTab: 'shortcutNextTab',
-  settings: 'shortcutSettings',
+  prevTab: 'shortcutPrevTab',
+  closeAllTabs: 'shortcutCloseAllTabs',
+  reopenTab: 'shortcutReopenTab',
+  switchToTab1: 'shortcutSwitchToTab1',
+  // 编辑器操作
+  executeQuery: 'shortcutExecuteQuery',
+  executeCurrentLine: 'shortcutExecuteCurrentLine',
+  explainQuery: 'shortcutExplainQuery',
+  commentLine: 'shortcutCommentLine',
+  formatSQL: 'shortcutFormatSQL',
+  triggerAutocomplete: 'shortcutTriggerAutocomplete',
+  saveFile: 'shortcutSaveFile',
+  find: 'shortcutFind',
+  replace: 'shortcutReplace',
+  gotoLine: 'shortcutGotoLine',
+  // 视图控制
   toggleSidebar: 'shortcutToggleSidebar',
   toggleBottomPanel: 'shortcutToggleBottomPanel',
+  focusObjectTree: 'shortcutFocusObjectTree',
+  focusEditor: 'shortcutFocusEditor',
+  toggleMessageCenter: 'shortcutToggleMessageCenter',
+  toggleFullscreen: 'shortcutToggleFullscreen',
+  // 通用操作
+  commandPalette: 'shortcutCommandPalette',
+  toggleTheme: 'shortcutToggleTheme',
+  settings: 'shortcutSettings',
+  help: 'shortcutHelp',
+  quit: 'shortcutQuit',
 }
+
+/** 快捷键参考分组定义（只读展示） */
+interface ShortcutRefItem {
+  keys: string
+  descKey: string
+}
+
+interface ShortcutRefGroup {
+  titleKey: string
+  items: ShortcutRefItem[]
+}
+
+const shortcutRefGroups: ShortcutRefGroup[] = [
+  {
+    titleKey: 'settings.shortcutRefSqlEditor',
+    items: [
+      { keys: 'Ctrl+Enter', descKey: 'settings.shortcutRefExecCurrent' },
+      { keys: 'Ctrl+Shift+Enter', descKey: 'settings.shortcutRefExecAll' },
+      { keys: 'F5', descKey: 'settings.shortcutRefExecCurrent' },
+      { keys: 'Ctrl+Shift+F', descKey: 'settings.shortcutRefFormatSql' },
+      { keys: 'Shift+Alt+F', descKey: 'settings.shortcutRefFormatSql' },
+      { keys: 'Ctrl+S', descKey: 'settings.shortcutRefSaveSnippet' },
+    ],
+  },
+  {
+    titleKey: 'settings.shortcutRefGlobal',
+    items: [
+      { keys: 'Ctrl+T', descKey: 'settings.shortcutRefNewTab' },
+      { keys: 'Ctrl+W', descKey: 'settings.shortcutRefCloseTab' },
+      { keys: 'Ctrl+Tab', descKey: 'settings.shortcutRefSwitchTab' },
+    ],
+  },
+  {
+    titleKey: 'settings.shortcutRefDataGrid',
+    items: [
+      { keys: 'Ctrl+C', descKey: 'settings.shortcutRefCopy' },
+      { keys: 'Ctrl+F', descKey: 'settings.shortcutRefSearch' },
+      { keys: 'Ctrl+G', descKey: 'settings.shortcutRefGotoRow' },
+    ],
+  },
+]
 
 const editingId = ref<string | null>(null)
 const conflictId = ref<string | null>(null)
@@ -116,6 +191,30 @@ function handleKeyCapture(e: KeyboardEvent) {
         <RotateCcw class="h-3 w-3" />
         {{ t('settings.resetShortcuts') }}
       </Button>
+    </div>
+
+    <!-- 快捷键参考列表（只读） -->
+    <Separator />
+    <div class="pt-2">
+      <Label class="text-base font-bold tracking-tight">{{ t('settings.shortcutRefTitle') }}</Label>
+      <p class="text-xs text-muted-foreground/60 mt-1">{{ t('settings.shortcutRefDesc') }}</p>
+    </div>
+
+    <div v-for="group in shortcutRefGroups" :key="group.titleKey" class="space-y-2">
+      <Label class="text-sm font-semibold text-muted-foreground">{{ t(group.titleKey) }}</Label>
+      <div class="rounded-xl border border-border/20 bg-muted/10 overflow-hidden">
+        <div
+          v-for="(item, idx) in group.items"
+          :key="item.keys"
+          class="flex items-center justify-between px-4 py-2.5"
+          :class="{ 'border-t border-border/10': idx > 0 }"
+        >
+          <span class="text-sm text-foreground/80">{{ t(item.descKey) }}</span>
+          <Badge variant="outline" class="font-mono text-xs select-none pointer-events-none">
+            {{ item.keys }}
+          </Badge>
+        </div>
+      </div>
     </div>
   </div>
 </template>

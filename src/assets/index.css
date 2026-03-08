@@ -188,23 +188,38 @@
     background: oklch(1 0 0 / 15%);
   }
 
-  /* 表格结果区域 - 可见滚动条 */
-  .qr-scroll-area::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
+}
 
-  .qr-scroll-area::-webkit-scrollbar-track {
-    background: transparent;
-  }
+/* ========= 表格滚动条（独立于 @layer 以确保最高优先级） ========= */
+.qr-scroll-area::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
 
-  .qr-scroll-area::-webkit-scrollbar-thumb {
-    @apply bg-muted-foreground/20 rounded-full;
-  }
+.qr-scroll-area::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.04);
+}
 
-  .qr-scroll-area::-webkit-scrollbar-thumb:hover {
-    @apply bg-muted-foreground/40;
-  }
+.qr-scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 4px;
+}
+
+.qr-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.dark .qr-scroll-area::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.dark .qr-scroll-area::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 4px;
+}
+
+.dark .qr-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.4);
 }
 
 @layer utilities {
@@ -226,6 +241,64 @@
 
   .glass-sidebar {
     @apply bg-sidebar border-r border-border/50;
+  }
+}
+
+@layer utilities {
+  .industrial-grid {
+    background-image: radial-gradient(circle, currentColor 1px, transparent 1px);
+    background-size: 16px 16px;
+  }
+
+  .noise-texture {
+    position: relative;
+  }
+
+  .noise-texture::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0.03;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    z-index: 10;
+  }
+
+  .pulse-ready {
+    animation: pulse-ready 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes pulse-ready {
+
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+    }
+
+    50% {
+      opacity: 0.5;
+      transform: scale(0.9);
+    }
+  }
+
+  /* Custom Scrollbar for Pro-Tech */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border-radius: 10px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: var(--muted-foreground);
   }
 }
 

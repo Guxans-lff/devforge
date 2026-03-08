@@ -35,4 +35,15 @@ impl DriverPool {
             DriverPool::Postgres(pool) => pool.close().await,
         }
     }
+
+    /// 将内部 pool clone 为 owned 值，避免引用跨越 await 点
+    ///
+    /// 用于 tokio::spawn 场景：在 spawn 之前调用此方法，
+    /// 将 owned pool 移入 async block，使 Future 满足 Send + 'static。
+    pub fn clone_inner_pools(&self) -> (Option<MySqlPool>, Option<PgPool>) {
+        match self {
+            DriverPool::MySql(p) => (Some(p.clone()), None),
+            DriverPool::Postgres(p) => (None, Some(p.clone())),
+        }
+    }
 }

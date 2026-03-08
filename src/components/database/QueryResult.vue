@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, watch, ref, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useVirtualizer } from '@tanstack/vue-virtual'
@@ -9,7 +9,7 @@ import {
   createColumnHelper,
   FlexRender,
 } from '@tanstack/vue-table'
-import type { ColumnDef as TanstackColumnDef, SortingState } from '@tanstack/vue-table'
+import type { ColumnDef as TanstackColumnDef, SortingState, ColumnResizeMode } from '@tanstack/vue-table'
 import {
   ArrowUpDown,
   ArrowUp,
@@ -33,14 +33,17 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { writeTextFile, dbExecuteQuery } from '@/api/database'
 import { formatData, getFilters, type ExportFormat } from '@/utils/exportData'
 import { useToast } from '@/composables/useToast'
+import { useAdaptiveOverscan } from '@/composables/useAdaptiveOverscan'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import ExportDialog from '@/components/database/ExportDialog.vue'
 
 const props = defineProps<{
   result: QueryResultType | null
@@ -74,9 +77,10 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const sorting = ref<SortingState>([])
 const toast = useToast()
-const CHUNK_SIZE = 100
+const CHUNK_SIZE = 200
 const visibleCount = ref(CHUNK_SIZE)
 const selectedRowIndex = ref<number | null>(null)
+const columnResizeMode = ref<ColumnResizeMode>('onChange')
 
 function handleCellClick(value: unknown) {
   const text = value === null || value === undefined ? 'NULL' : String(value)
@@ -91,6 +95,25 @@ type RowData = Record<string, unknown> & { __originalIndex: number }
 
 // === 是否可编辑（需要 connectionId + database + tableName） ===
 const editable = computed(() => !!props.connectionId && !!props.database && !!props.tableName)
+
+/**
+ * 判断当前错误是否为连接类错误（网络/认证/权限）
+ * 连接类错误显示网络排查建议，SQL 执行错误显示语法/逻辑排查建议
+ */
+const isConnectionError = computed(() => {
+  const err = props.result?.error?.toLowerCase() ?? ''
+  // 连接类错误关键词匹配
+  const connectionKeywords = [
+    'connection refused', 'connection reset', 'connection timed out',
+    'can\'t connect', 'cannot connect', 'unable to connect',
+    'broken pipe', 'network', 'timeout', 'timed out',
+    'access denied', 'authentication', 'login failed',
+    'host is not allowed', 'too many connections',
+    'gone away', 'lost connection', 'server has gone away',
+    'ssl', 'handshake',
+  ]
+  return connectionKeywords.some(kw => err.includes(kw))
+})
 
 // === 列过滤 ===
 const showFilters = ref(false)
@@ -258,6 +281,26 @@ async function saveEdit() {
 const deleteConfirmOpen = ref(false)
 const pendingDeleteIndex = ref<number | null>(null)
 
+// === 多格式导出对话框 ===
+const exportDialogOpen = ref(false)
+
+/** 构建导出数据来源（用于 ExportDialog） */
+const exportSource = computed(() => {
+  if (props.database && props.tableName) {
+    return {
+      type: 'table' as const,
+      database: props.database,
+      table: props.tableName,
+    }
+  }
+  // 查询结果导出：使用空 SQL（后端不需要重新执行）
+  return {
+    type: 'table' as const,
+    database: props.database ?? '',
+    table: props.tableName ?? 'exported_table',
+  }
+})
+
 function requestDeleteRow(displayIndex: number) {
   pendingDeleteIndex.value = displayIndex
   deleteConfirmOpen.value = true
@@ -405,6 +448,7 @@ const table = useVueTable({
   onSortingChange: (updater) => {
     sorting.value = typeof updater === 'function' ? updater(sorting.value) : updater
   },
+  columnResizeMode: columnResizeMode.value,
   getCoreRowModel: getCoreRowModel(),
   getSortedRowModel: getSortedRowModel(),
 })
@@ -414,29 +458,48 @@ const ROW_HEIGHT = 28
 
 // 统一的 grid 列宽，确保 header 和 body 对齐
 const gridStyle = computed(() => {
-  const colCount = columns.value.length
+  const headers = table.getFlatHeaders()
+  const colCount = headers.length
   if (colCount === 0) return {}
-  // 第一列（行号）固定 60px，其余列等宽，可编辑时末尾加操作列 40px
+
+  // 动态构建列宽字符串
+  const columnWidths = headers.map(header => `${header.getSize()}px`).join(' ')
   const actionCol = editable.value ? ' 40px' : ''
+
   return {
     display: 'grid',
-    gridTemplateColumns: `60px repeat(${colCount}, minmax(120px, 1fr))${actionCol}`,
+    gridTemplateColumns: `60px ${columnWidths}${actionCol}`,
   }
 })
+
+// 缓存虚拟行基础样式，避免每行都展开 gridStyle 创建新对象
+const rowBaseStyle = computed(() => {
+  const gs = gridStyle.value
+  return {
+    ...gs,
+    height: `${ROW_HEIGHT}px`,
+  }
+})
+
+// 自适应 overscan：根据滚动速度动态调整预渲染行数
+const { overscan: adaptiveOverscan, attach: attachOverscan, detach: detachOverscan } = useAdaptiveOverscan(
+  tableScrollRef,
+  { baseOverscan: 20, maxOverscan: 80, rowHeight: ROW_HEIGHT, velocityThreshold: 15, decayDelay: 300 },
+)
 
 const rowVirtualizer = useVirtualizer({
   get count() { return table.getRowModel().rows.length },
   getScrollElement: () => tableScrollRef.value,
   estimateSize: () => ROW_HEIGHT,
-  overscan: 15,
+  get overscan() { return adaptiveOverscan.value },
 })
 
 // 无感加载：滚动到底部时自动加载更多
 function handleScroll() {
   const el = tableScrollRef.value
   if (!el || !hasMore.value) return
-  // 距离底部 200px 时触发加载
-  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
+  // 距离底部 500px 时提前触发加载，避免快速滚动时数据断层
+  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 500) {
     if (visibleCount.value < totalRows.value) {
       // 先展示本地已有的数据
       loadMore()
@@ -451,6 +514,9 @@ function handleScroll() {
 watch(tableScrollRef, (el, oldEl) => {
   oldEl?.removeEventListener('scroll', handleScroll)
   el?.addEventListener('scroll', handleScroll, { passive: true })
+  // 同步绑定自适应 overscan 的滚动监听
+  if (el) attachOverscan()
+  else detachOverscan()
 })
 
 onBeforeUnmount(() => {
@@ -460,79 +526,80 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-full flex-col overflow-hidden">
-    <!-- Status bar -->
+    <!-- Status bar (Sharp text layout) -->
     <div
-      class="flex items-center gap-4 border-b border-border bg-muted/30 px-3 py-1.5 text-xs text-muted-foreground"
+      class="flex h-8 items-center gap-6 border-b border-border bg-muted/20 px-4 text-[11px] text-muted-foreground transition-colors shrink-0"
     >
       <template v-if="loading">
-        <div class="flex items-center gap-1.5">
-          <div class="h-3 w-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
-          <span>{{ t('database.executing') }}</span>
+        <div class="flex items-center gap-2 text-primary animate-pulse">
+          <Loader2 class="h-3.5 w-3.5 animate-spin" />
+          <span class="font-medium tracking-tight">{{ t('database.executing') }}</span>
         </div>
       </template>
       <template v-else-if="result">
         <template v-if="result.isError" />
         <template v-else>
-          <div class="flex items-center gap-1.5">
-            <CheckCircle2 class="h-3.5 w-3.5 text-[var(--df-success)]" />
-            <span v-if="result.columns.length > 0">
-              {{ result.rows.length }} {{ t('database.rows') }}
+          <div class="flex items-center gap-1.5 hover:text-foreground transition-colors">
+            <CheckCircle2 class="h-3.5 w-3.5 text-green-500" />
+            <span v-if="result.columns.length > 0" class="font-medium tracking-tight tabular-nums">
+              {{ result.rows.length }} <span class="opacity-60">{{ t('database.rows') }}</span>
             </span>
-            <span v-else>
-              {{ result.affectedRows }} {{ t('database.rowsAffected') }}
+            <span v-else class="font-medium tracking-tight">
+              {{ result.affectedRows }} <span class="opacity-60">{{ t('database.rowsAffected') }}</span>
             </span>
           </div>
-          <div class="flex items-center gap-1.5">
-            <Clock class="h-3.5 w-3.5" />
-            <span>{{ result.executionTimeMs }}ms</span>
+          <div class="flex items-center gap-1.5 hover:text-foreground transition-colors">
+            <Clock class="h-3.5 w-3.5 opacity-60" />
+            <span class="font-medium tracking-tight tabular-nums">{{ result.executionTimeMs }}<span class="text-[10px] opacity-60">ms</span></span>
           </div>
-          <div v-if="result.columns.length > 0" class="flex items-center gap-1.5">
-            <Hash class="h-3.5 w-3.5" />
-            <span>{{ result.columns.length }} {{ t('database.columns') }}</span>
+          <div v-if="result.columns.length > 0" class="flex items-center gap-1.5 hover:text-foreground transition-colors">
+            <Hash class="h-3.5 w-3.5 opacity-60" />
+            <span class="font-medium tracking-tight tabular-nums">{{ result.columns.length }} <span class="opacity-60">{{ t('database.columns') }}</span></span>
           </div>
           <div class="flex-1" />
-          <Button
-            variant="ghost"
-            size="sm"
-            class="h-5 gap-1 text-xs px-1.5"
-            :class="{ 'text-primary': showFilters }"
-            @click="toggleFilters"
-          >
-            <Filter class="h-3 w-3" />
-            {{ t('database.filter') }}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button variant="ghost" size="sm" class="h-5 gap-1 text-xs px-1.5">
-                <Download class="h-3 w-3" />
-                {{ t('database.export') }}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem @click="handleExport('csv')">
-                {{ t('database.exportCSV') }}
-              </DropdownMenuItem>
-              <DropdownMenuItem @click="handleExport('json')">
-                {{ t('database.exportJSON') }}
-              </DropdownMenuItem>
-              <DropdownMenuItem @click="handleExport('sql')">
-                {{ t('database.exportSQL') }}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <div class="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-6 gap-1.5 text-[10px] px-2 hover:bg-muted/50 rounded-md transition-all active:scale-95"
+              :class="{ 'text-primary bg-primary/10': showFilters }"
+              @click="toggleFilters"
+            >
+              <Filter class="h-3 w-3" />
+              {{ t('database.filter') }}
+            </Button>
+            <div class="w-px h-3 bg-border/50 mx-1" />
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <Button variant="ghost" size="sm" class="h-6 gap-1.5 text-[10px] px-2 hover:bg-muted/50 rounded-md transition-all active:scale-95">
+                  <Download class="h-3 w-3" />
+                  {{ t('database.export') }}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" class="min-w-[140px]">
+                <DropdownMenuItem @click="handleExport('csv')">CSV</DropdownMenuItem>
+                <DropdownMenuItem @click="handleExport('json')">JSON</DropdownMenuItem>
+                <DropdownMenuItem @click="handleExport('sql')">SQL脚本</DropdownMenuItem>
+                <DropdownMenuItem @click="handleExport('markdown')">Markdown</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem v-if="connectionId" @click="exportDialogOpen = true" class="font-medium text-primary">多格式高级导出...</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
         </template>
       </template>
       <template v-else>
-        <span>{{ t('database.ready') }}</span>
+        <span class="opacity-50 italic">{{ t('database.ready') }}</span>
       </template>
     </div>
 
     <!-- Table -->
-    <div ref="tableScrollRef" class="qr-scroll-area min-h-0 flex-1 overflow-scroll">
+    <!-- contain: strict 限制重排范围，避免虚拟滚动区域内的变化触发外部布局重算 -->
+    <div ref="tableScrollRef" class="qr-scroll-area relative min-h-0 flex-1 overflow-auto bg-background/30 border-t border-border/50" style="contain: strict">
       <div
         v-if="result && !result.isError && result.columns.length > 0"
-        class="text-sm"
-        :style="{ minWidth: `${(result.columns.length + 1) * 120 + (editable ? 40 : 0)}px` }"
+        class="text-sm min-w-full inline-block align-top"
+        :style="{ width: 'max-content' }"
       >
         <!-- Header -->
         <div
@@ -547,10 +614,12 @@ onBeforeUnmount(() => {
             <div
               v-for="header in table.getFlatHeaders()"
               :key="header.id"
-              class="cursor-pointer select-none whitespace-nowrap border-b border-r border-border px-3 py-1.5 text-left text-xs font-medium text-muted-foreground hover:bg-muted/50 transition-colors"
-              @click="isTableBrowse ? handleHeaderClick(header.column.id) : header.column.getToggleSortingHandler()?.($event)"
+              class="group/header relative select-none whitespace-nowrap border-b border-r border-border px-3 py-1.5 text-left text-xs font-bold text-muted-foreground/80 hover:bg-muted/50 transition-colors"
             >
-              <div class="flex items-center gap-1">
+              <div 
+                class="flex items-center gap-1 cursor-pointer"
+                @click="isTableBrowse ? handleHeaderClick(header.column.id) : header.column.getToggleSortingHandler()?.($event)"
+              >
                 <FlexRender :render="header.column.columnDef.header" :props="header.getContext()" />
                 <template v-if="isTableBrowse">
                   <ArrowUp
@@ -561,20 +630,29 @@ onBeforeUnmount(() => {
                     v-else-if="serverSortCol === header.column.id && serverSortDir === 'DESC'"
                     class="h-3 w-3 text-primary"
                   />
-                  <ArrowUpDown v-else class="h-3 w-3 opacity-30" />
+                  <ArrowUpDown v-else class="h-3 w-3 opacity-0 group-hover/header:opacity-30" />
                 </template>
                 <template v-else>
                   <ArrowUp
                     v-if="header.column.getIsSorted() === 'asc'"
-                    class="h-3 w-3"
+                    class="h-3 w-3 text-primary"
                   />
                   <ArrowDown
                     v-else-if="header.column.getIsSorted() === 'desc'"
-                    class="h-3 w-3"
+                    class="h-3 w-3 text-primary"
                   />
-                  <ArrowUpDown v-else class="h-3 w-3 opacity-30" />
+                  <ArrowUpDown v-else class="h-3 w-3 opacity-0 group-hover/header:opacity-30" />
                 </template>
               </div>
+
+              <!-- Resizer Handle -->
+              <div
+                v-if="header.column.getCanResize()"
+                class="absolute right-0 top-0 h-full w-1 cursor-col-resize user-select-none touch-none hover:bg-primary/50 transition-colors"
+                :class="{ 'bg-primary w-0.5 opacity-100': header.column.getIsResizing() }"
+                @mousedown="header.getResizeHandler()($event)"
+                @touchstart="header.getResizeHandler()($event)"
+              />
             </div>
             <div
               v-if="editable"
@@ -627,27 +705,29 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Body (virtual rows) -->
-        <div :style="{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }">
+        <div :style="{ height: `${rowVirtualizer.getTotalSize()}px`, position: 'relative' }" style="will-change: transform; contain: content">
           <div
             v-for="vRow in rowVirtualizer.getVirtualItems()"
             :key="vRow.index"
-            class="flex transition-colors cursor-pointer absolute left-0 right-0"
-            :style="{ height: `${ROW_HEIGHT}px`, transform: `translateY(${vRow.start}px)`, ...gridStyle }"
+            v-memo="[vRow.index, vRow.start, selectedRowIndex === vRow.index, editingCell?.rowIndex === vRow.index, table.getRowModel().rows[vRow.index]?.id]"
+            class="flex cursor-pointer absolute left-0 right-0"
+            :style="{ ...rowBaseStyle, transform: `translateY(${vRow.start}px)` }"
             :class="selectedRowIndex === vRow.index ? 'bg-primary/10' : 'hover:bg-muted/30'"
             @click="selectedRowIndex = vRow.index"
           >
             <div
-              class="whitespace-nowrap border-b border-r border-border px-3 text-xs text-muted-foreground tabular-nums flex items-center"
+              class="whitespace-nowrap border-b border-r border-border bg-muted/5 px-3 text-[10px] font-bold text-muted-foreground/40 tabular-nums flex items-center justify-center"
             >
               {{ vRow.index + 1 }}
             </div>
             <div
               v-for="cell in table.getRowModel().rows[vRow.index]?.getVisibleCells()"
               :key="cell.id"
-              class="select-text whitespace-nowrap border-b border-r border-border px-3 font-mono text-xs flex items-center overflow-hidden"
+              class="select-text whitespace-nowrap border-b border-r border-border px-3 font-mono text-[12px] flex items-center overflow-hidden"
               :class="{
-                'text-muted-foreground/50 italic': cell.getValue() === null || cell.getValue() === undefined,
-                'cursor-pointer hover:bg-muted/50': !editingCell || editingCell.rowIndex !== vRow.index || editingCell.colName !== cell.column.id,
+                'text-muted-foreground/40 italic font-sans': cell.getValue() === null || cell.getValue() === undefined,
+                'cursor-pointer hover:bg-primary/[0.02]': !editingCell || editingCell.rowIndex !== vRow.index || editingCell.colName !== cell.column.id,
+                'text-primary font-bold': selectedRowIndex === vRow.index
               }"
               @dblclick="editable ? startEdit(vRow.index, cell.column.id, cell.getValue()) : handleCellClick(cell.getValue())"
             >
@@ -663,7 +743,9 @@ onBeforeUnmount(() => {
                 />
               </template>
               <template v-else>
-                <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+                <!-- 直接渲染单元格文本，避免 FlexRender 组件实例化开销 -->
+                <span v-if="cell.getValue() === null || cell.getValue() === undefined">NULL</span>
+                <span v-else>{{ String(cell.getValue()) }}</span>
               </template>
             </div>
             <div
@@ -671,7 +753,7 @@ onBeforeUnmount(() => {
               class="border-b border-r border-border flex items-center justify-center"
             >
               <button
-                class="h-5 w-5 flex items-center justify-center rounded-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                class="h-5 w-5 flex items-center justify-center rounded-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                 :title="t('common.delete')"
                 @click.stop="requestDeleteRow(vRow.index)"
               >
@@ -682,82 +764,107 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- Error state (High Fidelity Card) -->
+      <!-- 错误状态：内联紧凑展示 -->
       <div
         v-else-if="result && result.isError"
-        class="absolute inset-0 z-10 flex items-center justify-center bg-background/40 backdrop-blur-[1px] p-6 animate-in fade-in zoom-in-95 duration-500"
+        class="flex flex-col h-full overflow-auto"
       >
-        <div class="relative w-full max-w-sm overflow-hidden rounded-2xl border border-border/20 bg-background/80 p-6 shadow-2xl backdrop-blur-xl ring-1 ring-white/5">
-          <!-- Background Glow -->
-          <div class="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-destructive/10 blur-2xl font-black"></div>
-          <div class="absolute -bottom-8 -left-8 h-24 w-24 rounded-full bg-primary/5 blur-2xl"></div>
-
-          <div class="relative flex flex-col items-center text-center">
-            <!-- Icon Container -->
-            <div class="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10 ring-1 ring-destructive/20 shadow-[0_8px_16px_rgba(var(--color-destructive),0.1)]">
-              <ShieldAlert class="h-7 w-7 text-destructive" />
-            </div>
-
-            <h3 class="mb-1 text-base font-bold tracking-tight text-foreground">
-              {{ t('database.queryError') }}
-            </h3>
-            <p class="mb-6 px-4 font-mono text-[11px] font-medium leading-relaxed text-muted-foreground/80 break-all max-h-32 overflow-auto qr-scroll-area">
-               {{ result.error }}
+        <!-- 错误头部 -->
+        <div class="flex items-center gap-2 px-4 py-3 border-b border-destructive/20 bg-destructive/5">
+          <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-destructive/10">
+            <ShieldAlert v-if="isConnectionError" class="h-4 w-4 text-destructive" />
+            <AlertCircle v-else class="h-4 w-4 text-destructive" />
+          </div>
+          <div class="min-w-0 flex-1">
+            <p class="text-xs font-semibold text-destructive">
+              {{ isConnectionError ? t('database.queryError') : '执行出错' }}
             </p>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <Button
+              v-if="showReconnect"
+              size="sm"
+              class="h-6 text-[10px] gap-1"
+              @click="emit('reconnect')"
+            >
+              <RotateCcw class="h-3 w-3" />
+              {{ t('database.reconnect') }}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              class="h-6 text-[10px]"
+              @click="emit('refresh')"
+            >
+              {{ t('common.retry' as any) || '重试' }}
+            </Button>
+          </div>
+        </div>
 
-            <!-- Diagnostic Suggestions -->
-            <div class="mb-8 grid w-full grid-cols-1 gap-2 text-left">
-               <div class="flex items-start gap-2.5 rounded-lg bg-muted/30 p-2.5 ring-1 ring-border/5 transition-colors hover:bg-muted/50">
-                  <WifiOff class="mt-0.5 h-3.5 w-3.5 text-muted-foreground/60" />
-                  <div>
-                     <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('connection.checkNetwork' as any) || '连接检查' }}</p>
-                     <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('connection.checkNetworkDesc' as any) || '确保数据库服务地址/端口可达，检查防火墙/白名单。' }}</p>
-                  </div>
-               </div>
-               <div class="flex items-start gap-2.5 rounded-lg bg-muted/30 p-2.5 ring-1 ring-border/5 transition-colors hover:bg-muted/50">
-                  <KeyRound class="mt-0.5 h-3.5 w-3.5 text-muted-foreground/60" />
-                  <div>
-                     <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('connection.checkAuth' as any) || '配置检查' }}</p>
-                     <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('connection.checkAuthDesc' as any) || '检查驱动、用户名、密码或连接池配置。' }}</p>
-                  </div>
-               </div>
-               <div class="flex items-start gap-2.5 rounded-lg bg-muted/30 p-2.5 ring-1 ring-border/5 transition-colors hover:bg-muted/50">
-                  <Activity class="mt-0.5 h-3.5 w-3.5 text-muted-foreground/60" />
-                  <div>
-                     <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('connection.checkServer' as any) || '远程权限' }}</p>
-                     <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('connection.checkServerDesc' as any) || '确认该账号具备从当前 IP 远程连接的权限。' }}</p>
-                  </div>
-               </div>
-            </div>
+        <!-- 错误详情 -->
+        <div class="flex-1 px-4 py-3 overflow-auto">
+          <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/80 select-text">{{ result.error }}</pre>
 
-            <!-- Actions -->
-            <div class="flex w-full items-center gap-2">
-              <Button
-                v-if="showReconnect"
-                class="flex-1 h-9 bg-primary text-[12px] font-bold shadow-[0_4px_12px_rgba(var(--color-primary),0.3)] hover:shadow-[0_6px_20_rgba(var(--color-primary),0.4)] transition-all active:scale-95"
-                @click="emit('reconnect')"
-              >
-                <RotateCcw class="mr-1.5 h-3.5 w-3.5" />
-                {{ t('database.reconnect') }}
-              </Button>
-              <Button
-                variant="outline"
-                class="h-9 flex-1 text-[12px] font-medium border-border/40 hover:bg-muted/30 transition-all active:scale-95"
-                @click="emit('refresh')"
-              >
-                {{ t('common.retry' as any) || '重试' }}
-              </Button>
-            </div>
+          <!-- 诊断建议 -->
+          <div class="mt-4 space-y-1.5">
+            <p class="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">排查建议</p>
+            <template v-if="isConnectionError">
+              <div class="flex items-start gap-2 text-[11px] text-muted-foreground/70">
+                <WifiOff class="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/40" />
+                <span>确保数据库服务地址/端口可达，检查防火墙/白名单</span>
+              </div>
+              <div class="flex items-start gap-2 text-[11px] text-muted-foreground/70">
+                <KeyRound class="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/40" />
+                <span>检查用户名、密码或连接池配置是否正确</span>
+              </div>
+              <div class="flex items-start gap-2 text-[11px] text-muted-foreground/70">
+                <Activity class="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/40" />
+                <span>确认该账号具备从当前 IP 远程连接的权限</span>
+              </div>
+            </template>
+            <template v-else>
+              <div class="flex items-start gap-2 text-[11px] text-muted-foreground/70">
+                <AlertCircle class="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/40" />
+                <span>检查 SQL 关键字拼写、括号匹配、引号闭合是否正确</span>
+              </div>
+              <div class="flex items-start gap-2 text-[11px] text-muted-foreground/70">
+                <Hash class="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/40" />
+                <span>确认表名、列名、数据库名是否存在且拼写正确</span>
+              </div>
+              <div class="flex items-start gap-2 text-[11px] text-muted-foreground/70">
+                <KeyRound class="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/40" />
+                <span>确认当前用户对目标对象有足够权限，检查是否违反约束</span>
+              </div>
+            </template>
           </div>
         </div>
       </div>
 
-      <!-- Empty state -->
+
+      <!-- Empty initial state -->
       <div
-        v-else-if="!loading && (!result || (!result.isError && result.columns.length === 0))"
+        v-else-if="!loading && !result"
         class="flex h-full items-center justify-center text-muted-foreground"
       >
-        <p class="text-sm">{{ t('database.noResults') }}</p>
+        <p class="text-sm font-medium tracking-wide">{{ t('database.noResults') }}</p>
+      </div>
+
+      <!-- Success state for non-select queries -->
+      <div
+        v-else-if="!loading && result && !result.isError && result.columns.length === 0"
+        class="flex h-full flex-col items-center justify-center text-muted-foreground gap-4 animate-in zoom-in-95 duration-300"
+      >
+        <div class="rounded-full bg-green-500/10 p-4 shadow-sm">
+          <CheckCircle2 class="h-10 w-10 text-green-500" />
+        </div>
+        <div class="text-center space-y-1.5">
+          <p class="text-lg font-bold text-foreground">执行成功</p>
+          <p class="text-xs text-muted-foreground/80">
+            <span class="font-medium text-foreground">{{ result.affectedRows }}</span> <span class="opacity-80">{{ t('database.rowsAffected') }}</span>
+            <span class="mx-2 opacity-30">|</span>
+            <span class="opacity-80">耗时</span> <span class="font-medium text-foreground">{{ result.executionTimeMs }}ms</span>
+          </p>
+        </div>
       </div>
     </div>
 
@@ -782,6 +889,14 @@ onBeforeUnmount(() => {
       :cancel-label="t('common.cancel')"
       variant="destructive"
       @confirm="confirmDeleteRow"
+    />
+
+    <!-- 多格式导出对话框 -->
+    <ExportDialog
+      v-if="connectionId"
+      v-model:open="exportDialogOpen"
+      :connection-id="connectionId"
+      :source="exportSource"
     />
   </div>
 </template>

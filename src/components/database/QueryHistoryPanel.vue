@@ -198,77 +198,74 @@ onMounted(() => loadHistory(true))
         {{ t('queryHistory.noHistory') }}
       </div>
       
-      <div v-else class="p-2 space-y-4">
-        <div v-for="group in groupedRecords" :key="group.title" class="space-y-1.5">
+      <div v-else class="p-2 space-y-3">
+        <div v-for="group in groupedRecords" :key="group.title" class="space-y-1">
           <!-- Group Header -->
-          <div class="flex items-center gap-2 px-1 text-[10px] font-black uppercase tracking-widest text-muted-foreground/40">
-            <Calendar class="h-2.5 w-2.5" />
+          <div class="flex items-center gap-2 px-1 text-[9px] font-bold uppercase tracking-wider text-muted-foreground/30">
+            <Calendar class="h-2.5 w-2.5 opacity-50" />
             {{ group.title }}
-            <div class="h-[1px] flex-1 bg-border/10"></div>
+            <div class="h-[1px] flex-1 bg-border/5"></div>
           </div>
 
           <!-- Items -->
-          <div class="space-y-1">
+          <div class="divide-y divide-border/5">
             <div
               v-for="record in group.records"
               :key="record.id"
-              class="group relative flex cursor-pointer items-start gap-3 rounded-lg border border-transparent bg-background/50 p-2.5 transition-all duration-200 hover:border-border/30 hover:bg-background hover:shadow-sm active:scale-[0.99]"
+              class="group relative flex cursor-pointer items-center gap-2.5 rounded-md border border-transparent py-1.5 px-2 transition-all duration-150 hover:bg-muted/40 active:bg-muted/60"
               @click="handleRowClick(record.sqlText)"
               @dblclick="handleExecute(record)"
             >
-              <!-- 侧边状态条 -->
-              <div class="absolute left-0 top-1/2 -translate-y-1/2 h-0 w-1 rounded-r-full transition-all duration-300 group-hover:h-1/2" 
-                   :class="record.isError ? 'bg-destructive' : 'bg-green-500'"></div>
+              <!-- Status indicator (Left bar) -->
+              <div class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full transition-all duration-300 group-hover:opacity-100 opacity-0" 
+                   :class="record.isError ? 'bg-destructive' : 'bg-primary'"></div>
 
-              <!-- Status icon -->
-              <div class="mt-0.5 shrink-0 flex items-center justify-center h-4 w-4 rounded-full" 
-                   :class="record.isError ? 'bg-destructive/10' : 'bg-green-500/10'">
+              <!-- Status icon (Smaller) -->
+              <div class="shrink-0 flex items-center justify-center h-3.5 w-3.5 rounded-full">
                 <AlertCircle v-if="record.isError" class="h-3 w-3 text-destructive" />
-                <CheckCircle2 v-else class="h-3 w-3 text-green-500" />
+                <CheckCircle2 v-else class="h-3 w-3 text-primary opacity-60" />
               </div>
 
               <!-- Content -->
-              <div class="min-w-0 flex-1 space-y-1">
-                <div class="flex items-center justify-between gap-4">
-                  <div class="min-w-0 flex-1">
-                    <p class="truncate font-mono text-[11px] font-medium leading-normal text-foreground/80 group-hover:text-foreground transition-colors" 
-                       v-html="highlightSql(truncateSql(record.sqlText, 300))">
-                    </p>
+              <div class="min-w-0 flex-1 flex items-center gap-3">
+                <div class="min-w-0 flex-1">
+                  <p class="truncate font-mono text-[11px] leading-tight text-foreground/70 group-hover:text-foreground transition-colors" 
+                     v-html="highlightSql(truncateSql(record.sqlText, 250))">
+                  </p>
+                </div>
+                
+                <!-- Metadata & Actions -->
+                <div class="shrink-0 flex items-center gap-3 text-[10px] font-medium text-muted-foreground/40 tabular-nums">
+                  <div class="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                    <Zap class="h-2.5 w-2.5" />
+                    <span>{{ formatDuration(record.executionTimeMs) }}</span>
                   </div>
-                  <div class="flex shrink-0 items-center gap-1.5 opacity-0 transition-opacity group-hover:opacity-100">
+                  
+                  <div v-if="record.connectionName" class="hidden md:block truncate bg-muted/30 px-1 py-0.5 rounded text-[9px] font-semibold opacity-60">
+                    {{ record.connectionName }}
+                  </div>
+
+                  <span class="w-16 text-right font-mono tracking-tighter opacity-100">{{ formatTime(record.executedAt) }}</span>
+
+                  <!-- Quick Actions (Reveal on hover) -->
+                  <div class="flex items-center gap-0.5 w-0 overflow-hidden group-hover:w-[48px] transition-all duration-200">
                     <Tooltip>
                       <TooltipTrigger as-child>
-                        <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-primary/10 hover:text-primary" @click.stop="handleExecute(record)">
-                          <Play class="h-3 w-3" />
+                        <Button variant="ghost" size="icon" class="h-5 w-5 rounded-md hover:bg-primary/10 hover:text-primary" @click.stop="handleExecute(record)">
+                          <Play class="h-2.5 w-2.5" />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent side="top" class="text-[10px]">{{ t('database.execute') }}</TooltipContent>
                     </Tooltip>
                     <Tooltip>
                       <TooltipTrigger as-child>
-                        <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-primary/10 hover:text-primary" @click.stop="handleCopy(record.sqlText)">
-                          <Copy class="h-3 w-3" />
+                        <Button variant="ghost" size="icon" class="h-5 w-5 rounded-md hover:bg-primary/10 hover:text-primary" @click.stop="handleCopy(record.sqlText)">
+                          <Copy class="h-2.5 w-2.5" />
                         </Button>
                       </TooltipTrigger>
                       <TooltipContent side="top" class="text-[10px]">{{ t('common.copy') }}</TooltipContent>
                     </Tooltip>
                   </div>
-                </div>
-
-                <div class="flex items-center gap-3 text-[10px] font-medium text-muted-foreground/50">
-                  <div class="flex items-center gap-1">
-                    <Zap class="h-2.5 w-2.5" />
-                    <span>{{ formatDuration(record.executionTimeMs) }}</span>
-                  </div>
-                  <span v-if="record.connectionName" class="truncate bg-muted px-1.5 py-0.5 rounded text-[9px] font-bold text-muted-foreground/60">{{ record.connectionName }}</span>
-                  <span v-if="record.databaseName" class="truncate opacity-70">{{ record.databaseName }}</span>
-                  <span v-if="!record.isError && record.affectedRows > 0" class="text-green-500/60">
-                    {{ record.affectedRows }} {{ t('database.rowsAffected') }}
-                  </span>
-                  <span v-if="record.isError" class="truncate text-destructive font-bold">
-                    {{ record.errorMessage }}
-                  </span>
-                  <span class="ml-auto shrink-0 font-mono tracking-tighter">{{ formatTime(record.executedAt) }}</span>
                 </div>
               </div>
             </div>

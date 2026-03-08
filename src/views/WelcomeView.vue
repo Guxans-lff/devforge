@@ -287,10 +287,10 @@ const statusColorMap: Record<string, string> = {
           <!-- 版本状态 -->
           <div class="mt-auto flex flex-col gap-4">
             <div class="flex items-center justify-between px-1">
-              <span class="text-[10px] font-bold text-muted-foreground/40 uppercase tracking-[0.2em]">System Status</span>
+              <span class="text-[10px] font-bold text-muted-foreground/40 uppercase tracking-[0.2em]">系统状态</span>
               <div class="flex items-center gap-1.5">
                 <div class="h-1.5 w-1.5 rounded-full bg-emerald-500"></div>
-                <span class="text-[9px] font-bold text-emerald-500/80 uppercase">Ready</span>
+                <span class="text-[9px] font-bold text-emerald-500/80 uppercase">就绪</span>
               </div>
             </div>
             <div class="rounded-xl border border-border bg-muted/10 p-4">

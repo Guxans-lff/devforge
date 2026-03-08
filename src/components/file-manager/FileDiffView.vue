@@ -147,6 +147,18 @@ watch(
   },
 )
 
+// 监听编辑器设置变化，实时同步到 diff 编辑器
+watch(
+  () => settingsStore.settings,
+  (s) => {
+    if (!diffEditor) return
+    diffEditor.updateOptions({
+      fontSize: s.editorFontSize,
+    })
+  },
+  { deep: true },
+)
+
 onMounted(async () => {
   if (props.open) {
     await nextTick()

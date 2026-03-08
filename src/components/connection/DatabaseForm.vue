@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { open } from '@tauri-apps/plugin-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Button } from '@/components/ui/button'
 import {
   Select,
   SelectContent,
@@ -10,15 +12,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Eye, EyeOff, Globe, User, Lock, Database as DbIcon, Hash } from 'lucide-vue-next'
+import { Eye, EyeOff, Globe, User, Lock, Database as DbIcon, Hash, ShieldCheck, FolderOpen, FileKey, FileLock } from 'lucide-vue-next'
+import type { SslConfig } from '@/types/connection'
 
-interface DatabaseFormData {
+/** SSL 模式选项定义 */
+const SSL_MODE_OPTIONS = computed(() => [
+  { value: 'disabled', label: t('connection.sslModeDisabled') },
+  { value: 'preferred', label: t('connection.sslModePreferred') },
+  { value: 'required', label: t('connection.sslModeRequired') },
+  { value: 'verify-ca', label: t('connection.sslModeVerifyCa') },
+  { value: 'verify-identity', label: t('connection.sslModeVerifyIdentity') },
+])
+
+export interface DatabaseFormData {
   driver: string
   host: string
   port: number
   username: string
   password: string
   database: string
+  ssl: SslConfig
 }
 
 const props = defineProps<{
@@ -79,6 +92,63 @@ const driverIcons: Record<string, string> = {
   postgresql: '/icons/postgresql.svg',
   sqlite: '/icons/sqlite.svg',
 }
+
+/** 是否需要显示证书文件选择器（仅 verify-ca 和 verify-identity 模式） */
+const showCertFields = computed(() => {
+  const mode = localValue.value.ssl?.mode
+  return mode === 'verify-ca' || mode === 'verify-identity'
+})
+
+/** 是否显示客户端证书选择器（非 disabled 模式均可配置） */
+const showClientCertFields = computed(() => {
+  const mode = localValue.value.ssl?.mode
+  return mode && mode !== 'disabled'
+})
+
+/** 更新 SSL 配置字段 */
+function updateSslField<K extends keyof SslConfig>(field: K, value: SslConfig[K]) {
+  localValue.value = {
+    ...localValue.value,
+    ssl: {
+      ...localValue.value.ssl,
+      [field]: value,
+    } as SslConfig,
+  }
+}
+
+/** 浏览 CA 证书文件 */
+async function browseCaCert() {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'Certificate Files', extensions: ['pem', 'crt', 'cer', 'ca', '*'] }],
+  })
+  if (selected) {
+    updateSslField('caCertPath', selected as string)
+  }
+}
+
+/** 浏览客户端证书文件 */
+async function browseClientCert() {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'Certificate Files', extensions: ['pem', 'crt', 'cer', '*'] }],
+  })
+  if (selected) {
+    updateSslField('clientCertPath', selected as string)
+  }
+}
+
+/** 浏览客户端密钥文件 */
+async function browseClientKey() {
+  const selected = await open({
+    multiple: false,
+    filters: [{ name: 'Key Files', extensions: ['pem', 'key', '*'] }],
+  })
+  if (selected) {
+    updateSslField('clientKeyPath', selected as string)
+  }
+}
+
 </script>
 
 <template>
@@ -87,7 +157,7 @@ const driverIcons: Record<string, string> = {
     <section class="space-y-4">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.networkLayer') || 'Network Protocol' }}</h3>
+        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.networkLayer') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
@@ -96,7 +166,7 @@ const driverIcons: Record<string, string> = {
         <div class="col-span-4 space-y-2">
           <div class="flex items-center justify-between px-1">
             <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('connection.driver') }}</Label>
-            <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">Protocol</span>
+            <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.protocol') }}</span>
           </div>
           <Select :model-value="localValue.driver" @update:model-value="updateField('driver', $event as string)">
             <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs shadow-none">
@@ -124,7 +194,7 @@ const driverIcons: Record<string, string> = {
               {{ t('connection.host') }}
               <span class="text-destructive font-black">*</span>
             </Label>
-            <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">Network EndPoint</span>
+            <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.endpoint') }}</span>
           </div>
           <div class="relative group">
             <Globe class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/20 group-focus-within:text-primary transition-colors" />
@@ -155,7 +225,7 @@ const driverIcons: Record<string, string> = {
             class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none w-full text-foreground font-bold placeholder:text-muted-foreground/30"
             :class="{ 'border-destructive/40 bg-destructive/5': portError }"
           />
-          <div class="absolute right-3 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded bg-muted/30 border border-border/50 text-[8px] font-mono font-black text-muted-foreground/60 uppercase">Port</div>
+          <div class="absolute right-3 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded bg-muted/30 border border-border/50 text-[8px] font-mono font-black text-muted-foreground/60 uppercase">{{ t('connection.portSub') }}</div>
         </div>
       </div>
     </section>
@@ -164,7 +234,7 @@ const driverIcons: Record<string, string> = {
     <section class="space-y-4">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.authLayer') || 'Access Credentials' }}</h3>
+        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.authLayer') || t('connection.accessCredentials') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
@@ -214,7 +284,7 @@ const driverIcons: Record<string, string> = {
     <section class="space-y-4">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.targetLayer') || 'Target Environment' }}</h3>
+        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.targetLayer') || t('connection.targetEnvironment') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
@@ -231,6 +301,117 @@ const driverIcons: Record<string, string> = {
           />
         </div>
       </div>
+    </section>
+
+
+    <!-- Section 6: SSL/TLS 安全配置 -->
+    <section class="space-y-4">
+      <div class="flex items-center gap-2">
+        <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
+        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.sslTlsSecurity') }}</h3>
+        <div class="flex-1 h-[1px] bg-border/40"></div>
+      </div>
+
+      <!-- SSL 模式选择器 -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between px-1">
+          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('connection.sslMode') }}</Label>
+          <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.encryption') }}</span>
+        </div>
+        <Select :model-value="localValue.ssl?.mode ?? 'disabled'" @update:model-value="updateSslField('mode', $event as SslConfig['mode'])">
+          <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs shadow-none">
+            <template #default>
+              <div class="flex items-center gap-1.5 min-w-0 font-bold">
+                <div class="h-5 w-5 rounded flex items-center justify-center bg-background/50 border border-border/50">
+                  <ShieldCheck class="h-3 w-3 text-primary/70 shrink-0" />
+                </div>
+                <SelectValue />
+              </div>
+            </template>
+          </SelectTrigger>
+          <SelectContent class="bg-popover border-border rounded-xl shadow-2xl">
+            <SelectItem v-for="opt in SSL_MODE_OPTIONS" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <!-- CA 证书文件选择器（仅 verify-ca / verify-identity 模式显示） -->
+      <Transition name="form-fade">
+        <div v-if="showCertFields" class="space-y-2 animate-in fade-in zoom-in-95 duration-300">
+          <div class="flex items-center justify-between px-1">
+            <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70 flex items-center gap-1">
+              {{ t('connection.caCertificate') }}
+              <span class="text-destructive font-black">*</span>
+            </Label>
+            <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.rootCa') }}</span>
+          </div>
+          <div class="flex gap-2">
+            <div class="relative group flex-1">
+              <FileKey class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
+              <Input
+                :model-value="localValue.ssl?.caCertPath ?? ''"
+                @update:model-value="updateSslField('caCertPath', $event as string)"
+                placeholder="CA 证书文件路径"
+                class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-mono"
+              />
+            </div>
+            <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-all shadow-none px-0 rounded-lg" @click="browseCaCert">
+              <FolderOpen class="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </Transition>
+
+      <!-- 客户端证书文件选择器（非 disabled 模式可选配置） -->
+      <Transition name="form-fade">
+        <div v-if="showClientCertFields" class="space-y-4 animate-in fade-in zoom-in-95 duration-300">
+          <!-- 客户端证书 -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between px-1">
+              <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('connection.clientCertificate') }}</Label>
+              <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.optional') }}</span>
+            </div>
+            <div class="flex gap-2">
+              <div class="relative group flex-1">
+                <FileLock class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
+                <Input
+                  :model-value="localValue.ssl?.clientCertPath ?? ''"
+                  @update:model-value="updateSslField('clientCertPath', $event as string)"
+                  placeholder="客户端证书文件路径"
+                  class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-mono"
+                />
+              </div>
+              <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-all shadow-none px-0 rounded-lg" @click="browseClientCert">
+                <FolderOpen class="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <!-- 客户端密钥 -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between px-1">
+              <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('connection.clientKey') }}</Label>
+              <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.optional') }}</span>
+            </div>
+            <div class="flex gap-2">
+              <div class="relative group flex-1">
+                <Lock class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
+                <Input
+                  :model-value="localValue.ssl?.clientKeyPath ?? ''"
+                  @update:model-value="updateSslField('clientKeyPath', $event as string)"
+                  placeholder="客户端密钥文件路径"
+                  class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-mono"
+                />
+              </div>
+              <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-all shadow-none px-0 rounded-lg" @click="browseClientKey">
+                <FolderOpen class="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </Transition>
     </section>
   </div>
 </template>

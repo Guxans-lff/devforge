@@ -34,6 +34,20 @@ function applyTheme(theme: ThemeDefinition) {
 
   // Update background color to prevent flash
   root.style.backgroundColor = theme.terminal.background
+
+  // 同步 Tauri 窗口标题栏主题，使其跟随应用主题
+  syncTauriWindowTheme(isDark)
+}
+
+/** 异步同步 Tauri 窗口标题栏主题 */
+async function syncTauriWindowTheme(isDark: boolean) {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    const appWindow = getCurrentWindow()
+    await appWindow.setTheme(isDark ? 'dark' : 'light')
+  } catch {
+    // 非 Tauri 环境或 API 未就绪时静默忽略
+  }
 }
 
 function clearCssOverrides() {

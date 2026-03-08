@@ -10,6 +10,7 @@ import {
 
 const props = defineProps<{
   result: Record<string, unknown> | null
+  tableRows: Record<string, unknown>[] | null
   loading: boolean
 }>()
 
@@ -223,7 +224,7 @@ function toggleNode(id: string) {
 }
 
 // 视图切换
-const viewMode = ref<'tree' | 'json'>('tree')
+const viewMode = ref<'tree' | 'table' | 'json'>('tree')
 const formattedJson = computed(() => {
   if (!props.result) return ''
   try {
@@ -232,6 +233,32 @@ const formattedJson = computed(() => {
     return ''
   }
 })
+
+// ---- 表格视图相关 ----
+/** EXPLAIN 表格视图的标准列名 */
+const tableColumns = ['id', 'select_type', 'table', 'type', 'possible_keys', 'key', 'key_len', 'ref', 'rows', 'filtered', 'Extra']
+
+/** 根据行数据返回单元格的警告样式类 */
+function getCellWarningClass(row: Record<string, unknown>, colName: string): string {
+  // type=ALL 全表扫描 → 红色
+  if (colName === 'type' && String(row['type'] ?? '').toUpperCase() === 'ALL') {
+    return 'bg-red-500/10 text-red-500'
+  }
+  // Extra 中包含 Using filesort 或 Using temporary → 黄色
+  if (colName === 'Extra') {
+    const extra = String(row['Extra'] ?? row['extra'] ?? '')
+    if (extra.includes('Using filesort') || extra.includes('Using temporary')) {
+      return 'bg-amber-500/10 text-amber-500'
+    }
+  }
+  return ''
+}
+
+/** 获取行数据中某列的值（兼容大小写） */
+function getRowValue(row: Record<string, unknown>, colName: string): string {
+  const val = row[colName] ?? row[colName.toLowerCase()] ?? null
+  return val === null || val === undefined ? 'NULL' : String(val)
+}
 
 
 </script>
@@ -244,13 +271,20 @@ const formattedJson = computed(() => {
         <Zap class="h-3.5 w-3.5 text-amber-500" />
         <span class="text-xs font-medium">{{ t('explain.title') }}</span>
         <!-- 视图切换 -->
-        <div v-if="nodes.length > 0" class="flex items-center gap-0.5 ml-2 rounded-md border border-border p-0.5">
+        <div v-if="nodes.length > 0 || (tableRows && tableRows.length > 0)" class="flex items-center gap-0.5 ml-2 rounded-md border border-border p-0.5">
           <button
             class="px-1.5 py-0.5 text-[10px] rounded transition-colors"
             :class="viewMode === 'tree' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
             @click="viewMode = 'tree'"
           >
             {{ t('explain.viewTree') }}
+          </button>
+          <button
+            class="px-1.5 py-0.5 text-[10px] rounded transition-colors"
+            :class="viewMode === 'table' ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground'"
+            @click="viewMode = 'table'"
+          >
+            {{ t('explain.viewTable', '表格') }}
           </button>
           <button
             class="px-1.5 py-0.5 text-[10px] rounded transition-colors"
@@ -286,9 +320,9 @@ const formattedJson = computed(() => {
       </div>
 
       <!-- 执行计划 -->
-      <div v-else-if="nodes.length > 0" class="p-3 space-y-3">
-        <!-- 汇总统计卡片 -->
-        <div v-if="summary" class="grid grid-cols-4 gap-2">
+      <div v-else-if="nodes.length > 0 || (tableRows && tableRows.length > 0)" class="p-3 space-y-3">
+        <!-- 汇总统计卡片（仅 tree 视图显示） -->
+        <div v-if="summary && viewMode === 'tree'" class="grid grid-cols-4 gap-2">
           <div class="rounded-md border border-border bg-muted/30 px-2.5 py-2">
             <div class="flex items-center gap-1.5 text-muted-foreground mb-1">
               <Clock class="h-3 w-3" />
@@ -329,8 +363,8 @@ const formattedJson = computed(() => {
           </div>
         </div>
 
-        <!-- 优化建议 -->
-        <div v-if="summary && summary.warnings.length > 0" class="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+        <!-- 优化建议（仅 tree 视图显示） -->
+        <div v-if="summary && summary.warnings.length > 0 && viewMode === 'tree'" class="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2">
           <div class="flex items-center gap-1.5 mb-1.5">
             <AlertTriangle class="h-3.5 w-3.5 text-amber-500" />
             <span class="text-xs font-medium text-amber-600 dark:text-amber-400">{{ t('explain.suggestions') }}</span>
@@ -347,6 +381,41 @@ const formattedJson = computed(() => {
           <template v-for="node in nodes" :key="node.id">
             <ExplainNodeItem :node="node" :depth="0" :expanded-nodes="expandedNodes" @toggle="toggleNode" />
           </template>
+        </div>
+
+        <!-- 表格视图 -->
+        <div v-else-if="viewMode === 'table'">
+          <div v-if="tableRows && tableRows.length > 0" class="overflow-x-auto">
+            <table class="w-full text-xs font-mono border-collapse">
+              <thead>
+                <tr>
+                  <th
+                    v-for="col in tableColumns"
+                    :key="col"
+                    class="px-2 py-1.5 text-left font-semibold text-muted-foreground border border-border bg-muted/30 whitespace-nowrap"
+                  >
+                    {{ col }}
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(row, idx) in tableRows" :key="idx" class="hover:bg-muted/20">
+                  <td
+                    v-for="col in tableColumns"
+                    :key="col"
+                    class="px-2 py-1 border border-border whitespace-nowrap"
+                    :class="getCellWarningClass(row, col)"
+                  >
+                    {{ getRowValue(row, col) }}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <!-- 表格数据为空时的提示 -->
+          <div v-else class="flex items-center justify-center py-8">
+            <span class="text-xs text-muted-foreground">{{ t('explain.noData') }}</span>
+          </div>
         </div>
 
         <!-- JSON 视图 -->

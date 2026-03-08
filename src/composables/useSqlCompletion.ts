@@ -156,7 +156,11 @@ function extractTableContext(textBeforeCursor: string): string[] {
   return tables
 }
 
-export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<string | undefined>) {
+export function useSqlCompletion(
+  schema: Ref<SchemaCache | null>,
+  driver?: Ref<string | undefined>,
+  isLoadingSchema?: Ref<boolean>,
+) {
   let disposable: monaco.IDisposable | null = null
 
   function register() {
@@ -184,6 +188,19 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<s
         const currentSchema = schema.value
         const currentDriver = driver?.value
 
+        // Schema 缓存加载中时，显示加载提示项
+        if (isLoadingSchema?.value) {
+          suggestions.push({
+            label: '正在加载 Schema...',
+            kind: monaco.languages.CompletionItemKind.Text,
+            insertText: '',
+            range,
+            sortText: '0_loading',
+            detail: '请稍候，正在加载数据库元数据',
+            command: undefined,
+          })
+        }
+
         // Check if we're after a dot (e.g., "database." or "table." or "alias.")
         const lineContent = model.getLineContent(position.lineNumber)
         const charBeforeWord = lineContent.charAt(word.startColumn - 2)
@@ -201,6 +218,10 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<s
             const db = currentSchema.databases.get(prefix)
             if (db) {
               for (const [tableName, tableSchema] of db.tables) {
+                // 表补全项：显示表类型和表注释
+                const tableDetail = tableSchema.comment
+                  ? `${tableSchema.tableType} - ${tableSchema.comment}`
+                  : tableSchema.tableType
                 suggestions.push({
                   label: tableName,
                   kind: tableSchema.tableType === 'VIEW'
@@ -208,7 +229,7 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<s
                     : monaco.languages.CompletionItemKind.Struct,
                   insertText: tableName,
                   range,
-                  detail: tableSchema.tableType,
+                  detail: tableDetail,
                 })
               }
               return { suggestions }
@@ -223,9 +244,12 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<s
               const table = dbSchema.tables.get(resolvedName)
               if (table) {
                 for (const col of table.columns) {
-                  const typeDetail = col.nullable
-                    ? `${col.dataType} NULL`
-                    : `${col.dataType} NOT NULL`
+                  // 列补全项：格式 "列名 - 数据类型 - 注释"
+                  const detailParts = [col.dataType]
+                  if (col.comment) detailParts.push(col.comment)
+                  const colDetail = col.isPrimaryKey
+                    ? `🔑 ${detailParts.join(' - ')}`
+                    : detailParts.join(' - ')
                   suggestions.push({
                     label: col.name,
                     kind: col.isPrimaryKey
@@ -233,7 +257,7 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<s
                       : monaco.languages.CompletionItemKind.Property,
                     insertText: col.name,
                     range,
-                    detail: col.isPrimaryKey ? `🔑 ${typeDetail}` : typeDetail,
+                    detail: colDetail,
                     documentation: col.comment ?? undefined,
                   })
                 }
@@ -266,6 +290,10 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<s
           if (!context || context === 'table' || context === 'column') {
             for (const [, db] of currentSchema.databases) {
               for (const [tableName, tableSchema] of db.tables) {
+                // 表补全项：显示表类型和表注释
+                const tableDetail = tableSchema.comment
+                  ? `${tableSchema.tableType} - ${tableSchema.comment}`
+                  : tableSchema.tableType
                 suggestions.push({
                   label: tableName,
                   kind: tableSchema.tableType === 'VIEW'
@@ -273,7 +301,7 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<s
                     : monaco.languages.CompletionItemKind.Struct,
                   insertText: tableName,
                   range,
-                  detail: tableSchema.tableType,
+                  detail: tableDetail,
                   sortText: context === 'table' ? '0_' + tableName : '2_' + tableName,
                 })
               }
@@ -299,9 +327,12 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<s
                   for (const col of table.columns) {
                     if (!addedColumns.has(col.name)) {
                       addedColumns.add(col.name)
-                      const typeDetail = col.nullable
-                        ? `${col.dataType} NULL`
-                        : `${col.dataType} NOT NULL`
+                      // 列补全项：格式 "表名.数据类型 - 注释"
+                      const detailParts = [`${tblName}.${col.dataType}`]
+                      if (col.comment) detailParts.push(col.comment)
+                      const colDetail = col.isPrimaryKey
+                        ? `🔑 ${detailParts.join(' - ')}`
+                        : detailParts.join(' - ')
                       suggestions.push({
                         label: col.name,
                         kind: col.isPrimaryKey
@@ -309,9 +340,7 @@ export function useSqlCompletion(schema: Ref<SchemaCache | null>, driver?: Ref<s
                           : monaco.languages.CompletionItemKind.Property,
                         insertText: col.name,
                         range,
-                        detail: col.isPrimaryKey
-                          ? `🔑 ${tblName}.${typeDetail}`
-                          : `${tblName}.${typeDetail}`,
+                        detail: colDetail,
                         documentation: col.comment ?? undefined,
                         sortText: context === 'column' ? '0_' + col.name : '3_' + col.name,
                       })

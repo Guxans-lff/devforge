@@ -83,10 +83,15 @@ async function loadDatabases(connectionId: string, target: 'source' | 'target') 
 
   loading.value = true
   try {
-    // 先确保连接
-    await dbApi.dbConnect(connectionId)
-    const dbs = await dbApi.dbGetDatabases(connectionId)
-    databases.value = dbs.map((d) => d.name)
+    // 连接时一并获取数据库列表（预加载），减少一次 IPC 往返
+    const result = await dbApi.dbConnect(connectionId)
+    if (result.databases.length > 0) {
+      databases.value = result.databases.map((d) => d.name)
+    } else {
+      // 预加载为空时回退到手动获取
+      const dbs = await dbApi.dbGetDatabases(connectionId)
+      databases.value = dbs.map((d) => d.name)
+    }
   } catch (e) {
     databases.value = []
   } finally {

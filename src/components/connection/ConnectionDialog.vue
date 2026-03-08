@@ -22,6 +22,7 @@ import DatabaseForm from './DatabaseForm.vue'
 import SshForm from './SshForm.vue'
 import SftpForm from './SftpForm.vue'
 import type { ConnectionRecord } from '@/api/connection'
+import type { SslConfig } from '@/types/connection'
 
 const props = defineProps<{
   open: boolean
@@ -61,6 +62,12 @@ const form = ref({
   sshConnectionId: '',
   proxyJumpEnabled: false,
   proxyJumpConnectionId: '',
+  ssl: {
+    mode: 'disabled',
+    caCertPath: '',
+    clientCertPath: '',
+    clientKeyPath: '',
+  } as SslConfig,
 })
 
 const isEditing = computed(() => !!props.editingConnection)
@@ -82,8 +89,7 @@ const canSave = computed(() => {
   const hasName = form.value.name.trim().length > 0
   const hasHost = form.value.host.trim().length > 0
   const hasUser = form.value.username.trim().length > 0
-  
-  // Database type also usually needs a username, but we'll stick to a slightly broader check
+
   return hasName && hasHost && hasUser && !nameError.value && !portError.value
 })
 
@@ -99,6 +105,7 @@ const databaseFormData = computed({
     username: form.value.username,
     password: form.value.password,
     database: form.value.database,
+    ssl: form.value.ssl,
   }),
   set: (value) => {
     form.value.driver = value.driver
@@ -107,6 +114,7 @@ const databaseFormData = computed({
     form.value.username = value.username
     form.value.password = value.password
     form.value.database = value.database
+    form.value.ssl = value.ssl
   },
 })
 
@@ -199,6 +207,15 @@ watch(
         form.value.sshConnectionId = config.sshConnectionId ?? ''
         form.value.proxyJumpEnabled = !!config.proxyJump?.connectionId
         form.value.proxyJumpConnectionId = config.proxyJump?.connectionId ?? ''
+        // 加载 SSL 配置
+        if (config.ssl) {
+          form.value.ssl = {
+            mode: config.ssl.mode ?? 'disabled',
+            caCertPath: config.ssl.caCertPath ?? '',
+            clientCertPath: config.ssl.clientCertPath ?? '',
+            clientKeyPath: config.ssl.clientKeyPath ?? '',
+          }
+        }
       } catch {
         // ignore parse errors
       }
@@ -246,6 +263,12 @@ function resetForm() {
     sshConnectionId: '',
     proxyJumpEnabled: false,
     proxyJumpConnectionId: '',
+    ssl: {
+      mode: 'disabled',
+      caCertPath: '',
+      clientCertPath: '',
+      clientKeyPath: '',
+    },
   }
 }
 
@@ -301,10 +324,21 @@ async function handleSave(connectAfter = false) {
 
 function buildConfigJson(): string {
   if (connectionType.value === 'database') {
-    return JSON.stringify({
+    const config: Record<string, unknown> = {
       driver: form.value.driver,
       database: form.value.database,
-    })
+    }
+    // 仅在非 disabled 模式下保存 SSL 配置
+    if (form.value.ssl && form.value.ssl.mode !== 'disabled') {
+      const sslConfig: Record<string, unknown> = {
+        mode: form.value.ssl.mode,
+      }
+      if (form.value.ssl.caCertPath) sslConfig.caCertPath = form.value.ssl.caCertPath
+      if (form.value.ssl.clientCertPath) sslConfig.clientCertPath = form.value.ssl.clientCertPath
+      if (form.value.ssl.clientKeyPath) sslConfig.clientKeyPath = form.value.ssl.clientKeyPath
+      config.ssl = sslConfig
+    }
+    return JSON.stringify(config)
   }
   if (connectionType.value === 'ssh') {
     const config: Record<string, unknown> = {
@@ -514,44 +548,56 @@ async function handleTestConnection() {
           </div>
 
           <!-- Bottom Action Bar (Fixed at bottom of right pane) -->
-          <footer class="h-16 px-8 flex items-center justify-between border-t border-border/40 bg-muted/5 shrink-0 industrial-grid text-muted-foreground/5 overflow-hidden relative">
-            <div class="flex items-center gap-2 relative z-10 w-40 shrink-0">
-              <span class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 font-mono truncate">
-                {{ canSave ? t('connection.readyToSave') || 'Ready to deploy' : t('connection.awaitingCoreParams') || 'Awaiting entry' }}
-              </span>
+          <footer class="h-16 px-6 flex items-center justify-between border-t border-border/40 bg-muted/5 shrink-0 industrial-grid text-muted-foreground/5 overflow-hidden relative">
+            <!-- 左侧状态区：调整宽度平衡 -->
+            <div class="flex items-center gap-2 relative z-10 w-[160px] shrink-0">
+              <div 
+                class="flex items-center gap-2 transition-all duration-300"
+                :class="canSave ? 'text-primary/90' : 'text-muted-foreground/60'"
+              >
+                <div 
+                  class="h-1.5 w-1.5 rounded-full transition-all duration-500"
+                  :class="canSave ? 'bg-primary animate-pulse shadow-[0_0_8px_rgba(var(--primary),0.5)]' : 'bg-muted-foreground/30'"
+                ></div>
+                <span class="text-[10px] font-black uppercase tracking-widest font-mono truncate">
+                  {{ canSave ? t('connection.readyToSave') : t('connection.awaitingCoreParams') }}
+                </span>
+              </div>
             </div>
 
-            <div class="flex items-center gap-3 shrink-0">
-              <Button variant="ghost" @click="emit('update:open', false)" class="h-9 w-24 rounded-md font-black text-xs text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors shrink-0 !justify-center !px-0 flex">
+            <!-- 右侧按钮组：紧凑且对齐 -->
+            <div class="flex items-center gap-2 shrink-0 ml-auto relative z-10">
+              <Button 
+                variant="ghost" 
+                @click="emit('update:open', false)" 
+                class="h-8 w-16 rounded-md font-bold text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-all shrink-0"
+              >
                 {{ t('common.cancel') }}
               </Button>
-              <div class="h-4 w-[1px] bg-border/20 shrink-0"></div>
+              
+              <div class="h-4 w-[1px] bg-border/20 shrink-0 mx-0.5"></div>
               
               <Button
                 v-if="connectionType === 'database'"
-                variant="ghost"
+                variant="outline"
                 :disabled="saving || !canSave"
                 @click="handleSave(true)"
-                class="h-9 w-[130px] rounded-md font-black text-xs text-primary hover:bg-primary/5 active:scale-95 disabled:opacity-30 shrink-0 !justify-center !px-0 flex"
+                class="h-9 w-[110px] rounded-md font-bold text-[11px] text-primary border-primary/20 hover:bg-primary/5 hover:border-primary/40 active:scale-95 disabled:opacity-30 shrink-0 transition-all flex items-center justify-center gap-1"
               >
-                <div class="flex items-center justify-center gap-2">
-                  <Loader2 v-if="saving" class="h-3.5 w-3.5 animate-spin" />
-                  <span class="truncate">{{ t('connection.saveAndConnect') }}</span>
-                </div>
+                <Loader2 v-if="saving" class="h-3 w-3 animate-spin" />
+                <span class="truncate">{{ t('connection.saveAndConnect') }}</span>
               </Button>
  
               <Button 
                 :disabled="saving || !canSave" 
                 @click="handleSave(false)"
-                class="h-9 w-24 rounded-md font-black bg-primary text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 active:scale-95 disabled:opacity-50 text-xs relative overflow-hidden shrink-0 !justify-center !px-0 flex"
-                :class="{ 'pulse-ready': canSave && !saving }"
+                class="h-9 w-[80px] rounded-md font-bold bg-primary text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 hover:shadow-primary/30 active:scale-95 disabled:opacity-50 text-[11px] flex items-center justify-center gap-1 shrink-0"
               >
-                <div v-if="canSave && !saving" class="absolute inset-0 bg-white/10 animate-pulse"></div>
-                <div class="relative flex items-center justify-center gap-2">
-                  <Loader2 v-if="saving" class="h-3 w-3 animate-spin" />
-                  <Save v-else-if="canSave" class="h-3.5 w-3.5 animate-in zoom-in-50 duration-300" />
-                  <span>{{ saving ? t('common.saving') : t('common.save') }}</span>
-                </div>
+                <Loader2 v-if="saving" class="h-3 w-3 animate-spin" />
+                <template v-else>
+                  <CheckCircle2 v-if="canSave" class="h-3 w-3 animate-in zoom-in-50 duration-300" />
+                  <span>{{ t('common.save') }}</span>
+                </template>
               </Button>
             </div>
           </footer>

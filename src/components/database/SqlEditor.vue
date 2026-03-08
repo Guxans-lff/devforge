@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, watch, nextTick, toRef } from 'vue'
 import * as monaco from 'monaco-editor'
-import { format as formatSql } from 'sql-formatter'
 import { useTheme } from '@/composables/useTheme'
 import { useSettingsStore } from '@/stores/settings'
+import { useSqlFormatter } from '@/composables/useSqlFormatter'
 import type { SchemaCache } from '@/types/database'
 import { useSqlCompletion } from '@/composables/useSqlCompletion'
 
@@ -13,6 +13,7 @@ const props = withDefaults(
     language?: string
     readOnly?: boolean
     schema?: SchemaCache | null
+    isLoadingSchema?: boolean
     driver?: string
   }>(),
   {
@@ -20,23 +21,27 @@ const props = withDefaults(
     language: 'sql',
     readOnly: false,
     schema: null,
+    isLoadingSchema: false,
     driver: undefined,
   },
 )
 
-// Register SQL completion provider
-useSqlCompletion(toRef(props, 'schema'), toRef(props, 'driver'))
+// 注册 SQL 智能补全（传入 Schema 缓存、驱动类型和加载状态）
+useSqlCompletion(toRef(props, 'schema'), toRef(props, 'driver'), toRef(props, 'isLoadingSchema'))
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   execute: [sql: string]
   executeSelected: [sql: string]
+  executeAll: [sql: string]
+  save: []
 }>()
 
 const editorContainer = ref<HTMLDivElement>()
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
 const { activeTheme, activeThemeId } = useTheme()
 const settingsStore = useSettingsStore()
+const { formatSqlText } = useSqlFormatter()
 
 function registerMonacoTheme(): string {
   const theme = activeTheme.value
@@ -103,15 +108,51 @@ onMounted(async () => {
     },
   })
 
-  // Shift+Alt+F -> format SQL
+  // Shift+Alt+F -> 格式化 SQL（支持选中部分）
   editor.addAction({
     id: 'format-sql',
     label: 'Format SQL',
     keybindings: [
       monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF,
     ],
+    run: (ed) => {
+      formatDocumentOrSelection(ed)
+    },
+  })
+
+  // Ctrl+Shift+F -> 格式化 SQL（支持选中部分）
+  editor.addAction({
+    id: 'format-sql-selection',
+    label: 'Format SQL (Selection)',
+    keybindings: [
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyF,
+    ],
+    run: (ed) => {
+      formatDocumentOrSelection(ed)
+    },
+  })
+
+  // Ctrl+Shift+Enter -> 执行全部语句（忽略选中，强制执行全部）
+  editor.addAction({
+    id: 'execute-all-sql',
+    label: 'Execute All SQL',
+    keybindings: [
+      monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.Enter,
+    ],
+    run: (ed) => {
+      emit('executeAll', ed.getValue())
+    },
+  })
+
+  // Ctrl+S -> 保存 SQL 片段
+  editor.addAction({
+    id: 'save-sql-snippet',
+    label: 'Save SQL Snippet',
+    keybindings: [
+      monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,
+    ],
     run: () => {
-      formatDocument()
+      emit('save')
     },
   })
 })
@@ -184,29 +225,51 @@ function insertText(text: string) {
   }
 }
 
-function formatDocument() {
-  if (!editor) return
-  const model = editor.getModel()
+/** 格式化整个文档或选中部分 */
+function formatDocumentOrSelection(ed?: monaco.editor.IStandaloneCodeEditor) {
+  const target = ed ?? editor
+  if (!target) return
+  const model = target.getModel()
   if (!model) return
 
   const language = props.driver === 'postgresql' ? 'postgresql' : 'mysql'
-  const currentValue = model.getValue()
-  try {
-    const formatted = formatSql(currentValue, {
+  const selection = target.getSelection()
+
+  // 如果有选中文本，只格式化选中部分
+  if (selection && !selection.isEmpty()) {
+    const selectedText = model.getValueInRange(selection)
+    const result = formatSqlText(selectedText, {
       language,
       tabWidth: settingsStore.settings.editorTabSize,
       keywordCase: 'upper',
     })
-    // Use pushEditOperations to preserve undo history
-    editor.executeEdits('format', [
-      {
-        range: model.getFullModelRange(),
-        text: formatted,
-      },
-    ])
-  } catch {
-    // If formatting fails, silently ignore
+    if (result.success) {
+      target.executeEdits('format', [{
+        range: selection,
+        text: result.formatted,
+      }])
+    }
+    return
   }
+
+  // 否则格式化整个文档
+  const currentValue = model.getValue()
+  const result = formatSqlText(currentValue, {
+    language,
+    tabWidth: settingsStore.settings.editorTabSize,
+    keywordCase: 'upper',
+  })
+  if (result.success) {
+    target.executeEdits('format', [{
+      range: model.getFullModelRange(),
+      text: result.formatted,
+    }])
+  }
+}
+
+/** 格式化文档（对外暴露的方法，兼容原有调用） */
+function formatDocument() {
+  formatDocumentOrSelection()
 }
 
 defineExpose({ getSelectedText, focus, insertText, formatDocument })

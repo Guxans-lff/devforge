@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useMessageCenterStore } from '@/stores/message-center'
-import { useCommandPaletteStore } from '@/stores/command-palette'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -16,15 +15,12 @@ import {
   Bell,
   Play,
   TerminalSquare,
-  Search,
-  Command,
 } from 'lucide-vue-next'
 import type { TabType } from '@/types/workspace'
 import MessageCenter from './MessageCenter.vue'
 
 const workspace = useWorkspaceStore()
 const messageCenter = useMessageCenterStore()
-const commandPalette = useCommandPaletteStore()
 const { t } = useI18n()
 
 const iconMap: Record<TabType, typeof Database> = {
@@ -50,7 +46,7 @@ function handleMiddleClick(event: MouseEvent, tabId: string) {
 </script>
 
 <template>
-  <div class="relative flex h-10 items-center border-b border-border/40 bg-background/60 backdrop-blur-md">
+  <div class="relative z-30 flex h-10 items-center border-b border-border/40 bg-background/60 backdrop-blur-md">
     <ScrollArea orientation="horizontal" class="flex-1">
       <div class="flex h-10 items-center">
         <TooltipProvider :delay-duration="500">
@@ -98,25 +94,6 @@ function handleMiddleClick(event: MouseEvent, tabId: string) {
 
     <!-- 右侧功能区 -->
     <div class="flex h-full items-center gap-1 px-2 border-l border-border/40">
-      <!-- 快捷搜索/命令面板触发器 -->
-      <TooltipProvider :delay-duration="300">
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <button
-              class="flex h-7 items-center gap-2 rounded-md bg-muted/30 px-2 text-muted-foreground/60 transition-all hover:bg-muted/50 hover:text-foreground/80 active:scale-95"
-              @click="commandPalette.toggle()"
-            >
-              <Search class="h-3.5 w-3.5" />
-              <div class="flex items-center gap-0.5 text-[10px] font-bold opacity-60">
-                 <Command class="h-2.5 w-2.5" />
-                 <span>K</span>
-              </div>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" class="text-[11px] font-medium">{{ t('command.palette') }}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
       <!-- 消息中心按钮 -->
       <TooltipProvider :delay-duration="300">
         <Tooltip>

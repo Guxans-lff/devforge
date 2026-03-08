@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { useTransferStore } from '@/stores/transfer'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import TabBar from '@/components/layout/TabBar.vue'
+import TitleBar from '@/components/layout/TitleBar.vue'
 import BottomPanel from '@/components/layout/BottomPanel.vue'
 import CommandPalette from '@/components/layout/CommandPalette.vue'
 import WelcomeView from '@/views/WelcomeView.vue'
@@ -79,7 +80,11 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-screen overflow-hidden bg-muted/20 dark:bg-[#0c0c0e]">
+  <div class="flex h-screen w-screen flex-col overflow-hidden bg-muted/20 dark:bg-[#0c0c0e]">
+    <!-- 自定义标题栏 -->
+    <TitleBar />
+
+    <div class="flex flex-1 min-h-0">
     <!-- Sidebar -->
     <Sidebar />
 
@@ -109,6 +114,7 @@ onMounted(() => {
 
       <!-- Bottom Panel -->
       <BottomPanel />
+    </div>
     </div>
 
     <!-- Command Palette -->

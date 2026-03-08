@@ -118,3 +118,32 @@ export const useMessageCenterStore = defineStore('message-center', () => {
     togglePanel,
   }
 })
+
+/**
+ * 便捷的消息通知 Hook
+ * 提供类似 message.success('...') 的链式调用 API
+ */
+export function useMessage() {
+  const store = useMessageCenterStore()
+
+  const notify = (type: MessageType, title: string, description?: string, autoClose = 3000) => {
+    return store.addMessage({
+      type,
+      title,
+      description,
+      autoClose: type === 'loading' ? undefined : autoClose,
+      persistent: type === 'loading'
+    })
+  }
+
+  return {
+    success: (title: string, description?: string) => notify('success', title, description),
+    error: (title: string, description?: string) => notify('error', title, description),
+    warning: (title: string, description?: string) => notify('warning', title, description),
+    info: (title: string, description?: string) => notify('info', title, description),
+    loading: (title: string, description?: string) => notify('loading', title, description),
+    /** 这里的 id 可以用于之后的手动删除或更新 */
+    add: store.addMessage,
+    remove: store.deleteMessage,
+  }
+}
