@@ -1,8 +1,10 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use russh_sftp::client::rawsession::RawSftpSession;
 use russh_sftp::client::SftpSession;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
@@ -51,6 +53,7 @@ pub struct TransferTask {
     pub state: Arc<Mutex<TransferState>>,
     pub cancel_token: CancellationToken,
     pub total_bytes: u64,
+    pub transferred_bytes: Arc<AtomicU64>,
 }
 
 impl TransferTask {
@@ -61,6 +64,7 @@ impl TransferTask {
             state: Arc::new(Mutex::new(TransferState::Pending)),
             cancel_token: CancellationToken::new(),
             total_bytes,
+            transferred_bytes: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -93,6 +97,8 @@ struct PendingTransfer {
     #[allow(dead_code)]
     connection_id: String,
     sftp_session: Arc<SftpSession>,
+    /// 用于流水线上传的 RawSftpSession（可选）
+    raw_sftp: Option<Arc<RawSftpSession>>,
     total_bytes: u64,
 }
 
@@ -172,6 +178,7 @@ impl TransferManager {
                         pending.id,
                         TransferType::Upload { local_path, remote_path },
                         pending.sftp_session,
+                        pending.raw_sftp,
                         pending.total_bytes,
                         active_tasks.clone(),
                         config.clone(),
@@ -184,6 +191,7 @@ impl TransferManager {
                         pending.id,
                         TransferType::Download { remote_path, local_path },
                         pending.sftp_session,
+                        pending.raw_sftp,
                         pending.total_bytes,
                         active_tasks.clone(),
                         config.clone(),
@@ -201,6 +209,7 @@ impl TransferManager {
         id: String,
         transfer_type: TransferType,
         sftp: Arc<SftpSession>,
+        raw_sftp: Option<Arc<RawSftpSession>>,
         total_bytes: u64,
         active_tasks: Arc<Mutex<HashMap<String, Arc<TransferTask>>>>,
         config: TransferConfig,
@@ -220,16 +229,21 @@ impl TransferManager {
         // 更新状态为运行中
         *lock_or_recover(&task.state) = TransferState::Running { offset: 0 };
 
-        // 创建进度跟踪器
-        let progress_tracker = Arc::new(ProgressTracker::new(
+        // 创建进度跟踪器 (共享任务的原子计数器)
+        let progress_tracker = Arc::new(ProgressTracker::with_atomic(
             id.clone(),
             total_bytes,
             Duration::from_millis(config.progress_emit_interval),
             Duration::from_secs(config.speed_window_size),
+            task.transferred_bytes.clone(),
         ));
 
-        // 创建 SFTP 处理器
-        let handler = SftpHandler::new(sftp);
+        // 创建 SFTP 处理器（上传时使用流水线模式）
+        let handler = if let Some(raw) = raw_sftp {
+            SftpHandler::with_raw_session(sftp, raw)
+        } else {
+            SftpHandler::new(sftp)
+        };
 
         // 克隆需要的变量
         let cancel_token = task.cancel_token.clone();
@@ -238,6 +252,7 @@ impl TransferManager {
         let chunk_size = config.chunk_size;
 
         // 在后台任务中执行传输
+        let bg_cancel_token = cancel_token.clone();
         tokio::spawn(async move {
             let result = match transfer_type {
                 TransferType::Upload { local_path, remote_path } => {
@@ -262,30 +277,47 @@ impl TransferManager {
                 }
             };
 
-            // 更新任务状态
-            match result {
-                Ok(_) => {
-                    *lock_or_recover(&task_state) = TransferState::Completed;
-                }
-                Err(e) => {
-                    *lock_or_recover(&task_state) = TransferState::Failed {
-                        error: e.clone(),
-                    };
+            log::debug!("[Transfer] Task {} background work finished, result: {:?}", task_id, result.is_ok());
 
-                    // 发送错误事件
-                    let _ = app_handle.emit(
-                        "transfer://error",
-                        ErrorEvent {
-                            id: task_id.clone(),
-                            error: e,
-                        },
-                    );
+            // 更新任务状态
+            {
+                let mut state = lock_or_recover(&task_state);
+                
+                // 关键防御：如果任务已经因为暂停或取消而被外部打断
+                // 或者已经通过 resume 启动了新一代任务，则不处理结果
+                if bg_cancel_token.is_cancelled() || matches!(*state, TransferState::Paused { .. }) {
+                    return;
+                }
+
+                match result {
+                    Ok(_) => {
+                        *state = TransferState::Completed;
+                    }
+                    Err(e) => {
+                        *state = TransferState::Failed { error: e.clone() };
+                        // 发送错误事件
+                        let _ = app_handle.emit(
+                            "transfer://error",
+                            ErrorEvent {
+                                id: task_id.clone(),
+                                error: e,
+                            },
+                        );
+                    }
                 }
             }
 
-            // 延迟后移除任务
+            // 非暂停任务：延迟后移除
             tokio::time::sleep(Duration::from_secs(3)).await;
-            lock_or_recover(&active_tasks).remove(&task_id);
+            
+            let mut tasks = lock_or_recover(&active_tasks);
+            if let Some(current_task) = tasks.get(&task_id) {
+                // 关键修复：只有当活动列表中的任务依然是当前这个 Arc 实例时，才执行移除
+                // 防止旧任务的清理逻辑误杀了刚刚通过 resume 启动的新任务实例
+                if Arc::ptr_eq(current_task, &task) {
+                    tasks.remove(&task_id);
+                }
+            }
 
             // 通知调度器检查队列
             if let Some(tx) = scheduler_tx {
@@ -303,6 +335,7 @@ impl TransferManager {
         transfer_type: TransferType,
         connection_id: String,
         sftp_session: Arc<SftpSession>,
+        raw_sftp: Option<Arc<RawSftpSession>>,
         total_bytes: u64,
     ) {
         let pending = PendingTransfer {
@@ -310,6 +343,7 @@ impl TransferManager {
             transfer_type,
             connection_id,
             sftp_session,
+            raw_sftp,
             total_bytes,
         };
 
@@ -335,6 +369,7 @@ impl TransferManager {
         local_path: PathBuf,
         remote_path: String,
         sftp: Arc<SftpSession>,
+        raw_sftp: Option<Arc<RawSftpSession>>,
         app_handle: AppHandle,
     ) -> Result<(), String> {
         let metadata = tokio::fs::metadata(&local_path)
@@ -345,6 +380,7 @@ impl TransferManager {
             id,
             TransferType::Upload { local_path, remote_path },
             sftp,
+            raw_sftp,
             metadata.len(),
             self.active_tasks.clone(),
             self.config.clone(),
@@ -370,6 +406,7 @@ impl TransferManager {
             id,
             TransferType::Download { remote_path, local_path },
             sftp,
+            None, // 下载不需要流水线
             metadata.size.unwrap_or(0),
             self.active_tasks.clone(),
             self.config.clone(),
@@ -379,7 +416,7 @@ impl TransferManager {
     }
 
     /// 暂停任务
-    pub fn pause_task(&self, id: &str) -> Result<(), String> {
+    pub fn pause_task(&self, id: &str, app_handle: &AppHandle) -> Result<(), String> {
         let tasks = lock_or_recover(&self.active_tasks);
         let task = tasks.get(id)
             .ok_or_else(|| format!("Task not found: {}", id))?;
@@ -387,13 +424,42 @@ impl TransferManager {
         let mut state = lock_or_recover(&task.state);
 
         // 只有运行中的任务可以暂停
-        if let TransferState::Running { offset } = *state {
+        if let TransferState::Running { .. } = *state {
+            let offset = task.transferred_bytes.load(Ordering::SeqCst);
             *state = TransferState::Paused { offset };
             task.cancel_token.cancel();
+            
+            // 全网通知：我停了
+            let _ = app_handle.emit("transfer://paused", id);
             Ok(())
         } else {
             Err(format!("Task {} is not running", id))
         }
+    }
+
+    /// 取消任务
+    pub fn cancel_task(&self, id: &str, app_handle: &AppHandle) -> Result<(), String> {
+        let mut tasks = lock_or_recover(&self.active_tasks);
+        let task = tasks.remove(id)
+            .ok_or_else(|| format!("Task not found: {}", id))?;
+
+        let mut state = lock_or_recover(&task.state);
+        *state = TransferState::Failed { error: "已取消".to_string() };
+        task.cancel_token.cancel();
+
+        // 清理文件
+        match &task.task_type {
+            TransferType::Upload { .. } => {
+                // 远程文件清理通常在 execute_transfer 的 Err 分支处理
+            }
+            TransferType::Download { local_path, .. } => {
+                let _ = std::fs::remove_file(local_path);
+            }
+        }
+
+        // 全网通知：我废了
+        let _ = app_handle.emit("transfer://cancelled", id);
+        Ok(())
     }
 
     /// 恢复任务
@@ -401,12 +467,13 @@ impl TransferManager {
         &self,
         id: &str,
         sftp: Arc<SftpSession>,
+        raw_sftp: Option<Arc<RawSftpSession>>,
         app_handle: AppHandle,
     ) -> Result<(), String> {
         // 创建新的取消令牌
         let new_cancel_token = CancellationToken::new();
 
-        let (task_type, task_state, total_bytes, offset) = {
+        let (task_type, task_state, total_bytes, offset, task_transferred_bytes, new_task) = {
             let mut tasks = lock_or_recover(&self.active_tasks);
             let task = tasks.get(id)
                 .ok_or_else(|| format!("Task not found: {}", id))?;
@@ -421,31 +488,43 @@ impl TransferManager {
                 }
             };
 
-            let result = (task.task_type.clone(), task.state.clone(), task.total_bytes, offset);
+            let result = (
+                task.task_type.clone(),
+                task.state.clone(),
+                task.total_bytes,
+                offset,
+                task.transferred_bytes.clone(),
+            );
 
             // 替换 task 实例以更新 cancel_token，保证后续 pause_task 能取消恢复后的任务
-            let new_task = Arc::new(TransferTask {
+            let nt = Arc::new(TransferTask {
                 id: id.to_string(),
                 task_type: task.task_type.clone(),
                 state: task.state.clone(),
                 cancel_token: new_cancel_token.clone(),
                 total_bytes: task.total_bytes,
+                transferred_bytes: task.transferred_bytes.clone(),
             });
-            tasks.insert(id.to_string(), new_task);
+            tasks.insert(id.to_string(), nt.clone());
 
-            result
+            (result.0, result.1, result.2, result.3, result.4, nt)
         };
 
-        // 创建进度跟踪器
-        let progress_tracker = Arc::new(ProgressTracker::new(
+        // 创建进度跟踪器 (共享任务的原子计数器)
+        let progress_tracker = Arc::new(ProgressTracker::with_atomic(
             id.to_string(),
             total_bytes,
             Duration::from_millis(self.config.progress_emit_interval),
             Duration::from_secs(self.config.speed_window_size),
+            task_transferred_bytes,
         ));
 
         // 创建 SFTP 处理器
-        let handler = SftpHandler::new(sftp);
+        let handler = if let Some(raw) = raw_sftp {
+            SftpHandler::with_raw_session(sftp, raw)
+        } else {
+            SftpHandler::new(sftp)
+        };
 
         // 克隆需要的变量
         let task_id = id.to_string();
@@ -453,6 +532,8 @@ impl TransferManager {
         let chunk_size = self.config.chunk_size;
 
         // 在后台任务中执行恢复
+        let bg_task = new_task.clone();
+        let bg_cancel_token = new_cancel_token.clone();
         tokio::spawn(async move {
             let result = match task_type {
                 TransferType::Upload { local_path, remote_path } => {
@@ -480,55 +561,51 @@ impl TransferManager {
             };
 
             // 更新任务状态
-            match result {
-                Ok(_) => {
-                    *lock_or_recover(&task_state) = TransferState::Completed;
+            {
+                let mut state = lock_or_recover(&task_state);
+                
+                // 关键防御：如果本代任务已被取消或再次暂停
+                if bg_cancel_token.is_cancelled() || matches!(*state, TransferState::Paused { .. }) {
+                    return; 
                 }
-                Err(e) => {
-                    *lock_or_recover(&task_state) = TransferState::Failed {
-                        error: e.user_message(),
-                    };
 
-                    // 发送错误事件
-                    let _ = app_handle.emit(
-                        "transfer://error",
-                        ErrorEvent {
-                            id: task_id.clone(),
+                match result {
+                    Ok(_) => {
+                        *state = TransferState::Completed;
+                    }
+                    Err(e) => {
+                        *state = TransferState::Failed {
                             error: e.user_message(),
-                        },
-                    );
+                        };
+
+                        // 发送错误事件
+                        let _ = app_handle.emit(
+                            "transfer://error",
+                            ErrorEvent {
+                                id: task_id.clone(),
+                                error: e.user_message(),
+                            },
+                        );
+                    }
                 }
             }
 
-            // 从活动任务列表中移除
+            // 非暂停任务：延迟后移除
             tokio::time::sleep(Duration::from_secs(3)).await;
-            lock_or_recover(&active_tasks).remove(&task_id);
+            
+            let mut tasks = lock_or_recover(&active_tasks);
+            if let Some(current_task) = tasks.get(&task_id) {
+                // 关键修复：只有当活动列表中的任务依然是当前这个 Arc 实例时，才执行移除
+                if Arc::ptr_eq(current_task, &bg_task) {
+                    tasks.remove(&task_id);
+                }
+            }
         });
 
         Ok(())
     }
 
-    /// 取消任务
-    pub fn cancel_task(&self, id: &str) -> Result<(), String> {
-        let mut tasks = lock_or_recover(&self.active_tasks);
-        let task = tasks.remove(id)
-            .ok_or_else(|| format!("Task not found: {}", id))?;
 
-        // 取消任务
-        task.cancel_token.cancel();
-
-        // 清理文件
-        match &task.task_type {
-            TransferType::Upload { remote_path, .. } => {
-                log::warn!("Remote file cleanup for cancelled upload: {}", remote_path);
-            }
-            TransferType::Download { local_path, .. } => {
-                let _ = std::fs::remove_file(local_path);
-            }
-        }
-
-        Ok(())
-    }
 
     /// 获取活动任务数量
     #[allow(dead_code)]

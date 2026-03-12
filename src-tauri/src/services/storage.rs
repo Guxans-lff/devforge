@@ -1,15 +1,17 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
-use directories::ProjectDirs;
+
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 
 use crate::models::connection::{Connection, ConnectionGroup};
 use crate::utils::error::AppError;
 
+use tokio::sync::RwLock;
+
 pub struct Storage {
-    pool: SqlitePool,
+    pool: RwLock<SqlitePool>,
 }
 
 impl Storage {
@@ -29,19 +31,63 @@ impl Storage {
             .connect_with(options)
             .await?;
 
-        let storage = Self { pool };
+        let storage = Self { pool: RwLock::new(pool) };
         storage.run_migrations().await?;
 
         Ok(storage)
     }
 
-    fn get_db_path() -> Result<PathBuf, AppError> {
-        let dirs = ProjectDirs::from("com", "devforge", "DevForge")
-            .ok_or_else(|| AppError::Other("Failed to determine app data directory".into()))?;
-        Ok(dirs.data_dir().join("devforge.db"))
+    /// 热重载数据库：关闭当前连接池，根据最新配置重新打开
+    pub async fn reload(&self) -> Result<(), AppError> {
+        let db_path = Self::get_db_path()?;
+        log::info!("正在热重载数据库，新路径: {:?}", db_path);
+
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        let options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true);
+
+        let new_pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect_with(options)
+            .await?;
+
+        {
+            let mut pool_lock = self.pool.write().await;
+            let old_pool = std::mem::replace(&mut *pool_lock, new_pool);
+            old_pool.close().await; 
+        }
+
+        self.run_migrations().await?;
+        Ok(())
+    }
+
+    pub(crate) fn get_db_path() -> Result<PathBuf, AppError> {
+        let boot_config = crate::utils::boot_config::BootConfigManager::load();
+        
+        if let Some(custom_path) = boot_config.data_storage_path {
+            let path = PathBuf::from(custom_path);
+            return Ok(path.join("devforge.db"));
+        }
+
+        // 如果没有自定义路径，采用“建议的默认路径”（智能识别安装位置）
+        let suggested = crate::utils::boot_config::BootConfigManager::get_suggested_default_path();
+        Ok(suggested.join("devforge.db"))
+    }
+
+    pub fn get_db_path_raw(&self) -> PathBuf {
+        Self::get_db_path().unwrap_or_else(|_| PathBuf::from("devforge.db"))
+    }
+
+    async fn pool(&self) -> tokio::sync::RwLockReadGuard<'_, SqlitePool> {
+        self.pool.read().await
     }
 
     async fn run_migrations(&self) -> Result<(), AppError> {
+        let pool = self.pool().await;
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS connections (
                 id TEXT PRIMARY KEY,
@@ -58,7 +104,7 @@ impl Storage {
                 updated_at INTEGER NOT NULL
             )",
         )
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
 
         sqlx::query(
@@ -69,7 +115,7 @@ impl Storage {
                 parent_id TEXT
             )",
         )
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
 
         sqlx::query(
@@ -87,18 +133,18 @@ impl Storage {
                 executed_at INTEGER NOT NULL
             )",
         )
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
 
         // Indexes for query_history
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_qh_conn ON query_history(connection_id)")
-            .execute(&self.pool)
+            .execute(&*pool)
             .await?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_qh_time ON query_history(executed_at DESC)")
-            .execute(&self.pool)
+            .execute(&*pool)
             .await?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_qh_sql ON query_history(sql_text COLLATE NOCASE)")
-            .execute(&self.pool)
+            .execute(&*pool)
             .await?;
 
         sqlx::query(
@@ -114,7 +160,7 @@ impl Storage {
                 updated_at INTEGER NOT NULL
             )",
         )
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
 
         // Command snippets table
@@ -130,7 +176,7 @@ impl Storage {
                 updated_at INTEGER NOT NULL
             )",
         )
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
 
         Ok(())
@@ -143,7 +189,7 @@ impl Storage {
             "SELECT id, name, type, group_id, host, port, username, config_json, color, sort_order, created_at, updated_at
              FROM connections ORDER BY sort_order ASC, created_at ASC",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&*self.pool().await)
         .await?;
 
         let connections = rows
@@ -173,7 +219,7 @@ impl Storage {
              FROM connections WHERE id = ?",
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool().await)
         .await?
         .ok_or_else(|| AppError::ConnectionNotFound(id.to_string()))?;
 
@@ -194,6 +240,7 @@ impl Storage {
     }
 
     pub async fn create_connection(&self, conn: &Connection) -> Result<(), AppError> {
+        let pool = self.pool().await;
         sqlx::query(
             "INSERT INTO connections (id, name, type, group_id, host, port, username, config_json, color, sort_order, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -210,13 +257,14 @@ impl Storage {
         .bind(conn.sort_order)
         .bind(conn.created_at)
         .bind(conn.updated_at)
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
 
         Ok(())
     }
 
     pub async fn update_connection(&self, conn: &Connection) -> Result<(), AppError> {
+        let pool = self.pool().await;
         let result = sqlx::query(
             "UPDATE connections SET name = ?, type = ?, group_id = ?, host = ?, port = ?, username = ?, config_json = ?, color = ?, sort_order = ?, updated_at = ?
              WHERE id = ?",
@@ -232,7 +280,7 @@ impl Storage {
         .bind(conn.sort_order)
         .bind(conn.updated_at)
         .bind(&conn.id)
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
 
         if result.rows_affected() == 0 {
@@ -245,7 +293,7 @@ impl Storage {
     pub async fn delete_connection(&self, id: &str) -> Result<(), AppError> {
         let result = sqlx::query("DELETE FROM connections WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&*self.pool().await)
             .await?;
 
         if result.rows_affected() == 0 {
@@ -256,7 +304,7 @@ impl Storage {
     }
 
     pub async fn reorder_connections(&self, ids: &[String]) -> Result<(), AppError> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool().await.begin().await?;
         for (index, id) in ids.iter().enumerate() {
             sqlx::query("UPDATE connections SET sort_order = ? WHERE id = ?")
                 .bind(index as i32)
@@ -274,7 +322,7 @@ impl Storage {
         let rows = sqlx::query(
             "SELECT id, name, sort_order, parent_id FROM connection_groups ORDER BY sort_order ASC",
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&*self.pool().await)
         .await?;
 
         let groups = rows
@@ -291,6 +339,7 @@ impl Storage {
     }
 
     pub async fn create_group(&self, group: &ConnectionGroup) -> Result<(), AppError> {
+        let pool = self.pool().await;
         sqlx::query(
             "INSERT INTO connection_groups (id, name, sort_order, parent_id) VALUES (?, ?, ?, ?)",
         )
@@ -298,7 +347,7 @@ impl Storage {
         .bind(&group.name)
         .bind(group.sort_order)
         .bind(&group.parent_id)
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
 
         Ok(())
@@ -311,14 +360,14 @@ impl Storage {
             .bind(group.sort_order)
             .bind(&group.parent_id)
             .bind(&group.id)
-            .execute(&self.pool)
+            .execute(&*self.pool().await)
             .await?;
 
         Ok(())
     }
 
     pub async fn delete_group(&self, id: &str) -> Result<(), AppError> {
-        let mut tx = self.pool.begin().await?;
+        let mut tx = self.pool().await.begin().await?;
 
         // Ungroup connections in this group
         sqlx::query("UPDATE connections SET group_id = NULL WHERE group_id = ?")
@@ -341,7 +390,7 @@ impl Storage {
             "SELECT id, name, sort_order, parent_id FROM connection_groups WHERE id = ?",
         )
         .bind(id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool().await)
         .await?
         .ok_or_else(|| AppError::Other(format!("分组不存在: {}", id)))?;
 
@@ -364,7 +413,7 @@ impl Storage {
                 "SELECT parent_id FROM connection_groups WHERE id = ?",
             )
             .bind(&current_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&*self.pool().await)
             .await?;
 
             match row {
@@ -397,7 +446,7 @@ impl Storage {
                 "SELECT id FROM connection_groups WHERE parent_id = ?",
             )
             .bind(group_id)
-            .fetch_all(&self.pool)
+            .fetch_all(&*self.pool().await)
             .await?;
 
             if rows.is_empty() {
@@ -427,7 +476,7 @@ impl Storage {
                 "SELECT id FROM connection_groups WHERE parent_id = ?",
             )
             .bind(group_id)
-            .fetch_all(&self.pool)
+            .fetch_all(&*self.pool().await)
             .await?;
 
             for row in &rows {
@@ -450,13 +499,14 @@ impl Storage {
         connection_id: &str,
         group_id: Option<&str>,
     ) -> Result<(), AppError> {
+        let pool = self.pool().await;
         let result = sqlx::query(
             "UPDATE connections SET group_id = ?, updated_at = ? WHERE id = ?",
         )
         .bind(group_id)
         .bind(Utc::now().timestamp_millis())
         .bind(connection_id)
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
 
         if result.rows_affected() == 0 {
@@ -482,6 +532,7 @@ impl Storage {
         row_count: Option<i64>,
         executed_at: i64,
     ) -> Result<(), AppError> {
+        let pool = self.pool().await;
         sqlx::query(
             "INSERT INTO query_history (id, connection_id, connection_name, database_name, sql_text, execution_time_ms, is_error, error_message, affected_rows, row_count, executed_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -497,21 +548,21 @@ impl Storage {
         .bind(affected_rows)
         .bind(row_count)
         .bind(executed_at)
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
 
         // 高效清理：找到第 1000 条记录的时间戳，删除更早的记录（利用 idx_qh_time 索引）
         let cutoff_row = sqlx::query(
             "SELECT executed_at FROM query_history ORDER BY executed_at DESC LIMIT 1 OFFSET 1000",
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool().await)
         .await?;
 
         if let Some(row) = cutoff_row {
             let cutoff_time: i64 = row.get("executed_at");
             sqlx::query("DELETE FROM query_history WHERE executed_at < ?")
                 .bind(cutoff_time)
-                .execute(&self.pool)
+                .execute(&*self.pool().await)
                 .await?;
         }
 
@@ -547,7 +598,7 @@ impl Storage {
         }
         query = query.bind(limit).bind(offset);
 
-        let rows = query.fetch_all(&self.pool).await?;
+        let rows = query.fetch_all(&*self.pool().await).await?;
 
         let records = rows
             .iter()
@@ -572,7 +623,7 @@ impl Storage {
     pub async fn delete_query_history(&self, id: &str) -> Result<(), AppError> {
         sqlx::query("DELETE FROM query_history WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&*self.pool().await)
             .await?;
         Ok(())
     }
@@ -581,11 +632,11 @@ impl Storage {
         if let Some(cid) = connection_id {
             sqlx::query("DELETE FROM query_history WHERE connection_id = ?")
                 .bind(cid)
-                .execute(&self.pool)
+                .execute(&*self.pool().await)
                 .await?;
         } else {
             sqlx::query("DELETE FROM query_history")
-                .execute(&self.pool)
+                .execute(&*self.pool().await)
                 .await?;
         }
         Ok(())
@@ -621,7 +672,7 @@ impl Storage {
             query = query.bind(b);
         }
 
-        let rows = query.fetch_all(&self.pool).await?;
+        let rows = query.fetch_all(&*self.pool().await).await?;
 
         let records = rows
             .iter()
@@ -642,6 +693,7 @@ impl Storage {
     }
 
     pub async fn create_sql_snippet(&self, record: &SqlSnippetRecord) -> Result<(), AppError> {
+        let pool = self.pool().await;
         sqlx::query(
             "INSERT INTO sql_snippets (id, title, description, sql_text, category, tags, connection_id, created_at, updated_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -655,12 +707,13 @@ impl Storage {
         .bind(&record.connection_id)
         .bind(record.created_at)
         .bind(record.updated_at)
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
         Ok(())
     }
 
     pub async fn update_sql_snippet(&self, record: &SqlSnippetRecord) -> Result<(), AppError> {
+        let pool = self.pool().await;
         sqlx::query(
             "UPDATE sql_snippets SET title = ?, description = ?, sql_text = ?, category = ?, tags = ?, connection_id = ?, updated_at = ? WHERE id = ?",
         )
@@ -672,7 +725,7 @@ impl Storage {
         .bind(&record.connection_id)
         .bind(record.updated_at)
         .bind(&record.id)
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
         Ok(())
     }
@@ -680,7 +733,7 @@ impl Storage {
     pub async fn delete_sql_snippet(&self, id: &str) -> Result<(), AppError> {
         sqlx::query("DELETE FROM sql_snippets WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&*self.pool().await)
             .await?;
         Ok(())
     }
@@ -716,7 +769,7 @@ impl Storage {
             query = query.bind(b);
         }
 
-        let rows = query.fetch_all(&self.pool).await?;
+        let rows = query.fetch_all(&*self.pool().await).await?;
         let records = rows
             .iter()
             .map(|row| {
@@ -737,6 +790,7 @@ impl Storage {
     }
 
     pub async fn create_command_snippet(&self, record: &CommandSnippetRecord) -> Result<(), AppError> {
+        let pool = self.pool().await;
         sqlx::query(
             "INSERT INTO command_snippets (id, title, command, description, category, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
@@ -748,12 +802,13 @@ impl Storage {
         .bind(record.sort_order)
         .bind(record.created_at)
         .bind(record.updated_at)
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
         Ok(())
     }
 
     pub async fn update_command_snippet(&self, record: &CommandSnippetRecord) -> Result<(), AppError> {
+        let pool = self.pool().await;
         sqlx::query(
             "UPDATE command_snippets SET title = ?, command = ?, description = ?, category = ?, sort_order = ?, updated_at = ? WHERE id = ?",
         )
@@ -764,7 +819,7 @@ impl Storage {
         .bind(record.sort_order)
         .bind(record.updated_at)
         .bind(&record.id)
-        .execute(&self.pool)
+        .execute(&*pool)
         .await?;
         Ok(())
     }
@@ -772,7 +827,7 @@ impl Storage {
     pub async fn delete_command_snippet(&self, id: &str) -> Result<(), AppError> {
         sqlx::query("DELETE FROM command_snippets WHERE id = ?")
             .bind(id)
-            .execute(&self.pool)
+            .execute(&*self.pool().await)
             .await?;
         Ok(())
     }

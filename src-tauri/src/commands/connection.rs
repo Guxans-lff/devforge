@@ -8,6 +8,7 @@ use crate::models::connection::{
 use crate::services::credential::CredentialManager;
 use crate::services::db_engine::DbEngine;
 use crate::services::storage::Storage;
+use crate::utils::error::AppError;
 
 use std::sync::Arc;
 
@@ -149,10 +150,10 @@ pub async fn test_connection(
     storage: State<'_, StorageState>,
     id: String,
 ) -> Result<TestResult, String> {
-    let conn = storage.get_connection(&id).await.map_err(|e| e.to_string())?;
+    let conn = storage.get_connection(&id).await.map_err(|e: AppError| e.to_string())?;
 
     let password = CredentialManager::get(&id)
-        .map_err(|e| e.to_string())?
+        .map_err(|e: AppError| e.to_string())?
         .unwrap_or_default();
 
     let config: serde_json::Value =
@@ -217,7 +218,7 @@ pub async fn test_connection_params(
 pub async fn list_groups(
     storage: State<'_, StorageState>,
 ) -> Result<Vec<ConnectionGroup>, String> {
-    storage.list_groups().await.map_err(|e| e.to_string())
+    storage.list_groups().await.map_err(|e: AppError| e.to_string())
 }
 
 #[command]
@@ -346,7 +347,7 @@ pub async fn toggle_favorite(
     let mut conn = storage
         .get_connection(&connection_id)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: AppError| e.to_string())?;
 
     // 解析 config_json
     let mut config: serde_json::Value =
@@ -407,4 +408,66 @@ pub struct TestResult {
     pub success: bool,
     pub message: String,
     pub latency_ms: Option<u64>,
+}
+
+#[command]
+pub async fn update_boot_config(
+    storage: State<'_, StorageState>,
+    data_storage_path: Option<String>
+) -> Result<(), String> {
+    // 1. 获取当前的数据库路径（老家）
+    let current_db_path = storage.get_db_path_raw();
+    
+    // 2. 如果有新路径，准备执行“搬迁”
+    if let Some(ref new_dir_str) = data_storage_path {
+        let new_dir = std::path::PathBuf::from(new_dir_str);
+        let new_db_path = new_dir.join("devforge.db");
+        
+        // 确保新目录存在
+        if !new_dir.exists() {
+            std::fs::create_dir_all(&new_dir).map_err(|e| format!("无法创建新目录: {}", e))?;
+        }
+
+        // 物理迁移文件：如果老家有东西，且新家没东西，就搬过去
+        if current_db_path.exists() && !new_db_path.exists() {
+            log::info!("正在从 {:?} 物理搬迁数据到 {:?}", current_db_path, new_db_path);
+            // 先尝试复制
+            std::fs::copy(&current_db_path, &new_db_path)
+                .map_err(|e| format!("数据文件复制失败: {}", e))?;
+            
+            // 复制成功后，尝试把老家的改个名（如果被锁定则跳过，不影响新家）
+            let backup_path = current_db_path.with_extension("db.bak");
+            if let Err(e) = std::fs::rename(&current_db_path, backup_path) {
+                log::warn!("老家数据库文件被锁定，暂无法自动重命名(不影响搬迁): {}", e);
+            }
+        }
+    }
+
+    // 3. 保存引导配置，指路“新家”
+    let config = crate::utils::boot_config::BootConfig {
+        data_storage_path,
+    };
+    crate::utils::boot_config::BootConfigManager::save(&config).map_err(|e| e.to_string())?;
+
+    // 4. 即时重载存储引擎，让“搬迁”立即生效
+    storage.reload().await.map_err(|e| e.to_string())?;
+    
+    Ok(())
+}
+
+#[command]
+pub async fn reload_storage(storage: State<'_, StorageState>) -> Result<(), String> {
+    storage.reload().await.map_err(|e| e.to_string())
+}
+
+#[command]
+pub fn show_main_window(window: tauri::Window) {
+    let _ = window.show();
+}
+
+#[command]
+pub fn get_suggested_data_path() -> String {
+    crate::utils::boot_config::BootConfigManager::get_suggested_default_path()
+        .to_string_lossy()
+        .to_string()
 }

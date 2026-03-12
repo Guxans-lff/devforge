@@ -7,7 +7,10 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import TransferQueue from '@/components/file-manager/TransferQueue.vue'
 import TransferHistory from '@/components/file-manager/TransferHistory.vue'
+import LogPanel from '@/components/layout/LogPanel.vue'
 import QueryHistoryPanel from '@/components/database/QueryHistoryPanel.vue'
+import { useLogStore } from '@/stores/log'
+import { onMounted } from 'vue'
 import {
   ChevronDown,
   ChevronUp,
@@ -20,6 +23,11 @@ import {
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const transferStore = useTransferStore()
+const logStore = useLogStore()
+
+onMounted(() => {
+  logStore.info('SYSTEM', t('log.systemInit'))
+})
 
 const activeTransferCount = computed(() => {
   let count = 0
@@ -48,63 +56,73 @@ const panelTabs = [
         : `${workspace.panelState.bottomPanelHeight}px`,
     }"
   >
-    <!-- Panel Header / Status Bar (Sharp Visuals) -->
+    <!-- Panel Header / Status Bar (Masterpiece Dashboard Style) -->
     <div 
-      class="flex h-8 shrink-0 items-center justify-between border-b border-border/10 px-3 transition-colors bg-muted/5 font-medium"
+      class="flex h-9 shrink-0 items-center justify-between border-b border-border/10 px-4 transition-colors bg-background/95 backdrop-blur-md font-medium z-10"
     >
-      <div class="flex h-full items-center gap-3">
-        <!-- 极简化药丸切换器 -->
-        <div class="flex h-6 items-center rounded-full bg-muted/30 p-0.5 border border-border/20 shadow-inner">
+      <div class="flex h-full items-center gap-4">
+        <!-- 极进化灵动切换器 -->
+        <div class="flex h-6 items-center rounded-full bg-muted/20 p-0.5 border border-muted/30 shadow-inner">
           <button
             v-for="tab in panelTabs"
             :key="tab.id"
-            class="relative flex h-full items-center gap-2 rounded-full px-3 text-[10px] font-semibold transition-all duration-300"
+            class="relative flex h-full items-center gap-2 rounded-full px-3.5 text-[10px] font-black transition-all duration-300 uppercase tracking-tight group"
             :class="[
               workspace.panelState.bottomPanelTab === tab.id && !workspace.panelState.bottomPanelCollapsed
-                ? 'bg-background text-primary shadow-[0_1px_3px_rgba(0,0,0,0.1)] ring-1 ring-black/5 dark:ring-white/5'
-                : 'text-muted-foreground/50 hover:text-foreground/80 hover:bg-muted/10',
+                ? 'bg-background text-primary shadow-[0_2px_8px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.03] dark:ring-white/[0.03]'
+                : 'text-muted-foreground/40 hover:text-foreground/80 hover:bg-muted/10',
             ]"
             @click="workspace.setBottomPanelTab(tab.id); if(workspace.panelState.bottomPanelCollapsed) workspace.toggleBottomPanel()"
           >
             <component 
               :is="tab.icon" 
-              class="h-3 w-3" 
+              class="h-3 w-3 transition-transform group-active:scale-90" 
               :class="{ 'animate-pulse text-primary': tab.id === 'transfer' && activeTransferCount > 0 }"
             />
-            <span v-if="!workspace.panelState.bottomPanelCollapsed" class="whitespace-nowrap uppercase tracking-tighter">{{ t(tab.labelKey) }}</span>
+            <span v-if="!workspace.panelState.bottomPanelCollapsed" class="whitespace-nowrap">{{ t(tab.labelKey) }}</span>
+            
+            <!-- 传输任务数字气泡 -->
             <span
               v-if="tab.id === 'transfer' && activeTransferCount > 0"
-              class="inline-flex h-3 min-w-3 items-center justify-center rounded-full bg-primary/20 px-1 text-[8px] font-bold text-primary"
+              class="ml-1 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-primary/20 px-1 text-[8px] font-black text-primary border border-primary/20"
             >
               {{ activeTransferCount }}
             </span>
           </button>
         </div>
 
-        <!-- 垂直分割线 -->
-        <div class="h-3 w-px bg-border/20 mx-1"></div>
+        <!-- 极细分割线 -->
+        <div class="h-3 w-[1px] bg-border/40 mx-0.5"></div>
 
-        <!-- 工业级状态指示 -->
-        <div class="flex items-center gap-4 text-[10px] font-medium tracking-tight">
-           <div class="flex items-center gap-2 px-2 py-0.5 rounded-md bg-emerald-500/5 border border-emerald-500/10 text-emerald-500/80 transition-all hover:bg-emerald-500/10 active:scale-95 cursor-default group">
-             <div class="relative h-1 w-1 rounded-full bg-current">
-               <div class="absolute inset-0 animate-ping rounded-full bg-current opacity-40"></div>
+        <!-- 旗舰仪表级状态指示 -->
+        <div class="flex items-center gap-4">
+           <div class="flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-emerald-500/5 border border-emerald-500/10 text-emerald-500/90 transition-all hover:bg-emerald-500/10 cursor-default group">
+             <div class="relative flex items-center justify-center">
+               <div class="h-1 w-1 rounded-full bg-current shadow-[0_0_8px_rgba(16,185,129,0.8)]"></div>
+               <div class="absolute inset-[-4px] animate-ping rounded-full bg-current opacity-20"></div>
              </div>
-             <span class="uppercase font-bold tracking-widest text-[9px]">{{ t('bottomPanel.ready') }}</span>
+             <span class="font-black tracking-[0.1em] text-[9px] uppercase">{{ t('bottomPanel.ready') }}</span>
            </div>
 
-           <div v-if="activeTransferCount > 0" class="flex items-center gap-2 px-2 py-0.5 rounded-md bg-primary/5 border border-primary/10 text-primary/80 animate-in fade-in slide-in-from-left-2 duration-300">
-             <ArrowUpDown class="h-3 w-3 animate-bounce opacity-80" style="animation-duration: 2s;" />
-             <span class="font-bold tabular-nums text-[10px]">{{ activeTransferCount }}</span>
-             <span class="opacity-60 text-[9px] uppercase tracking-wider text-xs">{{ t('transfer.tasks') }}</span>
+           <!-- 活跃传输指示器 -->
+           <div v-if="activeTransferCount > 0" class="flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-primary/5 border border-primary/10 text-primary/90 animate-in fade-in zoom-in-95 duration-500">
+             <div class="relative">
+               <ArrowUpDown class="h-3 w-3 animate-bounce" style="animation-duration: 2.5s;" />
+             </div>
+             <div class="flex items-center gap-1">
+               <span class="font-black tabular-nums text-[10px]">{{ activeTransferCount }}</span>
+               <span class="opacity-40 text-[8px] font-black uppercase tracking-widest">{{ t('transfer.tasks') }}</span>
+             </div>
            </div>
         </div>
       </div>
 
-      <div class="flex items-center gap-2">
-        <!-- 侧边折叠控制 -->
+      <div class="flex items-center gap-3">
+        <!-- 面板功能操作 (后续可扩展) -->
+        
+        <!-- 大师级折叠控制 -->
         <button
-          class="flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground/30 transition-all hover:bg-muted/30 hover:text-foreground active:scale-90"
+          class="flex h-6 w-6 items-center justify-center rounded-lg text-muted-foreground/30 transition-all hover:bg-muted/40 hover:text-foreground active:scale-[0.85] border border-transparent hover:border-muted/30"
           @click="workspace.toggleBottomPanel()"
         >
           <ChevronDown
@@ -122,11 +140,7 @@ const panelTabs = [
       <QueryHistoryPanel v-if="workspace.panelState.bottomPanelTab === 'query-history'" />
 
       <!-- Log Tab -->
-      <ScrollArea v-else-if="workspace.panelState.bottomPanelTab === 'log'" class="h-full">
-        <div class="p-2 font-mono text-xs text-muted-foreground">
-          <p>{{ t('bottomPanel.noLog') }}</p>
-        </div>
-      </ScrollArea>
+      <LogPanel v-else-if="workspace.panelState.bottomPanelTab === 'log'" />
 
       <!-- Transfer Tab -->
       <TransferQueue v-else-if="workspace.panelState.bottomPanelTab === 'transfer'" />

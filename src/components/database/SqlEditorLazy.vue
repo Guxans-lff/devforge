@@ -35,10 +35,7 @@ const SqlEditor = defineAsyncComponent(() => import('./SqlEditor.vue'))
 const editorRef = ref<InstanceType<typeof SqlEditor>>()
 
 onMounted(() => {
-  // 延迟 100ms 加载编辑器，避免阻塞初始渲染
-  setTimeout(() => {
-    isLoaded.value = true
-  }, 100)
+  isLoaded.value = true
 })
 
 function handleUpdate(value: string) {
@@ -85,17 +82,6 @@ defineExpose({ getSelectedText, focus, insertText, formatDocument })
 
 <template>
   <div class="h-full w-full">
-    <!-- 加载占位符 -->
-    <div
-      v-if="!isLoaded"
-      class="flex h-full w-full items-center justify-center bg-muted/30"
-    >
-      <div class="flex flex-col items-center gap-2">
-        <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-        <p class="text-sm text-muted-foreground">加载编辑器...</p>
-      </div>
-    </div>
-
     <!-- 实际编辑器 -->
     <SqlEditor
       v-if="isLoaded"
@@ -112,5 +98,16 @@ defineExpose({ getSelectedText, focus, insertText, formatDocument })
       @execute-all="handleExecuteAll"
       @save="handleSave"
     />
+
+    <!-- 加载占位符 -->
+    <div
+      v-else
+      class="flex h-full w-full items-center justify-center bg-muted/30"
+    >
+      <div class="flex flex-col items-center gap-2">
+        <div class="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        <p class="text-sm text-muted-foreground">加载编辑器...</p>
+      </div>
+    </div>
   </div>
 </template>

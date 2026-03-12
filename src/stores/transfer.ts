@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { listen } from '@tauri-apps/api/event'
+import { useLogStore } from './log'
+import { i18n } from '@/locales'
 
 export interface TransferTask {
   id: string
@@ -21,6 +23,7 @@ export interface TransferTask {
 export const useTransferStore = defineStore('transfer', () => {
   const tasks = ref<Map<string, TransferTask>>(new Map())
   const history = ref<TransferTask[]>([])
+  const logStore = useLogStore()
 
   // 监听传输进度事件
   let listenersSetup = false
@@ -70,6 +73,13 @@ export const useTransferStore = defineStore('transfer', () => {
         if (task) {
           const completed = { ...task, status: 'completed' as const, endTime: Date.now() }
           tasks.value.set(event.payload.id, completed)
+
+          logStore.info('SFTP', (i18n.global as any).t('log.sftp.completed', { file: task.fileName }), {
+            type: task.type,
+            size: task.totalBytes,
+            duration: Date.now() - (task.startTime || 0)
+          })
+
           // 移到历史记录
           const next = [{ ...completed }, ...history.value]
           history.value = next.length > 100 ? next.slice(0, 100) : next
@@ -100,6 +110,12 @@ export const useTransferStore = defineStore('transfer', () => {
             error: event.payload.error,
             endTime: Date.now(),
           })
+
+          logStore.error('SFTP', (i18n.global as any).t('log.sftp.failed', { file: task.fileName, error: event.payload.error }), {
+            error: event.payload.error,
+            remotePath: task.remotePath
+          })
+
           // 触发响应式更新
           tasks.value = new Map(tasks.value)
         }
@@ -116,6 +132,12 @@ export const useTransferStore = defineStore('transfer', () => {
       startTime: Date.now(),
     }
     tasks.value.set(task.id, fullTask)
+
+    logStore.info('SFTP', (i18n.global as any).t('log.sftp.queueing', { type: task.type, file: task.fileName }), {
+      local: task.localPath,
+      remote: task.remotePath
+    })
+
     tasks.value = new Map(tasks.value)
   }
 

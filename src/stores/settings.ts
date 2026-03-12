@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 
 const STORAGE_KEY = 'devforge-settings'
 
@@ -29,10 +30,14 @@ export interface AppSettings {
   terminalCursorStyle: 'block' | 'underline' | 'bar'
   /** Terminal cursor blink */
   terminalCursorBlink: boolean
+  /** Terminal scrollback lines */
+  terminalScrollback: number
   /** UI font size in px */
   uiFontSize: number
   /** Custom keyboard shortcuts */
   shortcuts: ShortcutBinding[]
+  /** Data storage path */
+  dataStoragePath: string
 }
 
 const defaultShortcuts: ShortcutBinding[] = [
@@ -92,8 +97,10 @@ const defaults: AppSettings = {
   terminalFontFamily: "'Cascadia Code', 'JetBrains Mono', 'Fira Code', Consolas, monospace",
   terminalCursorStyle: 'block',
   terminalCursorBlink: true,
+  terminalScrollback: 5000,
   uiFontSize: 14,
   shortcuts: defaultShortcuts,
+  dataStoragePath: 'D:\\DevForgeData',
 }
 
 function loadSettings(): AppSettings {
@@ -151,5 +158,19 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  return { settings, update, reset, resetShortcuts, updateShortcut }
+  async function initializeDataPath() {
+    // 如果还没配置过，或者还在用以前死板的默认值，就去问后端拿“智能建议”
+    if (!settings.value.dataStoragePath || settings.value.dataStoragePath === 'D:\\DevForgeData') {
+      try {
+        const suggested = await invoke<string>('get_suggested_data_path')
+        if (suggested) {
+          update({ dataStoragePath: suggested })
+        }
+      } catch (e) {
+        console.error('Failed to get suggested data path:', e)
+      }
+    }
+  }
+
+  return { settings, update, reset, resetShortcuts, updateShortcut, initializeDataPath }
 })

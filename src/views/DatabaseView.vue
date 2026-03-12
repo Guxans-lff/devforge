@@ -473,7 +473,7 @@ async function handleExportDatabaseDdl(database: string) {
 </script>
 
 <template>
-  <div class="flex h-full flex-col bg-transparent">
+  <div class="flex h-full flex-col bg-background">
     <!-- 连接状态栏 (移除虚化，提升清晰度) -->
     <div class="flex items-center gap-2 border-b border-border/20 bg-background px-3 py-1.5">
       <div class="flex-1" />

@@ -52,7 +52,7 @@ impl SshTunnelEngine {
         let auth = config.to_auth_config();
 
         // Connect to SSH server
-        let ssh_config = Arc::new(client::Config::default());
+        let ssh_config = ssh_auth::create_ssh_config();
         let mut session =
             client::connect(ssh_config, (&*config.ssh_host, config.ssh_port), TunnelSshClient)
                 .await

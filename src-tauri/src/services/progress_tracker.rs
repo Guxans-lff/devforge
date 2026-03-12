@@ -38,10 +38,26 @@ impl ProgressTracker {
         emit_interval: Duration,
         speed_window_duration: Duration,
     ) -> Self {
+        Self::with_atomic(
+            task_id,
+            total_bytes,
+            emit_interval,
+            speed_window_duration,
+            Arc::new(AtomicU64::new(0)),
+        )
+    }
+
+    pub fn with_atomic(
+        task_id: String,
+        total_bytes: u64,
+        emit_interval: Duration,
+        speed_window_duration: Duration,
+        transferred_bytes: Arc<AtomicU64>,
+    ) -> Self {
         Self {
             task_id,
             total_bytes,
-            transferred_bytes: Arc::new(AtomicU64::new(0)),
+            transferred_bytes,
             speed_window: Arc::new(Mutex::new(VecDeque::new())),
             last_emit_time: Arc::new(Mutex::new(Instant::now())),
             emit_interval,
@@ -79,13 +95,14 @@ impl ProgressTracker {
             return 0;
         }
         
-        // 如果只有一个样本,使用从开始到现在的平均速度
+        // 如果只有一个样本，使用从该样本到现在的时间跨度计算
         if window.len() == 1 {
             let sample = window.front().unwrap();
             let duration = Instant::now().duration_since(sample.timestamp).as_secs_f64();
-            if duration > 0.1 {
-                // 至少等待 100ms 才计算速度
-                return (sample.bytes as f64 / duration) as u64;
+            // 在前 500ms 内，如果只有一个样本，可能还在预热，
+            // 我们可以尝试根据当前已传输量和基准时间做一个估算，或者保持 0
+            if duration > 0.01 {
+                return 0; // 等待更多样本
             }
             return 0;
         }

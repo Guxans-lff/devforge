@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
-import { Type, MousePointer2, Activity, Keyboard } from 'lucide-vue-next'
+import { Type, MousePointer2, Activity, Keyboard, ScrollText } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -147,6 +147,29 @@ function handleCursorStyle(value: string) {
         @update:checked="settingsStore.update({ terminalCursorBlink: $event })"
         class="scale-90"
       />
+    </div>
+
+    <!-- Scrollback Lines Card -->
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+      <div class="flex items-start gap-4">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/5 text-emerald-500/60 transition-colors group-hover:bg-emerald-500/10 group-hover:text-emerald-500">
+          <ScrollText class="h-5 w-5" />
+        </div>
+        <div class="space-y-0.5">
+          <Label class="text-[15px] font-bold tracking-tight">{{ t('settings.terminalScrollback' as any) || '滚动缓冲区' }}</Label>
+          <p class="text-xs text-muted-foreground/60 font-medium">{{ t('settings.terminalScrollbackDesc' as any) || '终端可回滚查看的历史行数' }}</p>
+        </div>
+      </div>
+      <Select :model-value="String(settingsStore.settings.terminalScrollback ?? 5000)" @update:model-value="settingsStore.update({ terminalScrollback: Number($event) })">
+        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs transition-all focus:ring-primary/20">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+          <SelectItem v-for="lines in [1000, 3000, 5000, 10000, 50000]" :key="lines" :value="String(lines)" class="rounded-lg font-bold">
+            {{ lines.toLocaleString() }} 行
+          </SelectItem>
+        </SelectContent>
+      </Select>
     </div>
   </div>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useMessageCenterStore } from '@/stores/message-center'
@@ -43,6 +43,67 @@ function handleMiddleClick(event: MouseEvent, tabId: string) {
     workspace.closeTab(tabId)
   }
 }
+
+// 右键菜单状态
+const contextMenu = ref<{ visible: boolean; x: number; y: number; tabId: string }>({
+  visible: false, x: 0, y: 0, tabId: '',
+})
+
+const contextTab = computed(() => workspace.tabs.find((t) => t.id === contextMenu.value.tabId))
+
+function handleContextMenu(e: MouseEvent, tabId: string) {
+  e.preventDefault()
+  contextMenu.value = { visible: true, x: e.clientX, y: e.clientY, tabId }
+}
+
+function closeContextMenu() {
+  contextMenu.value = { ...contextMenu.value, visible: false }
+}
+
+function closeCurrentTab() {
+  const tabId = contextMenu.value.tabId
+  closeContextMenu()
+  workspace.closeTab(tabId)
+}
+
+function closeOtherTabs() {
+  const tabId = contextMenu.value.tabId
+  closeContextMenu()
+  const closable = workspace.tabs.filter((t) => t.id !== tabId && t.closable)
+  for (const tab of closable) {
+    workspace.closeTab(tab.id)
+  }
+}
+
+function closeTabsToLeft() {
+  const tabId = contextMenu.value.tabId
+  closeContextMenu()
+  const idx = workspace.tabs.findIndex((t) => t.id === tabId)
+  if (idx <= 0) return
+  const closable = workspace.tabs.slice(0, idx).filter((t) => t.closable)
+  for (const tab of closable) {
+    workspace.closeTab(tab.id)
+  }
+}
+
+function closeTabsToRight() {
+  const tabId = contextMenu.value.tabId
+  closeContextMenu()
+  const idx = workspace.tabs.findIndex((t) => t.id === tabId)
+  if (idx < 0) return
+  const closable = workspace.tabs.slice(idx + 1).filter((t) => t.closable)
+  for (const tab of closable) {
+    workspace.closeTab(tab.id)
+  }
+}
+
+function closeAllTabs() {
+  closeContextMenu()
+  const closable = workspace.tabs.filter((t) => t.closable)
+  for (const tab of closable) {
+    workspace.closeTab(tab.id)
+  }
+}
 </script>
 
 <template>
@@ -61,6 +122,7 @@ function handleMiddleClick(event: MouseEvent, tabId: string) {
                 ]"
                 @click="workspace.setActiveTab(tab.id)"
                 @mousedown="handleMiddleClick($event, tab.id)"
+                @contextmenu="handleContextMenu($event, tab.id)"
               >
                 <!-- Active indicator handled by before pseudo-element -->
 
@@ -121,4 +183,53 @@ function handleMiddleClick(event: MouseEvent, tabId: string) {
     <!-- Message Center Panel -->
     <MessageCenter />
   </div>
+
+  <!-- 右键菜单 -->
+  <Teleport to="body">
+    <div
+      v-if="contextMenu.visible"
+      class="fixed inset-0 z-50"
+      @click="closeContextMenu"
+      @contextmenu.prevent="closeContextMenu"
+    />
+    <div
+      v-if="contextMenu.visible"
+      class="fixed z-50 min-w-[160px] rounded-md border border-border bg-popover p-1 shadow-md"
+      :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+    >
+      <button
+        class="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+        :disabled="!contextTab?.closable"
+        :class="{ 'opacity-40 pointer-events-none': !contextTab?.closable }"
+        @click="closeCurrentTab"
+      >
+        {{ t('common.close') }}
+      </button>
+      <button
+        class="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+        @click="closeOtherTabs"
+      >
+        {{ t('innerTab.closeOthers') }}
+      </button>
+      <button
+        class="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+        @click="closeTabsToLeft"
+      >
+        {{ t('innerTab.closeLeft') }}
+      </button>
+      <button
+        class="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+        @click="closeTabsToRight"
+      >
+        {{ t('innerTab.closeRight') }}
+      </button>
+      <div class="my-1 h-px bg-border" />
+      <button
+        class="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+        @click="closeAllTabs"
+      >
+        {{ t('innerTab.closeAll') }}
+      </button>
+    </div>
+  </Teleport>
 </template>

@@ -198,22 +198,16 @@ pub async fn execute_select_in_database(
 ) -> Result<QueryResult, AppError> {
     let mut conn = pool.acquire().await.map_err(AppError::Database)?;
 
-    // SET search_path 走 raw_sql 文本协议
+    // SET search_path 切换数据库上下文
     let set_sql = format!("SET search_path TO \"{}\"", database.replace('"', "\"\""));
-    {
-        let c: &mut sqlx::PgConnection = &mut *conn;
-        sqlx::raw_sql(&set_sql).execute(&mut *c).await.map_err(|e| {
-            AppError::Other(format!("切换数据库失败: {}", e))
-        })?;
-    }
+    sqlx::query(&set_sql).execute(&mut *conn).await.map_err(|e| {
+        AppError::Other(format!("切换数据库失败: {}", e))
+    })?;
 
-    let rows: Vec<PgRow> = {
-        let c: &mut PgConnection = &mut *conn;
-        sqlx::raw_sql(&sql)
-            .fetch_all(c)
-            .await
-            .map_err(|e| AppError::Other(format!("Query failed: {}", e)))?
-    };
+    let rows: Vec<PgRow> = sqlx::query(&sql)
+        .fetch_all(&mut *conn)
+        .await
+        .map_err(|e| AppError::Other(format!("Query failed: {}", e)))?;
 
     let elapsed = start.elapsed().as_millis() as u64;
 
@@ -275,19 +269,15 @@ pub async fn execute_non_select_in_database(
 ) -> Result<QueryResult, AppError> {
     let mut conn = pool.acquire().await.map_err(AppError::Database)?;
 
-    // SET search_path 走 Executor::execute 文本协议
+    // SET search_path 切换数据库上下文
     let set_sql = format!("SET search_path TO \"{}\"", database.replace('"', "\"\""));
-    conn.execute(set_sql.as_str())
-        .await
+    sqlx::query(&set_sql).execute(&mut *conn).await
         .map_err(|e| AppError::Other(format!("切换数据库失败: {}", e)))?;
 
-    let result: sqlx::postgres::PgQueryResult = {
-        let c: &mut PgConnection = &mut *conn;
-        sqlx::raw_sql(&sql)
-            .execute(c)
-            .await
-            .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?
-    };
+    let result: sqlx::postgres::PgQueryResult = sqlx::query(&sql)
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?;
 
     let elapsed = start.elapsed().as_millis() as u64;
 

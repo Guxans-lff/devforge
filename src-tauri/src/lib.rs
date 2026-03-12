@@ -111,6 +111,10 @@ pub fn run() {
             connection::delete_credential,
             // App
             connection::get_app_version,
+            connection::show_main_window,
+            connection::update_boot_config,
+            connection::reload_storage,
+            connection::get_suggested_data_path,
             // Database engine
             db::db_connect,
             db::db_disconnect,
@@ -156,6 +160,8 @@ pub fn run() {
             ssh::ssh_disconnect,
             ssh::ssh_send_data,
             ssh::ssh_resize,
+            ssh::ssh_flow_ack,
+            ssh::ssh_get_cwd,
             ssh::ssh_exec_command,
             ssh::ssh_test_connection,
             ssh::ssh_test_connection_params,

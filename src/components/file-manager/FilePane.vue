@@ -594,51 +594,106 @@ function formatDate(timestamp: number | null): string {
 
     <!-- New Folder Dialog -->
     <Dialog v-model:open="showMkdirDialog">
-      <DialogContent class="sm:max-w-[360px]">
-        <DialogHeader>
-          <DialogTitle>{{ t('fileManager.newFolder') }}</DialogTitle>
-        </DialogHeader>
-        <form @submit.prevent="handleMkdir">
-          <Input
-            v-model="mkdirName"
-            :placeholder="t('fileManager.newFolderName')"
-            class="mb-4"
-            autofocus
-          />
-          <DialogFooter>
-            <Button variant="outline" type="button" @click="showMkdirDialog = false">
-              {{ t('common.cancel') }}
-            </Button>
-            <Button type="submit" :disabled="!mkdirName.trim()">
-              {{ t('common.confirm') }}
-            </Button>
-          </DialogFooter>
-        </form>
+      <DialogContent class="max-w-[350px] p-0 overflow-hidden border border-border/40 shadow-2xl rounded-2xl bg-background/98 backdrop-blur-3xl">
+        <!-- Masterpiece Header -->
+        <div class="px-6 py-4 border-b border-white/[0.02] bg-muted/20 flex items-center gap-3">
+          <div class="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center text-primary shadow-sm border border-primary/20">
+            <FolderPlus class="h-4 w-4" />
+          </div>
+          <div class="flex flex-col">
+            <DialogTitle class="text-[14px] font-bold tracking-tight text-foreground/90">
+              {{ t('fileManager.newFolder') }}
+            </DialogTitle>
+            <span class="text-[10px] font-medium text-muted-foreground/40 uppercase tracking-[0.1em]">
+              Create New Directory
+            </span>
+          </div>
+        </div>
+
+        <div class="p-6">
+          <form @submit.prevent="handleMkdir">
+            <div class="mb-6">
+              <div class="flex items-center justify-between px-1 mb-2">
+                <label class="text-[11px] font-bold text-muted-foreground/60 uppercase tracking-widest">
+                  {{ t('fileManager.newFolderName') }}
+                </label>
+              </div>
+              <div class="relative group">
+                <Input
+                  v-model="mkdirName"
+                  class="h-11 rounded-xl border-border/80 bg-background/50 px-4 text-[13px] tracking-wide transition-all focus:border-primary focus:ring-4 focus:ring-primary/5 shadow-sm"
+                  :placeholder="t('fileManager.newFolderName')"
+                  autofocus
+                />
+                <div class="absolute inset-0 rounded-xl bg-primary/5 opacity-0 group-focus-within:opacity-100 pointer-events-none transition-opacity duration-300"></div>
+              </div>
+            </div>
+            <DialogFooter class="gap-3 p-0">
+              <Button 
+                variant="outline" 
+                type="button" 
+                class="flex-1 h-11 rounded-xl text-[12px] font-bold text-foreground/60 hover:text-foreground hover:bg-muted transition-all" 
+                @click="showMkdirDialog = false"
+              >
+                {{ t('common.cancel') }}
+              </Button>
+              <Button 
+                type="submit" 
+                class="flex-1 h-11 rounded-xl text-[12px] font-extrabold shadow-lg shadow-primary/20 transition-all active:scale-[0.96]" 
+                :disabled="!mkdirName.trim()"
+              >
+                {{ t('common.confirm') }}
+              </Button>
+            </DialogFooter>
+          </form>
+        </div>
       </DialogContent>
     </Dialog>
 
     <!-- Rename Dialog -->
     <Dialog v-model:open="showRenameDialog">
-      <DialogContent class="sm:max-w-[360px]">
-        <DialogHeader>
-          <DialogTitle>{{ t('fileManager.rename') }}</DialogTitle>
-        </DialogHeader>
-        <form @submit.prevent="handleRename">
-          <Input
-            v-model="renameName"
-            :placeholder="t('fileManager.renameTo')"
-            class="mb-4"
-            autofocus
-          />
-          <DialogFooter>
-            <Button variant="outline" type="button" @click="showRenameDialog = false">
-              {{ t('common.cancel') }}
-            </Button>
-            <Button type="submit" :disabled="!renameName.trim()">
-              {{ t('common.confirm') }}
-            </Button>
-          </DialogFooter>
-        </form>
+      <DialogContent class="max-w-[300px] p-0 overflow-hidden border border-border/60 shadow-2xl rounded-2xl bg-background/98 backdrop-blur-3xl">
+        <div class="px-5 py-3 border-b border-muted/30 flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <Pencil class="h-3.5 w-3.5 text-primary" />
+            <DialogTitle class="text-[12px] font-black uppercase tracking-widest text-foreground/70">
+              {{ t('fileManager.rename') }}
+            </DialogTitle>
+          </div>
+        </div>
+
+        <div class="p-5">
+          <form @submit.prevent="handleRename">
+            <div class="mb-5">
+              <div class="relative group">
+                <Input
+                  v-model="renameName"
+                  class="h-10 rounded-xl border-border/80 bg-muted/20 px-3 text-[13px] tracking-wide transition-all focus:border-primary focus:bg-background focus:ring-4 focus:ring-primary/5 shadow-sm"
+                  :placeholder="t('fileManager.renameTo')"
+                  autofocus
+                />
+              </div>
+            </div>
+
+            <div class="flex gap-2.5">
+              <Button 
+                variant="outline" 
+                type="button"
+                class="flex-1 h-9 rounded-xl text-[11px] font-bold text-foreground/60 border-border/40 hover:bg-muted transition-all" 
+                @click="showRenameDialog = false"
+              >
+                {{ t('common.cancel') }}
+              </Button>
+              <Button
+                type="submit"
+                class="flex-1 h-9 rounded-xl text-[11px] font-black shadow-lg shadow-primary/10 transition-all active:scale-[0.96]"
+                :disabled="!renameName.trim()"
+              >
+                {{ t('common.confirm') }}
+              </Button>
+            </div>
+          </form>
+        </div>
       </DialogContent>
     </Dialog>
   </div>

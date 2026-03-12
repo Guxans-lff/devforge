@@ -55,10 +55,15 @@ const activeTabProps = computed(() => {
     return { filePath: tab.meta.filePath }
   }
   if (tab.connectionId) {
-    return {
+    const base: Record<string, string> = {
       connectionId: tab.connectionId,
       connectionName: tab.title,
     }
+    // 文件管理器：传递初始远程路径（从终端 cwd 同步）
+    if (tab.type === 'file-manager' && tab.meta?.initialRemotePath) {
+      base.initialRemotePath = tab.meta.initialRemotePath
+    }
+    return base
   }
   return {}
 })

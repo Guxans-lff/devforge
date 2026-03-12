@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -26,6 +26,7 @@ import type { FileEntry } from '@/types/fileManager'
 const props = defineProps<{
   connectionId: string
   connectionName: string
+  initialRemotePath?: string
 }>()
 
 const { t } = useI18n()
@@ -74,7 +75,8 @@ const localEntries = ref<FileEntry[]>([])
 const localLoading = ref(false)
 
 // Remote pane state
-const remotePath = ref('/')
+// 远程面板状态（如果从终端传入了初始路径则使用，否则默认 /）
+const remotePath = ref(props.initialRemotePath || '/')
 const remoteEntries = ref<FileEntry[]>([])
 const remoteLoading = ref(false)
 
@@ -527,6 +529,21 @@ function debouncedLoadLocal() {
   }, 500)
 }
 
+// 监听 tab meta 中的 initialRemotePath 变化（从终端跳转过来时触发）
+watch(
+  () => {
+    const tab = workspace.tabs.find(t => t.id === `file-manager-${props.connectionId}`)
+    return tab?.meta?.initialRemotePath
+  },
+  (newPath, oldPath) => {
+    console.log('[FileManagerView] watch initialRemotePath 变化:', JSON.stringify(oldPath), '->', JSON.stringify(newPath), 'status:', status.value, 'remotePath:', remotePath.value)
+    if (newPath && newPath !== remotePath.value && status.value === 'connected') {
+      console.log('[FileManagerView] 执行 loadRemote:', newPath)
+      loadRemote(newPath)
+    }
+  },
+)
+
 onMounted(async () => {
   // 监听传输完成事件，自动刷新文件列表（防抖，批量传输时合并刷新）
   unlistenTransferComplete = await listen<{ id: string }>(
@@ -641,13 +658,13 @@ onBeforeUnmount(async () => {
         </Tooltip>
       </TooltipProvider>
       <div class="flex-1" />
-      <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div class="flex items-center gap-2 border-l border-border/10 ml-2 pl-3 text-[10px] font-black tracking-widest text-muted-foreground/30 uppercase italic">
         <div
-          class="h-2 w-2 rounded-full"
+          class="h-1.5 w-1.5 rounded-full transition-colors duration-300"
           :class="{
-            'bg-[var(--df-success)]': status === 'connected',
-            'bg-[var(--df-warning)] animate-pulse': status === 'connecting',
-            'bg-destructive': status === 'disconnected' || status === 'error',
+            'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]': status === 'connected',
+            'bg-yellow-500 animate-pulse': status === 'connecting',
+            'bg-red-500': status === 'disconnected' || status === 'error',
           }"
         />
         <span>{{ connectionName }}</span>

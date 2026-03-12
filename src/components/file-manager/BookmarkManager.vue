@@ -10,7 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { FolderOpen, Trash2, GripVertical, ArrowUp, ArrowDown } from 'lucide-vue-next'
+import { Bookmark, Trash2, GripVertical, ArrowUp, ArrowDown } from 'lucide-vue-next'
 
 interface Bookmark {
   path: string
@@ -76,58 +76,109 @@ function handleSave() {
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="sm:max-w-[550px] max-h-[70vh] flex flex-col">
-      <DialogHeader>
-        <DialogTitle>{{ t('fileManager.manageBookmarks') }}</DialogTitle>
-      </DialogHeader>
-
-      <div class="min-h-0 flex-1 overflow-auto space-y-1">
-        <div v-if="items.length === 0" class="py-8 text-center text-xs text-muted-foreground">
-          {{ t('fileManager.noBookmarks') }}
-        </div>
-        <div
-          v-for="(item, index) in items"
-          :key="item.path"
-          class="flex items-center gap-2 rounded-md border border-border p-2"
-        >
-          <GripVertical class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <FolderOpen class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <div class="flex-1 min-w-0 space-y-1">
-            <div class="flex gap-2">
-              <Input
-                :model-value="item.label"
-                class="h-6 text-xs"
-                :placeholder="t('fileManager.bookmarkName')"
-                @update:model-value="updateLabel(index, $event as string)"
-              />
-              <Input
-                :model-value="item.group"
-                class="h-6 w-24 text-xs"
-                :placeholder="t('fileManager.bookmarkGroup')"
-                @update:model-value="updateGroup(index, $event as string)"
-              />
-            </div>
-            <div class="truncate text-[10px] text-muted-foreground font-mono">{{ item.path }}</div>
-          </div>
-          <div class="flex flex-col gap-0.5">
-            <Button variant="ghost" size="icon" class="h-5 w-5" :disabled="index === 0" @click="moveUp(index)">
-              <ArrowUp class="h-3 w-3" />
-            </Button>
-            <Button variant="ghost" size="icon" class="h-5 w-5" :disabled="index === items.length - 1" @click="moveDown(index)">
-              <ArrowDown class="h-3 w-3" />
-            </Button>
-          </div>
-          <Button variant="ghost" size="icon" class="h-6 w-6 text-destructive" @click="removeItem(index)">
-            <Trash2 class="h-3 w-3" />
-          </Button>
+    <DialogContent class="sm:max-w-[450px] p-0 overflow-hidden border border-border/40 shadow-2xl rounded-2xl bg-background/98 backdrop-blur-3xl flex flex-col max-h-[85vh]">
+      <!-- Masterpiece Header -->
+      <div class="px-5 py-3 border-b border-muted/30 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-2">
+          <Bookmark class="h-3.5 w-3.5 text-primary" />
+          <DialogTitle class="text-[12px] font-black uppercase tracking-widest text-foreground/70">
+            {{ t('fileManager.manageBookmarks') }}
+          </DialogTitle>
         </div>
       </div>
 
-      <DialogFooter>
-        <Button variant="outline" @click="emit('update:open', false)">
+      <div class="p-5 flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+        <div class="space-y-3">
+          <!-- Empty State -->
+          <div v-if="items.length === 0" class="py-16 flex flex-col items-center justify-center text-center space-y-3">
+            <div class="h-12 w-12 rounded-full bg-muted/20 flex items-center justify-center text-muted-foreground/30">
+              <Bookmark class="h-6 w-6" />
+            </div>
+            <p class="text-[11px] font-bold text-muted-foreground/40 uppercase tracking-widest">
+              {{ t('fileManager.noBookmarks') }}
+            </p>
+          </div>
+
+          <!-- Bookmark List -->
+          <div
+            v-for="(item, index) in items"
+            :key="item.path"
+            class="group relative flex items-center gap-3 p-3 rounded-xl border border-border/40 bg-muted/5 hover:bg-primary/[0.02] hover:border-primary/20 transition-all"
+          >
+            <div class="cursor-grab active:cursor-grabbing p-1 text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors">
+              <GripVertical class="h-3.5 w-3.5" />
+            </div>
+            
+            <div class="flex-1 min-w-0 space-y-2">
+              <div class="flex gap-2">
+                <div class="flex-1 relative">
+                  <Input
+                    :model-value="item.label"
+                    class="h-8 rounded-lg border-border/60 bg-background/50 px-2.5 text-[11px] font-bold transition-all focus:border-primary focus:ring-4 focus:ring-primary/5"
+                    :placeholder="t('fileManager.bookmarkName')"
+                    @update:model-value="updateLabel(index, $event as string)"
+                  />
+                </div>
+                <div class="w-24 relative">
+                  <Input
+                    :model-value="item.group"
+                    class="h-8 rounded-lg border-border/60 bg-background/50 px-2.5 text-[11px] font-bold transition-all focus:border-primary focus:ring-4 focus:ring-primary/5 italic text-primary/70"
+                    :placeholder="t('fileManager.bookmarkGroup')"
+                    @update:model-value="updateGroup(index, $event as string)"
+                  />
+                </div>
+              </div>
+              <div class="px-1 truncate text-[9px] font-mono text-muted-foreground/50 tracking-tight">
+                {{ item.path }}
+              </div>
+            </div>
+
+            <div class="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div class="flex gap-1">
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  class="h-6 w-6 rounded-lg hover:bg-primary/10 hover:text-primary disabled:opacity-20" 
+                  :disabled="index === 0" 
+                  @click="moveUp(index)"
+                >
+                  <ArrowUp class="h-3 w-3" />
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  class="h-6 w-6 rounded-lg hover:bg-primary/10 hover:text-primary disabled:opacity-20" 
+                  :disabled="index === items.length - 1" 
+                  @click="moveDown(index)"
+                >
+                  <ArrowDown class="h-3 w-3" />
+                </Button>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                class="h-6 w-24 w-full rounded-lg hover:bg-destructive/10 hover:text-destructive text-muted-foreground/40" 
+                @click="removeItem(index)"
+              >
+                <Trash2 class="h-3 w-3" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <DialogFooter class="px-5 py-4 border-t border-muted/30 flex gap-2.5 sm:justify-start shrink-0">
+        <Button 
+          variant="outline" 
+          class="flex-1 h-9 rounded-xl text-[11px] font-bold text-foreground/60 border-border/40 hover:bg-muted transition-all" 
+          @click="emit('update:open', false)"
+        >
           {{ t('common.cancel') }}
         </Button>
-        <Button @click="handleSave">
+        <Button 
+          class="flex-1 h-9 rounded-xl text-[11px] font-black shadow-lg shadow-primary/20 transition-all active:scale-[0.96]" 
+          @click="handleSave"
+        >
           {{ t('common.save') }}
         </Button>
       </DialogFooter>

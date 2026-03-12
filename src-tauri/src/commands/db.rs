@@ -6,6 +6,7 @@ use crate::models::import_export::{ExportRequest, ExportResult};
 use crate::models::query::{ApplyChangesResult, ColumnInfo, ConnectResult, CreateUserRequest, DatabaseInfo, MysqlUser, ProcessInfo, QueryChunk, QueryResult, RoutineInfo, RowChange, ScriptOptions, ServerStatus, ServerVariable, TableInfo, TriggerInfo, ViewInfo};
 use crate::services::credential::CredentialManager;
 use crate::services::db_engine::DbEngine;
+use crate::utils::error::AppError;
 
 use std::sync::Arc;
 
@@ -424,9 +425,8 @@ pub async fn db_get_pool_status(
     engine: State<'_, DbEngineState>,
     connection_id: String,
 ) -> Result<PoolStatus, String> {
-    engine.get_pool_status(&connection_id)
-        .await
-        .map_err(|e| e.to_string())
+    let res: Result<PoolStatus, AppError> = engine.get_pool_status(&connection_id).await;
+    res.map_err(|e| e.to_string())
 }
 
 /// 检查连接状态并在断开时自动重连
@@ -439,9 +439,8 @@ pub async fn db_check_and_reconnect(
     connection_id: String,
     reconnect_params: ReconnectParams,
 ) -> Result<ReconnectResult, String> {
-    engine.check_and_reconnect(&connection_id, &reconnect_params)
-        .await
-        .map_err(|e| e.to_string())
+    let res: Result<ReconnectResult, AppError> = engine.check_and_reconnect(&connection_id, &reconnect_params).await;
+    res.map_err(|e| e.to_string())
 }
 
 /// 开始事务

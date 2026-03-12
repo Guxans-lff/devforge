@@ -169,21 +169,21 @@ onMounted(() => loadHistory(true))
 <template>
   <TooltipProvider :delay-duration="100">
     <div class="flex h-full flex-col">
-    <!-- Header -->
-    <div class="flex items-center gap-2 border-b border-border px-2 py-1">
-      <div class="relative flex-1">
-        <Search class="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+    <!-- Header (Masterpiece Refined) -->
+    <div class="flex items-center gap-2 border-b border-border/10 px-4 py-2 bg-muted/5">
+      <div class="relative flex-1 group">
+        <Search class="absolute left-2.5 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
         <Input
           v-model="searchText"
           :placeholder="t('queryHistory.searchPlaceholder')"
-          class="h-6 pl-7 text-xs"
+          class="h-7 pl-8 rounded-lg border-border/40 bg-background/50 text-[11px] font-bold transition-all focus:border-primary focus:ring-4 focus:ring-primary/5"
         />
       </div>
       <Button
         v-if="records.length > 0"
         variant="ghost"
         size="sm"
-        class="h-6 gap-1 px-2 text-xs text-muted-foreground hover:text-destructive"
+        class="h-7 gap-1.5 px-3 rounded-lg text-[10px] font-black text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-all uppercase tracking-tight"
         @click="handleClearAll"
       >
         <Trash2 class="h-3 w-3" />

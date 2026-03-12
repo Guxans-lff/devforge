@@ -35,6 +35,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function addTab(tab: Tab) {
     const existing = tabs.value.find((t) => t.id === tab.id)
     if (existing) {
+      // tab 已存在时更新 meta（用于跨组件传递参数，如文件管理器路径跳转）
+      if (tab.meta) {
+        existing.meta = { ...existing.meta, ...tab.meta }
+      }
       activeTabId.value = tab.id
       return
     }

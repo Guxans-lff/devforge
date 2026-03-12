@@ -1,10 +1,21 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
+import { useLogStore } from '@/stores/log'
+import { i18n } from '@/locales'
 import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo, RowChange, ApplyChangesResult, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest } from '@/types/database'
 import type { PoolStatus, ReconnectParams, ReconnectResult } from '@/types/connection'
 import type { ExportFormat } from '@/types/export'
 
-export function dbConnect(connectionId: string): Promise<ConnectResult> {
-  return invoke('db_connect', { connectionId })
+export async function dbConnect(connectionId: string): Promise<ConnectResult> {
+  const logStore = useLogStore()
+  logStore.info('DATABASE', (i18n.global as any).t('log.database.connecting', { id: connectionId }))
+  try {
+    const result = await invoke<ConnectResult>('db_connect', { connectionId })
+    logStore.info('DATABASE', (i18n.global as any).t('log.database.connected', { count: result.databases.length }))
+    return result
+  } catch (err: any) {
+    logStore.error('DATABASE', (i18n.global as any).t('log.database.failed', { error: err.toString() }))
+    throw err
+  }
 }
 
 export function dbDisconnect(connectionId: string): Promise<boolean> {
@@ -16,8 +27,17 @@ export function dbIsConnected(connectionId: string): Promise<boolean> {
 }
 
 /** 执行 SQL 查询，支持可选的超时时间（秒） */
-export function dbExecuteQuery(connectionId: string, sql: string, timeoutSecs?: number): Promise<QueryResult> {
-  return invoke('db_execute_query', { connectionId, sql, timeoutSecs: timeoutSecs ?? null })
+export async function dbExecuteQuery(connectionId: string, sql: string, timeoutSecs?: number): Promise<QueryResult> {
+  const logStore = useLogStore()
+  logStore.debug('DATABASE', (i18n.global as any).t('log.database.executing', { sql: sql.slice(0, 100) + (sql.length > 100 ? '...' : '') }), { sql })
+  try {
+    const result = await invoke<QueryResult>('db_execute_query', { connectionId, sql, timeoutSecs: timeoutSecs ?? null })
+    logStore.debug('DATABASE', (i18n.global as any).t('log.database.success', { rows: result.rows.length, time: result.executionTimeMs }))
+    return result
+  } catch (err: any) {
+    logStore.error('DATABASE', (i18n.global as any).t('log.database.execFailed', { error: err.toString() }), { sql, error: err })
+    throw err
+  }
 }
 
 /** 在指定数据库上下文中执行 SQL 查询（同一连接上先 USE <database> 再执行） */

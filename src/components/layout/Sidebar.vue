@@ -357,7 +357,7 @@ const groupedNonFavorites = computed(() => {
       <div class="group relative flex-1">
         <Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50 transition-colors group-focus-within:text-primary" />
         <Input
-          class="h-7 border-border bg-background/50 pl-8 pr-10 text-[11px] select-text shadow-none focus-visible:ring-1 focus-visible:ring-primary/40 transition-all hover:bg-background/80"
+          class="h-7 border-border bg-background pl-8 pr-10 text-[11px] select-text shadow-none focus-visible:ring-1 focus-visible:ring-primary/40 transition-all hover:bg-background/80"
           :placeholder="t('sidebar.searchConnections')"
           :model-value="connectionStore.searchQuery"
           @update:model-value="connectionStore.setSearchQuery($event as string)"

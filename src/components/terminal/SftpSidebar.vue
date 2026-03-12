@@ -67,8 +67,9 @@ const deleteConfirmDesc = ref('')
 let pendingDeleteAction: (() => Promise<void>) | null = null
 
 // 重命名
-const renamingEntry = ref<FileEntry | null>(null)
+const showRenameDialog = ref(false)
 const renameValue = ref('')
+const renamingEntry = ref<FileEntry | null>(null)
 
 let unlistenTransferComplete: (() => void) | null = null
 
@@ -214,6 +215,7 @@ async function executeDelete() {
 function startRename(entry: FileEntry) {
   renamingEntry.value = entry
   renameValue.value = entry.name
+  showRenameDialog.value = true
 }
 
 async function confirmRename() {
@@ -223,6 +225,7 @@ async function confirmRename() {
     const parentPath = lastSlash > 0 ? renamingEntry.value.path.substring(0, lastSlash) : ''
     const newPath = `${parentPath}/${renameValue.value}`
     await sftpApi.sftpRename(props.connectionId, renamingEntry.value.path, newPath)
+    showRenameDialog.value = false
     renamingEntry.value = null
     await loadDir()
   } catch (e) {
@@ -288,7 +291,7 @@ defineExpose({ syncToPath })
   <div class="flex h-full flex-col border-l border-border bg-background">
     <!-- Header -->
     <div class="flex items-center gap-1 border-b border-border px-2 py-1.5">
-      <span class="flex-1 truncate text-xs font-medium text-muted-foreground">{{ t('terminal.sftpFiles') }}</span>
+      <span class="flex-1 truncate text-[10px] font-black tracking-widest text-muted-foreground/30 uppercase italic">{{ t('terminal.sftpFiles') }}</span>
       <Button variant="ghost" size="icon" class="h-6 w-6" :title="t('sftp.syncDir')" @click="syncTerminalDir">
         <FolderSync class="h-3 w-3" />
       </Button>
@@ -358,20 +361,8 @@ defineExpose({ syncToPath })
           <ContextMenuTrigger class="flex flex-1 items-center gap-1.5 min-w-0">
             <Folder v-if="entry.isDir" class="h-3.5 w-3.5 shrink-0 text-[var(--df-warning)]" />
             <FileIcon v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            <template v-if="renamingEntry?.path === entry.path">
-              <Input
-                v-model="renameValue"
-                class="h-5 text-xs flex-1"
-                @keydown.enter="confirmRename"
-                @keydown.escape="renamingEntry = null"
-                @click.stop
-                @dblclick.stop
-              />
-            </template>
-            <template v-else>
-              <span class="flex-1 truncate">{{ entry.name }}</span>
-              <span v-if="!entry.isDir" class="shrink-0 text-muted-foreground">{{ formatSize(entry.size) }}</span>
-            </template>
+            <span class="flex-1 truncate">{{ entry.name }}</span>
+            <span v-if="!entry.isDir" class="shrink-0 text-muted-foreground">{{ formatSize(entry.size) }}</span>
           </ContextMenuTrigger>
           <ContextMenuContent>
             <!-- 目录操作 -->
@@ -420,4 +411,33 @@ defineExpose({ syncToPath })
     :description="deleteConfirmDesc"
     @confirm="executeDelete"
   />
+
+  <ConfirmDialog
+    v-model:open="showRenameDialog"
+    @confirm="confirmRename"
+    class="max-w-[300px] p-0 overflow-hidden border border-border/60 shadow-2xl rounded-2xl bg-background/98 backdrop-blur-3xl"
+  >
+    <div class="px-5 py-3 border-b border-muted/30 flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <Pencil class="h-3.5 w-3.5 text-primary" />
+        <h3 class="text-[12px] font-black uppercase tracking-widest text-foreground/70">
+          {{ t('fileManager.rename') }}
+        </h3>
+      </div>
+    </div>
+
+    <div class="p-5">
+      <div class="mb-5 text-left">
+        <div class="relative group">
+          <Input
+            v-model="renameValue"
+            class="h-10 rounded-xl border-border/80 bg-muted/20 px-3 text-[13px] tracking-wide transition-all focus:border-primary focus:bg-background focus:ring-4 focus:ring-primary/5 shadow-sm"
+            :placeholder="t('fileManager.renameTo')"
+            autofocus
+            @keydown.enter="confirmRename"
+          />
+        </div>
+      </div>
+    </div>
+  </ConfirmDialog>
 </template>

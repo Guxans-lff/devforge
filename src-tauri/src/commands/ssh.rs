@@ -7,6 +7,7 @@ use crate::commands::connection::{StorageState, TestResult};
 use crate::models::ssh::{AuthConfig, ProxyJumpConfig, SessionInfo};
 use crate::services::ssh_auth;
 use crate::services::ssh_engine::SshEngine;
+use crate::utils::error::AppError;
 
 pub type SshEngineState = Arc<SshEngine>;
 
@@ -26,10 +27,10 @@ pub async fn resolve_proxy_from_config(
     let proxy_conn = storage
         .get_connection(proxy_id)
         .await
-        .map_err(|e| format!("获取跳板机连接失败: {}", e))?;
+        .map_err(|e: AppError| format!("获取跳板机连接失败: {}", e))?;
 
     let proxy_auth = ssh_auth::parse_auth_config(proxy_id, &proxy_conn.config_json)
-        .map_err(|e| format!("解析跳板机认证失败: {}", e))?;
+        .map_err(|e: AppError| format!("解析跳板机认证失败: {}", e))?;
 
     Ok(Some(ProxyJumpConfig {
         host: proxy_conn.host,
@@ -114,6 +115,32 @@ pub async fn ssh_resize(
         .map_err(|e| e.to_string())
 }
 
+/// 前端流控 ACK：通知后端前端 xterm.js 已处理的累计字节数
+#[tauri::command]
+pub async fn ssh_flow_ack(
+    ssh_engine: State<'_, SshEngineState>,
+    session_id: String,
+    bytes: u64,
+) -> Result<(), String> {
+    ssh_engine
+        .flow_ack(&session_id, bytes)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// 获取终端当前工作目录（通过 exec channel，不在终端中执行命令）
+/// 类似 XShell 的做法：通过 /proc/<pid>/cwd 获取 shell 进程的 cwd
+#[tauri::command]
+pub async fn ssh_get_cwd(
+    ssh_engine: State<'_, SshEngineState>,
+    session_id: String,
+) -> Result<String, String> {
+    ssh_engine
+        .get_cwd(&session_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 /// 通过 connectionId 建立短连接执行单条命令并返回输出
 #[tauri::command]
 pub async fn ssh_exec_command(
@@ -128,7 +155,7 @@ pub async fn ssh_exec_command(
     let auth = ssh_auth::parse_auth_config(&connection_id, &conn.config_json)
         .map_err(|e| e.to_string())?;
 
-    let config = Arc::new(russh::client::Config::default());
+    let config = crate::services::ssh_auth::create_ssh_config();
     let mut session = russh::client::connect(config, (&*conn.host, conn.port as u16), TestSshClient)
         .await
         .map_err(|e| format!("SSH 连接失败: {}", e))?;
@@ -210,7 +237,7 @@ async fn ssh_test_connect(
     auth: &AuthConfig,
 ) -> Result<u64, String> {
     let start = Instant::now();
-    let config = Arc::new(russh::client::Config::default());
+    let config = crate::services::ssh_auth::create_ssh_config();
 
     let mut session = russh::client::connect(config, (host, port), TestSshClient)
         .await

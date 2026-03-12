@@ -5,6 +5,9 @@ import { listen } from '@tauri-apps/api/event'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
+import { Unicode11Addon } from '@xterm/addon-unicode11'
+import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import * as sshApi from '@/api/ssh'
 import { useTheme } from '@/composables/useTheme'
@@ -31,11 +34,58 @@ const errorMessage = ref('')
 
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
+let searchAddon: SearchAddon | null = null
 let sessionId = ''
 let unlistenOutput: (() => void) | null = null
 let unlistenStatus: (() => void) | null = null
 let resizeObserver: ResizeObserver | null = null
-let detectCwdUntil = 0 // 时间戳，在此之前检测 pwd 输出
+let resizeTimer: ReturnType<typeof setTimeout> | null = null
+let lastDetectedCwd = '' // 最近一次获取到的工作目录
+
+// === 端到端流控写入引擎（参考 VS Code + xterm.js 官方方案）===
+//
+// 核心原理：
+//   xterm.js 的 write(data, callback) 在数据被解析处理后触发 callback。
+//   我们在 callback 中累计已处理字节数，每处理 ACK_BYTE_THRESHOLD 字节
+//   就通过 Tauri command 通知后端。后端据此决定是否暂停从 SSH channel 读取。
+//
+// 这是 xterm.js 官方推荐的水位线流控方案，VS Code 终端也是这么做的。
+
+// 流控状态
+let totalReceived = 0       // 累计从后端收到的字节数
+let totalAcked = 0          // 累计已通过 ACK 通知后端的字节数
+let totalProcessed = 0      // 累计 xterm.js 已处理完的字节数
+let pendingAckBytes = 0     // 自上次 ACK 以来已处理但未通知的字节数
+
+// 流控参数
+const ACK_BYTE_THRESHOLD = 128_000  // 每处理 128KB 发一次 ACK
+
+/** 发送 ACK 到后端，通知已处理的字节数 */
+function sendFlowAck() {
+  if (!sessionId || pendingAckBytes === 0) return
+  totalAcked = totalProcessed
+  pendingAckBytes = 0
+  sshApi.sshFlowAck(sessionId, totalAcked).catch(() => {})
+}
+
+/** 将数据写入 xterm.js 并注册处理完成回调用于流控 */
+function flowControlledWrite(data: Uint8Array) {
+  if (!terminal) return
+
+  const chunkSize = data.length
+  totalReceived += chunkSize
+
+  // 使用 xterm.js 的 write callback：数据被解析处理完后触发
+  terminal.write(data, () => {
+    totalProcessed += chunkSize
+    pendingAckBytes += chunkSize
+
+    // 累积到阈值再发 ACK，避免过于频繁的 IPC 调用
+    if (pendingAckBytes >= ACK_BYTE_THRESHOLD) {
+      sendFlowAck()
+    }
+  })
+}
 
 function createTerminal() {
   const tc = activeTheme.value.terminal
@@ -45,6 +95,7 @@ function createTerminal() {
     fontSize: settingsStore.settings.terminalFontSize,
     fontFamily: settingsStore.settings.terminalFontFamily,
     cursorStyle: settingsStore.settings.terminalCursorStyle,
+    scrollback: settingsStore.settings.terminalScrollback ?? 5000,
     theme: {
       background: tc.background,
       foreground: tc.foreground,
@@ -70,16 +121,35 @@ function createTerminal() {
     allowProposedApi: true,
   })
 
+  // 基础插件
   fitAddon = new FitAddon()
   terminal.loadAddon(fitAddon)
   terminal.loadAddon(new WebLinksAddon())
 
+  // Unicode 11 插件 — CJK 宽字符正确对齐
+  const unicode11 = new Unicode11Addon()
+  terminal.loadAddon(unicode11)
+  terminal.unicode.activeVersion = '11'
+
+  // Search 插件 — 终端内搜索
+  searchAddon = new SearchAddon()
+  terminal.loadAddon(searchAddon)
+
   if (terminalRef.value) {
     terminal.open(terminalRef.value)
     fitAddon.fit()
+
+    // WebGL 渲染器 — GPU 加速
+    try {
+      const webgl = new WebglAddon()
+      webgl.onContextLoss(() => { webgl.dispose() })
+      terminal.loadAddon(webgl)
+    } catch (e) {
+      console.warn('WebGL 渲染器加载失败，回退到 Canvas 2D:', e)
+    }
   }
 
-  // Send user input to SSH
+  // 用户键盘输入发送到 SSH
   terminal.onData((data) => {
     if (sessionId && status.value === 'connected') {
       sshApi.sshSendData(sessionId, data).catch((err) => {
@@ -102,33 +172,23 @@ async function connect() {
     const session = await sshApi.sshConnect(props.connectionId, cols, rows)
     sessionId = session.sessionId
 
-    // Listen for SSH output
-    unlistenOutput = await listen<number[]>(
+    // 监听 SSH 输出（Base64 编码传输）
+    unlistenOutput = await listen<string>(
       `ssh://output/${sessionId}`,
       (event) => {
         if (terminal) {
-          const data = new Uint8Array(event.payload)
-          terminal.write(data)
-          // 仅在 pwd 检测窗口期内解析输出
-          if (detectCwdUntil > Date.now()) {
-            try {
-              const text = new TextDecoder().decode(data)
-              const lines = text.split(/\r?\n/)
-              for (const line of lines) {
-                const clean = line.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').trim()
-                if (/^\/[a-zA-Z0-9_.\/\-]+$/.test(clean) && clean.length > 1 && !clean.includes(' ')) {
-                  emit('cwdChange', clean)
-                  detectCwdUntil = 0 // 匹配到后关闭检测
-                  break
-                }
-              }
-            } catch { /* ignore */ }
+          try {
+            const binaryStr = atob(event.payload)
+            const data = Uint8Array.from(binaryStr, c => c.charCodeAt(0))
+            flowControlledWrite(data)
+          } catch (e) {
+            console.error('Terminal Base64 decode error:', e);
           }
         }
       },
     )
 
-    // Listen for status changes
+    // 监听连接状态变化
     unlistenStatus = await listen<string>(
       `ssh://status/${sessionId}`,
       () => {
@@ -156,13 +216,16 @@ async function reconnect() {
 function handleResize() {
   if (!fitAddon || !terminal) return
 
-  fitAddon.fit()
-
-  if (sessionId && status.value === 'connected') {
-    sshApi.sshResize(sessionId, terminal.cols, terminal.rows).catch((err) => {
-      console.warn('SSH resize failed:', err)
-    })
-  }
+  if (resizeTimer) clearTimeout(resizeTimer)
+  resizeTimer = setTimeout(() => {
+    if (!fitAddon || !terminal) return
+    fitAddon.fit()
+    if (sessionId && status.value === 'connected' && terminal) {
+      sshApi.sshResize(sessionId, terminal.cols, terminal.rows).catch((err) => {
+        console.warn('SSH resize failed:', err)
+      })
+    }
+  }, 150)
 }
 
 async function cleanup() {
@@ -172,12 +235,22 @@ async function cleanup() {
   unlistenStatus = null
   resizeObserver?.disconnect()
   resizeObserver = null
+  if (resizeTimer) {
+    clearTimeout(resizeTimer)
+    resizeTimer = null
+  }
+
+  totalReceived = 0
+  totalAcked = 0
+  totalProcessed = 0
+  pendingAckBytes = 0
 
   if (sessionId) {
     await sshApi.sshDisconnect(sessionId).catch(() => {})
     sessionId = ''
   }
 
+  searchAddon = null
   terminal?.dispose()
   terminal = null
   fitAddon = null
@@ -186,11 +259,8 @@ async function cleanup() {
 onMounted(() => {
   createTerminal()
 
-  // Observe container resize
   if (terminalRef.value) {
-    resizeObserver = new ResizeObserver(() => {
-      handleResize()
-    })
+    resizeObserver = new ResizeObserver(() => { handleResize() })
     resizeObserver.observe(terminalRef.value)
   }
 
@@ -201,7 +271,7 @@ onBeforeUnmount(() => {
   cleanup()
 })
 
-// React to theme changes
+// 响应主题变化
 watch(activeThemeId, () => {
   if (terminal) {
     const tc = activeTheme.value.terminal
@@ -230,7 +300,7 @@ watch(activeThemeId, () => {
   }
 })
 
-// React to user settings changes
+// 响应用户设置变化
 watch(
   () => settingsStore.settings,
   (s) => {
@@ -239,6 +309,7 @@ watch(
     terminal.options.fontFamily = s.terminalFontFamily
     terminal.options.cursorStyle = s.terminalCursorStyle
     terminal.options.cursorBlink = s.terminalCursorBlink
+    terminal.options.scrollback = s.terminalScrollback ?? 5000
     fitAddon?.fit()
   },
   { deep: true },
@@ -246,11 +317,6 @@ watch(
 
 function sendData(data: string) {
   if (sessionId && status.value === 'connected') {
-    // 检测是否发送了 pwd 或 cd 命令，开启 cwd 检测窗口
-    const cmd = data.replace(/\n$/, '').trim()
-    if (cmd === 'pwd' || cmd.startsWith('cd ') || cmd === 'cd') {
-      detectCwdUntil = Date.now() + 3000 // 3 秒检测窗口
-    }
     sshApi.sshSendData(sessionId, data).catch((err) => {
       console.warn('SSH send data failed:', err)
     })
@@ -272,12 +338,73 @@ function getSessionInfo() {
   }
 }
 
-defineExpose({ reconnect, handleResize, sendData, getSessionInfo })
+/** 获取最近一次缓存的工作目录 */
+function getCwd(): string {
+  return lastDetectedCwd
+}
+
+/**
+ * 主动请求当前工作目录（通过后端 exec channel，不在终端中执行命令）
+ * 类似 XShell 的做法：后端通过 /proc/<pid>/cwd 获取 shell 进程的 cwd
+ */
+async function requestCwd(): Promise<string> {
+  if (!sessionId || status.value !== 'connected') {
+    console.log('[requestCwd] 未连接, sessionId:', sessionId, 'status:', status.value)
+    return lastDetectedCwd
+  }
+  try {
+    console.log('[requestCwd] 调用后端 sshGetCwd, sessionId:', sessionId)
+    const cwd = await sshApi.sshGetCwd(sessionId)
+    console.log('[requestCwd] 后端返回:', JSON.stringify(cwd))
+    if (cwd) {
+      lastDetectedCwd = cwd
+      emit('cwdChange', cwd)
+    }
+    return cwd || lastDetectedCwd
+  } catch (err) {
+    console.warn('[requestCwd] 获取终端 cwd 失败:', err)
+    return lastDetectedCwd
+  }
+}
+
+// === 搜索功能方法 ===
+function searchFind(query: string, options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean }) {
+  if (!searchAddon) return false
+  return searchAddon.findNext(query, {
+    caseSensitive: options?.caseSensitive,
+    wholeWord: options?.wholeWord,
+    regex: options?.regex,
+  })
+}
+
+function searchFindNext(query: string, options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean }) {
+  if (!searchAddon) return false
+  return searchAddon.findNext(query, {
+    caseSensitive: options?.caseSensitive,
+    wholeWord: options?.wholeWord,
+    regex: options?.regex,
+  })
+}
+
+function searchFindPrevious(query: string, options?: { caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean }) {
+  if (!searchAddon) return false
+  return searchAddon.findPrevious(query, {
+    caseSensitive: options?.caseSensitive,
+    wholeWord: options?.wholeWord,
+    regex: options?.regex,
+  })
+}
+
+function searchClear() {
+  searchAddon?.clearDecorations()
+}
+
+defineExpose({ reconnect, handleResize, sendData, getSessionInfo, getCwd, requestCwd, searchFind, searchFindNext, searchFindPrevious, searchClear })
 </script>
 
 <template>
   <div class="relative h-full w-full overflow-hidden">
-    <!-- Terminal container -->
+    <!-- 终端容器 -->
     <div
       ref="terminalRef"
       class="h-full w-full p-2"
@@ -286,7 +413,7 @@ defineExpose({ reconnect, handleResize, sendData, getSessionInfo })
       @drop.prevent="handleDrop"
     />
 
-    <!-- Connecting overlay -->
+    <!-- 连接中遮罩 -->
     <div
       v-if="status === 'connecting'"
       class="absolute inset-0 flex items-center justify-center"
@@ -297,18 +424,16 @@ defineExpose({ reconnect, handleResize, sendData, getSessionInfo })
       </div>
     </div>
 
-    <!-- Error / Disconnected State (High Fidelity Card) -->
+    <!-- 断开/错误状态卡片 -->
     <div
       v-if="status === 'disconnected' || status === 'error'"
       class="absolute inset-0 z-10 flex items-center justify-center bg-background/40 backdrop-blur-[2px] p-6 animate-in fade-in duration-500"
     >
       <div class="relative w-full max-w-sm overflow-hidden rounded-2xl border border-border/20 bg-background/80 p-6 shadow-2xl backdrop-blur-xl ring-1 ring-white/5">
-        <!-- Background Glow -->
         <div class="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-destructive/10 blur-2xl"></div>
         <div class="absolute -bottom-8 -left-8 h-24 w-24 rounded-full bg-primary/5 blur-2xl"></div>
 
         <div class="relative flex flex-col items-center text-center">
-          <!-- Icon Container -->
           <div class="mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-destructive/10 ring-1 ring-destructive/20 shadow-[0_8px_16px_rgba(var(--color-destructive),0.1)]">
             <ShieldAlert class="h-7 w-7 text-destructive" />
           </div>
@@ -320,7 +445,7 @@ defineExpose({ reconnect, handleResize, sendData, getSessionInfo })
              {{ status === 'error' ? errorMessage : t('terminal.disconnected') }}
           </p>
 
-          <!-- Diagnostic Suggestions -->
+          <!-- 诊断建议 -->
           <div class="mb-8 grid w-full grid-cols-1 gap-2 text-left">
              <div class="flex items-start gap-2.5 rounded-lg bg-muted/30 p-2.5 ring-1 ring-border/5 transition-colors hover:bg-muted/50">
                 <WifiOff class="mt-0.5 h-3.5 w-3.5 text-muted-foreground/60" />
@@ -345,7 +470,7 @@ defineExpose({ reconnect, handleResize, sendData, getSessionInfo })
              </div>
           </div>
 
-          <!-- Actions -->
+          <!-- 操作按钮 -->
           <div class="flex w-full items-center gap-2">
             <Button
               class="flex-1 h-9 bg-primary text-[12px] font-bold shadow-[0_4px_12px_rgba(var(--color-primary),0.3)] hover:shadow-[0_6px_20px_rgba(var(--color-primary),0.4)] transition-all active:scale-95"

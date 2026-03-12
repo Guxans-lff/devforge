@@ -63,6 +63,13 @@ function getETA(task: any): string {
   return formatTime(seconds)
 }
 
+function getElapsedTime(task: any): string {
+  if (!task.startTime) return '--'
+  const end = task.endTime || Date.now()
+  const seconds = (end - task.startTime) / 1000
+  return formatTime(seconds)
+}
+
 async function handlePause(id: string) {
   try {
     await pauseTransfer(id)
@@ -81,17 +88,41 @@ async function handleResume(id: string) {
     const task = transferStore.tasks.get(id)
     if (!task) return
 
-    await resumeTransfer(id, task.connectionId)
+    // 立即更新 UI 状态，不等后端返回，避免用户感觉卡顿
     transferStore.tasks.set(id, { ...task, status: 'transferring' })
     transferStore.tasks = new Map(transferStore.tasks)
+
+    await resumeTransfer(id, task.connectionId)
   } catch (error) {
+    // 后端恢复失败，回滚 UI 状态为 paused
+    const current = transferStore.tasks.get(id)
+    if (current) {
+      transferStore.tasks.set(id, { ...current, status: 'paused' })
+      transferStore.tasks = new Map(transferStore.tasks)
+    }
     toast.error(t('transfer.resumeFailed'), String(error))
   }
+}
+
+// 清理任务关联的通知
+function dismissTaskNotification(id: string) {
+  const notificationId = taskNotifications.value.get(id)
+  if (notificationId) {
+    notification.dismiss(notificationId)
+    taskNotifications.value.delete(id)
+  }
+}
+
+// 移除任务并同步清理通知
+function handleRemove(id: string) {
+  dismissTaskNotification(id)
+  transferStore.removeTask(id)
 }
 
 async function handleCancel(id: string) {
   try {
     await cancelTransfer(id)
+    dismissTaskNotification(id)
     transferStore.removeTask(id)
   } catch (error) {
     toast.error(t('transfer.cancelFailed'), String(error))
@@ -106,7 +137,8 @@ async function handleRetry(id: string) {
   const task = transferStore.tasks.get(id)
   if (!task) return
 
-  // 移除失败的任务
+  // 移除失败的任务及其通知
+  dismissTaskNotification(id)
   transferStore.removeTask(id)
 
   // 创建新任务重新传输
@@ -150,6 +182,16 @@ const totalRemaining = computed(() => {
 const errorCount = computed(() =>
   activeTasks.value.filter(t => t.status === 'error').length,
 )
+const totalElapsed = computed(() => {
+  // 取所有传输中任务中最早的开始时间
+  const earliest = transferringTasks.value.reduce(
+    (min, t) => t.startTime && t.startTime < min ? t.startTime : min,
+    Date.now(),
+  )
+  if (transferringTasks.value.length === 0) return '--'
+  const seconds = (Date.now() - earliest) / 1000
+  return formatTime(seconds)
+})
 
 // 监听传输任务状态变化，显示通知
 watch(
@@ -271,7 +313,7 @@ watch(
                 <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-primary/10" @click="handleRetry(task.id)">
                   <RotateCcw class="h-3 w-3" />
                 </Button>
-                <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-destructive/10 hover:text-destructive" @click="transferStore.removeTask(task.id)">
+                <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-destructive/10 hover:text-destructive" @click="handleRemove(task.id)">
                   <X class="h-3 w-3" />
                 </Button>
               </template>
@@ -339,10 +381,12 @@ watch(
                    <Zap class="h-2.5 w-2.5 animate-pulse" />
                    {{ formatSpeed(task.speed) }}
                    <span class="text-muted-foreground/40">•</span>
-                   <span class="text-foreground/70">ETA {{ getETA(task) }}</span>
+                   <span class="text-foreground/70">剩余 {{ getETA(task) }}</span>
+                   <span class="text-muted-foreground/40">•</span>
+                   <span class="text-foreground/50">已用 {{ getElapsedTime(task) }}</span>
                 </span>
                 <span v-else-if="task.status === 'paused'" class="text-amber-500 uppercase tracking-widest text-[9px]">{{ t('transfer.paused') }}</span>
-                <span v-else-if="task.status === 'completed'" class="text-emerald-500 uppercase tracking-widest text-[9px]">{{ t('transfer.completed') }}</span>
+                <span v-else-if="task.status === 'completed'" class="text-emerald-500 uppercase tracking-widest text-[9px]">{{ t('transfer.completed') }} · {{ getElapsedTime(task) }}</span>
                 <span v-else-if="task.status === 'error'" class="text-destructive uppercase tracking-widest text-[9px]">{{ task.error || t('transfer.failed') }}</span>
               </div>
             </div>
@@ -364,7 +408,8 @@ watch(
         </span>
       </div>
       <div class="flex items-center gap-3">
-        <span v-if="transferringTasks.length > 0">ETA {{ totalRemaining }}</span>
+        <span v-if="transferringTasks.length > 0">剩余 {{ totalRemaining }}</span>
+        <span v-if="transferringTasks.length > 0" class="text-muted-foreground/50">已用 {{ totalElapsed }}</span>
         <span v-if="errorCount > 0" class="text-destructive font-black">
           {{ errorCount }} {{ t('transfer.failed') }}
         </span>

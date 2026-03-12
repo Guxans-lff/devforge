@@ -32,16 +32,31 @@ if (import.meta.env.DEV) {
 
 // 应用启动时恢复工作区状态
 onMounted(async () => {
+  const settingsStore = useSettingsStore()
   const workspaceStore = useWorkspaceStore()
   const connectionStore = useConnectionStore()
 
-  // 先加载连接列表
+  // 1. 初始化智能数据路径（如果是随行搬迁模式）
+  await settingsStore.initializeDataPath()
+
+  // 2. 加载连接列表
   await connectionStore.loadConnections()
 
   // 然后尝试恢复工作区状态
   const snapshot = workspaceStore.loadSnapshot()
   if (snapshot) {
     workspaceStore.restoreSnapshot(snapshot)
+  }
+
+  // 4. 全部就绪后显示窗口，彻底解决白屏闪烁
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    // 给 Vue 渲染渲染最后一帧留一点缓冲时间
+    setTimeout(() => {
+      invoke('show_main_window')
+    }, 100)
+  } catch (e) {
+    console.error('Failed to show window:', e)
   }
 })
 </script>

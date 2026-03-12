@@ -13,6 +13,47 @@ pub struct QueryResult {
     pub truncated: bool,
 }
 
+impl QueryResult {
+    pub fn empty(columns: Vec<ColumnDef>, execution_time_ms: u64) -> Self {
+        Self {
+            columns,
+            rows: vec![],
+            affected_rows: 0,
+            execution_time_ms,
+            is_error: false,
+            error: None,
+            total_count: Some(0),
+            truncated: false,
+        }
+    }
+
+    pub fn affected(affected_rows: u64, execution_time_ms: u64) -> Self {
+        Self {
+            columns: vec![],
+            rows: vec![],
+            affected_rows,
+            execution_time_ms,
+            is_error: false,
+            error: None,
+            total_count: None,
+            truncated: false,
+        }
+    }
+
+    pub fn error(error: String, execution_time_ms: u64) -> Self {
+        Self {
+            columns: vec![],
+            rows: vec![],
+            affected_rows: 0,
+            execution_time_ms,
+            is_error: true,
+            error: Some(error),
+            total_count: None,
+            truncated: false,
+        }
+    }
+}
+
 /// 流式查询数据块（通过 Tauri Channel 逐批推送给前端）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +71,20 @@ pub struct QueryChunk {
     /// 错误信息（仅在执行失败时包含）
     pub error: Option<String>,
 }
+
+impl QueryChunk {
+    pub fn error(chunk_index: u32, total_time_ms: u64, error: String) -> Self {
+        Self {
+            chunk_index,
+            columns: vec![],
+            rows: vec![],
+            is_last: true,
+            total_time_ms: Some(total_time_ms),
+            error: Some(error),
+        }
+    }
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
