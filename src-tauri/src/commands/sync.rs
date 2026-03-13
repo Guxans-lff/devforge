@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tauri::State;
+use tauri::Manager;
 
 use crate::commands::sftp::SftpEngineState;
 use russh_sftp::client::SftpSession;
+use futures::future::BoxFuture;
+use futures::FutureExt;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -31,15 +33,17 @@ pub struct SyncDiff {
 /// 比较本地和远程目录差异
 #[tauri::command]
 pub async fn sync_compare(
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     local_path: String,
     remote_path: String,
 ) -> Result<SyncDiff, String> {
-    // 收集本地文件
-    let local_files = collect_local_files(&local_path)
-        .await
-        .map_err(|e| format!("扫描本地目录失败: {}", e))?;
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
+        // 收集本地文件
+    let local_files = match collect_local_files(&local_path).await {
+        Ok(f) => f,
+        Err(e) => return Err(format!("扫描本地目录失败: {}", e)),
+    };
 
     // 收集远程文件
     let sftp = sftp_engine
@@ -47,9 +51,10 @@ pub async fn sync_compare(
         .await
         .ok_or_else(|| format!("No SFTP session for connection: {}", connection_id))?;
 
-    let remote_files = collect_remote_files_map(&sftp, &remote_path)
-        .await
-        .map_err(|e| format!("扫描远程目录失败: {}", e))?;
+    let remote_files = match collect_remote_files_map(&sftp, &remote_path).await {
+        Ok(f) => f,
+        Err(e) => return Err(format!("扫描远程目录失败: {}", e)),
+    };
 
     // 比较差异
     let mut entries = Vec::new();
@@ -153,8 +158,8 @@ fn collect_local_recursive<'a>(
     base: &'a std::path::Path,
     current: &'a std::path::Path,
     result: &'a mut HashMap<String, FileMetaInfo>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), std::io::Error>> + Send + 'a>> {
-    Box::pin(async move {
+) -> BoxFuture<'a, Result<(), std::io::Error>> {
+    async move {
         let mut entries = tokio::fs::read_dir(current).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
@@ -185,7 +190,7 @@ fn collect_local_recursive<'a>(
             }
         }
         Ok(())
-    })
+    }.boxed()
 }
 
 /// 递归收集远程文件，返回 (相对路径 -> 元信息) 的 HashMap
@@ -194,20 +199,18 @@ async fn collect_remote_files_map(
     base_path: &str,
 ) -> Result<HashMap<String, FileMetaInfo>, String> {
     let mut result = HashMap::new();
-    collect_remote_recursive(sftp, base_path, base_path, &mut result).await?;
+    collect_remote_recursive(sftp.as_ref(), base_path, base_path, &mut result).await?;
     Ok(result)
 }
 
 fn collect_remote_recursive<'a>(
-    sftp: &'a Arc<SftpSession>,
+    sftp: &'a SftpSession,
     base_path: &'a str,
     current_path: &'a str,
     result: &'a mut HashMap<String, FileMetaInfo>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
-    Box::pin(async move {
-        let entries = sftp
-            .read_dir(current_path)
-            .await
+) -> BoxFuture<'a, Result<(), String>> {
+    async move {
+        let entries = sftp.read_dir(current_path).await
             .map_err(|e| format!("read_dir {} 失败: {}", current_path, e))?;
 
         for entry in entries {
@@ -256,5 +259,5 @@ fn collect_remote_recursive<'a>(
             }
         }
         Ok(())
-    })
+    }.boxed()
 }

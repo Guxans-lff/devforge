@@ -1,7 +1,7 @@
 import { invoke, Channel } from '@tauri-apps/api/core'
 import { useLogStore } from '@/stores/log'
 import { i18n } from '@/locales'
-import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo, RowChange, ApplyChangesResult, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest } from '@/types/database'
+import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo, RowChange, ApplyChangesResult, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy } from '@/types/database'
 import type { PoolStatus, ReconnectParams, ReconnectResult } from '@/types/connection'
 import type { ExportFormat } from '@/types/export'
 
@@ -167,6 +167,11 @@ export function dbGetObjectDefinition(
 
 export function writeTextFile(path: string, content: string): Promise<void> {
   return invoke('write_text_file', { path, content })
+}
+
+/** 读取文本文件内容（用于运行 SQL 文件等场景） */
+export function readTextFile(path: string): Promise<string> {
+  return invoke('read_text_file', { path })
 }
 
 /** 获取连接池运行状态（活跃/空闲连接数） */
@@ -351,4 +356,166 @@ export function dbExportDatabaseDdl(
   options: ScriptOptions,
 ): Promise<string> {
   return invoke('db_export_database_ddl', { connectionId, database, options })
+}
+
+
+// ===== 多语句智能执行 API =====
+
+/**
+ * 多语句智能执行（增强版）
+ *
+ * 后端智能分割 SQL 文本后逐条执行，每条语句返回独立结果。
+ * 支持错误策略选择和数据库上下文切换。
+ *
+ * @param connectionId 连接 ID
+ * @param sql 原始 SQL 文本（后端负责分割）
+ * @param database 可选数据库上下文
+ * @param errorStrategy 错误策略：stopOnError（默认）或 continueOnError
+ * @param timeoutSecs 可选单条语句超时时间（秒）
+ * @returns 每条语句的执行结果列表
+ */
+export async function dbExecuteMultiV2(
+  connectionId: string,
+  sql: string,
+  database?: string,
+  errorStrategy?: ErrorStrategy,
+  timeoutSecs?: number,
+): Promise<StatementResult[]> {
+  const logStore = useLogStore()
+  logStore.debug('DATABASE', `多语句执行: ${sql.slice(0, 80)}${sql.length > 80 ? '...' : ''}`)
+  try {
+    const results = await invoke<StatementResult[]>('db_execute_multi_v2', {
+      connectionId,
+      sql,
+      database: database ?? null,
+      errorStrategy: errorStrategy ?? null,
+      timeoutSecs: timeoutSecs ?? null,
+    })
+    const successCount = results.filter(r => !r.result.isError).length
+    const failCount = results.length - successCount
+    logStore.debug('DATABASE', `多语句执行完成: 共 ${results.length} 条，成功 ${successCount}，失败 ${failCount}`)
+    return results
+  } catch (err: any) {
+    logStore.error('DATABASE', `多语句执行失败: ${err.toString()}`)
+    throw err
+  }
+}
+// ===== SQL File Stream API =====
+
+export interface SqlFileProgress {
+  totalStatements: number;
+  executed: number;
+  success: number;
+  fail: number;
+  currentSql: string;
+  isFinished: boolean;
+  error: string | null;
+}
+
+export interface SqlImportOptions {
+  continueOnError: boolean
+  multipleQueries: boolean
+  disableAutoCommit: boolean
+}
+
+/**
+ * 流式运行本地大体积 SQL 文件
+ * 
+ * @param connectionId 连接ID
+ * @param importId 分配给当前导入任务的唯一标识
+ * @param filePath 绝对文件路径
+ * @param options 高级导入配置
+ * @param onProgress 进度回调函数
+ * @param database 目标数据库（可选）
+ */
+export async function dbRunSqlFileStream(
+  connectionId: string,
+  importId: string,
+  filePath: string,
+  options: SqlImportOptions,
+  onProgress: (progress: SqlFileProgress) => void,
+  database?: string,
+): Promise<void> {
+  const channel = new Channel<SqlFileProgress>()
+  channel.onmessage = (message) => {
+    onProgress(message)
+  }
+
+  await invoke('db_run_sql_file_stream', {
+    connectionId,
+    importId,
+    filePath,
+    options,
+    database: database ?? null,
+    onProgress: channel,
+  })
+}
+
+export async function dbPauseSqlImport(importId: string): Promise<void> {
+  await invoke('db_pause_sql_import', { importId })
+}
+
+export async function dbResumeSqlImport(importId: string): Promise<void> {
+  await invoke('db_resume_sql_import', { importId })
+}
+
+export async function dbCancelSqlImport(importId: string): Promise<void> {
+  await invoke('db_cancel_sql_import', { importId })
+}
+
+// ===== Session 连接管理（企业级模式） =====
+
+/** 为指定查询 Tab 获取专用 Session 连接 */
+export function dbAcquireSession(connectionId: string, tabId: string): Promise<boolean> {
+  return invoke('db_acquire_session', { connectionId, tabId })
+}
+
+/** 释放指定查询 Tab 的 Session 连接 */
+export function dbReleaseSession(connectionId: string, tabId: string): Promise<boolean> {
+  return invoke('db_release_session', { connectionId, tabId })
+}
+
+/** 在 Session 连接上切换数据库 */
+export function dbSwitchDatabase(connectionId: string, tabId: string, database: string): Promise<boolean> {
+  return invoke('db_switch_database', { connectionId, tabId, database })
+}
+
+/** 在 Session 连接上执行查询（企业级模式） */
+export function dbExecuteQueryOnSession(
+  connectionId: string,
+  tabId: string,
+  sql: string,
+  database?: string,
+  timeoutSecs?: number,
+): Promise<QueryResult> {
+  return invoke('db_execute_query_on_session', {
+    connectionId,
+    tabId,
+    database: database ?? null,
+    sql,
+    timeoutSecs: timeoutSecs ?? null,
+  })
+}
+
+/**
+ * 在 Session 连接上流式执行查询（企业级模式）
+ */
+export function dbExecuteQueryStreamOnSession(
+  connectionId: string,
+  tabId: string,
+  sql: string,
+  onChunk: (chunk: QueryChunk) => void,
+  database?: string,
+  timeoutSecs?: number,
+): Promise<void> {
+  const channel = new Channel<QueryChunk>()
+  channel.onmessage = onChunk
+  return invoke('db_execute_query_stream_on_session', {
+    connectionId,
+    tabId,
+    database: database ?? null,
+    sql,
+    timeoutSecs: timeoutSecs ?? null,
+    onChunk: channel,
+  })
 }

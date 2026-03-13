@@ -20,8 +20,10 @@ import {
   ChevronRight,
   Copy,
   Check,
+  Play,
 } from 'lucide-vue-next'
 import { useConnectionStore } from '@/stores/connections'
+import { useNotification } from '@/composables/useNotification'
 import * as dbApi from '@/api/database'
 import * as schemaCompareApi from '@/api/schema-compare'
 import type { SchemaDiff } from '@/types/schema-compare'
@@ -33,6 +35,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
+const notification = useNotification()
 
 // 源和目标选择
 const sourceConnectionId = ref(props.connectionId)
@@ -210,6 +213,50 @@ async function handleCopySql() {
     }, 2000)
   } catch {
     // 静默处理
+  }
+}
+
+// ===== 执行迁移 =====
+const isExecutingMigration = ref(false)
+
+/** 执行迁移 SQL：调用 dbExecuteMultiV2，默认遇错停止 */
+async function handleExecuteMigration() {
+  if (!migrationSql.value || isExecutingMigration.value) return
+
+  if (!confirm(t('database.multiStatement.migrationConfirm'))) return
+
+  isExecutingMigration.value = true
+  try {
+    const results = await dbApi.dbExecuteMultiV2(
+      targetConnectionId.value,
+      migrationSql.value,
+      targetDatabase.value,
+      'stopOnError',
+    )
+
+    const successCount = results.filter(r => !r.result.isError).length
+    const failCount = results.length - successCount
+    const totalTimeMs = results.reduce((sum, r) => sum + r.result.executionTimeMs, 0)
+
+    const summaryMsg = t('database.multiStatement.executionSummary', {
+      total: results.length,
+      success: successCount,
+      fail: failCount,
+      time: `${(totalTimeMs / 1000).toFixed(1)}s`,
+    })
+
+    if (failCount > 0) {
+      // 找到第一个失败的语句，展示错误详情
+      const firstError = results.find(r => r.result.isError)
+      const errorDetail = firstError ? `\n语句 ${firstError.index}: ${firstError.result.error}` : ''
+      notification.warning(t('database.multiStatement.migrationFailed'), summaryMsg + errorDetail, true)
+    } else {
+      notification.success(t('database.multiStatement.migrationSuccess'), summaryMsg, 5000)
+    }
+  } catch (e) {
+    notification.error(t('database.multiStatement.migrationFailed'), String(e), true)
+  } finally {
+    isExecutingMigration.value = false
   }
 }
 
@@ -492,6 +539,17 @@ loadDatabases(props.connectionId, 'source')
                 <Check v-if="copied" class="h-3 w-3 text-emerald-500" />
                 <Copy v-else class="h-3 w-3" />
                 {{ copied ? t('common.copied') : t('common.copy') }}
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                class="h-5 gap-1 text-[10px]"
+                :disabled="isExecutingMigration || !migrationSql"
+                @click="handleExecuteMigration"
+              >
+                <Loader2 v-if="isExecutingMigration" class="h-3 w-3 animate-spin" />
+                <Play v-else class="h-3 w-3" />
+                {{ t('database.multiStatement.executeMigration') }}
               </Button>
             </div>
             <ScrollArea class="flex-1 min-h-0">

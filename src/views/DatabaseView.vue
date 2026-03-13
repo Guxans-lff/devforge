@@ -14,17 +14,20 @@ import PerformanceDashboard from '@/components/database/PerformanceDashboard.vue
 import UserManagementPanel from '@/components/database/UserManagementPanel.vue'
 import BackupDialog from '@/components/database/BackupDialog.vue'
 import RestoreDialog from '@/components/database/RestoreDialog.vue'
+import CreateDatabaseDialog from '@/components/database/CreateDatabaseDialog.vue'
+import EditDatabaseDialog from '@/components/database/EditDatabaseDialog.vue'
 import ConfirmDialog from '@/components/ui/confirm-dialog/ConfirmDialog.vue'
 import { useConnectionStore } from '@/stores/connections'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import * as dbApi from '@/api/database'
-import { dbGetPoolStatus, dbGenerateScript, dbExportDatabaseDdl } from '@/api/database'
+import { dbGetPoolStatus, dbGenerateScript, dbExportDatabaseDdl, readTextFile } from '@/api/database'
 import type { ScriptOptions } from '@/api/database'
 import type { PoolStatus } from '@/types/connection'
 import type { DatabaseTreeNode } from '@/types/database'
 import type { TableEditorTabContext, ImportTabContext } from '@/types/database-workspace'
 import { useSchemaCache } from '@/composables/useSchemaCache'
 import { useNotification } from '@/composables/useNotification'
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 
 const props = defineProps<{
   connectionId: string
@@ -136,12 +139,24 @@ function handleSchemaUpdated() {
   refreshSchemaCache()
 }
 
+// 从 ObjectTree 的 treeNodes 中提取数据库名称列表
+const databaseNames = computed(() => {
+  const nodes = objectTreeRef.value?.treeNodes
+  if (!nodes || nodes.length === 0) return []
+  return nodes.map((n: any) => n.label)
+})
+
 // 捕获 QueryPanel 执行成功事件，若是 DDL 则触发对象树无感刷新
 function handleExecuteSuccess(sql: string) {
   const isDDL = /\b(CREATE|DROP|ALTER|RENAME|TRUNCATE)\b/i.test(sql)
   if (isDDL && objectTreeRef.value) {
     (objectTreeRef.value as any).silentRefresh()
   }
+}
+
+/** 处理 QueryPanel 数据库切换事件，同步 ObjectTree 高亮和 Schema 缓存 */
+function handleDatabaseChanged(database: string) {
+  handleDatabaseSwitch(database)
 }
 
 /**
@@ -366,6 +381,31 @@ async function handleConfirmDeleteTable() {
   }
 }
 
+const truncateTableDialogOpen = ref(false)
+const truncateTableData = ref({ database: '', table: '' })
+
+function handleTruncateTable(database: string, table: string) {
+  truncateTableData.value = { database, table }
+  truncateTableDialogOpen.value = true
+}
+
+async function handleConfirmTruncateTable() {
+  const { database, table } = truncateTableData.value
+  if (!database || !table) return
+  try {
+    const q = quoteIdentifier
+    const sql = `TRUNCATE TABLE ${q(database)}.${q(table)};`
+    const result = await dbApi.dbExecuteQueryInDatabase(props.connectionId, database, sql)
+    if (result.isError) {
+      notification.error(t('database.queryFailed'), result.error ?? undefined, true)
+    } else {
+      notification.success(t('database.querySuccess'), `表 ${table} 已成功清空`, 3000)
+    }
+  } catch (e) {
+    console.error('Failed to truncate table:', e)
+  }
+}
+
 function handleImportData(database: string, table: string, columns: string[]) {
   dbWorkspaceStore.openImport(props.connectionId, database, table, columns)
 }
@@ -470,6 +510,48 @@ async function handleExportDatabaseDdl(database: string) {
     console.error('导出数据库结构失败:', e)
   }
 }
+
+import RunSqlFileDialog from '@/components/database/RunSqlFileDialog.vue'
+
+// 执行 SQL 文件相关状态
+const runSqlDialogOpen = ref(false)
+const runSqlDatabase = ref('')
+const runSqlFilePath = ref('')
+
+/** 运行 SQL 文件：直接打开对话框，支持在对话框内选择文件 */
+function handleRunSqlFile(database: string) {
+  runSqlDatabase.value = database
+  runSqlFilePath.value = '' // 不再强制要求先选文件
+  runSqlDialogOpen.value = true
+}
+
+function handleRunSqlSuccess() {
+  (objectTreeRef.value as any)?.silentRefresh()
+}
+
+const createDatabaseDialogOpen = ref(false)
+
+function handleCreateDatabase() {
+  createDatabaseDialogOpen.value = true
+}
+
+function handleCreateDatabaseSuccess(dbName: string) {
+  notification.success('创建成功', `数据库 ${dbName} 已创建`)
+  objectTreeRef.value?.forceRefresh()
+}
+
+const editDatabaseDialogOpen = ref(false)
+const editDatabaseName = ref('')
+
+function handleEditDatabase(dbName: string) {
+  editDatabaseName.value = dbName
+  editDatabaseDialogOpen.value = true
+}
+
+function handleEditDatabaseSuccess() {
+  notification.success('修改成功', `数据库 ${editDatabaseName.value} 属性已更新`)
+  objectTreeRef.value?.forceRefresh()
+}
 </script>
 
 <template>
@@ -495,18 +577,17 @@ async function handleExportDatabaseDdl(database: string) {
           <span class="text-muted-foreground/50 font-medium tabular-nums">{{ poolStatus.maxConnections }}</span>
         </div>
       </div>
-      <div class="flex items-center gap-1.5 text-xs text-muted-foreground">
+      <div class="flex items-center gap-2 border-l border-border/10 ml-2 pl-3 text-[10px] font-black tracking-widest text-muted-foreground/30 uppercase italic">
         <div
-          class="h-2 w-2 rounded-full"
+          class="h-1.5 w-1.5 rounded-full transition-colors duration-300"
           :class="{
-            'bg-[var(--df-success)]': isConnected && connectionState?.status !== 'reconnecting',
-            'bg-amber-500 animate-pulse': connectionState?.status === 'reconnecting',
-            'bg-[var(--df-warning)] animate-pulse': isConnecting && connectionState?.status !== 'reconnecting',
-            'bg-destructive': !isConnected && !isConnecting && connectionState?.status !== 'reconnecting',
+            'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]': isConnected && connectionState?.status !== 'reconnecting',
+            'bg-yellow-500 animate-pulse': connectionState?.status === 'reconnecting' || (isConnecting && connectionState?.status !== 'reconnecting'),
+            'bg-red-500': !isConnected && !isConnecting && connectionState?.status !== 'reconnecting',
           }"
         />
         <!-- 重连状态提示 -->
-        <span v-if="connectionState?.status === 'reconnecting'" class="text-amber-500 font-medium">
+        <span v-if="connectionState?.status === 'reconnecting'" class="text-amber-500">
           正在重连（第 {{ connectionState?.reconnectAttempt ?? 1 }} 次尝试）
         </span>
         <span v-else>{{ connectionName }}</span>
@@ -526,6 +607,7 @@ async function handleExportDatabaseDdl(database: string) {
           @edit-table="handleEditTable"
           @create-table="handleCreateTable"
           @delete-table="handleDeleteTable"
+          @truncate-table="handleTruncateTable"
           @import-data="handleImportData"
           @show-create-sql="handleShowCreateSql"
           @show-object-definition="handleShowObjectDefinition"
@@ -537,6 +619,9 @@ async function handleExportDatabaseDdl(database: string) {
           @open-performance="handleOpenPerformance"
           @generate-script="handleGenerateScript"
           @export-database-ddl="handleExportDatabaseDdl"
+          @run-sql-file="handleRunSqlFile"
+          @create-database="handleCreateDatabase"
+          @edit-database="handleEditDatabase"
         />
       </Pane>
 
@@ -563,8 +648,10 @@ async function handleExportDatabaseDdl(database: string) {
                 :schema-cache="schemaCache"
                 :is-loading-schema="isLoadingSchema"
                 :driver="driver"
+                :databases="databaseNames"
                 @reconnect="connectAndLoad"
                 @execute-success="handleExecuteSuccess"
+                @database-changed="handleDatabaseChanged"
               />
               <TableEditorPanel
                 v-else-if="activeTab?.type === 'table-editor' && tableEditorContext"
@@ -638,6 +725,40 @@ async function handleExportDatabaseDdl(database: string) {
       variant="destructive"
       confirm-label="坚决删除"
       @confirm="handleConfirmDeleteTable"
+    />
+
+    <!-- 清空表二次确认对话框 -->
+    <ConfirmDialog
+      v-model:open="truncateTableDialogOpen"
+      :title="`清空表 ${truncateTableData.table} 的数据?`"
+      description="此操作将快速并且不可逆地删除该表中的所有数据（保留表结构）。您确定要这么做吗？"
+      variant="destructive"
+      confirm-label="坚决清空"
+      @confirm="handleConfirmTruncateTable"
+    />
+
+    <!-- 运行 SQL 文件对话框 -->
+    <RunSqlFileDialog
+      v-model:open="runSqlDialogOpen"
+      :connection-id="connectionId"
+      :database="runSqlDatabase"
+      :file-path="runSqlFilePath"
+      @success="handleRunSqlSuccess"
+    />
+
+    <!-- 新建数据库对话框 -->
+    <CreateDatabaseDialog
+      v-model:open="createDatabaseDialogOpen"
+      :connection-id="connectionId"
+      @success="handleCreateDatabaseSuccess"
+    />
+
+    <!-- 编辑数据库对话框 -->
+    <EditDatabaseDialog
+      v-model:open="editDatabaseDialogOpen"
+      :connection-id="connectionId"
+      :database="editDatabaseName"
+      @success="handleEditDatabaseSuccess"
     />
   </div>
 </template>

@@ -295,90 +295,102 @@ pub async fn execute_non_select_in_database(
 
 /// 在专用连接上执行 SELECT 查询（用于事务内操作）
 ///
-/// 与 execute_select 逻辑相同，但使用 PoolConnection 而非连接池
+/// 接受 Arc<Mutex<PoolConnection>> 以避免调用方持有跨 await 的引用
+/// 内部通过 tokio::spawn 隔离 sqlx HRTB Executor 约束，消除 Tauri 宏的 Send 报错
 pub async fn execute_select_on_conn(
-    conn: &mut PoolConnection<sqlx::Postgres>,
-    sql: &str,
+    conn_mutex: std::sync::Arc<tokio::sync::Mutex<PoolConnection<sqlx::Postgres>>>,
+    sql: String,
     start: Instant,
 ) -> Result<QueryResult, AppError> {
-    let rows: Vec<PgRow> = sqlx::query(sql)
-        .fetch_all(&mut **conn)
-        .await
-        .map_err(|e| AppError::Other(format!("Query failed: {}", e)))?;
+    tokio::spawn(async move {
+        let mut conn = conn_mutex.lock().await;
+        let rows: Vec<PgRow> = sqlx::query(&sql)
+            .fetch_all(&mut **conn)
+            .await
+            .map_err(|e| AppError::Other(format!("Query failed: {}", e)))?;
 
-    let elapsed = start.elapsed().as_millis() as u64;
+        let elapsed = start.elapsed().as_millis() as u64;
 
-    if rows.is_empty() {
-        return Ok(QueryResult {
-            columns: vec![],
-            rows: vec![],
+        if rows.is_empty() {
+            return Ok(QueryResult {
+                columns: vec![],
+                rows: vec![],
+                affected_rows: 0,
+                execution_time_ms: elapsed,
+                is_error: false,
+                error: None,
+                total_count: Some(0),
+                truncated: false,
+            });
+        }
+
+        let columns: Vec<ColumnDef> = rows[0]
+            .columns()
+            .iter()
+            .map(|col: &PgColumn| ColumnDef {
+                name: col.name().to_string(),
+                data_type: col.type_info().name().to_string(),
+                nullable: true,
+            })
+            .collect();
+
+        let data_rows: Vec<Vec<serde_json::Value>> = rows
+            .iter()
+            .map(|row: &PgRow| {
+                row.columns()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, col)| pg_value_to_json(row, i, col.type_info().name()))
+                    .collect()
+            })
+            .collect();
+
+        Ok(QueryResult {
+            columns,
+            rows: data_rows,
             affected_rows: 0,
             execution_time_ms: elapsed,
             is_error: false,
             error: None,
-            total_count: Some(0),
+            total_count: None,
             truncated: false,
-        });
-    }
-
-    let columns: Vec<ColumnDef> = rows[0]
-        .columns()
-        .iter()
-        .map(|col: &PgColumn| ColumnDef {
-            name: col.name().to_string(),
-            data_type: col.type_info().name().to_string(),
-            nullable: true,
         })
-        .collect();
-
-    let data_rows: Vec<Vec<serde_json::Value>> = rows
-        .iter()
-        .map(|row: &PgRow| {
-            row.columns()
-                .iter()
-                .enumerate()
-                .map(|(i, col)| pg_value_to_json(row, i, col.type_info().name()))
-                .collect()
-        })
-        .collect();
-
-    Ok(QueryResult {
-        columns,
-        rows: data_rows,
-        affected_rows: 0,
-        execution_time_ms: elapsed,
-        is_error: false,
-        error: None,
-        total_count: None,
-        truncated: false,
     })
+    .await
+    .map_err(|e| AppError::Other(format!("Spawn error: {}", e)))?
 }
 
 /// 在专用连接上执行非 SELECT 语句（用于事务内操作）
 ///
-/// 与 execute_non_select 逻辑相同，但使用 PoolConnection 而非连接池
+/// 接受 Arc<Mutex<PoolConnection>> 以避免调用方持有跨 await 的引用
+/// 内部通过 tokio::spawn 隔离 sqlx HRTB Executor 约束，消除 Tauri 宏的 Send 报错
 pub async fn execute_non_select_on_conn(
-    conn: &mut PoolConnection<sqlx::Postgres>,
-    sql: &str,
+    conn_mutex: std::sync::Arc<tokio::sync::Mutex<PoolConnection<sqlx::Postgres>>>,
+    sql: String,
     start: Instant,
 ) -> Result<QueryResult, AppError> {
-    let result = sqlx::query(sql)
-        .execute(&mut **conn)
-        .await
-        .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?;
+    tokio::spawn(async move {
+        let mut conn = conn_mutex.lock().await;
+        let result = sqlx::query(&sql)
+            .execute(&mut **conn)
+            .await
+            .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?;
 
-    let elapsed = start.elapsed().as_millis() as u64;
+        let elapsed = start.elapsed().as_millis() as u64;
 
-    Ok(QueryResult {
-        columns: vec![],
-        rows: vec![],
-        affected_rows: result.rows_affected(),
-        execution_time_ms: elapsed,
-        is_error: false,
-        error: None,
-        total_count: None,
-        truncated: false,
+        Ok::<QueryResult, AppError>(QueryResult {
+            columns: vec![],
+            rows: vec![],
+            affected_rows: result.rows_affected(),
+            execution_time_ms: elapsed,
+            is_error: false,
+            error: None,
+            total_count: None,
+            truncated: false,
+        })
     })
+    .await
+    .map_err(|e| AppError::Other(format!("Spawn error: {}", e)))?
 }
 
 /// For PostgreSQL, "databases" maps to schemas within the connected database.

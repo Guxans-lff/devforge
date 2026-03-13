@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Splitpanes, Pane } from 'splitpanes'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Play, Loader2, Square, WrapText, Bookmark, ListTree, PlayCircle, CheckCircle2, XCircle, Clock, Pin, Table2, X as XIcon } from 'lucide-vue-next'
+import { Play, Loader2, Square, WrapText, Bookmark, ListTree, PlayCircle, CheckCircle2, XCircle, Clock, Pin, Table2, X as XIcon, ShieldAlert, ShieldCheck, Database } from 'lucide-vue-next'
 import SqlEditor from '@/components/database/SqlEditorLazy.vue'
 import QueryResultComponent from '@/components/database/QueryResult.vue'
 import SqlSnippetPanel from '@/components/database/SqlSnippetPanel.vue'
@@ -15,6 +15,7 @@ import * as dbApi from '@/api/database'
 import * as historyApi from '@/api/query-history'
 import { useGridSearch } from '@/composables/useGridSearch'
 import type { QueryResult, QueryChunk, SchemaCache } from '@/types/database'
+import type { ErrorStrategy } from '@/types/database'
 import type { QueryTabContext, ResultTab } from '@/types/database-workspace'
 
 const props = defineProps<{
@@ -25,11 +26,14 @@ const props = defineProps<{
   schemaCache: SchemaCache | null
   isLoadingSchema?: boolean
   driver: string
+  /** 可用数据库列表（由父组件从 ObjectTree 提取） */
+  databases?: string[]
 }>()
 
 const emit = defineEmits<{
   reconnect: []
   executeSuccess: [sql: string]
+  databaseChanged: [database: string]
 }>()
 
 const { t } = useI18n()
@@ -78,9 +82,36 @@ const activeResultTab = computed(() => {
   return resultTabs.value.find(t => t.id === activeResultTabId.value) ?? null
 })
 
+// ===== 多语句子结果切换 =====
+/** 当前选中的子语句索引（-1 表示显示汇总） */
+const activeSubResultIndex = ref(-1)
+
+/** 当前激活 Tab 的子结果列表 */
+const subResults = computed(() => activeResultTab.value?.subResults ?? [])
+
+/** 是否为多语句汇总 Tab */
+const isMultiResultTab = computed(() => subResults.value.length > 0)
+
+/** 切换子语句结果 */
+function setActiveSubResult(index: number) {
+  activeSubResultIndex.value = index
+}
+
+// 切换结果 Tab 时重置子结果索引
+watch(activeResultTabId, () => {
+  activeSubResultIndex.value = -1
+})
+
 // 当前显示的查询结果（优先显示激活的结果标签页）
 const displayResult = computed(() => {
-  if (activeResultTab.value) return activeResultTab.value.result
+  if (activeResultTab.value) {
+    // 多语句模式下，如果选中了某条子语句，显示该子语句的结果
+    if (isMultiResultTab.value && activeSubResultIndex.value >= 0) {
+      const sub = subResults.value[activeSubResultIndex.value]
+      if (sub) return sub.result
+    }
+    return activeResultTab.value.result
+  }
   return tabContext.value?.result ?? null
 })
 
@@ -179,9 +210,17 @@ function closeResultTabContextMenu() {
 // 全局点击监听，关闭右键菜单
 onMounted(() => {
   document.addEventListener('click', closeResultTabContextMenu)
+  // 获取 Session 专用连接（企业级模式）
+  if (props.isConnected) {
+    dbApi.dbAcquireSession(props.connectionId, props.tabId).catch((e) => {
+      console.warn('[Session] 获取 Session 连接失败，将降级到传统模式:', e)
+    })
+  }
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', closeResultTabContextMenu)
+  // 释放 Session 连接
+  dbApi.dbReleaseSession(props.connectionId, props.tabId).catch(() => {})
 })
 
 // 表浏览模式下是否还有更多数据
@@ -200,15 +239,41 @@ const pendingExecuteSql = ref<string | null>(null)
 const currentBrowseDb = computed(() => tabContext.value?.tableBrowse?.database)
 const currentBrowseTable = computed(() => tabContext.value?.tableBrowse?.table)
 
+/** 数据库选择下拉框切换处理 */
+async function handleDatabaseSelect(database: string) {
+  if (!database || !props.isConnected) return
+  // 更新 store 中的当前数据库
+  store.updateTabContext(props.connectionId, props.tabId, {
+    currentDatabase: database,
+  })
+  // 在 Session 连接上切换数据库（后端执行 USE）
+  try {
+    await dbApi.dbSwitchDatabase(props.connectionId, props.tabId, database)
+  } catch (e) {
+    console.warn('[Session] 切换数据库失败:', e)
+  }
+  // 通知父组件
+  emit('databaseChanged', database)
+}
+
+/** 当前选中的数据库 */
+const currentDatabase = computed({
+  get: () => tabContext.value?.currentDatabase ?? '',
+  set: (val: string) => {
+    if (val) handleDatabaseSelect(val)
+  },
+})
+
 async function handleExecute(sql: string) {
   if (!sql.trim() || !props.isConnected || isExecuting.value) return
 
   // 如果用户执行的是 USE <database> 语句，直接在前端切换数据库上下文
-  // 不发送给后端执行（MySQL prepared statement 协议不支持 USE 语句）
+  // 同时在 Session 连接上执行 USE，保持前后端状态一致
   const useMatch = sql.trim().match(/^USE\s+`?(\w+)`?\s*;?\s*$/i)
   if (useMatch) {
+    const dbName = useMatch[1]!
     store.updateTabContext(props.connectionId, props.tabId, {
-      currentDatabase: useMatch[1],
+      currentDatabase: dbName,
       result: {
         columns: [],
         rows: [],
@@ -221,7 +286,10 @@ async function handleExecute(sql: string) {
       },
       isExecuting: false,
     })
-    notification.success(t('database.databaseSwitched', { name: useMatch[1] }) || `已切换到数据库 ${useMatch[1]}`)
+    // 在 Session 连接上同步切换
+    dbApi.dbSwitchDatabase(props.connectionId, props.tabId, dbName).catch(() => {})
+    emit('databaseChanged', dbName)
+    notification.success(t('database.databaseSwitched', { name: dbName }) || `已切换到数据库 ${dbName}`)
     return
   }
 
@@ -235,6 +303,12 @@ async function handleExecute(sql: string) {
   console.log('[DEBUG] 开始执行 SQL，已清除旧 Tab 状态以确保流式渲染可见')
 
   const startTime = Date.now()
+
+  // 检测是否为多语句
+  if (isMultiStatement(sql)) {
+    await handleMultiExecute(sql, startTime)
+    return
+  }
 
   // SELECT 类查询优先使用流式 API（失败自动降级到传统 API）
   const firstWord = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? ''
@@ -310,11 +384,10 @@ async function handleStreamExecute(sql: string, startTime: number) {
         }
     }
 
-    // 根据是否有当前数据库上下文，选择对应的流式 API
+    // 根据是否有当前数据库上下文，选择对应的流式 API（优先使用 Session 模式）
     const currentDb = tabContext.value?.currentDatabase
-    const invokePromise = (currentDb
-      ? dbApi.dbExecuteQueryStreamInDatabase(props.connectionId, currentDb, sql, onChunk, timeoutSecs)
-      : dbApi.dbExecuteQueryStream(props.connectionId, sql, onChunk, timeoutSecs)
+    const invokePromise = dbApi.dbExecuteQueryStreamOnSession(
+      props.connectionId, props.tabId, sql, onChunk, currentDb, timeoutSecs
     ).catch(e => {
       console.warn('[DEBUG] Invoke 过程报错:', e)
       rejectStream!(e)
@@ -373,11 +446,11 @@ async function handleStreamExecute(sql: string, startTime: number) {
 async function handleNonStreamExecute(sql: string, startTime: number) {
   try {
     const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
-    // 根据是否有当前数据库上下文，选择对应的 API
+    // 优先使用 Session 模式执行（自动处理数据库上下文）
     const currentDb = tabContext.value?.currentDatabase
-    const result = currentDb
-      ? await dbApi.dbExecuteQueryInDatabase(props.connectionId, currentDb, sql, timeoutSecs)
-      : await dbApi.dbExecuteQuery(props.connectionId, sql, timeoutSecs)
+    const result = await dbApi.dbExecuteQueryOnSession(
+      props.connectionId, props.tabId, sql, currentDb, timeoutSecs
+    )
     store.updateTabContext(props.connectionId, props.tabId, {
       result,
       isExecuting: false,
@@ -397,6 +470,119 @@ async function handleNonStreamExecute(sql: string, startTime: number) {
       emit('executeSuccess', sql)
     }
     saveHistory(sql, result)
+  } catch (e) {
+    const errorResult: QueryResult = {
+      columns: [],
+      rows: [],
+      affectedRows: 0,
+      executionTimeMs: Date.now() - startTime,
+      isError: true,
+      error: String(e),
+      totalCount: null,
+      truncated: false,
+    }
+    store.updateTabContext(props.connectionId, props.tabId, {
+      result: errorResult,
+      isExecuting: false,
+    })
+    notification.error(t('database.queryFailed'), String(e), true)
+    saveHistory(sql, errorResult)
+  }
+}
+
+/** 多语句智能执行 */
+async function handleMultiExecute(sql: string, startTime: number) {
+  try {
+    const currentDb = tabContext.value?.currentDatabase
+    const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
+
+    const results = await dbApi.dbExecuteMultiV2(
+      props.connectionId,
+      sql,
+      currentDb,
+      errorStrategy.value,
+      timeoutSecs,
+    )
+
+    // 多语句执行只创建一个汇总结果 Tab，包含所有子语句结果
+    const totalTime = Date.now() - startTime
+    const successCount = results.filter(r => !r.result.isError).length
+    const failCount = results.length - successCount
+
+    // 构建子结果列表
+    const subResults = results.map(stmt => ({
+      index: stmt.index,
+      sql: stmt.sql,
+      statementType: stmt.statementType,
+      result: stmt.result,
+    }))
+
+    // 找到最后一条有数据的结果作为主展示结果（优先展示 SELECT 结果）
+    const selectResult = results.find(r => !r.result.isError && r.result.columns.length > 0)
+    const lastResult = selectResult?.result ?? (results.length > 0 ? results[results.length - 1]!.result : null)
+
+    // 构建汇总结果
+    const summaryResult: QueryResult = lastResult ? {
+      ...lastResult,
+      executionTimeMs: totalTime,
+      multiStatementSummary: { total: results.length, success: successCount, fail: failCount },
+    } : {
+      columns: [],
+      rows: [],
+      affectedRows: 0,
+      executionTimeMs: totalTime,
+      isError: false,
+      error: null,
+      totalCount: null,
+      truncated: false,
+      multiStatementSummary: { total: results.length, success: successCount, fail: failCount },
+    }
+
+    // 创建一个汇总结果 Tab
+    const tabs = [...(tabContext.value?.resultTabs ?? [])]
+    while (tabs.length >= MAX_RESULT_TABS) {
+      const unpinnedIdx = tabs.findIndex(t => !t.isPinned)
+      if (unpinnedIdx === -1) break
+      tabs.splice(unpinnedIdx, 1)
+    }
+    const newTab: ResultTab = {
+      id: crypto.randomUUID(),
+      title: `批量执行 (${successCount}/${results.length})`,
+      result: summaryResult,
+      sql: sql.trim(),
+      isPinned: false,
+      createdAt: Date.now(),
+      subResults,
+    }
+    tabs.push(newTab)
+
+    store.updateTabContext(props.connectionId, props.tabId, {
+      resultTabs: tabs,
+      activeResultTabId: newTab.id,
+      result: summaryResult,
+      isExecuting: false,
+    })
+
+    // 显示执行摘要通知
+    const summaryMsg = t('database.multiStatement.executionSummary', {
+      total: results.length,
+      success: successCount,
+      fail: failCount,
+      time: `${(totalTime / 1000).toFixed(1)}s`,
+    })
+
+    if (failCount > 0) {
+      notification.warning('执行完成', summaryMsg, true)
+    } else {
+      notification.success('执行完成', summaryMsg, 3000)
+    }
+
+    emit('executeSuccess', sql)
+
+    // 保存历史（用整体 SQL）
+    if (lastResult) {
+      saveHistory(sql, lastResult)
+    }
   } catch (e) {
     const errorResult: QueryResult = {
       columns: [],
@@ -532,6 +718,15 @@ watch(pendingExecuteSql, (sql) => {
   if (sql) {
     pendingExecuteSql.value = null
     handleExecute(sql)
+  }
+})
+
+// 连接状态变化时自动管理 Session
+watch(() => props.isConnected, (connected) => {
+  if (connected) {
+    dbApi.dbAcquireSession(props.connectionId, props.tabId).catch((e) => {
+      console.warn('[Session] 连接恢复后获取 Session 失败:', e)
+    })
   }
 })
 
@@ -689,6 +884,73 @@ const queryTimeout = computed({
   },
 })
 
+// ===== 多语句执行：错误策略 =====
+const errorStrategy = ref<ErrorStrategy>('stopOnError')
+
+/** 切换错误策略 */
+function toggleErrorStrategy() {
+  errorStrategy.value = errorStrategy.value === 'stopOnError' ? 'continueOnError' : 'stopOnError'
+}
+
+/**
+ * 简单检测 SQL 文本是否包含多条语句
+ * 检查非字符串、非注释内的分号数量
+ */
+function isMultiStatement(sql: string): boolean {
+  let inSingleQuote = false
+  let inDoubleQuote = false
+  let inBacktick = false
+  let inLineComment = false
+  let inBlockComment = false
+  let semicolonCount = 0
+
+  const chars = sql.split('')
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]!
+    const next = chars[i + 1]
+
+    if (inLineComment) {
+      if (ch === '\n') inLineComment = false
+      continue
+    }
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') { inBlockComment = false; i++ }
+      continue
+    }
+    if (inSingleQuote) {
+      if (ch === "'" && next === "'") { i++; continue }
+      if (ch === "'") inSingleQuote = false
+      continue
+    }
+    if (inDoubleQuote) {
+      if (ch === '"') inDoubleQuote = false
+      continue
+    }
+    if (inBacktick) {
+      if (ch === '`') inBacktick = false
+      continue
+    }
+
+    if (ch === '-' && next === '-') { inLineComment = true; continue }
+    if (ch === '#') { inLineComment = true; continue }
+    if (ch === '/' && next === '*') { inBlockComment = true; i++; continue }
+    if (ch === "'") { inSingleQuote = true; continue }
+    if (ch === '"') { inDoubleQuote = true; continue }
+    if (ch === '`') { inBacktick = true; continue }
+
+    if (ch === ';') {
+      semicolonCount++
+      if (semicolonCount >= 2) return true
+      // 检查分号后面是否还有非空白内容
+      const rest = sql.slice(i + 1).trim()
+      if (rest.length > 0 && !rest.startsWith('--') && !rest.startsWith('#')) {
+        return true
+      }
+    }
+  }
+  return false
+}
+
 /** 开始事务 */
 async function handleBeginTransaction() {
   if (!props.isConnected) return
@@ -795,6 +1057,38 @@ async function handleRollback() {
         <ListTree v-else class="h-3 w-3" />
         EXPLAIN
       </Button>
+      <!-- 数据库上下文选择器（企业级模式） -->
+      <div class="w-px h-4 bg-border" />
+      <div class="flex items-center gap-1">
+        <Database class="h-3 w-3 text-muted-foreground" />
+        <select
+          v-model="currentDatabase"
+          class="h-6 rounded border border-border bg-background px-1.5 text-[11px] min-w-[100px] max-w-[200px] cursor-pointer hover:border-primary/50 transition-colors"
+          :title="t('database.selectDatabase')"
+        >
+          <option value="" disabled>{{ t('database.selectDatabase') }}</option>
+          <option v-for="db in (databases ?? [])" :key="db" :value="db">{{ db }}</option>
+        </select>
+      </div>
+      <!-- 错误策略切换按钮 -->
+      <TooltipProvider :delay-duration="300">
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <Button
+              variant="ghost"
+              size="sm"
+              class="h-6 w-6 p-0"
+              @click="toggleErrorStrategy"
+            >
+              <ShieldAlert v-if="errorStrategy === 'stopOnError'" class="h-3 w-3 text-amber-500" />
+              <ShieldCheck v-else class="h-3 w-3 text-green-500" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" class="text-xs">
+            {{ t('database.multiStatement.errorStrategyTooltip', { strategy: errorStrategy === 'stopOnError' ? t('database.multiStatement.stopOnError') : t('database.multiStatement.continueOnError') }) }}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
       <!-- 事务管理按钮组 -->
       <div class="w-px h-4 bg-border" />
       <Button
@@ -993,6 +1287,34 @@ async function handleRollback() {
               </button>
             </div>
           </Teleport>
+
+          <!-- 多语句子结果切换条 -->
+          <div v-if="isMultiResultTab && !showExplain" class="flex items-center border-b border-border bg-muted/10 overflow-x-auto no-scrollbar shrink-0">
+            <!-- 汇总按钮 -->
+            <button
+              class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] border-r border-border shrink-0 transition-colors"
+              :class="activeSubResultIndex === -1 ? 'bg-background text-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'"
+              @click="setActiveSubResult(-1)"
+            >
+              <ListTree class="h-3 w-3" />
+              汇总
+              <span class="text-[9px] opacity-60">({{ subResults.length }})</span>
+            </button>
+            <!-- 各子语句按钮 -->
+            <button
+              v-for="(sub, idx) in subResults"
+              :key="sub.index"
+              class="flex items-center gap-1.5 px-3 py-1.5 text-[11px] border-r border-border shrink-0 transition-colors"
+              :class="activeSubResultIndex === idx ? 'bg-background text-foreground font-medium' : 'text-muted-foreground hover:text-foreground hover:bg-muted/30'"
+              :title="sub.sql"
+              @click="setActiveSubResult(idx)"
+            >
+              <CheckCircle2 v-if="!sub.result.isError" class="h-3 w-3 text-green-500" />
+              <XCircle v-else class="h-3 w-3 text-red-500" />
+              <span class="max-w-[120px] truncate">{{ sub.statementType }}</span>
+              <span class="text-[9px] opacity-50">{{ sub.result.executionTimeMs }}ms</span>
+            </button>
+          </div>
 
           <!-- 原有的结果面板 -->
           <ExplainPanel

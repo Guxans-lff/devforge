@@ -6,7 +6,6 @@ use sqlx::pool::PoolConnection;
 use crate::models::query::{QueryChunk, QueryResult, ColumnDef};
 use crate::utils::error::AppError;
 use super::util::*;
-use super::super::{escape_mysql_ident, validate_sql_clause};
 
 /// 执行 SELECT 查询
 pub async fn execute_select(
@@ -46,12 +45,14 @@ pub async fn execute_select(
 }
 
 /// 执行非 SELECT 语句
+/// 使用 raw_sql 文本协议执行单条语句，支持 DDL/DML/存储过程等
 pub async fn execute_non_select(
     pool: &MySqlPool,
     sql: &str,
     start: Instant,
 ) -> Result<QueryResult, AppError> {
-    let result = sqlx::query(sql)
+    let trimmed = sql.trim();
+    let result = sqlx::raw_sql(trimmed)
         .execute(pool)
         .await
         .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?;
@@ -67,8 +68,9 @@ pub async fn execute_select_in_database(
     start: Instant,
 ) -> Result<QueryResult, AppError> {
     let mut conn = pool.acquire().await.map_err(AppError::Database)?;
+    // 使用 raw_sql 走文本协议执行 USE，避免 prepared statement 协议下的 error 1295
     let use_sql = format!("USE `{}`", database.replace('`', "``"));
-    sqlx::query(&use_sql).execute(&mut *conn).await.map_err(|e| {
+    conn.execute(sqlx::raw_sql(&use_sql)).await.map_err(|e| {
         AppError::Other(format!("切换数据库失败: {}", e))
     })?;
 
@@ -95,6 +97,7 @@ pub async fn execute_select_in_database(
 }
 
 /// 在指定数据库上下文中执行非 SELECT 语句
+/// 使用 raw_sql 走文本协议，支持多语句批量执行（如迁移 SQL）
 pub async fn execute_non_select_in_database(
     pool: MySqlPool,
     database: String,
@@ -102,13 +105,14 @@ pub async fn execute_non_select_in_database(
     start: Instant,
 ) -> Result<QueryResult, AppError> {
     let mut conn = pool.acquire().await.map_err(AppError::Database)?;
+    // 使用 raw_sql 走文本协议执行 USE，避免 prepared statement 协议下的 error 1295
     let use_sql = format!("USE `{}`", database.replace('`', "``"));
-    sqlx::query(&use_sql).execute(&mut *conn).await.map_err(|e| {
+    conn.execute(sqlx::raw_sql(&use_sql)).await.map_err(|e| {
         AppError::Other(format!("切换数据库失败: {}", e))
     })?;
 
-    let result = sqlx::query(&sql)
-        .execute(&mut *conn)
+    // 使用 raw_sql 走文本协议，支持多语句批量执行
+    let result = conn.execute(sqlx::raw_sql(&sql))
         .await
         .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?;
 
@@ -122,7 +126,6 @@ pub async fn execute_select_stream(
     start: Instant,
     on_chunk: impl Fn(QueryChunk) -> Result<(), String>,
 ) -> Result<(), AppError> {
-    use futures::StreamExt;
     let mut stream = sqlx::query(sql).fetch(pool);
     process_stream(&mut stream, None, start, on_chunk).await
 }
@@ -136,8 +139,9 @@ pub async fn execute_select_stream_in_database(
     on_chunk: Arc<dyn Fn(QueryChunk) -> Result<(), String> + Send + Sync + 'static>,
 ) -> Result<(), AppError> {
     let mut conn = pool.acquire().await.map_err(AppError::Database)?;
+    // 使用 raw_sql 走文本协议执行 USE，避免 prepared statement 协议下的 error 1295
     let use_sql = format!("USE `{}`", database.replace('`', "``"));
-    sqlx::query(&use_sql).execute(&mut *conn).await.map_err(|e| {
+    conn.execute(sqlx::raw_sql(&use_sql)).await.map_err(|e| {
         AppError::Other(format!("切换数据库失败: {}", e))
     })?;
 
@@ -145,46 +149,76 @@ pub async fn execute_select_stream_in_database(
     process_stream(&mut stream, None, start, move |c| on_chunk(c)).await
 }
 
+/// 在专用连接上流式执行 SELECT 查询（Session 模式使用）
+/// 接受 Arc<Mutex<PoolConnection>> 以避免调用方持有跨 await 的引用
+pub async fn execute_select_stream_on_conn(
+    conn_mutex: Arc<tokio::sync::Mutex<PoolConnection<sqlx::MySql>>>,
+    sql: String,
+    start: Instant,
+    on_chunk: Arc<dyn Fn(QueryChunk) -> Result<(), String> + Send + Sync + 'static>,
+) -> Result<(), AppError> {
+    let mut conn = conn_mutex.lock().await;
+    let mut stream = sqlx::query(&sql).fetch(&mut **conn as &mut sqlx::MySqlConnection);
+    process_stream(&mut stream, None, start, move |c| on_chunk(c)).await
+}
+
 /// 在专用连接上执行 SELECT 查询
+/// 接受 Arc<Mutex<PoolConnection>> 以避免调用方持有跨 await 的引用
+/// 内部通过 tokio::spawn 隔离 sqlx HRTB Executor 约束，消除 Tauri 宏的 Send 报错
 pub async fn execute_select_on_conn(
-    conn: &mut PoolConnection<sqlx::MySql>,
-    sql: &str,
+    conn_mutex: Arc<tokio::sync::Mutex<PoolConnection<sqlx::MySql>>>,
+    sql: String,
     start: Instant,
 ) -> Result<QueryResult, AppError> {
-    let rows: Vec<MySqlRow> = sqlx::query(sql)
-        .fetch_all(&mut **conn)
-        .await
-        .map_err(|e| AppError::Other(format!("Query failed: {}", e)))?;
+    tokio::spawn(async move {
+        let mut conn = conn_mutex.lock().await;
+        let rows: Vec<MySqlRow> = sqlx::query(&sql)
+            .fetch_all(&mut **conn)
+            .await
+            .map_err(|e| AppError::Other(format!("Query failed: {}", e)))?;
 
-    let elapsed = start.elapsed().as_millis() as u64;
-    if rows.is_empty() {
-        return Ok(QueryResult::empty(vec![], elapsed));
-    }
+        let elapsed = start.elapsed().as_millis() as u64;
+        if rows.is_empty() {
+            return Ok(QueryResult::empty(vec![], elapsed));
+        }
 
-    Ok(QueryResult {
-        columns: extract_column_defs(&rows[0]),
-        rows: map_rows_to_json(&rows),
-        affected_rows: 0,
-        execution_time_ms: elapsed,
-        is_error: false,
-        error: None,
-        total_count: None,
-        truncated: false,
+        Ok(QueryResult {
+            columns: extract_column_defs(&rows[0]),
+            rows: map_rows_to_json(&rows),
+            affected_rows: 0,
+            execution_time_ms: elapsed,
+            is_error: false,
+            error: None,
+            total_count: None,
+            truncated: false,
+        })
     })
+    .await
+    .map_err(|e| AppError::Other(format!("Spawn error: {}", e)))?
 }
 
 /// 在专用连接上执行非 SELECT 查询
+/// 接受 Arc<Mutex<PoolConnection>> 以避免调用方持有跨 await 的引用
+/// 内部通过 tokio::spawn 隔离 sqlx HRTB Executor 约束，消除 Tauri 宏的 Send 报错
 pub async fn execute_non_select_on_conn(
-    conn: &mut PoolConnection<sqlx::MySql>,
-    sql: &str,
+    conn_mutex: Arc<tokio::sync::Mutex<PoolConnection<sqlx::MySql>>>,
+    sql: String,
     start: Instant,
 ) -> Result<QueryResult, AppError> {
-    let result = sqlx::query(sql)
-        .execute(&mut **conn)
-        .await
-        .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?;
+    tokio::spawn(async move {
+        let mut conn = conn_mutex.lock().await;
+        // 使用 raw_sql 走文本协议，以支持多语句批量执行（如导入 SQL 时的 batch 提交）
+        // 通过 conn.execute() 方式调用而非 raw_sql().execute()，避免 HRTB lifetime 歧义
+        use sqlx::Executor as _;
+        let raw = sqlx::raw_sql(sql.as_str());
+        let result = (&mut **conn).execute(raw)
+            .await
+            .map_err(|e| AppError::Other(format!("Execute failed: {}", e)))?;
 
-    Ok(QueryResult::affected(result.rows_affected(), start.elapsed().as_millis() as u64))
+        Ok::<QueryResult, AppError>(QueryResult::affected(result.rows_affected(), start.elapsed().as_millis() as u64))
+    })
+    .await
+    .map_err(|e| AppError::Other(format!("Spawn error: {}", e)))?
 }
 
 /// 内部私有方法：处理流式数据并推送到回调 (已去重)

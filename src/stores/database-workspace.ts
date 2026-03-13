@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { i18n } from '@/locales'
 import type {
   InnerTab,
   ConnectionWorkspace,
@@ -98,6 +99,13 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     const tab = ws.tabs.find((t) => t.id === tabId)
     if (!tab || !tab.closable) return
 
+    // 如果关闭的是查询 Tab，释放其 Session 连接
+    if (tab.type === 'query') {
+      import('@/api/database').then(({ dbReleaseSession }) => {
+        dbReleaseSession(connectionId, tabId).catch(() => {})
+      })
+    }
+
     const index = ws.tabs.findIndex((t) => t.id === tabId)
     const newTabs = ws.tabs.filter((t) => t.id !== tabId)
 
@@ -191,7 +199,9 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     const tab: InnerTab = {
       id: tabId,
       type: 'table-editor',
-      title: table ? `Alter: ${table}` : 'New Table',
+      title: table
+        ? `${(i18n.global as any).t('tableEditor.alterTable')}: ${table}`
+        : (i18n.global as any).t('tableEditor.createTable'),
       closable: true,
       context: { type: 'table-editor', database, table },
     }
@@ -203,7 +213,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     const tab: InnerTab = {
       id: tabId,
       type: 'import',
-      title: `Import: ${table}`,
+      title: `${(i18n.global as any).t('dataImport.title')}: ${table}`,
       closable: true,
       context: { type: 'import', database, table, columns },
     }
@@ -227,7 +237,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     const tab: InnerTab = {
       id: tabId,
       type: 'schema-compare',
-      title: 'Schema Compare',
+      title: (i18n.global as any).t('schemaCompare.title'),
       closable: true,
       context: { type: 'schema-compare' },
     }

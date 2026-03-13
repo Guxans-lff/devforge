@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::commands::ssh::SshEngineState;
 use crate::services::terminal_recorder::{RecordingInfo, TerminalRecorder};
@@ -10,17 +10,21 @@ pub type TerminalRecorderState = Arc<Mutex<TerminalRecorder>>;
 
 #[tauri::command]
 pub async fn start_recording(
-    recorder: State<'_, TerminalRecorderState>,
-    ssh_engine: State<'_, SshEngineState>,
+    app: tauri::AppHandle,
     session_id: String,
     output_path: Option<String>,
     width: u32,
     height: u32,
 ) -> Result<String, String> {
-    let shared_writer = ssh_engine
+    let recorder = app.state::<TerminalRecorderState>().inner().clone();
+    let ssh_engine = app.state::<SshEngineState>().inner().clone();
+    let shared_writer: crate::services::terminal_recorder::SharedRecordingWriter = match ssh_engine
         .get_recording_writer(&session_id)
         .await
-        .ok_or_else(|| "SSH 会话不存在".to_string())?;
+    {
+        Some(w) => w,
+        None => return Err("SSH 会话不存在".to_string()),
+    };
 
     let mut rec = recorder.lock().await;
     let (writer, file_path) = rec.start(&session_id, output_path, width, height)?;
@@ -34,12 +38,14 @@ pub async fn start_recording(
 
 #[tauri::command]
 pub async fn stop_recording(
-    recorder: State<'_, TerminalRecorderState>,
-    ssh_engine: State<'_, SshEngineState>,
+    app: tauri::AppHandle,
     session_id: String,
 ) -> Result<String, String> {
+    let recorder = app.state::<TerminalRecorderState>().inner().clone();
+    let ssh_engine = app.state::<SshEngineState>().inner().clone();
     // 先清除 I/O task 中的写入器，并显式 flush
     if let Some(shared_writer) = ssh_engine.get_recording_writer(&session_id).await {
+        let shared_writer: crate::services::terminal_recorder::SharedRecordingWriter = shared_writer;
         let mut guard = shared_writer.lock().await;
         if let Some(ref mut writer) = *guard {
             let _ = writer.flush();
@@ -53,9 +59,10 @@ pub async fn stop_recording(
 
 #[tauri::command]
 pub async fn is_recording(
-    recorder: State<'_, TerminalRecorderState>,
+    app: tauri::AppHandle,
     session_id: String,
 ) -> Result<bool, String> {
+    let recorder = app.state::<TerminalRecorderState>().inner().clone();
     let rec = recorder.lock().await;
     Ok(rec.is_recording(&session_id))
 }

@@ -8,6 +8,7 @@ pub mod import_export;
 pub mod progress_tracker;
 pub mod schema_compare;
 pub mod sftp_engine;
+pub mod sql_splitter;
 pub mod sftp_handler;
 pub mod ssh_auth;
 pub mod ssh_engine;

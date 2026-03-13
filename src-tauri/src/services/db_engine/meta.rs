@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+use sqlx::Executor;
 use crate::models::query::{
     ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo,
     ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, ScriptOptions
@@ -8,47 +10,48 @@ use crate::utils::error::AppError;
 use super::{DbEngine, MonitoringState};
 
 impl DbEngine {
-    pub async fn get_databases(&self, connection_id: &str) -> Result<Vec<DatabaseInfo>, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_databases(self: Arc<Self>, connection_id: String) -> Result<Vec<DatabaseInfo>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => mysql::get_databases(p).await,
             DriverPool::Postgres(p) => postgres::get_databases(p).await,
         }
     }
 
-    pub async fn get_tables(&self, connection_id: &str, database: &str) -> Result<Vec<TableInfo>, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_tables(self: Arc<Self>, connection_id: String, database: String) -> Result<Vec<TableInfo>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
-            DriverPool::MySql(p) => mysql::get_tables(p, database).await,
-            DriverPool::Postgres(p) => postgres::get_tables(p, database).await,
+            DriverPool::MySql(p) => mysql::get_tables(p, &database).await,
+            DriverPool::Postgres(p) => postgres::get_tables(p, &database).await,
         }
     }
 
-    pub async fn get_columns(&self, connection_id: &str, database: &str, table: &str) -> Result<Vec<ColumnInfo>, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_columns(self: Arc<Self>, connection_id: String, database: String, table: String) -> Result<Vec<ColumnInfo>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
-            DriverPool::MySql(p) => mysql::get_columns(p, database, table).await,
-            DriverPool::Postgres(p) => postgres::get_columns(p, database, table).await,
+            DriverPool::MySql(p) => mysql::get_columns(p, &database, &table).await,
+            DriverPool::Postgres(p) => postgres::get_columns(p, &database, &table).await,
         }
     }
 
-    pub async fn get_table_data(&self, connection_id: &str, database: &str, table: &str, page: u32, page_size: u32, where_clause: Option<&str>, order_by: Option<&str>) -> Result<QueryResult, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_table_data(self: Arc<Self>, connection_id: String, database: String, table: String, page: u32, page_size: u32, where_clause: Option<String>, order_by: Option<String>) -> Result<QueryResult, AppError> {
+        let pool = self.clone().get_pool(connection_id.clone()).await?;
         let offset = page.saturating_sub(1) * page_size;
         let (data_sql, count_sql) = match pool.as_ref() {
             DriverPool::MySql(_) => (
-                mysql::build_table_data_sql(database, table, page_size, offset, where_clause, order_by).map_err(AppError::Other)?,
-                mysql::build_table_count_sql(database, table, where_clause).map_err(AppError::Other)?,
+                mysql::build_table_data_sql(&database, &table, page_size, offset, where_clause.as_deref(), order_by.as_deref()).map_err(AppError::Other)?,
+                mysql::build_table_count_sql(&database, &table, where_clause.as_deref()).map_err(AppError::Other)?,
             ),
             DriverPool::Postgres(_) => (
-                postgres::build_table_data_sql(database, table, page_size, offset, where_clause, order_by).map_err(AppError::Other)?,
-                postgres::build_table_count_sql(database, table, where_clause).map_err(AppError::Other)?,
+                postgres::build_table_data_sql(&database, &table, page_size, offset, where_clause.as_deref(), order_by.as_deref()).map_err(AppError::Other)?,
+                postgres::build_table_count_sql(&database, &table, where_clause.as_deref()).map_err(AppError::Other)?,
             ),
         };
 
+        let db_clone = connection_id.clone();
         let (result, count_res) = tokio::join!(
-            self.execute_query(connection_id, &data_sql, None),
-            self.execute_query(connection_id, &count_sql, None)
+            self.clone().execute_query(connection_id, None, data_sql, None),
+            self.execute_query(db_clone, None, count_sql, None)
         );
         let mut result = result?;
         if let Ok(count_res) = count_res {
@@ -59,48 +62,48 @@ impl DbEngine {
         Ok(result)
     }
 
-    pub async fn get_create_table(&self, connection_id: &str, database: &str, table: &str) -> Result<String, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_create_table(self: Arc<Self>, connection_id: String, database: String, table: String) -> Result<String, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
-            DriverPool::MySql(p) => mysql::get_create_table(p, database, table).await,
-            DriverPool::Postgres(p) => postgres::get_create_table(p, database, table).await,
+            DriverPool::MySql(p) => mysql::get_create_table(p, &database, &table).await,
+            DriverPool::Postgres(p) => postgres::get_create_table(p, &database, &table).await,
         }
     }
 
-    pub async fn get_views(&self, connection_id: &str, database: &str) -> Result<Vec<ViewInfo>, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_views(self: Arc<Self>, connection_id: String, database: String) -> Result<Vec<ViewInfo>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
-            DriverPool::MySql(p) => mysql::get_views(p, database).await,
-            DriverPool::Postgres(p) => postgres::get_views(p, database).await,
+            DriverPool::MySql(p) => mysql::get_views(p, &database).await,
+            DriverPool::Postgres(p) => postgres::get_views(p, &database).await,
         }
     }
 
-    pub async fn get_routines(&self, connection_id: &str, database: &str, routine_type: &str) -> Result<Vec<RoutineInfo>, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_routines(self: Arc<Self>, connection_id: String, database: String, routine_type: String) -> Result<Vec<RoutineInfo>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
-            DriverPool::MySql(p) => mysql::get_routines(p, database, routine_type).await,
-            DriverPool::Postgres(p) => postgres::get_routines(p, database, routine_type).await,
+            DriverPool::MySql(p) => mysql::get_routines(p, &database, &routine_type).await,
+            DriverPool::Postgres(p) => postgres::get_routines(p, &database, &routine_type).await,
         }
     }
 
-    pub async fn get_triggers(&self, connection_id: &str, database: &str) -> Result<Vec<TriggerInfo>, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_triggers(self: Arc<Self>, connection_id: String, database: String) -> Result<Vec<TriggerInfo>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
-            DriverPool::MySql(p) => mysql::get_triggers(p, database).await,
-            DriverPool::Postgres(p) => postgres::get_triggers(p, database).await,
+            DriverPool::MySql(p) => mysql::get_triggers(p, &database).await,
+            DriverPool::Postgres(p) => postgres::get_triggers(p, &database).await,
         }
     }
 
-    pub async fn get_object_definition(&self, connection_id: &str, database: &str, name: &str, object_type: &str) -> Result<String, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_object_definition(self: Arc<Self>, connection_id: String, database: String, name: String, object_type: String) -> Result<String, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
-            DriverPool::MySql(p) => mysql::get_object_definition(p, database, name, object_type).await,
-            DriverPool::Postgres(p) => postgres::get_object_definition(p, database, name, object_type).await,
+            DriverPool::MySql(p) => mysql::get_object_definition(p, &database, &name, &object_type).await,
+            DriverPool::Postgres(p) => postgres::get_object_definition(p, &database, &name, &object_type).await,
         }
     }
 
-    pub async fn get_server_status(&self, connection_id: &str) -> Result<ServerStatus, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_server_status(self: Arc<Self>, connection_id: String) -> Result<ServerStatus, AppError> {
+        let pool: Arc<DriverPool> = self.clone().get_pool(connection_id.clone()).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => {
                 use sqlx::Row;
@@ -121,13 +124,13 @@ impl DbEngine {
                 let bpf: f64 = smap.get("innodb_buffer_pool_pages_free").and_then(|v| v.parse().ok()).unwrap_or(0.0);
                 
                 let mut m = self.monitoring_states.write().await;
-                let (qps, tps) = if let Some(l) = m.get(connection_id) {
+                let (qps, tps) = if let Some(l) = m.get(&connection_id) {
                     let dt = u.saturating_sub(l.uptime);
                     if dt > 0 { ((q.saturating_sub(l.questions)) as f64 / dt as f64, (c+r).saturating_sub(l.com_commit+l.com_rollback) as f64 / dt as f64) }
                     else { (q as f64 / u as f64, (c+r) as f64 / u as f64) }
                 } else { (q as f64 / u as f64, (c+r) as f64 / u as f64) };
 
-                m.insert(connection_id.to_string(), MonitoringState { questions: q, com_commit: c, com_rollback: r, uptime: u });
+                m.insert(connection_id.clone(), MonitoringState { questions: q, com_commit: c, com_rollback: r, uptime: u });
                 Ok(ServerStatus {
                     qps, tps, active_connections: smap.get("threads_running").and_then(|v| v.parse().ok()).unwrap_or(0),
                     total_connections: smap.get("threads_connected").and_then(|v| v.parse().ok()).unwrap_or(0),
@@ -142,8 +145,8 @@ impl DbEngine {
         }
     }
 
-    pub async fn get_process_list(&self, connection_id: &str) -> Result<Vec<ProcessInfo>, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_process_list(self: Arc<Self>, connection_id: String) -> Result<Vec<ProcessInfo>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => {
                 use sqlx::{Row, Column};
@@ -163,16 +166,16 @@ impl DbEngine {
         }
     }
 
-    pub async fn kill_process(&self, connection_id: &str, pid: u64) -> Result<bool, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn kill_process(self: Arc<Self>, connection_id: String, pid: u64) -> Result<bool, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => { sqlx::query(&format!("KILL {}", pid)).execute(p).await.map_err(AppError::Database)?; Ok(true) }
             _ => Err(AppError::Other("Only MySQL supported".into())),
         }
     }
 
-    pub async fn get_server_variables(&self, connection_id: &str) -> Result<Vec<ServerVariable>, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_server_variables(self: Arc<Self>, connection_id: String) -> Result<Vec<ServerVariable>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => {
                 use sqlx::Row;
@@ -183,8 +186,8 @@ impl DbEngine {
         }
     }
 
-    pub async fn get_users(&self, connection_id: &str) -> Result<Vec<MysqlUser>, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_users(self: Arc<Self>, connection_id: String) -> Result<Vec<MysqlUser>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => {
                 use sqlx::Row;
@@ -199,8 +202,8 @@ impl DbEngine {
         }
     }
 
-    pub async fn create_user(&self, connection_id: &str, req: &CreateUserRequest) -> Result<bool, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn create_user(self: Arc<Self>, connection_id: String, req: CreateUserRequest) -> Result<bool, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => {
                 let pc = req.plugin.as_ref().map(|pl| format!(" WITH '{}'", pl)).unwrap_or_default();
@@ -213,21 +216,21 @@ impl DbEngine {
         }
     }
 
-    pub async fn drop_user(&self, connection_id: &str, user: &str, host: &str) -> Result<bool, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn drop_user(self: Arc<Self>, connection_id: String, user: String, host: String) -> Result<bool, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => { let sql = format!("DROP USER '{}'@'{}'", user.replace('\'', "\\'"), host.replace('\'', "\\'")); sqlx::query(&sql).execute(p).await.map_err(AppError::Database)?; Ok(true) }
             _ => Err(AppError::Other("Only MySQL supported".into())),
         }
     }
 
-    pub async fn get_user_grants(&self, connection_id: &str, user: &str, host: &str) -> Result<Vec<String>, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn get_user_grants(self: Arc<Self>, user: String, host: String, connection_id: String) -> Result<Vec<String>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => {
                 use sqlx::Row;
-                let uf = if user.is_empty() { "''" } else { user };
-                let hf = if host.is_empty() { "%" } else { host };
+                let uf = if user.is_empty() { "''" } else { &user };
+                let hf = if host.is_empty() { "%" } else { &host };
                 let sql = format!("SHOW GRANTS FOR '{}'@'{}'", uf.replace('\'', "\\'"), hf.replace('\'', "\\'"));
                 let rows = sqlx::query(&sql).fetch_all(p).await.map_err(AppError::Database)?;
                 Ok(rows.iter().map(|r| r.try_get::<String, _>(0).unwrap_or_default()).collect())
@@ -236,8 +239,8 @@ impl DbEngine {
         }
     }
 
-    pub async fn apply_grants(&self, connection_id: &str, stmts: Vec<String>) -> Result<bool, AppError> {
-        let pool = self.get_pool(connection_id).await?;
+    pub async fn apply_grants(self: Arc<Self>, stmts: Vec<String>, connection_id: String) -> Result<bool, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => {
                 for s in &stmts { sqlx::query(s).execute(p).await.map_err(|e| AppError::Other(format!("Error: {} | SQL: {}", e, s)))?; }
@@ -248,53 +251,57 @@ impl DbEngine {
         }
     }
 
-    pub async fn generate_script(&self, connection_id: &str, db: &str, obj: &str, stype: &str, opts: &ScriptOptions) -> Result<String, AppError> {
-        match stype {
+    pub async fn generate_script(self: Arc<Self>, connection_id: String, db: String, obj: String, stype: String, opts: ScriptOptions) -> Result<String, AppError> {
+        match stype.as_str() {
             "create" => {
-                let ddl = self.get_create_table(connection_id, db, obj).await?;
+                let ddl = self.clone().get_create_table(connection_id, db, obj).await?;
                 Ok(if opts.include_if_not_exists { ddl.replacen("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1) } else { ddl })
             }
             "drop" => { let esc = obj.replace('`', "``"); Ok(if opts.include_if_exists { format!("DROP TABLE IF EXISTS `{}`;", esc) } else { format!("DROP TABLE `{}`;", esc) }) }
             "insert-template" => {
-                let cols = self.get_columns(connection_id, db, obj).await?;
+                let cols = self.clone().get_columns(connection_id, db.clone(), obj.clone()).await?;
                 if cols.is_empty() { return Err(AppError::Other("Empty columns".into())); }
                 let names = cols.iter().map(|c| format!("`{}`", c.name.replace('`', "``"))).collect::<Vec<_>>().join(", ");
                 let phs = vec!["?"; cols.len()].join(", ");
                 Ok(format!("INSERT INTO `{}` ({}) VALUES ({});", obj.replace('`', "``"), names, phs))
             }
             "select-template" => {
-                let cols = self.get_columns(connection_id, db, obj).await?;
+                let cols = self.clone().get_columns(connection_id, db.clone(), obj.clone()).await?;
                 if cols.is_empty() { return Err(AppError::Other("Empty columns".into())); }
                 let names = cols.iter().map(|c| format!("`{}`", c.name.replace('`', "``"))).collect::<Vec<_>>().join(", ");
                 Ok(format!("SELECT {} FROM `{}`;", names, obj.replace('`', "``")))
+            }
+            "update-template" => {
+                let cols = self.clone().get_columns(connection_id, db.clone(), obj.clone()).await?;
+                if cols.is_empty() { return Err(AppError::Other("Empty columns".into())); }
+                let set_clause = cols.iter().map(|c| format!("`{}` = ?", c.name.replace('`', "``"))).collect::<Vec<_>>().join(", ");
+                Ok(format!("UPDATE `{}` SET {} WHERE /* 条件 */;", obj.replace('`', "``"), set_clause))
             }
             _ => Err(AppError::Other("Unknown script type".into())),
         }
     }
 
-    pub async fn export_database_ddl(&self, connection_id: &str, db: &str, opts: &ScriptOptions) -> Result<String, AppError> {
+    pub async fn export_database_ddl(self: Arc<Self>, connection_id: String, db: String, opts: ScriptOptions) -> Result<String, AppError> {
         let mut parts = vec![format!("-- Export: `{}`\n-- Time: {}\n", db, chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))];
-        let tables = self.get_tables(connection_id, db).await?;
+        let tables = self.clone().get_tables(connection_id.clone(), db.clone()).await?;
         for t in tables.iter().filter(|t| t.table_type.to_uppercase() != "VIEW") {
             parts.push(format!("\n-- Table: `{}`", t.name));
             if opts.include_if_exists { parts.push(format!("DROP TABLE IF EXISTS `{}`;", t.name.replace('`', "``"))); }
-            if let Ok(ddl) = self.get_create_table(connection_id, db, &t.name).await {
+            if let Ok(ddl) = self.clone().get_create_table(connection_id.clone(), db.clone(), t.name.clone()).await {
                 parts.push(format!("{};", if opts.include_if_not_exists { ddl.replacen("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1) } else { ddl }));
             }
         }
-        // Simplified view/proc/etc for brevity in this refactor step, assuming existing logic was similar.
-        // Actually, restore basic structure from original.
-        let views = self.get_views(connection_id, db).await?;
+        let views = self.clone().get_views(connection_id.clone(), db.clone()).await?;
         for v in views { 
             parts.push(format!("\n-- View: `{}`", v.name)); 
-            if let Ok(d) = self.get_object_definition(connection_id, db, &v.name, "VIEW").await { 
+            if let Ok(d) = self.clone().get_object_definition(connection_id.clone(), db.clone(), v.name.clone(), "VIEW".to_string()).await { 
                 parts.push(format!("{};", d)); 
             } 
         }
-        let procs = self.get_routines(connection_id, db, "PROCEDURE").await?;
+        let procs = self.clone().get_routines(connection_id.clone(), db.clone(), "PROCEDURE".to_string()).await?;
         for p in procs { 
             parts.push(format!("\n-- Proc: `{}`\nDELIMITER ;;\n", p.name)); 
-            if let Ok(d) = self.get_object_definition(connection_id, db, &p.name, "PROCEDURE").await { 
+            if let Ok(d) = self.clone().get_object_definition(connection_id.clone(), db.clone(), p.name.clone(), "PROCEDURE".to_string()).await { 
                 parts.push(format!("{};;\nDELIMITER ;", d)); 
             } 
         }

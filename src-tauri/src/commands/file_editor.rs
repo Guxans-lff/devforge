@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::commands::sftp::SftpEngineState;
@@ -48,11 +48,12 @@ fn build_search_regex(pattern: &str, case_sensitive: bool) -> Result<regex::Rege
 /// 读取远程文件文本内容
 #[tauri::command]
 pub async fn sftp_read_file_content(
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     remote_path: String,
     max_size: Option<u64>,
 ) -> Result<String, String> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     let sftp = sftp_engine
         .get_sftp_session(&connection_id)
         .await
@@ -89,11 +90,12 @@ pub async fn sftp_read_file_content(
 /// 写入文本内容到远程文件
 #[tauri::command]
 pub async fn sftp_write_file_content(
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     remote_path: String,
     content: String,
 ) -> Result<(), String> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     let sftp = sftp_engine
         .get_sftp_session(&connection_id)
         .await
@@ -118,11 +120,12 @@ pub async fn sftp_write_file_content(
 /// 修改远程文件权限 (chmod)
 #[tauri::command]
 pub async fn sftp_chmod(
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     path: String,
     mode: u32,
 ) -> Result<(), String> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     let sftp = sftp_engine
         .get_sftp_session(&connection_id)
         .await
@@ -149,7 +152,6 @@ pub async fn sftp_chmod(
 /// 通过 Tauri event 实时推送每条结果，命令返回时搜索结束。
 #[tauri::command]
 pub async fn sftp_search_files(
-    sftp_engine: State<'_, SftpEngineState>,
     app_handle: AppHandle,
     connection_id: String,
     base_path: String,
@@ -157,6 +159,7 @@ pub async fn sftp_search_files(
     case_sensitive: Option<bool>,
     max_depth: Option<u32>,
 ) -> Result<SearchDoneEvent, String> {
+    let sftp_engine = app_handle.state::<SftpEngineState>().inner().clone();
     let sftp = sftp_engine
         .get_sftp_session(&connection_id)
         .await

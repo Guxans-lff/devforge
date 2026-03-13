@@ -1,11 +1,11 @@
-use tauri::{command, AppHandle, State};
+use tauri::{command, AppHandle, Manager};
 
 use crate::commands::db::DbEngineState;
 use crate::services::db_backup;
+use crate::utils::error::AppError;
 
 #[command]
 pub async fn db_backup_database(
-    engine: State<'_, DbEngineState>,
     app_handle: AppHandle,
     connection_id: String,
     database: String,
@@ -14,8 +14,9 @@ pub async fn db_backup_database(
     include_data: bool,
     output_path: String,
 ) -> Result<(), String> {
+    let engine = app_handle.state::<DbEngineState>().inner().clone();
     db_backup::backup_database(
-        &engine,
+        engine,
         &connection_id,
         &database,
         tables,
@@ -30,14 +31,14 @@ pub async fn db_backup_database(
 
 #[command]
 pub async fn db_restore_database(
-    engine: State<'_, DbEngineState>,
     app_handle: AppHandle,
     connection_id: String,
     database: String,
     file_path: String,
 ) -> Result<(), String> {
+    let engine = app_handle.state::<DbEngineState>().inner().clone();
     db_backup::restore_database(
-        &engine,
+        engine,
         &connection_id,
         &database,
         &file_path,

@@ -1,20 +1,22 @@
 use std::sync::Arc;
 
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::commands::connection::StorageState;
 use crate::models::transfer::{FileEntry, FileInfo};
 use crate::services::sftp_engine::SftpEngine;
 use crate::services::ssh_auth;
+use crate::utils::error::AppError;
 
 pub type SftpEngineState = Arc<SftpEngine>;
 
 #[tauri::command]
 pub async fn sftp_connect(
-    sftp_engine: State<'_, SftpEngineState>,
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     connection_id: String,
 ) -> Result<bool, String> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
+    let storage = app.state::<StorageState>().inner().clone();
     let conn = storage
         .get_connection(&connection_id)
         .await
@@ -43,9 +45,10 @@ pub async fn sftp_connect(
 
 #[tauri::command]
 pub async fn sftp_disconnect(
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
 ) -> Result<bool, String> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     sftp_engine
         .disconnect(&connection_id)
         .await
@@ -55,10 +58,11 @@ pub async fn sftp_disconnect(
 
 #[tauri::command]
 pub async fn sftp_list_dir(
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     path: String,
 ) -> Result<Vec<FileEntry>, String> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     sftp_engine
         .list_dir(&connection_id, &path)
         .await
@@ -67,10 +71,11 @@ pub async fn sftp_list_dir(
 
 #[tauri::command]
 pub async fn sftp_stat(
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     path: String,
 ) -> Result<FileInfo, String> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     sftp_engine
         .stat(&connection_id, &path)
         .await
@@ -79,10 +84,11 @@ pub async fn sftp_stat(
 
 #[tauri::command]
 pub async fn sftp_mkdir(
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     path: String,
 ) -> Result<bool, String> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     sftp_engine
         .mkdir(&connection_id, &path)
         .await
@@ -92,11 +98,12 @@ pub async fn sftp_mkdir(
 
 #[tauri::command]
 pub async fn sftp_delete(
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     path: String,
     is_dir: bool,
 ) -> Result<bool, String> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     if is_dir {
         sftp_engine
             .delete_dir(&connection_id, &path)
@@ -113,11 +120,12 @@ pub async fn sftp_delete(
 
 #[tauri::command]
 pub async fn sftp_rename(
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     old_path: String,
     new_path: String,
 ) -> Result<bool, String> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     sftp_engine
         .rename(&connection_id, &old_path, &new_path)
         .await
@@ -128,11 +136,11 @@ pub async fn sftp_rename(
 #[tauri::command]
 pub async fn sftp_download(
     app_handle: tauri::AppHandle,
-    sftp_engine: State<'_, SftpEngineState>,
     connection_id: String,
     remote_path: String,
     local_path: String,
 ) -> Result<String, String> {
+    let sftp_engine = app_handle.state::<SftpEngineState>().inner().clone();
     let transfer_id = uuid::Uuid::new_v4().to_string();
 
     sftp_engine
@@ -152,11 +160,11 @@ pub async fn sftp_download(
 #[tauri::command]
 pub async fn sftp_upload(
     app_handle: tauri::AppHandle,
-    sftp_engine: State<'_, SftpEngineState>,
     connection_id: String,
     local_path: String,
     remote_path: String,
 ) -> Result<String, String> {
+    let sftp_engine = app_handle.state::<SftpEngineState>().inner().clone();
     let transfer_id = uuid::Uuid::new_v4().to_string();
 
     sftp_engine
@@ -299,16 +307,17 @@ fn collect_local_files<'a>(
 /// Recursively list all files in a remote directory
 #[tauri::command]
 pub async fn sftp_list_recursive(
-    engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     path: String,
 ) -> Result<Vec<(String, u64)>, String> {
+    let engine = app.state::<SftpEngineState>().inner().clone();
     // Check if connected
     if !engine.is_connected(&connection_id).await {
         return Err(format!("No SFTP session for connection: {}", connection_id));
     }
 
-    let sftp = engine
+    let sftp: Arc<russh_sftp::client::SftpSession> = engine
         .get_sftp_session(&connection_id)
         .await
         .ok_or_else(|| format!("No SFTP session for connection: {}", connection_id))?;

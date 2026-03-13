@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::Manager;
 
 use crate::commands::sftp::SftpEngineState;
 use crate::services::transfer_manager::{TransferManagerState, TransferType};
@@ -7,14 +7,15 @@ use std::path::PathBuf;
 /// 开始分块上传文件
 #[tauri::command]
 pub async fn start_upload_chunked(
+    app_handle: tauri::AppHandle,
     id: String,
     local_path: String,
     remote_path: String,
     connection_id: String,
-    transfer_manager: State<'_, TransferManagerState>,
-    sftp_engine: State<'_, SftpEngineState>,
-    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    let transfer_manager = app_handle.state::<TransferManagerState>().inner().clone();
+    let sftp_engine = app_handle.state::<SftpEngineState>().inner().clone();
+    
     // 参数验证
     if id.is_empty() {
         return Err("传输 ID 不能为空".to_string());
@@ -40,7 +41,7 @@ pub async fn start_upload_chunked(
         std::time::Duration::from_secs(10),
         sftp_engine.create_raw_sftp_session(&connection_id)
     ).await
-    .map_err(|_| "创建会话超时".to_string())?
+    .map_err(|e| format!("创建会话超时: {}", e))?
     .map_err(|e| format!("创建流水线会话失败: {}", e))
     .ok();
 
@@ -56,14 +57,15 @@ pub async fn start_upload_chunked(
 /// 开始分块下载文件
 #[tauri::command]
 pub async fn start_download_chunked(
+    app_handle: tauri::AppHandle,
     id: String,
     remote_path: String,
     local_path: String,
     connection_id: String,
-    transfer_manager: State<'_, TransferManagerState>,
-    sftp_engine: State<'_, SftpEngineState>,
-    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    let transfer_manager = app_handle.state::<TransferManagerState>().inner().clone();
+    let sftp_engine = app_handle.state::<SftpEngineState>().inner().clone();
+
     // 参数验证
     if id.is_empty() {
         return Err("传输 ID 不能为空".to_string());
@@ -94,10 +96,10 @@ pub async fn start_download_chunked(
 
 #[tauri::command]
 pub async fn pause_transfer(
-    id: String,
-    transfer_manager: State<'_, TransferManagerState>,
     app_handle: tauri::AppHandle,
+    id: String,
 ) -> Result<(), String> {
+    let transfer_manager = app_handle.state::<TransferManagerState>().inner().clone();
     if id.is_empty() {
         return Err("传输 ID 不能为空".to_string());
     }
@@ -110,12 +112,12 @@ pub async fn pause_transfer(
 /// 恢复传输任务
 #[tauri::command]
 pub async fn resume_transfer(
+    app_handle: tauri::AppHandle,
     id: String,
     connection_id: String,
-    transfer_manager: State<'_, TransferManagerState>,
-    sftp_engine: State<'_, SftpEngineState>,
-    app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    let transfer_manager = app_handle.state::<TransferManagerState>().inner().clone();
+    let sftp_engine = app_handle.state::<SftpEngineState>().inner().clone();
     if id.is_empty() {
         return Err("传输 ID 不能为空".to_string());
     }
@@ -134,7 +136,7 @@ pub async fn resume_transfer(
         std::time::Duration::from_secs(10),
         sftp_engine.create_raw_sftp_session(&connection_id)
     ).await
-    .map_err(|_| "创建会话超时".to_string())?
+    .map_err(|e| format!("创建会话超时: {}", e))?
     .map_err(|e| format!("创建会话失败: {}", e))
     .ok();
 
@@ -148,10 +150,10 @@ pub async fn resume_transfer(
 /// 取消传输任务
 #[tauri::command]
 pub async fn cancel_transfer(
-    id: String,
-    transfer_manager: State<'_, TransferManagerState>,
     app_handle: tauri::AppHandle,
+    id: String,
 ) -> Result<(), String> {
+    let transfer_manager = app_handle.state::<TransferManagerState>().inner().clone();
     if id.is_empty() {
         return Err("传输 ID 不能为空".to_string());
     }
@@ -164,11 +166,12 @@ pub async fn cancel_transfer(
 /// 批量加入上传任务到队列
 #[tauri::command]
 pub async fn enqueue_batch_upload(
+    app: tauri::AppHandle,
     connection_id: String,
     files: Vec<(String, String, u64)>, // (local_path, remote_path, size)
-    transfer_manager: State<'_, TransferManagerState>,
-    sftp_engine: State<'_, SftpEngineState>,
 ) -> Result<Vec<String>, String> {
+    let transfer_manager = app.state::<TransferManagerState>().inner().clone();
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     if connection_id.is_empty() {
         return Err("连接 ID 不能为空".to_string());
     }
@@ -213,11 +216,12 @@ pub async fn enqueue_batch_upload(
 /// 批量加入下载任务到队列
 #[tauri::command]
 pub async fn enqueue_batch_download(
+    app: tauri::AppHandle,
     connection_id: String,
     files: Vec<(String, String, u64)>, // (remote_path, local_path, size)
-    transfer_manager: State<'_, TransferManagerState>,
-    sftp_engine: State<'_, SftpEngineState>,
 ) -> Result<Vec<String>, String> {
+    let transfer_manager = app.state::<TransferManagerState>().inner().clone();
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     if connection_id.is_empty() {
         return Err("连接 ID 不能为空".to_string());
     }
@@ -253,8 +257,9 @@ pub async fn enqueue_batch_download(
 /// 获取队列状态
 #[tauri::command]
 pub async fn get_queue_status(
-    transfer_manager: State<'_, TransferManagerState>,
+    app: tauri::AppHandle,
 ) -> Result<(usize, usize), String> {
+    let transfer_manager = app.state::<TransferManagerState>().inner().clone();
     let manager = transfer_manager.lock().await;
     Ok(manager.get_queue_status())
 }
@@ -262,12 +267,13 @@ pub async fn get_queue_status(
 /// Upload an entire folder recursively
 #[tauri::command]
 pub async fn upload_folder_recursive(
-    transfer_manager: State<'_, TransferManagerState>,
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     local_folder: String,
     remote_folder: String,
 ) -> Result<Vec<String>, String> {
+    let transfer_manager = app.state::<TransferManagerState>().inner().clone();
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     // Get all files in local folder
     let files = crate::commands::sftp::local_list_recursive(local_folder.clone()).await?;
 
@@ -345,15 +351,16 @@ pub async fn upload_folder_recursive(
 /// Download an entire folder recursively
 #[tauri::command]
 pub async fn download_folder_recursive(
-    transfer_manager: State<'_, TransferManagerState>,
-    sftp_engine: State<'_, SftpEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     remote_folder: String,
     local_folder: String,
 ) -> Result<Vec<String>, String> {
+    let transfer_manager = app.state::<TransferManagerState>().inner().clone();
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     // Get all files in remote folder
     let files = crate::commands::sftp::sftp_list_recursive(
-        sftp_engine.clone(),
+        app.clone(),
         connection_id.clone(),
         remote_folder.clone(),
     )

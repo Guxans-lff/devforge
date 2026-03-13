@@ -1,18 +1,20 @@
-use tauri::{command, State};
+use tauri::{command, State, Manager};
 
 use crate::commands::db::DbEngineState;
 use crate::services::schema_compare::{self, SchemaDiff};
+use crate::utils::error::AppError;
 
 #[command]
 pub async fn schema_compare(
-    engine: State<'_, DbEngineState>,
+    app: tauri::AppHandle,
     source_connection_id: String,
     source_database: String,
     target_connection_id: String,
     target_database: String,
 ) -> Result<SchemaDiff, String> {
+    let engine = app.state::<DbEngineState>().inner().clone();
     schema_compare::compare_schemas(
-        &engine,
+        engine,
         &source_connection_id,
         &source_database,
         &target_connection_id,
@@ -24,15 +26,16 @@ pub async fn schema_compare(
 
 #[command]
 pub async fn generate_migration_sql(
-    engine: State<'_, DbEngineState>,
+    app: tauri::AppHandle,
     diff: SchemaDiff,
     driver: String,
     source_connection_id: String,
     source_database: String,
     target_database: String,
 ) -> Result<String, String> {
+    let engine = app.state::<DbEngineState>().inner().clone();
     schema_compare::generate_migration_sql(
-        &engine,
+        engine,
         &diff,
         &driver,
         &source_connection_id,

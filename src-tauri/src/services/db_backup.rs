@@ -4,8 +4,11 @@ use sqlx::Row;
 use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 
+use std::sync::Arc;
+use sqlx::Executor;
 use crate::services::db_drivers::DriverPool;
 use crate::services::db_engine::DbEngine;
+use crate::services::sql_splitter;
 use crate::utils::error::AppError;
 
 /// 备份进度事件
@@ -42,7 +45,7 @@ fn emit_restore_progress(app: &AppHandle, progress: &RestoreProgress) {
 
 /// 执行数据库备份
 pub async fn backup_database(
-    engine: &DbEngine,
+    engine: Arc<DbEngine>,
     connection_id: &str,
     database: &str,
     tables: Vec<String>,
@@ -51,11 +54,11 @@ pub async fn backup_database(
     output_path: &str,
     app_handle: &AppHandle,
 ) -> Result<(), AppError> {
-    let pool = engine.get_pool(connection_id).await?;
+    let pool = engine.clone().get_pool(connection_id.to_string()).await?;
 
     // 获取表列表
     let table_list = if tables.is_empty() {
-        let table_infos = engine.get_tables(connection_id, database).await?;
+        let table_infos = engine.clone().get_tables(connection_id.to_string(), database.to_string()).await?;
         table_infos.into_iter().map(|t| t.name).collect::<Vec<_>>()
     } else {
         tables
@@ -88,7 +91,7 @@ pub async fn backup_database(
 
         // 导出表结构
         if include_structure {
-            let create_sql = engine.get_create_table(connection_id, database, table_name).await?;
+            let create_sql = engine.clone().get_create_table(connection_id.to_string(), database.to_string(), table_name.to_string()).await?;
             match pool.as_ref() {
                 DriverPool::MySql(_) => {
                     file.write_all(format!("DROP TABLE IF EXISTS `{}`;\n", table_name).as_bytes()).await?;
@@ -149,17 +152,17 @@ pub async fn backup_database(
 
 /// 执行数据库恢复
 pub async fn restore_database(
-    engine: &DbEngine,
+    engine: Arc<DbEngine>,
     connection_id: &str,
     database: &str,
     file_path: &str,
     app_handle: &AppHandle,
 ) -> Result<(), AppError> {
-    let pool = engine.get_pool(connection_id).await?;
+    let pool = engine.clone().get_pool(connection_id.to_string()).await?;
     let content = tokio::fs::read_to_string(file_path).await?;
 
     // 分割 SQL 语句
-    let statements = split_sql_statements(&content);
+    let statements = sql_splitter::split_sql_statements(&content);
     let total = statements.len() as u32;
 
     // 切换数据库
@@ -448,117 +451,4 @@ fn format_postgres_value(row: &sqlx::postgres::PgRow, col_idx: usize) -> String 
     }
 }
 
-/// 将 SQL 文件内容分割为独立语句
-fn split_sql_statements(content: &str) -> Vec<String> {
-    let mut statements = Vec::new();
-    let mut current = String::new();
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
-    let mut in_line_comment = false;
-    let mut in_block_comment = false;
-    let chars: Vec<char> = content.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
 
-    while i < len {
-        let ch = chars[i];
-        let next = if i + 1 < len { Some(chars[i + 1]) } else { None };
-
-        if in_line_comment {
-            if ch == '\n' {
-                in_line_comment = false;
-            }
-            current.push(ch);
-            i += 1;
-            continue;
-        }
-
-        if in_block_comment {
-            current.push(ch);
-            if ch == '*' && next == Some('/') {
-                current.push('/');
-                in_block_comment = false;
-                i += 2;
-                continue;
-            }
-            i += 1;
-            continue;
-        }
-
-        if in_single_quote {
-            current.push(ch);
-            if ch == '\'' && next == Some('\'') {
-                current.push('\'');
-                i += 2;
-                continue;
-            }
-            if ch == '\'' {
-                in_single_quote = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if in_double_quote {
-            current.push(ch);
-            if ch == '"' {
-                in_double_quote = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        // 检测注释开头
-        if ch == '-' && next == Some('-') {
-            in_line_comment = true;
-            current.push(ch);
-            i += 1;
-            continue;
-        }
-
-        if ch == '/' && next == Some('*') {
-            in_block_comment = true;
-            current.push(ch);
-            current.push('*');
-            i += 2;
-            continue;
-        }
-
-        // 检测字符串
-        if ch == '\'' {
-            in_single_quote = true;
-            current.push(ch);
-            i += 1;
-            continue;
-        }
-
-        if ch == '"' {
-            in_double_quote = true;
-            current.push(ch);
-            i += 1;
-            continue;
-        }
-
-        // 语句分隔符
-        if ch == ';' {
-            let stmt = current.trim().to_string();
-            if !stmt.is_empty() && !stmt.starts_with("--") {
-                statements.push(stmt);
-            }
-            current.clear();
-            i += 1;
-            continue;
-        }
-
-        current.push(ch);
-        i += 1;
-    }
-
-    // 处理末尾无分号的语句
-    let last = current.trim().to_string();
-    if !last.is_empty() && !last.starts_with("--") {
-        statements.push(last);
-    }
-
-    statements
-}

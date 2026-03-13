@@ -1,5 +1,5 @@
 use chrono::Utc;
-use tauri::{command, State};
+use tauri::{command, Manager};
 use uuid::Uuid;
 
 use crate::models::connection::{
@@ -19,28 +19,29 @@ pub type StorageState = Arc<Storage>;
 
 #[command]
 pub async fn create_connection(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     req: CreateConnectionRequest,
 ) -> Result<Connection, String> {
+    let storage = app.state::<StorageState>().inner().clone();
     let now = Utc::now().timestamp_millis();
     let id = Uuid::new_v4().to_string();
 
     let conn = Connection {
         id: id.clone(),
-        name: req.name,
-        connection_type: req.connection_type,
-        group_id: req.group_id,
-        host: req.host,
+        name: req.name.clone(),
+        connection_type: req.connection_type.clone(),
+        group_id: req.group_id.clone(),
+        host: req.host.clone(),
         port: req.port,
-        username: req.username,
-        config_json: req.config_json,
-        color: req.color,
+        username: req.username.clone(),
+        config_json: req.config_json.clone(),
+        color: req.color.clone(),
         sort_order: 0,
         created_at: now,
         updated_at: now,
     };
 
-    storage.create_connection(&conn).await.map_err(|e| e.to_string())?;
+    storage.create_connection(&conn).await.map_err(|e: AppError| e.to_string())?;
 
     if let Some(password) = req.password {
         if !password.is_empty() {
@@ -61,11 +62,12 @@ pub async fn create_connection(
 
 #[command]
 pub async fn update_connection(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     id: String,
     req: UpdateConnectionRequest,
 ) -> Result<Connection, String> {
-    let mut conn = storage.get_connection(&id).await.map_err(|e| e.to_string())?;
+    let storage = app.state::<StorageState>().inner().clone();
+    let mut conn = storage.get_connection(&id).await.map_err(|e: AppError| e.to_string())?;
 
     if let Some(name) = req.name {
         conn.name = name;
@@ -90,7 +92,7 @@ pub async fn update_connection(
     }
 
     conn.updated_at = Utc::now().timestamp_millis();
-    storage.update_connection(&conn).await.map_err(|e| e.to_string())?;
+    storage.update_connection(&conn).await.map_err(|e: AppError| e.to_string())?;
 
     if let Some(password) = req.password {
         if password.is_empty() {
@@ -113,43 +115,48 @@ pub async fn update_connection(
 
 #[command]
 pub async fn delete_connection(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     id: String,
 ) -> Result<bool, String> {
-    storage.delete_connection(&id).await.map_err(|e| e.to_string())?;
+    let storage = app.state::<StorageState>().inner().clone();
+    storage.delete_connection(&id).await.map_err(|e: AppError| e.to_string())?;
     let _ = CredentialManager::delete(&id);
     Ok(true)
 }
 
 #[command]
 pub async fn list_connections(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<Connection>, String> {
-    storage.list_connections().await.map_err(|e| e.to_string())
+    let storage = app.state::<StorageState>().inner().clone();
+    storage.list_connections().await.map_err(|e: AppError| e.to_string())
 }
 
 #[command]
 pub async fn get_connection_by_id(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     id: String,
 ) -> Result<Connection, String> {
-    storage.get_connection(&id).await.map_err(|e| e.to_string())
+    let storage = app.state::<StorageState>().inner().clone();
+    storage.get_connection(&id).await.map_err(|e: AppError| e.to_string())
 }
 
 #[command]
 pub async fn reorder_connections(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     ids: Vec<String>,
 ) -> Result<bool, String> {
-    storage.reorder_connections(&ids).await.map_err(|e| e.to_string())?;
+    let storage = app.state::<StorageState>().inner().clone();
+    storage.reorder_connections(&ids).await.map_err(|e: AppError| e.to_string())?;
     Ok(true)
 }
 
 #[command]
 pub async fn test_connection(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     id: String,
 ) -> Result<TestResult, String> {
+    let storage = app.state::<StorageState>().inner().clone();
     let conn = storage.get_connection(&id).await.map_err(|e: AppError| e.to_string())?;
 
     let password = CredentialManager::get(&id)
@@ -160,7 +167,7 @@ pub async fn test_connection(
         serde_json::from_str(&conn.config_json).unwrap_or_default();
     let driver = config.get("driver").and_then(|v| v.as_str()).unwrap_or("mysql");
     let database = config.get("database").and_then(|v| v.as_str()).unwrap_or("");
-    let db_opt = if database.is_empty() { None } else { Some(database) };
+    let db_opt = if database.is_empty() { None } else { Some(database.to_string()) };
 
     // 从配置中解析 SSL 配置
     let ssl_config: Option<SslConfig> = config.get("ssl")
@@ -170,7 +177,16 @@ pub async fn test_connection(
     let pool_config: Option<PoolConfig> = config.get("pool")
         .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-    match DbEngine::test_connect(driver, &conn.host, conn.port, &conn.username, &password, db_opt, ssl_config.as_ref(), pool_config.as_ref()).await {
+    match DbEngine::test_connect(
+        driver.to_string(),
+        conn.host.clone(),
+        conn.port,
+        conn.username.clone(),
+        password.clone(),
+        db_opt,
+        ssl_config,
+        pool_config,
+    ).await {
         Ok(latency) => Ok(TestResult {
             success: true,
             message: format!("Connected to {}:{} ({}ms)", conn.host, conn.port, latency),
@@ -196,9 +212,18 @@ pub async fn test_connection_params(
     pool_config: Option<PoolConfig>,
 ) -> Result<TestResult, String> {
     let drv = driver.as_deref().unwrap_or("mysql");
-    let db_opt = database.as_deref().filter(|d| !d.is_empty());
+    let db_opt = database.filter(|d| !d.is_empty());
 
-    match DbEngine::test_connect(drv, &host, port, &username, &password, db_opt, ssl_config.as_ref(), pool_config.as_ref()).await {
+    match DbEngine::test_connect(
+        drv.to_string(),
+        host.clone(),
+        port,
+        username.clone(),
+        password.clone(),
+        db_opt,
+        ssl_config,
+        pool_config,
+    ).await {
         Ok(latency) => Ok(TestResult {
             success: true,
             message: format!("Connected to {}:{} ({}ms)", host, port, latency),
@@ -216,16 +241,18 @@ pub async fn test_connection_params(
 
 #[command]
 pub async fn list_groups(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<ConnectionGroup>, String> {
+    let storage = app.state::<StorageState>().inner().clone();
     storage.list_groups().await.map_err(|e: AppError| e.to_string())
 }
 
 #[command]
 pub async fn create_group(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     name: String,
 ) -> Result<ConnectionGroup, String> {
+    let storage = app.state::<StorageState>().inner().clone();
     let group = ConnectionGroup {
         id: Uuid::new_v4().to_string(),
         name,
@@ -233,16 +260,17 @@ pub async fn create_group(
         parent_id: None,
     };
 
-    storage.create_group(&group).await.map_err(|e| e.to_string())?;
+    storage.create_group(&group).await.map_err(|e: AppError| e.to_string())?;
     Ok(group)
 }
 
 #[command]
 pub async fn delete_group(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     id: String,
 ) -> Result<bool, String> {
-    storage.delete_group(&id).await.map_err(|e| e.to_string())?;
+    let storage = app.state::<StorageState>().inner().clone();
+    storage.delete_group(&id).await.map_err(|e: AppError| e.to_string())?;
     Ok(true)
 }
 
@@ -253,13 +281,14 @@ pub async fn delete_group(
 /// 移动分组时会校验：不能移动到自身或其后代下，且嵌套深度不能超过 3 级
 #[command]
 pub async fn update_group(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     group_id: String,
     name: String,
     parent_id: Option<String>,
 ) -> Result<ConnectionGroup, String> {
+    let storage = app.state::<StorageState>().inner().clone();
     // 获取当前分组
-    let mut group = storage.get_group(&group_id).await.map_err(|e| e.to_string())?;
+    let mut group = storage.get_group(&group_id).await.map_err(|e: AppError| e.to_string())?;
 
     // 规范化 parent_id：空字符串视为 None（根级）
     let new_parent_id = parent_id.filter(|p| !p.is_empty());
@@ -305,7 +334,7 @@ pub async fn update_group(
     group.name = name;
     group.parent_id = new_parent_id;
 
-    storage.update_group(&group).await.map_err(|e| e.to_string())?;
+    storage.update_group(&group).await.map_err(|e: AppError| e.to_string())?;
     Ok(group)
 }
 
@@ -314,16 +343,17 @@ pub async fn update_group(
 /// - target_group_id: 目标分组 ID（None 或空字符串表示移到根级）
 #[command]
 pub async fn move_connection(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     connection_id: String,
     target_group_id: Option<String>,
 ) -> Result<bool, String> {
+    let storage = app.state::<StorageState>().inner().clone();
     // 规范化：空字符串视为 None（根级）
     let group_id = target_group_id.filter(|g| !g.is_empty());
 
     // 如果指定了目标分组，验证分组是否存在
     if let Some(ref gid) = group_id {
-        storage.get_group(gid).await.map_err(|e| e.to_string())?;
+        storage.get_group(gid).await.map_err(|e: AppError| e.to_string())?;
     }
 
     storage
@@ -340,9 +370,10 @@ pub async fn move_connection(
 /// 返回切换后的收藏状态（true=已收藏，false=未收藏）
 #[command]
 pub async fn toggle_favorite(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     connection_id: String,
 ) -> Result<bool, String> {
+    let storage = app.state::<StorageState>().inner().clone();
     // 获取当前连接
     let mut conn = storage
         .get_connection(&connection_id)
@@ -369,7 +400,7 @@ pub async fn toggle_favorite(
     storage
         .update_connection(&conn)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e: AppError| e.to_string())?;
 
     Ok(new_favorite)
 }
@@ -378,7 +409,7 @@ pub async fn toggle_favorite(
 
 #[command]
 pub async fn get_credential(id: String) -> Result<Option<String>, String> {
-    CredentialManager::get(&id).map_err(|e| e.to_string())
+    CredentialManager::get(&id).map_err(|e: AppError| e.to_string())
 }
 
 #[command]
@@ -389,7 +420,7 @@ pub async fn save_credential(id: String, password: String) -> Result<bool, Strin
 
 #[command]
 pub async fn delete_credential(id: String) -> Result<bool, String> {
-    CredentialManager::delete(&id).map_err(|e| e.to_string())?;
+    CredentialManager::delete(&id).map_err(|e: AppError| e.to_string())?;
     Ok(true)
 }
 
@@ -412,9 +443,10 @@ pub struct TestResult {
 
 #[command]
 pub async fn update_boot_config(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     data_storage_path: Option<String>
 ) -> Result<(), String> {
+    let storage = app.state::<StorageState>().inner().clone();
     // 1. 获取当前的数据库路径（老家）
     let current_db_path = storage.get_db_path_raw();
     
@@ -450,14 +482,17 @@ pub async fn update_boot_config(
     crate::utils::boot_config::BootConfigManager::save(&config).map_err(|e| e.to_string())?;
 
     // 4. 即时重载存储引擎，让“搬迁”立即生效
-    storage.reload().await.map_err(|e| e.to_string())?;
+    storage.reload().await.map_err(|e: AppError| e.to_string())?;
     
     Ok(())
 }
 
 #[command]
-pub async fn reload_storage(storage: State<'_, StorageState>) -> Result<(), String> {
-    storage.reload().await.map_err(|e| e.to_string())
+pub async fn reload_storage(
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let storage = app.state::<StorageState>().inner().clone();
+    storage.reload().await.map_err(|e: AppError| e.to_string())
 }
 
 #[command]

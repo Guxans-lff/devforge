@@ -1,13 +1,14 @@
 use crate::commands::connection::StorageState;
 use crate::models::import_export::*;
 use crate::services::import_export::ImportExportService;
-use tauri::State;
+use tauri::{Manager, State};
 
 #[tauri::command]
 pub async fn export_connections(
-    state: State<'_, StorageState>,
+    app: tauri::AppHandle,
     connection_ids: Option<Vec<String>>,
 ) -> Result<ConnectionExport, String> {
+    let state = app.state::<StorageState>().inner().clone();
     let service = ImportExportService::new(&state);
     service
         .export_connections(connection_ids)
@@ -17,9 +18,10 @@ pub async fn export_connections(
 
 #[tauri::command]
 pub async fn preview_import(
-    state: State<'_, StorageState>,
+    app: tauri::AppHandle,
     data: ConnectionExport,
 ) -> Result<ImportPreview, String> {
+    let state = app.state::<StorageState>().inner().clone();
     let service = ImportExportService::new(&state);
     service
         .preview_import(data)
@@ -29,10 +31,11 @@ pub async fn preview_import(
 
 #[tauri::command]
 pub async fn import_connections(
-    state: State<'_, StorageState>,
+    app: tauri::AppHandle,
     data: ConnectionExport,
     options: ImportOptions,
 ) -> Result<ImportResult, String> {
+    let state = app.state::<StorageState>().inner().clone();
     let service = ImportExportService::new(&state);
     service
         .import_connections(data, options)

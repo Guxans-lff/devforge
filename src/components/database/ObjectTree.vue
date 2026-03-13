@@ -41,6 +41,7 @@ import {
   FileCode,
   FileDown,
   Trash2,
+  Eraser,
 } from 'lucide-vue-next'
 import * as dbApi from '@/api/database'
 import { fetchWithCache, invalidateByPrefix } from '@/composables/useMetadataCache'
@@ -61,6 +62,7 @@ const emit = defineEmits<{
   importData: [database: string, table: string, columns: string[]]
   createTable: [database: string]
   deleteTable: [database: string, table: string]
+  truncateTable: [database: string, table: string]
   showCreateSql: [database: string, table: string]
   showObjectDefinition: [database: string, name: string, objectType: string]
   schemaUpdated: []
@@ -71,6 +73,9 @@ const emit = defineEmits<{
   openPerformance: []
   generateScript: [database: string, table: string, scriptType: string]
   exportDatabaseDdl: [database: string]
+  runSqlFile: [database: string]
+  createDatabase: []
+  editDatabase: [database: string]
 }>()
 
 const { t } = useI18n()
@@ -532,6 +537,14 @@ function handleDeleteTable(node: DatabaseTreeNode) {
   }
 }
 
+function handleTruncateTable(node: DatabaseTreeNode) {
+  const database = node.meta?.database
+  const table = node.meta?.table
+  if (database && table) {
+    emit('truncateTable', database, table)
+  }
+}
+
 function handleShowCreateSql(node: DatabaseTreeNode) {
   const database = node.meta?.database
   const table = node.meta?.table
@@ -668,15 +681,26 @@ defineExpose({ loadDatabases, treeNodes, clearTree, forceRefresh, silentRefresh 
       <span class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
         {{ t('database.objects') }}
       </span>
-      <Button
-        variant="ghost"
-        size="icon"
-        class="h-5 w-5 text-muted-foreground hover:text-foreground"
-        :disabled="loading"
-        @click="forceRefresh"
-      >
-        <RefreshCw class="h-3 w-3" :class="{ 'animate-spin': loading }" />
-      </Button>
+      <div class="flex items-center gap-1">
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-5 w-5 text-muted-foreground hover:text-foreground"
+          title="新建数据库"
+          @click="emit('createDatabase')"
+        >
+          <Plus class="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-5 w-5 text-muted-foreground hover:text-foreground"
+          :disabled="loading"
+          @click="forceRefresh"
+        >
+          <RefreshCw class="h-3 w-3" :class="{ 'animate-spin': loading }" />
+        </Button>
+      </div>
     </div>
 
     <!-- 统一智能搜索框 -->
@@ -874,6 +898,11 @@ defineExpose({ loadDatabases, treeNodes, clearTree, forceRefresh, silentRefresh 
                 <!-- 右键菜单逻辑 (适配各种类型) -->
                 <ContextMenuContent class="w-48">
                   <template v-if="item.node.type === 'database'">
+                    <ContextMenuItem class="gap-2 text-xs" @click="emit('editDatabase', item.node.meta?.database ?? item.node.label)">
+                      <Pencil class="h-3.5 w-3.5" />
+                      编辑数据库
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
                     <ContextMenuItem class="gap-2 text-xs" @click="handleBackupDatabase(item.node)">
                       <HardDrive class="h-3.5 w-3.5" />
                       {{ t('backup.title') }}
@@ -892,10 +921,14 @@ defineExpose({ loadDatabases, treeNodes, clearTree, forceRefresh, silentRefresh 
                       <FileDown class="h-3.5 w-3.5" />
                       导出数据库结构
                     </ContextMenuItem>
+                    <ContextMenuItem class="gap-2 text-xs" @click="emit('runSqlFile', item.node.meta?.database ?? item.node.label)">
+                      <Code class="h-3.5 w-3.5" />
+                      运行 SQL 文件
+                    </ContextMenuItem>
                     <ContextMenuSeparator />
                     <ContextMenuItem class="gap-2 text-xs" @click="handleRefreshDatabase(item.node)">
                       <RefreshCw class="h-3.5 w-3.5" />
-                      {{ t('common.refresh') }}
+                      刷新
                     </ContextMenuItem>
                   </template>
 
@@ -906,7 +939,7 @@ defineExpose({ loadDatabases, treeNodes, clearTree, forceRefresh, silentRefresh 
                     </ContextMenuItem>
                     <ContextMenuItem class="gap-2 text-xs" @click="handleRefreshFolder(item.node)">
                       <RefreshCw class="h-3.5 w-3.5" />
-                      {{ t('common.refresh') }}
+                      刷新
                     </ContextMenuItem>
                   </template>
 
@@ -920,6 +953,10 @@ defineExpose({ loadDatabases, treeNodes, clearTree, forceRefresh, silentRefresh 
                       {{ t('dataImport.import') }}
                     </ContextMenuItem>
                     <ContextMenuSeparator />
+                    <ContextMenuItem class="gap-2 text-xs text-destructive focus:bg-destructive/10 focus:text-destructive" @click="handleTruncateTable(item.node)">
+                      <Eraser class="h-3.5 w-3.5" />
+                      清空表
+                    </ContextMenuItem>
                     <ContextMenuItem class="gap-2 text-xs text-destructive focus:bg-destructive/10 focus:text-destructive" @click="handleDeleteTable(item.node)">
                       <Trash2 class="h-3.5 w-3.5" />
                       删除表
@@ -935,6 +972,10 @@ defineExpose({ loadDatabases, treeNodes, clearTree, forceRefresh, silentRefresh 
                         生成脚本
                       </ContextMenuSubTrigger>
                       <ContextMenuSubContent class="w-44">
+                        <ContextMenuItem class="text-xs" @click="handleGenerateScript(item.node, 'select-template')">SELECT</ContextMenuItem>
+                        <ContextMenuItem class="text-xs" @click="handleGenerateScript(item.node, 'insert-template')">INSERT</ContextMenuItem>
+                        <ContextMenuItem class="text-xs" @click="handleGenerateScript(item.node, 'update-template')">UPDATE</ContextMenuItem>
+                        <ContextMenuSeparator />
                         <ContextMenuItem class="text-xs" @click="handleGenerateScript(item.node, 'create')">CREATE TABLE</ContextMenuItem>
                         <ContextMenuItem class="text-xs" @click="handleGenerateScript(item.node, 'drop')">DROP TABLE</ContextMenuItem>
                       </ContextMenuSubContent>

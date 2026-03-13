@@ -5,7 +5,7 @@ export type InnerTabType = 'query' | 'table-editor' | 'import' | 'table-data' | 
 /** 查询结果标签页 */
 export interface ResultTab {
   id: string
-  /** 标签标题：SQL 前 30 字符 + 执行时间 */
+  /** 标签标题 */
   title: string
   /** 查询结果 */
   result: QueryResult
@@ -15,6 +15,16 @@ export interface ResultTab {
   isPinned: boolean
   /** 创建时间戳 */
   createdAt: number
+  /** 多语句执行的子结果列表（仅多语句模式） */
+  subResults?: SubStatementResult[]
+}
+
+/** 多语句执行中每条语句的结果 */
+export interface SubStatementResult {
+  index: number
+  sql: string
+  statementType: string
+  result: QueryResult
 }
 
 export interface InnerTab {

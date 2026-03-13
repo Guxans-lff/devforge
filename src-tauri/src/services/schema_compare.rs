@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use std::sync::Arc;
 use crate::models::query::ColumnInfo;
 use crate::services::db_engine::DbEngine;
 use crate::utils::error::AppError;
@@ -36,7 +37,7 @@ pub struct SchemaDiff {
 
 /// 对比两个数据库的 schema
 pub async fn compare_schemas(
-    engine: &DbEngine,
+    engine: Arc<DbEngine>,
     source_connection_id: &str,
     source_database: &str,
     target_connection_id: &str,
@@ -44,8 +45,8 @@ pub async fn compare_schemas(
 ) -> Result<SchemaDiff, AppError> {
     // 获取源和目标的表列表
     let (source_tables, target_tables) = tokio::join!(
-        engine.get_tables(source_connection_id, source_database),
-        engine.get_tables(target_connection_id, target_database)
+        engine.clone().get_tables(source_connection_id.to_string(), source_database.to_string()),
+        engine.clone().get_tables(target_connection_id.to_string(), target_database.to_string())
     );
 
     let source_tables = source_tables?;
@@ -88,10 +89,16 @@ pub async fn compare_schemas(
     let mut table_diffs = Vec::new();
 
     for table_name in &common_tables {
-        let (source_cols, target_cols) = tokio::join!(
-            engine.get_columns(source_connection_id, source_database, table_name),
-            engine.get_columns(target_connection_id, target_database, table_name)
-        );
+        let s_conn = source_connection_id.to_string();
+        let s_db = source_database.to_string();
+        let t_conn = target_connection_id.to_string();
+        let t_db = target_database.to_string();
+        let t_name = table_name.to_string();
+
+        let source_fut = engine.clone().get_columns(s_conn, s_db, t_name.clone());
+        let target_fut = engine.clone().get_columns(t_conn, t_db, t_name);
+        
+        let (source_cols, target_cols) = tokio::join!(source_fut, target_fut);
 
         let source_cols = source_cols?;
         let target_cols = target_cols?;
@@ -216,7 +223,7 @@ fn diff_column(source: &ColumnInfo, target: &ColumnInfo) -> Vec<String> {
 
 /// 根据差异生成迁移 SQL（将目标同步到源的结构）
 pub async fn generate_migration_sql(
-    engine: &DbEngine,
+    engine: Arc<DbEngine>,
     diff: &SchemaDiff,
     driver: &str,
     source_connection_id: &str,
@@ -229,30 +236,38 @@ pub async fn generate_migration_sql(
     // 1. 仅在源端的表 — 从源端获取建表语句
     for table in &diff.tables_only_in_source {
         match engine
-            .get_create_table(source_connection_id, source_database, table)
+            .clone()
+            .get_create_table(source_connection_id.to_string(), source_database.to_string(), table.to_string())
             .await
         {
-            Ok(create_sql) => {
+            Ok(create_sql) if !create_sql.trim().is_empty() => {
                 statements.push(format!("-- 表 {q}{}{q} 仅在源端存在，以下为建表语句", table));
                 statements.push(format!("{};", create_sql.trim_end_matches(';')));
             }
-            Err(_) => {
+            Ok(_) => {
+                // 建表语句为空，回退到手动拼接 CREATE TABLE
                 statements.push(format!(
-                    "-- 表 {q}{}{q} 仅在源端存在，获取建表语句失败",
+                    "-- 表 {q}{}{q} 仅在源端存在，无法获取建表语句，请手动创建",
                     table
+                ));
+            }
+            Err(e) => {
+                statements.push(format!(
+                    "-- 表 {q}{}{q} 仅在源端存在，获取建表语句失败: {}",
+                    table, e
                 ));
             }
         }
     }
 
-    // 2. 仅在目标端的表 — 可选删除
+    // 2. 仅在目标端的表 — 删除
     for table in &diff.tables_only_in_target {
         statements.push(format!(
-            "-- 表 {q}{}{q} 仅在目标端存在，如需删除请取消下方注释",
+            "-- 表 {q}{}{q} 仅在目标端存在，需删除",
             table
         ));
         statements.push(format!(
-            "-- DROP TABLE {q}{}{q}.{q}{}{q};",
+            "DROP TABLE IF EXISTS {q}{}{q}.{q}{}{q};",
             target_database, table
         ));
     }
@@ -298,10 +313,10 @@ pub async fn generate_migration_sql(
             statements.push(col_def);
         }
 
-        // 需要移除的列（注释掉，让用户确认）
+        // 需要移除的列
         for col in &table_diff.columns_removed {
             statements.push(format!(
-                "-- ALTER TABLE {q}{}{q}.{q}{}{q} DROP COLUMN {q}{}{q};  -- 目标端多余列",
+                "ALTER TABLE {q}{}{q}.{q}{}{q} DROP COLUMN {q}{}{q};",
                 target_database, tbl, col.name
             ));
         }

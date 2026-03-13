@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, watch, ref, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useVirtualizer } from '@tanstack/vue-virtual'
@@ -458,6 +458,9 @@ const ROW_HEIGHT = 28
 
 // 统一的 grid 列宽，确保 header 和 body 对齐
 const gridStyle = computed(() => {
+  // 显式引用 columnSizing 建立响应式依赖 tracking，否则 resize 拖拽时不会触发视图更新
+  const _sizing = table.getState().columnSizing
+  
   const headers = table.getFlatHeaders()
   const colCount = headers.length
   if (colCount === 0) return {}
@@ -544,8 +547,14 @@ onBeforeUnmount(() => {
             <span v-if="result.columns.length > 0" class="font-medium tracking-tight tabular-nums">
               {{ result.rows.length }} <span class="opacity-60">{{ t('database.rows') }}</span>
             </span>
-            <span v-else class="font-medium tracking-tight">
+            <span v-else-if="result.multiStatementSummary" class="font-medium tracking-tight">
+              {{ result.multiStatementSummary.success }}/{{ result.multiStatementSummary.total }} <span class="opacity-60">条成功</span>
+            </span>
+            <span v-else-if="result.affectedRows > 0" class="font-medium tracking-tight">
               {{ result.affectedRows }} <span class="opacity-60">{{ t('database.rowsAffected') }}</span>
+            </span>
+            <span v-else class="font-medium tracking-tight">
+              {{ t('database.executeSuccess') }}
             </span>
           </div>
           <div class="flex items-center gap-1.5 hover:text-foreground transition-colors">
@@ -605,7 +614,7 @@ onBeforeUnmount(() => {
         <div
           class="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm"
         >
-          <div class="flex" :style="gridStyle">
+          <div class="w-full" :style="gridStyle">
             <div
               class="whitespace-nowrap border-b border-r border-border px-3 py-1.5 text-left text-xs font-medium text-muted-foreground"
             >
@@ -709,8 +718,8 @@ onBeforeUnmount(() => {
           <div
             v-for="vRow in rowVirtualizer.getVirtualItems()"
             :key="vRow.index"
-            v-memo="[vRow.index, vRow.start, selectedRowIndex === vRow.index, editingCell?.rowIndex === vRow.index, table.getRowModel().rows[vRow.index]?.id]"
-            class="flex cursor-pointer absolute left-0 right-0"
+            v-memo="[vRow.index, vRow.start, selectedRowIndex === vRow.index, editingCell?.rowIndex === vRow.index, table.getRowModel().rows[vRow.index]?.id, table.getState().columnSizing]"
+            class="cursor-pointer absolute left-0 right-0"
             :style="{ ...rowBaseStyle, transform: `translateY(${vRow.start}px)` }"
             :class="selectedRowIndex === vRow.index ? 'bg-primary/10' : 'hover:bg-muted/30'"
             @click="selectedRowIndex = vRow.index"
@@ -860,8 +869,20 @@ onBeforeUnmount(() => {
         <div class="text-center space-y-1.5">
           <p class="text-lg font-bold text-foreground">执行成功</p>
           <p class="text-xs text-muted-foreground/80">
-            <span class="font-medium text-foreground">{{ result.affectedRows }}</span> <span class="opacity-80">{{ t('database.rowsAffected') }}</span>
-            <span class="mx-2 opacity-30">|</span>
+            <template v-if="result.multiStatementSummary">
+              <span class="font-medium text-foreground">{{ result.multiStatementSummary.total }}</span> <span class="opacity-80">条语句</span>
+              <span class="mx-1 opacity-30">·</span>
+              <span class="font-medium text-green-500">{{ result.multiStatementSummary.success }} 成功</span>
+              <template v-if="result.multiStatementSummary.fail > 0">
+                <span class="mx-1 opacity-30">·</span>
+                <span class="font-medium text-red-500">{{ result.multiStatementSummary.fail }} 失败</span>
+              </template>
+              <span class="mx-2 opacity-30">|</span>
+            </template>
+            <template v-else-if="result.affectedRows > 0">
+              <span class="font-medium text-foreground">{{ result.affectedRows }}</span> <span class="opacity-80">{{ t('database.rowsAffected') }}</span>
+              <span class="mx-2 opacity-30">|</span>
+            </template>
             <span class="opacity-80">耗时</span> <span class="font-medium text-foreground">{{ result.executionTimeMs }}ms</span>
           </p>
         </div>

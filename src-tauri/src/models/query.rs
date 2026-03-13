@@ -308,3 +308,77 @@ pub struct ScriptOptions {
     /// 是否在 DROP 语句中包含 IF EXISTS
     pub include_if_exists: bool,
 }
+
+
+// ===== 多语句执行相关类型 =====
+
+/// 单条语句的执行结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatementResult {
+    /// 语句序号（从 1 开始）
+    pub index: u32,
+    /// 原始 SQL 文本
+    pub sql: String,
+    /// 语句类型（SELECT / INSERT / UPDATE / DELETE / CREATE / ALTER / DROP / OTHER）
+    pub statement_type: String,
+    /// 执行结果（复用现有 QueryResult）
+    pub result: QueryResult,
+}
+
+/// 多语句执行的错误策略
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
+pub enum ErrorStrategy {
+    /// 遇错停止（默认）
+    StopOnError,
+    /// 遇错继续
+    ContinueOnError,
+}
+
+impl Default for ErrorStrategy {
+    fn default() -> Self {
+        Self::StopOnError
+    }
+}
+
+/// 检测 SQL 语句类型
+pub fn detect_statement_type(sql: &str) -> String {
+    let first_word = sql.trim_start()
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_uppercase();
+    match first_word.as_str() {
+        "SELECT" | "SHOW" | "DESCRIBE" | "EXPLAIN" => first_word,
+        "INSERT" | "UPDATE" | "DELETE" | "REPLACE" => first_word,
+        "CREATE" | "ALTER" | "DROP" | "TRUNCATE" | "RENAME" => first_word,
+        "BEGIN" | "COMMIT" | "ROLLBACK" | "START" => first_word,
+        "SET" | "USE" | "GRANT" | "REVOKE" => first_word,
+        "CALL" => first_word,
+        _ => "OTHER".to_string(),
+    }
+}
+ 
+ // ===== SQL 导入相关结构体 =====
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(rename_all = "camelCase")]
+ pub struct SqlFileProgress {
+     pub total_statements: usize,
+     pub executed: usize,
+     pub success: usize,
+     pub fail: usize,
+     pub current_sql: String,
+     pub is_finished: bool,
+     pub error: Option<String>,
+ }
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ #[serde(rename_all = "camelCase")]
+ pub struct SqlImportOptions {
+     pub continue_on_error: bool,
+     pub multiple_queries: bool,
+     pub disable_auto_commit: bool,
+ }

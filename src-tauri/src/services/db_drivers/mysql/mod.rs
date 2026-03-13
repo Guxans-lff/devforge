@@ -2,7 +2,7 @@ mod connection;
 mod executor;
 mod util;
 
-pub use connection::{connect};
+pub use connection::{connect, test_connect};
 pub use executor::*;
 pub use util::{get_string, get_opt_string};
 
@@ -90,8 +90,22 @@ pub async fn get_create_table(pool: &MySqlPool, database: &str, table: &str) -> 
     let row: MySqlRow = sqlx::query(&sql).fetch_one(pool).await
         .map_err(|e| AppError::Other(format!("Failed to get DDL: {}", e)))?;
 
-    let ddl = get_string(&row, "Create Table");
-    Ok(ddl)
+    // SHOW CREATE TABLE 返回两列：[0]=表名, [1]=建表语句
+    // 用列索引取值比列名更可靠（避免 MySQL 版本差异导致列名不匹配）
+    let ddl = get_string(&row, 1usize);
+    if ddl.is_empty() {
+        // 回退：尝试按列名获取
+        let fallback = get_string(&row, "Create Table");
+        if fallback.is_empty() {
+            return Err(AppError::Other(format!(
+                "SHOW CREATE TABLE 返回空结果，表: {}.{}",
+                database, table
+            )));
+        }
+        Ok(fallback)
+    } else {
+        Ok(ddl)
+    }
 }
 
 pub async fn get_views(pool: &MySqlPool, database: &str) -> Result<Vec<ViewInfo>, AppError> {

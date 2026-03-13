@@ -2,7 +2,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use serde::Deserialize;
-use tauri::State;
+use tauri::Manager;
 
 use crate::models::ssh::{TunnelConfig, TunnelInfo};
 use crate::services::ssh_tunnel::SshTunnelEngine;
@@ -30,9 +30,10 @@ pub struct TunnelOpenParams {
 
 #[tauri::command]
 pub async fn tunnel_open(
-    tunnel_engine: State<'_, SshTunnelEngineState>,
+    app: tauri::AppHandle,
     params: TunnelOpenParams,
 ) -> Result<TunnelInfo, String> {
+    let tunnel_engine = app.state::<SshTunnelEngineState>().inner().clone();
     let tunnel_id = uuid::Uuid::new_v4().to_string();
 
     let config = TunnelConfig {
@@ -55,9 +56,10 @@ pub async fn tunnel_open(
 
 #[tauri::command]
 pub async fn tunnel_close(
-    tunnel_engine: State<'_, SshTunnelEngineState>,
+    app: tauri::AppHandle,
     tunnel_id: String,
 ) -> Result<bool, String> {
+    let tunnel_engine = app.state::<SshTunnelEngineState>().inner().clone();
     let mut engine = tunnel_engine.lock().await;
     engine
         .close_tunnel(&tunnel_id)
@@ -67,8 +69,9 @@ pub async fn tunnel_close(
 
 #[tauri::command]
 pub async fn tunnel_list(
-    tunnel_engine: State<'_, SshTunnelEngineState>,
+    app: tauri::AppHandle,
 ) -> Result<Vec<TunnelInfo>, String> {
+    let tunnel_engine = app.state::<SshTunnelEngineState>().inner().clone();
     let engine = tunnel_engine.lock().await;
     Ok(engine.list_tunnels())
 }

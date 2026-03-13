@@ -1,4 +1,4 @@
-use tauri::{command, State};
+use tauri::{command, State, Manager};
 
 use crate::commands::db::DbEngineState;
 use crate::models::table_editor::{DdlResult, TableAlteration, TableDefinition, TableDetail};
@@ -22,11 +22,12 @@ pub fn generate_alter_table_sql(
 
 #[command]
 pub async fn execute_ddl(
-    engine: State<'_, DbEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     sql: String,
 ) -> Result<bool, String> {
-    engine.execute_query(&connection_id, &sql, None)
+    let engine = app.state::<DbEngineState>().inner().clone();
+    engine.execute_query(connection_id, None, sql, None)
         .await
         .map_err(|e| e.to_string())?;
     Ok(true)
@@ -34,12 +35,13 @@ pub async fn execute_ddl(
 
 #[command]
 pub async fn get_table_detail(
-    engine: State<'_, DbEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     database: String,
     table: String,
 ) -> Result<TableDetail, String> {
-    let pool = engine.get_pool(&connection_id).await.map_err(|e| e.to_string())?;
+    let engine = app.state::<DbEngineState>().inner().clone();
+    let pool = engine.get_pool(connection_id).await.map_err(|e| e.to_string())?;
     table_editor::get_table_detail(&pool, &database, &table)
         .await
         .map_err(|e| e.to_string())
@@ -47,12 +49,13 @@ pub async fn get_table_detail(
 
 #[command]
 pub async fn get_table_ddl(
-    engine: State<'_, DbEngineState>,
+    app: tauri::AppHandle,
     connection_id: String,
     database: String,
     table: String,
 ) -> Result<String, String> {
-    let pool = engine.get_pool(&connection_id).await.map_err(|e| e.to_string())?;
+    let engine = app.state::<DbEngineState>().inner().clone();
+    let pool = engine.get_pool(connection_id).await.map_err(|e| e.to_string())?;
     table_editor::get_table_ddl(&pool, &database, &table)
         .await
         .map_err(|e| e.to_string())

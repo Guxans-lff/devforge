@@ -7,6 +7,12 @@ export interface QueryResult {
   error: string | null
   totalCount: number | null
   truncated: boolean
+  /** 多语句执行汇总（仅多语句模式下存在） */
+  multiStatementSummary?: {
+    total: number
+    success: number
+    fail: number
+  }
 }
 
 export interface ColumnDef {
@@ -210,3 +216,21 @@ export interface CreateUserRequest {
   /** 密码过期天数，null 表示不设置过期策略 */
   passwordExpireDays: number | null
 }
+
+
+// ===== 多语句执行相关类型 =====
+
+/** 单条语句的执行结果 */
+export interface StatementResult {
+  /** 语句序号（从 1 开始） */
+  index: number
+  /** 原始 SQL 文本 */
+  sql: string
+  /** 语句类型（SELECT / INSERT / UPDATE 等） */
+  statementType: string
+  /** 执行结果（复用 QueryResult） */
+  result: QueryResult
+}
+
+/** 多语句执行的错误策略 */
+export type ErrorStrategy = 'stopOnError' | 'continueOnError'

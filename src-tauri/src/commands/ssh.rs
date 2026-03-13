@@ -1,13 +1,11 @@
-use std::sync::Arc;
-use std::time::Instant;
-
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::commands::connection::{StorageState, TestResult};
 use crate::models::ssh::{AuthConfig, ProxyJumpConfig, SessionInfo};
 use crate::services::ssh_auth;
 use crate::services::ssh_engine::SshEngine;
-use crate::utils::error::AppError;
+use std::sync::Arc;
+use tokio::time::Instant;
 
 pub type SshEngineState = Arc<SshEngine>;
 
@@ -27,10 +25,10 @@ pub async fn resolve_proxy_from_config(
     let proxy_conn = storage
         .get_connection(proxy_id)
         .await
-        .map_err(|e: AppError| format!("获取跳板机连接失败: {}", e))?;
-
+        .map_err(|e| format!("获取跳板机连接失败: {}", e))?;
+        
     let proxy_auth = ssh_auth::parse_auth_config(proxy_id, &proxy_conn.config_json)
-        .map_err(|e: AppError| format!("解析跳板机认证失败: {}", e))?;
+        .map_err(|e| format!("解析跳板机认证失败: {}", e))?;
 
     Ok(Some(ProxyJumpConfig {
         host: proxy_conn.host,
@@ -43,17 +41,18 @@ pub async fn resolve_proxy_from_config(
 #[tauri::command]
 pub async fn ssh_connect(
     app_handle: tauri::AppHandle,
-    ssh_engine: State<'_, SshEngineState>,
-    storage: State<'_, StorageState>,
     connection_id: String,
     cols: u32,
     rows: u32,
 ) -> Result<SessionInfo, String> {
+    let ssh_engine = app_handle.state::<SshEngineState>().inner().clone();
+    let storage = app_handle.state::<StorageState>().inner().clone();
+    
     let conn = storage
         .get_connection(&connection_id)
         .await
         .map_err(|e| e.to_string())?;
-
+        
     let auth = ssh_auth::parse_auth_config(&connection_id, &conn.config_json)
         .map_err(|e| e.to_string())?;
 
@@ -80,9 +79,10 @@ pub async fn ssh_connect(
 
 #[tauri::command]
 pub async fn ssh_disconnect(
-    ssh_engine: State<'_, SshEngineState>,
+    app: tauri::AppHandle,
     session_id: String,
 ) -> Result<bool, String> {
+    let ssh_engine = app.state::<SshEngineState>().inner().clone();
     ssh_engine
         .disconnect(&session_id)
         .await
@@ -92,10 +92,11 @@ pub async fn ssh_disconnect(
 
 #[tauri::command]
 pub async fn ssh_send_data(
-    ssh_engine: State<'_, SshEngineState>,
+    app: tauri::AppHandle,
     session_id: String,
     data: String,
 ) -> Result<(), String> {
+    let ssh_engine = app.state::<SshEngineState>().inner().clone();
     ssh_engine
         .send_data(&session_id, data.as_bytes())
         .await
@@ -104,54 +105,55 @@ pub async fn ssh_send_data(
 
 #[tauri::command]
 pub async fn ssh_resize(
-    ssh_engine: State<'_, SshEngineState>,
+    app: tauri::AppHandle,
     session_id: String,
     cols: u32,
     rows: u32,
 ) -> Result<(), String> {
+    let ssh_engine = app.state::<SshEngineState>().inner().clone();
     ssh_engine
         .resize(&session_id, cols, rows)
         .await
         .map_err(|e| e.to_string())
 }
 
-/// 前端流控 ACK：通知后端前端 xterm.js 已处理的累计字节数
 #[tauri::command]
 pub async fn ssh_flow_ack(
-    ssh_engine: State<'_, SshEngineState>,
+    app: tauri::AppHandle,
     session_id: String,
     bytes: u64,
 ) -> Result<(), String> {
+    let ssh_engine = app.state::<SshEngineState>().inner().clone();
     ssh_engine
         .flow_ack(&session_id, bytes)
         .await
         .map_err(|e| e.to_string())
 }
 
-/// 获取终端当前工作目录（通过 exec channel，不在终端中执行命令）
-/// 类似 XShell 的做法：通过 /proc/<pid>/cwd 获取 shell 进程的 cwd
 #[tauri::command]
 pub async fn ssh_get_cwd(
-    ssh_engine: State<'_, SshEngineState>,
+    app: tauri::AppHandle,
     session_id: String,
 ) -> Result<String, String> {
+    let ssh_engine = app.state::<SshEngineState>().inner().clone();
     ssh_engine
         .get_cwd(&session_id)
         .await
         .map_err(|e| e.to_string())
 }
 
-/// 通过 connectionId 建立短连接执行单条命令并返回输出
 #[tauri::command]
 pub async fn ssh_exec_command(
-    storage: State<'_, StorageState>,
+    app_handle: tauri::AppHandle,
     connection_id: String,
     command: String,
 ) -> Result<String, String> {
+    let storage = app_handle.state::<StorageState>().inner().clone();
     let conn = storage
         .get_connection(&connection_id)
         .await
         .map_err(|e| e.to_string())?;
+        
     let auth = ssh_auth::parse_auth_config(&connection_id, &conn.config_json)
         .map_err(|e| e.to_string())?;
 
@@ -177,7 +179,6 @@ pub async fn ssh_exec_command(
     let mut stdout = Vec::new();
     let mut stderr = Vec::new();
 
-    // 带超时的输出读取（10 秒）
     let result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
             match channel.wait().await {
@@ -213,8 +214,6 @@ pub async fn ssh_exec_command(
         .map(|s| s.trim().to_string())
         .map_err(|e| format!("输出解码失败: {}", e))
 }
-
-// --- SSH test connection ---
 
 struct TestSshClient;
 
@@ -256,14 +255,15 @@ async fn ssh_test_connect(
 
 #[tauri::command]
 pub async fn ssh_test_connection(
-    storage: State<'_, StorageState>,
+    app: tauri::AppHandle,
     id: String,
 ) -> Result<TestResult, String> {
+    let storage = app.state::<StorageState>().inner().clone();
     let conn = storage
         .get_connection(&id)
         .await
         .map_err(|e| e.to_string())?;
-
+        
     let auth = ssh_auth::parse_auth_config(&id, &conn.config_json)
         .map_err(|e| e.to_string())?;
 
