@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import * as dbApi from '@/api/database'
 import type { SqlFileProgress } from '@/api/database'
@@ -13,7 +13,7 @@ import Progress from '@/components/ui/progress.vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { 
   CheckCircle2, XCircle, AlertCircle, Loader2, Play, Database, FileText, 
-  FileDown, Check, Settings2, FolderOpen, Zap, ShieldCheck, Timer, ArrowRight 
+  FileDown, Check, Settings2, FolderOpen, Zap, ShieldCheck, Timer, ArrowRight, Copy 
 } from 'lucide-vue-next'
 import { Label } from '@/components/ui/label'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
@@ -34,6 +34,13 @@ const { t } = useI18n()
 
 const isExecuting = ref(false)
 const isPaused = ref(false)
+
+// [DEBUG] 监控 isPaused 变化，追踪是谁触发的
+watch(isPaused, (newVal, oldVal) => {
+  if (newVal && !oldVal) {
+    console.trace(`[DEBUG] isPaused changed: ${oldVal} → ${newVal}`)
+  }
+})
 const isCancelling = ref(false)
 const importId = ref('')
 const progressData = ref<SqlFileProgress | null>(null)
@@ -46,13 +53,34 @@ watch(() => props.filePath, (newPath) => {
   if (newPath) selectedFilePath.value = newPath
 })
 
+watch(selectedFilePath, () => {
+  if (!isExecuting.value) {
+    progressData.value = null
+    errorLog.value = []
+    progressPercent.value = 0
+    startTime.value = null
+    elapsedTime.value = '0.0'
+  }
+})
+
 const progressPercent = ref(0)
 let timer: ReturnType<typeof setInterval> | null = null
+
+// 节流：避免高频进度回调阻塞主线程导致计时器卡顿
+let pendingProgress: SqlFileProgress | null = null
+let progressRafId: number | null = null
 
 const importOptions = ref({
   continueOnError: true,
   multipleQueries: true,
   disableAutoCommit: true
+})
+
+const copyStates = ref<Record<string, boolean>>({})
+
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
+  if (progressRafId) { cancelAnimationFrame(progressRafId); progressRafId = null }
 })
 
 watch(() => props.open, (val) => {
@@ -65,6 +93,9 @@ watch(() => props.open, (val) => {
     progressPercent.value = 0
     startTime.value = null
     elapsedTime.value = '0.0'
+    pendingProgress = null
+    if (progressRafId) { cancelAnimationFrame(progressRafId); progressRafId = null }
+    selectedFilePath.value = props.filePath || ''
     importOptions.value = {
       continueOnError: true,
       multipleQueries: true,
@@ -106,22 +137,39 @@ async function handleStart() {
         if (progress.error) {
           errorLog.value.push(`[${new Date().toLocaleTimeString()}] ${progress.error}`)
         }
-        // 暂停期间只处理完成信号和错误，冻结进度数字
-        if (isPaused.value && !progress.isFinished) {
-          return
-        }
-        progressData.value = progress
-        if (progress.totalStatements > 0) {
-          progressPercent.value = Math.min(100, Math.floor((progress.executed / progress.totalStatements) * 100))
-        } else {
-          progressPercent.value = 100
-        }
-        // 取消完成后，后端发送 isFinished=true，更新前端状态
+        // 完成信号必须立即处理，不走节流
         if (progress.isFinished) {
+          if (progressRafId) { cancelAnimationFrame(progressRafId); progressRafId = null }
+          pendingProgress = null
+          progressData.value = progress
+          if (progress.totalStatements > 0) {
+            progressPercent.value = Math.min(100, Math.floor((progress.executed / progress.totalStatements) * 100))
+          }
           isExecuting.value = false
           isPaused.value = false
           isCancelling.value = false
           if (timer) { clearInterval(timer); timer = null }
+          return
+        }
+        // 暂停期间只处理错误，冻结进度数字
+        if (isPaused.value) {
+          return
+        }
+        // 用 requestAnimationFrame 节流，避免高频回调阻塞主线程
+        pendingProgress = progress
+        if (!progressRafId) {
+          progressRafId = requestAnimationFrame(() => {
+            progressRafId = null
+            if (pendingProgress) {
+              progressData.value = pendingProgress
+              if (pendingProgress.totalStatements > 0) {
+                progressPercent.value = Math.min(100, Math.floor((pendingProgress.executed / pendingProgress.totalStatements) * 100))
+              } else {
+                progressPercent.value = 100
+              }
+              pendingProgress = null
+            }
+          })
         }
       },
       props.database
@@ -130,6 +178,7 @@ async function handleStart() {
     isExecuting.value = false
     isPaused.value = false
     if (timer) { clearInterval(timer); timer = null }
+    if (progressRafId) { cancelAnimationFrame(progressRafId); progressRafId = null }
     if (progressData.value && progressData.value.fail === 0 && progressData.value.isFinished) {
        emit('success')
     }
@@ -137,6 +186,7 @@ async function handleStart() {
     isExecuting.value = false
     isPaused.value = false
     if (timer) { clearInterval(timer); timer = null }
+    if (progressRafId) { cancelAnimationFrame(progressRafId); progressRafId = null }
     errorLog.value.push(`[Fatal] ${String(e)}`)
     // 确保切换到进度视图以展示错误信息
     if (!progressData.value) {
@@ -154,6 +204,8 @@ async function handleStart() {
 }
 
 async function handlePause() {
+  console.trace('[DEBUG] handlePause called - 调用栈追踪')
+  console.log('[DEBUG] handlePause - isPaused:', isPaused.value, 'isExecuting:', isExecuting.value, 'isCancelling:', isCancelling.value)
   isPaused.value = true
   await dbApi.dbPauseSqlImport(importId.value)
 }
@@ -177,6 +229,40 @@ function formatNumber(num: number) {
   return new Intl.NumberFormat().format(num)
 }
 
+function handleCopyLog(id: string, event: MouseEvent, text?: string) {
+  console.log('[DEBUG] handleCopyLog called, id:', id, 'event type:', event.type, 'target:', (event.target as HTMLElement)?.tagName)
+  event.stopPropagation()
+  event.preventDefault()
+
+  const content = text || errorLog.value.join('\n')
+
+  // 关键：在 Dialog 内部创建 textarea 做复制，避免焦点逃出 FocusScope
+  // 如果 textarea 放到 document.body，select() 会让焦点移到 Dialog 外，
+  // 触发 reka-ui FocusScope 的焦点回退，导致暂停按钮被意外激活
+  const target = event.currentTarget as HTMLElement
+  const container = target.closest('[data-slot="dialog-content"]') || target.parentElement!
+
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = content
+    textarea.style.cssText = 'position:absolute;left:-9999px;top:-9999px;opacity:0;pointer-events:none'
+    container.appendChild(textarea)
+    textarea.focus({ preventScroll: true })
+    textarea.select()
+    document.execCommand('copy')
+    container.removeChild(textarea)
+    // 把焦点还给触发按钮，确保 FocusScope 不乱跳
+    target.focus({ preventScroll: true })
+
+    copyStates.value[id] = true
+    setTimeout(() => {
+      copyStates.value[id] = false
+    }, 2000)
+  } catch (err) {
+    console.error('Failed to copy log:', err)
+  }
+}
+
 async function handleSelectFile() {
   try {
     const selected = await openFileDialog({
@@ -195,156 +281,185 @@ async function handleSelectFile() {
 
 <template>
   <Dialog :open="open" @update:open="(val) => !isExecuting && emit('update:open', val)">
-    <DialogContent class="sm:max-w-[720px] p-0 overflow-hidden border-border/40 shadow-2xl bg-background backdrop-blur-md transition-all duration-500 rounded-[24px]">
-      <!-- High Contrast Refined Header -->
-      <div class="px-8 pt-8 pb-6 border-b border-border/60 bg-muted/20">
-        <div class="flex items-center justify-between mb-6">
-          <div class="flex items-center gap-3.5">
-            <div class="h-10 w-10 rounded-xl bg-primary/20 border-2 border-primary/40 flex items-center justify-center text-primary shadow-sm">
-              <FileDown class="w-5 h-5" />
+    <DialogContent class="sm:max-w-[720px] p-0 overflow-hidden border border-white/10 bg-background/95 backdrop-blur-xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.05)] rounded-2xl transition-all duration-700 ease-in-out">
+      <!-- 3D Layered Header with Metallic Gradient -->
+      <div class="px-8 pt-8 pb-7 border-b border-white/5 bg-gradient-to-b from-muted/30 to-muted/5 industrial-grid text-muted-foreground/5 noise-texture relative overflow-hidden">
+        <!-- Technical Crosshair Decoration -->
+        <div class="absolute top-4 right-12 flex gap-1.5 opacity-20 pointer-events-none select-none">
+          <div class="w-2 h-[1px] bg-foreground"></div>
+          <div class="w-[1px] h-2 bg-foreground -mt-[3px]"></div>
+          <div class="text-[8px] font-mono tracking-tighter text-foreground ml-1">ST-64/RUN</div>
+        </div>
+
+        <div class="relative z-20 flex items-center justify-between mb-8">
+          <div class="flex items-center gap-4">
+            <div class="h-11 w-11 rounded-xl bg-primary/5 border border-primary/20 flex items-center justify-center text-primary shadow-[0_0_15px_rgba(var(--primary),0.1)] transition-transform duration-700 hover:rotate-6">
+              <Database class="w-5.5 h-5.5" />
             </div>
             <div>
-              <div class="flex items-center gap-2">
-                <h2 class="text-lg font-bold tracking-tight text-foreground">{{ t('sqlImport.title') }}</h2>
-                <span v-if="database" class="px-2.5 py-0.5 rounded-full bg-primary/20 text-primary text-[10px] font-black uppercase tracking-wider border border-primary/40 shadow-sm">
-                  {{ database }}
-                </span>
+              <div class="flex items-center gap-2.5">
+                <h2 class="text-[13px] font-black uppercase tracking-[0.15em] text-foreground/90">{{ t('sqlImport.title') }}</h2>
+                <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full border border-primary/20 bg-primary/5 text-[8px] font-bold text-primary/80 tracking-tighter uppercase backdrop-blur-sm">
+                  <div class="w-1 h-1 rounded-full bg-primary animate-pulse"></div>
+                  CORE_ENGINE
+                </div>
               </div>
-              <p class="text-[11px] text-foreground/80 font-black uppercase tracking-widest mt-1.5">{{ t('sqlImport.subtitle') }}</p>
+              <p class="text-[10px] font-medium text-muted-foreground/70 mt-1.5 tracking-tight">{{ t('sqlImport.subtitle') }}</p>
             </div>
+          </div>
+          <div v-if="database" class="px-3 py-1.5 rounded-lg bg-foreground/5 text-foreground/80 text-[9px] font-black uppercase tracking-[0.2em] border border-white/10 shadow-inner group transition-all duration-500 hover:bg-primary/5 hover:border-primary/20 hover:text-primary">
+            <span class="opacity-40 mr-1.5">DB:</span>{{ database }}
           </div>
         </div>
 
-        <!-- High-Vis Integrated Resource Bar -->
+        <!-- Integrated Resource Module ("Plug-in" look) -->
         <div 
-          class="group rounded-xl border-2 bg-background p-1.5 flex items-center gap-3 transition-all duration-300 shadow-sm"
-          :class="selectedFilePath ? 'border-primary/60 ring-2 ring-primary/5' : 'border-border hover:border-primary/40'"
+          class="relative z-20 group rounded-xl border border-white/5 bg-background p-2 flex items-center gap-3 transition-all duration-700 shadow-[inset_0_2px_4px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.1)]"
+          :class="selectedFilePath ? 'border-primary/30 ring-4 ring-primary/5' : 'hover:border-primary/20'"
         >
-          <div class="pl-3 flex items-center gap-2 text-foreground/60 shrink-0">
-             <FileText class="w-4 h-4" />
+          <div class="pl-3 flex items-center gap-2.5 text-muted-foreground shrink-0 border-r border-white/5 pr-3 mr-1">
+             <FileText class="w-4 h-4 transition-colors duration-500 group-hover:text-primary" />
           </div>
           <div class="flex-1 min-w-0 font-mono text-[11px] overflow-hidden">
-             <span v-if="selectedFilePath" class="text-foreground font-black truncate block">{{ selectedFilePath }}</span>
-             <span v-else class="text-foreground/40 font-bold italic block">{{ t('sqlImport.filePlaceholder') }}</span>
+             <span v-if="selectedFilePath" class="text-foreground/90 font-bold truncate block tracking-tight">{{ selectedFilePath }}</span>
+             <span v-else class="text-muted-foreground/60 font-medium italic block tracking-tighter">{{ t('sqlImport.filePlaceholder') }}</span>
           </div>
           <Button 
             v-if="!isExecuting" 
-            variant="secondary" 
+            variant="default" 
             size="sm" 
-            class="h-9 px-5 rounded-lg font-black text-[11px] bg-muted/50 border border-border hover:border-primary hover:bg-primary/5 transition-all shadow-sm active:scale-95 group/btn"
+            class="h-8 px-4 rounded-lg font-bold text-[10px] uppercase tracking-widest bg-foreground text-background hover:bg-foreground/90 transition-all duration-500 shadow-md relative overflow-hidden group/btn"
             @click="handleSelectFile"
           >
-            <FolderOpen class="w-4 h-4 mr-2 text-primary group-hover/btn:scale-110 transition-transform" />
+            <FolderOpen class="w-3.5 h-3.5 mr-2 transition-transform duration-500 group-hover/btn:scale-110" />
             {{ t('sqlImport.selectFile') }}
           </Button>
-          <div v-else class="h-9 px-5 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-primary">
-            <Loader2 class="w-4 h-4 animate-spin" />
+          <div v-else class="h-8 px-4 flex items-center gap-2.5 text-[9px] font-black uppercase tracking-widest text-primary bg-primary/5 rounded-lg border border-primary/10">
+            <Loader2 class="w-3.5 h-3.5 animate-spin" />
             {{ t('sqlImport.fileLocked') }}
           </div>
         </div>
       </div>
 
-      <div class="px-8 py-8">
+      <div class="px-10 py-4 relative overflow-hidden">
+        <!-- Sub-surface decorative line -->
+        <div class="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-white/5 to-transparent"></div>
+
         <!-- Dashboard / Options View -->
-        <div v-if="!isExecuting && !progressData" class="space-y-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+        <div v-if="!isExecuting && !progressData" class="space-y-7 animate-in fade-in slide-in-from-bottom-4 duration-700 ease-out">
           
-          <div class="space-y-4">
-             <div class="flex items-center gap-3 px-1">
-                <div class="w-1.5 h-4 bg-primary rounded-full shadow-[0_0_12px_rgba(var(--primary),0.6)]" />
-                <h4 class="text-xs font-black text-foreground uppercase tracking-[0.2em]">{{ t('sqlImport.accelerationMatrix') }}</h4>
+          <div class="space-y-5">
+             <div class="flex items-center gap-4 px-1">
+                <div class="flex gap-1 items-center">
+                  <div class="w-1.5 h-1.5 rounded-full bg-primary" />
+                  <div class="w-3 h-[1px] bg-primary/40" />
+                </div>
+                <h4 class="text-[10px] font-black text-foreground/40 uppercase tracking-[0.25em]">{{ t('sqlImport.accelerationMatrix') }}</h4>
              </div>
 
-             <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <!-- Card Option 1: Continue on Error -->
+             <div class="grid grid-cols-1 sm:grid-cols-3 gap-5">
+                <!-- Card Option 1 -->
                 <div 
-                  class="relative group cursor-pointer transition-all duration-300"
+                  class="relative group cursor-pointer"
                   @click="importOptions.continueOnError = !importOptions.continueOnError"
                 >
                   <div 
-                    class="h-full rounded-2xl border-2 p-5 flex flex-col items-center text-center gap-4 transition-all duration-500 bg-background"
+                    class="h-full rounded-2xl border border-white/5 p-6 flex flex-col items-center text-center gap-5 transition-all duration-700 bg-gradient-to-br from-background to-muted/5 relative overflow-hidden"
                     :class="importOptions.continueOnError 
-                      ? 'border-primary ring-4 ring-primary/5 shadow-2xl shadow-primary/20' 
-                      : 'border-border hover:border-primary/40 opacity-60 hover:opacity-100'"
+                      ? 'border-primary/40 shadow-[0_20px_40px_-12px_rgba(var(--primary),0.15)] ring-1 ring-primary/20 scale-[1.02]' 
+                      : 'hover:border-white/10 opacity-60 hover:opacity-90'"
                   >
+                    <!-- Background Gloss Overlay -->
+                    <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.02] to-transparent pointer-events-none"></div>
+
                     <div 
-                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-all duration-500"
-                      :class="importOptions.continueOnError ? 'bg-primary text-white shadow-lg shadow-primary/40' : 'bg-muted text-foreground/40'"
+                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-all duration-700 border"
+                      :class="importOptions.continueOnError 
+                        ? 'bg-primary text-primary-foreground border-primary shadow-[0_8px_16px_rgba(var(--primary),0.2)]' 
+                        : 'bg-muted/30 text-muted-foreground/30 border-white/5'"
                     >
-                      <ShieldCheck class="w-7 h-7" />
+                      <ShieldCheck class="w-7 h-7 transition-all duration-700" :class="importOptions.continueOnError ? 'scale-110' : 'scale-90'" />
                     </div>
-                    <div class="space-y-2">
-                      <div class="text-sm font-black tracking-tight" :class="importOptions.continueOnError ? 'text-foreground' : 'text-foreground/60'">
+                    <div class="space-y-2 relative z-10">
+                      <div class="text-[11px] font-black uppercase tracking-widest transition-colors duration-500" :class="importOptions.continueOnError ? 'text-foreground' : 'text-muted-foreground'">
                         {{ t('sqlImport.options.continueOnError') }}
                       </div>
-                      <p class="text-[10px] font-bold leading-relaxed" :class="importOptions.continueOnError ? 'text-foreground/70' : 'text-foreground/40'">
+                      <p class="text-[9px] font-medium leading-relaxed px-2 transition-colors duration-500" :class="importOptions.continueOnError ? 'text-muted-foreground/90' : 'text-muted-foreground/40'">
                         {{ t('sqlImport.options.continueOnErrorDesc') }}
                       </p>
                     </div>
-                    <!-- Indicator Dot -->
-                    <div class="absolute top-4 right-4 h-2 w-2 rounded-full transition-all duration-500"
-                      :class="importOptions.continueOnError ? 'bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]' : 'bg-border'"
+                    
+                    <!-- Selection Indicator (Sleek Tech Bar) -->
+                    <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-t-full transition-all duration-700"
+                      :class="importOptions.continueOnError ? 'bg-primary shadow-[0_0_12px_rgba(var(--primary),0.6)]' : 'bg-transparent'"
                     />
                   </div>
                 </div>
 
-                <!-- Card Option 2: Multiple Queries -->
+                <!-- Card Option 2 -->
                 <div 
-                  class="relative group cursor-pointer transition-all duration-300"
+                  class="relative group cursor-pointer"
                   @click="importOptions.multipleQueries = !importOptions.multipleQueries"
                 >
                   <div 
-                    class="h-full rounded-2xl border-2 p-5 flex flex-col items-center text-center gap-4 transition-all duration-500 bg-background"
+                    class="h-full rounded-2xl border border-white/5 p-6 flex flex-col items-center text-center gap-5 transition-all duration-700 bg-gradient-to-br from-background to-muted/5 relative overflow-hidden"
                     :class="importOptions.multipleQueries 
-                      ? 'border-primary ring-4 ring-primary/5 shadow-2xl shadow-primary/20' 
-                      : 'border-border hover:border-primary/40 opacity-60 hover:opacity-100'"
+                      ? 'border-primary/40 shadow-[0_20px_40px_-12px_rgba(var(--primary),0.15)] ring-1 ring-primary/20 scale-[1.02]' 
+                      : 'hover:border-white/10 opacity-60 hover:opacity-90'"
                   >
+                    <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.02] to-transparent pointer-events-none"></div>
                     <div 
-                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-all duration-500"
-                      :class="importOptions.multipleQueries ? 'bg-primary text-white shadow-lg shadow-primary/40' : 'bg-muted text-foreground/40'"
+                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-all duration-700 border"
+                      :class="importOptions.multipleQueries 
+                        ? 'bg-primary text-primary-foreground border-primary shadow-[0_8px_16px_rgba(var(--primary),0.2)]' 
+                        : 'bg-muted/30 text-muted-foreground/30 border-white/5'"
                     >
-                      <Zap class="w-7 h-7" />
+                      <Zap class="w-7 h-7 transition-all duration-700" :class="importOptions.multipleQueries ? 'scale-110' : 'scale-90'" />
                     </div>
-                    <div class="space-y-2">
-                      <div class="text-sm font-black tracking-tight" :class="importOptions.multipleQueries ? 'text-foreground' : 'text-foreground/60'">
+                    <div class="space-y-2 relative z-10">
+                      <div class="text-[11px] font-black uppercase tracking-widest transition-colors duration-500" :class="importOptions.multipleQueries ? 'text-foreground' : 'text-muted-foreground'">
                         {{ t('sqlImport.options.multipleQueries') }}
                       </div>
-                      <p class="text-[10px] font-bold leading-relaxed" :class="importOptions.multipleQueries ? 'text-foreground/70' : 'text-foreground/40'">
+                      <p class="text-[9px] font-medium leading-relaxed px-2 transition-colors duration-500" :class="importOptions.multipleQueries ? 'text-muted-foreground/90' : 'text-muted-foreground/40'">
                         {{ t('sqlImport.options.multipleQueriesDesc') }}
                       </p>
                     </div>
-                    <div class="absolute top-4 right-4 h-2 w-2 rounded-full transition-all duration-500"
-                      :class="importOptions.multipleQueries ? 'bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]' : 'bg-border'"
+                    <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-t-full transition-all duration-700"
+                      :class="importOptions.multipleQueries ? 'bg-primary shadow-[0_0_12px_rgba(var(--primary),0.6)]' : 'bg-transparent'"
                     />
                   </div>
                 </div>
 
-                <!-- Card Option 3: Disable Auto Commit -->
+                <!-- Card Option 3 -->
                 <div 
-                  class="relative group cursor-pointer transition-all duration-300"
+                  class="relative group cursor-pointer"
                   @click="importOptions.disableAutoCommit = !importOptions.disableAutoCommit"
                 >
                   <div 
-                    class="h-full rounded-2xl border-2 p-5 flex flex-col items-center text-center gap-4 transition-all duration-500 bg-background"
+                    class="h-full rounded-2xl border border-white/5 p-6 flex flex-col items-center text-center gap-5 transition-all duration-700 bg-gradient-to-br from-background to-muted/5 relative overflow-hidden"
                     :class="importOptions.disableAutoCommit 
-                      ? 'border-primary ring-4 ring-primary/5 shadow-2xl shadow-primary/20' 
-                      : 'border-border hover:border-primary/40 opacity-60 hover:opacity-100'"
+                      ? 'border-primary/40 shadow-[0_20px_40px_-12px_rgba(var(--primary),0.15)] ring-1 ring-primary/20 scale-[1.02]' 
+                      : 'hover:border-white/10 opacity-60 hover:opacity-90'"
                   >
+                    <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.02] to-transparent pointer-events-none"></div>
                     <div 
-                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-all duration-500"
-                      :class="importOptions.disableAutoCommit ? 'bg-primary text-white shadow-lg shadow-primary/40' : 'bg-muted text-foreground/40'"
+                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-all duration-700 border"
+                      :class="importOptions.disableAutoCommit 
+                        ? 'bg-primary text-primary-foreground border-primary shadow-[0_8px_16px_rgba(var(--primary),0.2)]' 
+                        : 'bg-muted/30 text-muted-foreground/30 border-white/5'"
                     >
-                      <Timer class="w-7 h-7" />
+                      <Timer class="w-7 h-7 transition-all duration-700" :class="importOptions.disableAutoCommit ? 'scale-110' : 'scale-90'" />
                     </div>
-                    <div class="space-y-2">
-                      <div class="text-sm font-black tracking-tight" :class="importOptions.disableAutoCommit ? 'text-foreground' : 'text-foreground/60'">
+                    <div class="space-y-2 relative z-10">
+                      <div class="text-[11px] font-black uppercase tracking-widest transition-colors duration-500" :class="importOptions.disableAutoCommit ? 'text-foreground' : 'text-muted-foreground'">
                         {{ t('sqlImport.options.disableAutoCommit') }}
                       </div>
-                      <p class="text-[10px] font-bold leading-relaxed" :class="importOptions.disableAutoCommit ? 'text-foreground/70' : 'text-foreground/40'">
+                      <p class="text-[9px] font-medium leading-relaxed px-2 transition-colors duration-500" :class="importOptions.disableAutoCommit ? 'text-muted-foreground/90' : 'text-muted-foreground/40'">
                         {{ t('sqlImport.options.disableAutoCommitDesc') }}
                       </p>
                     </div>
-                    <div class="absolute top-4 right-4 h-2 w-2 rounded-full transition-all duration-500"
-                      :class="importOptions.disableAutoCommit ? 'bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]' : 'bg-border'"
+                    <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-t-full transition-all duration-700"
+                      :class="importOptions.disableAutoCommit ? 'bg-primary shadow-[0_0_12px_rgba(var(--primary),0.6)]' : 'bg-transparent'"
                     />
                   </div>
                 </div>
@@ -353,74 +468,122 @@ async function handleSelectFile() {
         </div>
 
         <!-- Professional Simplified Progress View -->
-        <div v-else class="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+        <div v-else class="space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-1000 ease-out">
            
-           <!-- High-Contrast Stats Display -->
-           <div class="flex items-center gap-12 px-2">
-             <div class="space-y-1">
-                <span class="text-[10px] font-black uppercase tracking-[0.2em] text-foreground/60 block">{{ t('sqlImport.stats.total') }}</span>
-                <div class="text-3xl font-black font-mono tracking-tight tabular-nums">{{ formatNumber(progressData?.totalStatements || 0) }}</div>
+           <!-- High-Depth Stats Module -->
+           <div class="flex items-center gap-12 px-2 py-4 bg-muted/10 rounded-2xl border border-white/5 shadow-inner relative overflow-hidden">
+             <!-- Technical Label Background -->
+             <div class="absolute -right-4 -bottom-6 text-[48px] font-black text-white/[0.02] select-none pointer-events-none tracking-tighter">ANALYTICS</div>
+
+            <div class="space-y-1 py-1 pl-6">
+                <span class="text-[8px] font-black uppercase tracking-[0.2em] text-muted-foreground/50 block">{{ t('sqlImport.stats.total') }}</span>
+                <div class="text-2xl font-black font-mono tracking-tight tabular-nums text-foreground/90">{{ formatNumber(progressData?.totalStatements || 0) }}</div>
              </div>
              
-             <div class="w-px h-10 bg-border/80" />
-
-             <div class="space-y-1">
-                <span class="text-[10px] font-black uppercase tracking-[0.2em] text-emerald-600 block">{{ t('sqlImport.stats.success') }}</span>
-                <div class="text-3xl font-black font-mono tracking-tight tabular-nums text-emerald-600 shadow-emerald-500/10">{{ formatNumber(progressData?.success || 0) }}</div>
+             <div class="w-px h-10 bg-white/5" />
+ 
+             <div class="space-y-1 py-1">
+                <span class="text-[8px] font-black uppercase tracking-[0.2em] text-emerald-500/60 block">{{ t('sqlImport.stats.success') }}</span>
+                <div class="text-2xl font-black font-mono tracking-tight tabular-nums text-emerald-500 drop-shadow-[0_0_12px_rgba(16,185,129,0.2)]">{{ formatNumber(progressData?.success || 0) }}</div>
              </div>
-
-             <div class="w-px h-10 bg-border/80" />
-
-             <div class="space-y-1">
-                <span class="text-[10px] font-black uppercase tracking-[0.2em] text-destructive block">{{ t('sqlImport.stats.fail') }}</span>
-                <div class="text-3xl font-black font-mono tracking-tight tabular-nums text-destructive shadow-destructive/10">{{ formatNumber(progressData?.fail || 0) }}</div>
+ 
+             <div class="w-px h-10 bg-white/5" />
+ 
+             <div class="space-y-1 py-1">
+                <span class="text-[8px] font-black uppercase tracking-[0.2em] text-destructive/60 block">{{ t('sqlImport.stats.fail') }}</span>
+                <div class="text-2xl font-black font-mono tracking-tight tabular-nums text-destructive drop-shadow-[0_0_12px_rgba(var(--destructive),0.2)]">{{ formatNumber(progressData?.fail || 0) }}</div>
              </div>
              
              <div class="flex-1" />
              
-             <div class="px-3 py-2 rounded-lg bg-background border-2 border-border shadow-sm flex items-center gap-2">
-                <Timer class="w-4 h-4 text-primary" />
-                <span class="text-[12px] font-mono font-black text-foreground">{{ t('sqlImport.stats.elapsedTime', { time: elapsedTime }) }}</span>
+             <div class="mr-6 px-4 py-2.5 rounded-xl bg-background/50 border border-white/5 backdrop-blur-md shadow-lg flex items-center gap-3">
+                <Timer class="w-4 h-4 text-primary animate-pulse" />
+                <span class="text-[12px] font-mono font-black text-foreground/80 tracking-tight">
+                  {{ t('sqlImport.stats.elapsedTime', { time: elapsedTime }) }}
+                </span>
              </div>
            </div>
 
-           <!-- Multi-Layered Progress Strip -->
+           <!-- Multi-Layered Sleek Progress System -->
            <div class="space-y-4">
-             <div class="flex items-center justify-between text-[11px] font-black uppercase tracking-widest text-primary">
-               <div class="flex items-center gap-2">
-                 <span>{{ t('sqlImport.progress.streaming') }}</span>
-                 <span class="text-foreground/40 font-light">/</span>
-                 <span class="font-mono text-foreground">{{ progressPercent }}%</span>
+             <div class="flex items-center justify-between text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground/60 px-1">
+               <div class="flex items-center gap-3">
+                 <span class="text-primary/70">{{ t('sqlImport.progress.streaming') }}</span>
+                 <span class="font-mono text-foreground bg-foreground/5 px-2 py-0.5 rounded border border-white/5">{{ progressPercent }}%</span>
                </div>
-               <div class="text-foreground font-mono bg-muted/50 px-3 py-1 rounded-full border border-border/40">
-                 {{ formatNumber(progressData?.executed || 0) }} ROWS
+               <div class="font-mono text-foreground/40 flex items-center gap-2">
+                 <span>METRICS:</span>
+                 <span class="text-foreground/70">{{ formatNumber(progressData?.executed || 0) }} / {{ formatNumber(progressData?.totalStatements || 0) }}</span>
                </div>
              </div>
-             <Progress :model-value="progressPercent" class="h-2 w-full bg-muted border border-border/60 rounded-full overflow-hidden" />
+             <div class="relative h-2.5 w-full bg-muted/20 rounded-full overflow-hidden border border-white/5 p-[2px] shadow-inner">
+                <div 
+                  class="h-full bg-gradient-to-r from-primary/80 to-primary rounded-full transition-all duration-1000 ease-out shadow-[0_0_15px_rgba(var(--primary),0.3)] relative"
+                  :style="{ width: `${progressPercent}%` }"
+                >
+                  <!-- Moving Shine Effect -->
+                  <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-[indeterminate_2.5s_infinite] opacity-30"></div>
+                </div>
+             </div>
            </div>
 
-           <!-- Integrated Log/Stack Display -->
-           <div class="grid grid-cols-1 gap-4">
-              <div class="rounded-2xl border-2 border-border/80 bg-background p-5 shadow-sm">
-                 <div class="text-[10px] font-black uppercase tracking-widest text-foreground/50 mb-3 border-b border-border/40 pb-2 w-fit">{{ t('sqlImport.progress.currentStack') }}</div>
-                 <div class="font-mono text-[12px] text-foreground line-clamp-2 break-all font-bold min-h-[2.4em] leading-relaxed">
-                    {{ progressData?.currentSql || t('sqlImport.progress.preparing') }}
-                 </div>
-              </div>
-
-              <div v-if="errorLog.length > 0" class="rounded-2xl border-2 border-destructive/60 bg-background overflow-hidden shadow-lg">
-                <div class="px-5 py-3.5 flex items-center justify-between border-b-2 border-destructive/20 bg-destructive/5">
-                  <div class="flex items-center gap-2 text-destructive">
-                    <XCircle class="w-4 h-4" />
-                    <span class="text-[10px] font-black uppercase tracking-widest">{{ t('sqlImport.logs.title') }}</span>
+            <!-- Integrated Log/Stack Terminal -->
+            <div class="grid grid-cols-1 gap-4">
+               <div 
+                 class="rounded-3xl border border-white/5 bg-muted/5 p-4 relative overflow-hidden group shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)] transition-all duration-700"
+                 :class="errorLog.length > 0 ? 'bg-muted/2 shadow-none border-transparent' : 'bg-muted/5'"
+               >
+                  <!-- Grid Decoration -->
+                  <div class="absolute inset-0 industrial-grid text-white/[0.01] pointer-events-none"></div>
+                  
+                  <div v-if="errorLog.length === 0" class="text-[8px] font-black uppercase tracking-[0.2em] text-muted-foreground/30 mb-2 flex items-center gap-2 animate-in fade-in duration-700">
+                    <div class="w-1.5 h-1.5 rounded-full bg-primary/20" />
+                    {{ t('sqlImport.progress.currentStack') }}
                   </div>
-                  <span class="text-[10px] font-mono font-black text-white bg-destructive px-2 py-0.5 rounded-md">{{ errorLog.length }} ISSUES</span>
+                  <div 
+                    class="font-mono text-foreground/70 break-all font-medium leading-relaxed relative z-10 transition-all duration-700"
+                    :class="errorLog.length > 0 ? 'text-[9px] line-clamp-1 min-h-0 opacity-40 italic mt-0' : 'text-[11px] line-clamp-2 min-h-[2.8em]'"
+                  >
+                     <span v-if="errorLog.length > 0" class="mr-2 text-primary/30 font-black"># PREVIEW:</span>
+                     {{ progressData?.currentSql || t('sqlImport.progress.preparing') }}
+                  </div>
+               </div>
+
+              <div v-if="errorLog.length > 0" class="rounded-[32px] border border-destructive/20 bg-background/50 overflow-hidden shadow-2xl animate-in fade-in slide-in-from-top-4 duration-500 ease-out">
+                <div class="px-6 py-3.5 flex items-center justify-between border-b border-destructive/10 bg-destructive/5 backdrop-blur-md rounded-t-[31px]">
+                  <div class="flex items-center gap-3 text-destructive/80">
+                    <XCircle class="w-4 h-4" />
+                    <span class="text-[10px] font-black uppercase tracking-[0.2em]">{{ t('sqlImport.logs.title') }}</span>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <span class="text-[9px] font-black font-mono text-white bg-destructive/80 px-2.5 py-1 rounded-full shadow-lg shadow-destructive/20">{{ errorLog.length }} ISSUES</span>
+                    <button
+                      type="button"
+                      class="h-7 w-7 rounded-full flex items-center justify-center transition-all duration-300 cursor-pointer active:scale-90 outline-none border-none bg-transparent"
+                      :class="copyStates['all'] ? 'bg-emerald-500/10 text-emerald-500' : 'hover:bg-destructive/10 text-destructive/60 hover:text-destructive'"
+                      @mousedown.stop.prevent="handleCopyLog('all', $event)"
+                    >
+                      <Check v-if="copyStates['all']" class="w-3.5 h-3.5 animate-in zoom-in duration-300" />
+                      <Copy v-else class="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <ScrollArea class="h-[200px] bg-muted/10">
-                   <div class="p-4 font-mono text-[11px] leading-6 text-destructive font-bold select-text">
-                      <div v-for="(err, i) in errorLog" :key="i" class="py-2 border-b border-destructive/10 last:border-0 pl-4 relative hover:bg-destructive/5 transition-colors break-all whitespace-pre-wrap cursor-text">
-                        <div class="absolute left-0 top-4 w-1.5 h-1.5 rounded-full bg-destructive shadow-[0_0_8px_rgba(var(--destructive),0.4)]" />
-                        {{ err }}
+                <ScrollArea class="h-[180px] bg-muted/5 rounded-b-[31px]">
+                   <div class="p-5 font-mono text-[10px] leading-6 text-destructive/90 font-medium select-text">
+                      <div v-for="(err, i) in errorLog" :key="i" class="py-3 border-b border-destructive/5 last:border-0 pl-4 pr-12 relative group transition-colors duration-300 hover:bg-destructive/[0.03]">
+                        <div class="absolute left-0 top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-destructive shadow-[0_0_8px_rgba(var(--destructive),0.4)]" />
+                        <div class="break-all">{{ err }}</div>
+                        <button
+                          type="button"
+                          class="absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full flex items-center justify-center transition-all duration-300 cursor-pointer active:scale-90 outline-none border-none bg-transparent"
+                          :class="[
+                            copyStates[i] ? 'opacity-100 bg-emerald-500/10 text-emerald-500' : 'opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-destructive/60 hover:text-destructive'
+                          ]"
+                          @mousedown.stop.prevent="handleCopyLog(i.toString(), $event, err)"
+                        >
+                          <Check v-if="copyStates[i]" class="w-3.5 h-3.5 animate-in zoom-in duration-300" />
+                          <Copy v-else class="w-3.5 h-3.5" />
+                        </button>
                       </div>
                    </div>
                 </ScrollArea>
@@ -429,62 +592,71 @@ async function handleSelectFile() {
         </div>
       </div>
 
-      <!-- High-Contrast Action Footer -->
-      <div class="px-8 py-6 border-t-2 border-border bg-muted/30 flex items-center justify-between">
-        <div class="flex items-center gap-6">
-          <div class="flex items-center gap-3 px-4 py-2 rounded-xl bg-background border-2 border-border shadow-sm">
+      <!-- Industrial Slab Footer -->
+      <footer class="h-20 px-10 flex items-center justify-between border-t border-white/5 bg-gradient-to-t from-muted/20 to-transparent industrial-grid text-muted-foreground/[0.02] overflow-hidden relative">
+        <div class="flex items-center gap-5 relative z-10">
+          <div class="flex items-center gap-3.5 px-4 py-2 rounded-full bg-muted/10 border border-white/10 shadow-[inset_0_1px_2px_rgba(255,255,255,0.05),0_4px_12px_rgba(0,0,0,0.1)] backdrop-blur-md transition-all duration-700">
              <div 
-               class="h-2.5 w-2.5 rounded-full transition-all duration-500 shadow-lg ring-2 ring-white/20"
+               class="h-2.5 w-2.5 rounded-full transition-all duration-700 relative"
                :class="{
-                 'bg-destructive shadow-destructive/60 animate-pulse': isCancelling,
-                 'bg-emerald-500 shadow-emerald-500/60': isExecuting && !isPaused && !isCancelling,
-                 'bg-amber-500 shadow-amber-500/60 animate-pulse': isPaused && !isCancelling,
-                 'bg-border shadow-none': !isExecuting && !progressData?.isFinished && !isCancelling,
-                 'bg-primary shadow-primary/60 border-2 border-white/20': !isExecuting && progressData?.isFinished
+                 'bg-destructive shadow-[0_0_15px_rgba(var(--destructive),0.6)] animate-pulse': isCancelling,
+                 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]': isExecuting && !isPaused && !isCancelling,
+                 'bg-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.5)] animate-pulse': isPaused && !isCancelling,
+                 'bg-white/10': !isExecuting && !progressData?.isFinished && !isCancelling,
+                 'bg-primary shadow-[0_0_15px_rgba(var(--primary),0.6)]': !isExecuting && progressData?.isFinished
                }" 
-             />
-             <span class="text-[11px] font-black uppercase tracking-widest text-foreground">
+             >
+                <!-- Outer Glow Ring -->
+                <div v-if="isExecuting || progressData?.isFinished" class="absolute -inset-1 rounded-full border border-current opacity-20 animate-ping duration-[2000ms]"></div>
+             </div>
+             <span class="text-[10px] font-black uppercase tracking-[0.25em] text-foreground/80 font-mono">
                {{ isCancelling ? t('sqlImport.status.cancelling') : (isPaused ? t('sqlImport.status.paused') : (isExecuting ? t('sqlImport.status.active') : t('sqlImport.status.ready'))) }}
              </span>
           </div>
-          <div v-if="!isExecuting && progressData?.isFinished" class="flex items-center gap-2 text-primary px-4 py-2 rounded-xl border-2 border-primary/40 bg-primary/5 text-[11px] font-black uppercase tracking-widest shadow-md">
-             <CheckCircle2 class="w-4 h-4" />
+          <div v-if="!isExecuting && progressData?.isFinished" class="flex items-center gap-2.5 text-primary px-4 py-2 rounded-xl border border-primary/20 bg-primary/5 text-[10px] font-black uppercase tracking-[0.15em] backdrop-blur-sm animate-in fade-in slide-in-from-left-4 duration-700">
+             <CheckCircle2 class="w-4 h-4 shadow-[0_0_10px_rgba(var(--primary),0.3)]" />
              {{ t('sqlImport.status.missionSuccess') }}
           </div>
         </div>
 
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-4 relative z-10 shrink-0 ml-auto">
           <Button
             variant="ghost"
             @click="handleCancel"
             :disabled="isCancelling"
-            class="rounded-xl px-7 h-11 font-black text-xs text-foreground/70 hover:text-destructive hover:bg-destructive/10 transition-all uppercase tracking-widest border border-transparent hover:border-destructive/20"
+            class="h-10 px-6 rounded-xl font-black text-[10px] text-muted-foreground/60 hover:text-foreground hover:bg-white/5 uppercase tracking-[0.2em] transition-all duration-500"
           >
-            <Loader2 v-if="isCancelling" class="w-4 h-4 mr-2 animate-spin" />
+            <Loader2 v-if="isCancelling" class="w-3.5 h-3.5 mr-2.5 animate-spin" />
             {{ isCancelling ? t('sqlImport.status.cancelling') : ((!isExecuting && progressData?.isFinished) ? t('sqlImport.actions.finish') : t('sqlImport.actions.cancel')) }}
           </Button>
-
+ 
+          <div class="h-6 w-[1px] bg-white/5 mx-2"></div>
+ 
           <template v-if="isExecuting && !isCancelling">
-            <Button v-if="!isPaused" variant="outline" @click="handlePause" class="rounded-xl px-7 h-11 font-black text-xs border-2 border-border hover:border-amber-500 hover:text-amber-600 transition-all uppercase tracking-widest shadow-sm bg-background">
-              <Timer class="w-4 h-4 mr-2" /> {{ t('sqlImport.actions.pause') }}
+            <Button v-if="!isPaused" variant="default" @click="handlePause" class="h-10 rounded-full px-7 font-black text-[10px] bg-amber-500/90 text-white hover:bg-amber-500 shadow-[0_8px_20px_-6px_rgba(245,158,11,0.3)] hover:shadow-[0_12px_24px_-6px_rgba(245,158,11,0.5)] transition-all duration-500 uppercase tracking-[0.2em] group border-transparent">
+              <Timer class="w-4 h-4 mr-2.5 transition-transform duration-500 group-hover:rotate-12" /> {{ t('sqlImport.actions.pause') }}
             </Button>
-            <Button v-else variant="default" @click="handleResume" class="rounded-xl px-9 h-11 font-black text-xs bg-emerald-600 hover:bg-emerald-700 shadow-xl shadow-emerald-600/30 gap-2 uppercase tracking-widest text-white transition-all ring-offset-background active:scale-95">
-              <Play class="w-4 h-4 fill-current" /> {{ t('sqlImport.actions.resume') }}
+            <Button v-else variant="default" @click="handleResume" class="h-10 rounded-full px-7 font-black text-[10px] bg-emerald-600 hover:bg-emerald-500 shadow-lg shadow-emerald-500/20 gap-2.5 uppercase tracking-[0.2em] text-white transition-all duration-500 active:scale-95 group">
+              <Play class="w-3.5 h-3.5 fill-current transition-transform duration-500 group-hover:scale-110" /> {{ t('sqlImport.actions.resume') }}
             </Button>
           </template>
-
+ 
           <Button
             v-if="!isExecuting && !progressData"
             variant="default"
-            class="rounded-xl px-10 h-11 font-black text-xs bg-primary hover:bg-primary/90 shadow-2xl shadow-primary/40 transition-all hover:-translate-y-1 active:translate-y-0 group uppercase tracking-[0.2em] relative overflow-hidden ring-offset-background active:scale-95"
+            class="h-11 rounded-full px-10 font-black text-[11px] bg-primary text-primary-foreground shadow-[0_12px_24px_-8px_rgba(var(--primary),0.4)] transition-all duration-700 hover:shadow-[0_16px_32px_-8px_rgba(var(--primary),0.5)] hover:scale-[1.02] active:scale-95 group uppercase tracking-[0.2em] relative overflow-hidden"
             :disabled="!selectedFilePath"
             @click="handleStart"
           >
-            {{ t('sqlImport.actions.start') }}
-            <ArrowRight class="w-4 h-4 ml-3 group-hover:translate-x-2 transition-transform" />
+            <!-- Sleek Button Glare -->
+            <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+            <span class="relative z-10 flex items-center gap-3">
+              {{ t('sqlImport.actions.start') }}
+              <ArrowRight class="w-4.5 h-4.5 group-hover:translate-x-1.5 transition-transform duration-700" />
+            </span>
           </Button>
         </div>
-      </div>
+      </footer>
     </DialogContent>
   </Dialog>
 </template>

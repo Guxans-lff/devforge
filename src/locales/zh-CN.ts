@@ -3,6 +3,7 @@ export default {
     name: 'DevForge',
   },
   sidebar: {
+    workspace: '工作空间',
     connections: '连接',
     noConnections: '暂无连接',
     noConnectionsHint: '点击 + 添加第一个连接',

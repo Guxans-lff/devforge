@@ -3,6 +3,7 @@ export default {
     name: 'DevForge',
   },
   sidebar: {
+    workspace: 'Workspace',
     connections: 'Connections',
     noConnections: 'No connections yet',
     noConnectionsHint: 'Click + to add your first connection',

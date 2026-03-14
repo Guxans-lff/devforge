@@ -92,6 +92,9 @@ impl DbEngine {
         }
 
         let mut cancelled = false;
+        // 进度推送频率控制：最多每 100ms 推送一次，避免高频 IPC 阻塞前端主线程
+        let mut last_progress_time = std::time::Instant::now();
+        const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
         for (idx, stmt_str) in statements.into_iter().enumerate() {
             // ===== 每条语句入口处检查暂停/取消状态 =====
@@ -121,17 +124,22 @@ impl DbEngine {
                 continue;
             }
 
-            // 进度上报
-            let current_sql_chunk = trimmed.chars().take(200).collect::<String>();
-            let _ = on_progress.send(SqlFileProgress {
-                total_statements,
-                executed,
-                success,
-                fail,
-                current_sql: current_sql_chunk,
-                is_finished: false,
-                error: None,
-            });
+            // 进度上报：按时间间隔节流，首条、末条、以及每次真正执行批次时必定推送
+            let now = std::time::Instant::now();
+            let should_report = idx == 0 || is_last || now.duration_since(last_progress_time) >= PROGRESS_INTERVAL;
+            if should_report {
+                let current_sql_chunk = trimmed.chars().take(200).collect::<String>();
+                let _ = on_progress.send(SqlFileProgress {
+                    total_statements,
+                    executed,
+                    success,
+                    fail,
+                    current_sql: current_sql_chunk,
+                    is_finished: false,
+                    error: None,
+                });
+                last_progress_time = now;
+            }
 
             let mut loop_error: Option<String> = None;
             let mut executed_count_in_this_step: usize = 1;
@@ -245,6 +253,18 @@ impl DbEngine {
                     success += executed_count_in_this_step;
                     uncommitted_count += executed_count_in_this_step;
 
+                    // 批次执行完毕后立即推送最新进度，确保前端数据及时更新
+                    let _ = on_progress.send(SqlFileProgress {
+                        total_statements,
+                        executed,
+                        success,
+                        fail,
+                        current_sql: trimmed.chars().take(200).collect(),
+                        is_finished: false,
+                        error: None,
+                    });
+                    last_progress_time = std::time::Instant::now();
+
                     if options.disable_auto_commit && uncommitted_count >= COMMIT_INTERVAL {
                         let _ = self.clone().execute_query_on_session(connection_id.clone(), session_id.clone(), database.clone(), "COMMIT; START TRANSACTION;".to_string(), None).await;
                         uncommitted_count = 0;
@@ -252,7 +272,12 @@ impl DbEngine {
                 }
                 Some(e) => {
                     fail += executed_count_in_this_step;
-                    let err_msg = e.clone();
+                    // 批量模式下一批可能包含多条语句，附加受影响数量信息
+                    let err_msg = if executed_count_in_this_step > 1 {
+                        format!("{} (batch: {} statements affected)", e, executed_count_in_this_step)
+                    } else {
+                        e.clone()
+                    };
                     let _ = on_progress.send(SqlFileProgress {
                         total_statements,
                         executed,
