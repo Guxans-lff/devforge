@@ -44,10 +44,10 @@ const ROW_HEIGHT = 28
 
 export function useQueryResult(options: UseQueryResultOptions) {
   const {
-    result, loading, loadingMore, hasMoreServerRows, showReconnect,
+    result, loading: _loading, loadingMore, hasMoreServerRows, showReconnect: _showReconnect,
     connectionId, database, tableName, driver, isTableBrowse,
     tableScrollRef,
-    onReconnect, onLoadMore, onRefresh, onServerFilter, onServerSort,
+    onReconnect: _onReconnect, onLoadMore, onRefresh, onServerFilter, onServerSort,
   } = options
 
   const { t } = useI18n()

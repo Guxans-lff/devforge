@@ -245,7 +245,7 @@ defineExpose({
       <div v-else class="relative w-full" :style="{ height: `${tree.totalSize.value}px` }" style="will-change: transform">
         <div
           v-for="virtualRow in tree.virtualRows.value"
-          :key="virtualRow.key"
+          :key="virtualRow.key as number"
           class="absolute left-0 top-0 w-full"
           :style="{ height: `${virtualRow.size}px`, transform: `translateY(${virtualRow.start}px)` }"
         >

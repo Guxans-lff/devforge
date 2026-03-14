@@ -179,40 +179,40 @@ function selectType(idx: number, type: string) {
             </td>
             <!-- 长度 -->
             <td class="border-b border-border/50 p-0.5">
-              <input :value="columns[idx].length ?? ''" :disabled="NO_LENGTH_TYPES.has(columns[idx].dataType.toUpperCase())" class="w-full h-6 px-1 text-xs font-mono bg-transparent border border-transparent rounded focus:border-primary/50 focus:outline-none focus:bg-background hover:border-border/60 text-center disabled:opacity-30 disabled:cursor-not-allowed" :placeholder="NO_LENGTH_TYPES.has(columns[idx].dataType.toUpperCase()) ? '' : '-'" @input="emit('updateColumn', idx, 'length', ($event.target as HTMLInputElement).value || null)" />
+              <input :value="columns[idx]?.length ?? ''" :disabled="NO_LENGTH_TYPES.has(columns[idx]?.dataType?.toUpperCase() ?? '')" class="w-full h-6 px-1 text-xs font-mono bg-transparent border border-transparent rounded focus:border-primary/50 focus:outline-none focus:bg-background hover:border-border/60 text-center disabled:opacity-30 disabled:cursor-not-allowed" :placeholder="NO_LENGTH_TYPES.has(columns[idx]?.dataType?.toUpperCase() ?? '') ? '' : '-'" @input="emit('updateColumn', idx, 'length', ($event.target as HTMLInputElement).value || null)" />
             </td>
             <!-- 主键 -->
             <td class="border-b border-border/50 px-1 py-0.5 text-center">
-              <label class="inline-flex items-center justify-center size-4 rounded border cursor-pointer transition-colors" :class="columns[idx].isPrimaryKey ? 'bg-primary border-primary text-primary-foreground' : 'border-border hover:border-foreground/30'">
-                <input type="checkbox" :checked="columns[idx].isPrimaryKey" class="sr-only" @change="emit('updateColumn', idx, 'isPrimaryKey', ($event.target as HTMLInputElement).checked)" />
-                <Key v-if="columns[idx].isPrimaryKey" class="size-2.5" />
+              <label class="inline-flex items-center justify-center size-4 rounded border cursor-pointer transition-colors" :class="columns[idx]?.isPrimaryKey ? 'bg-primary border-primary text-primary-foreground' : 'border-border hover:border-foreground/30'">
+                <input type="checkbox" :checked="columns[idx]?.isPrimaryKey" class="sr-only" @change="emit('updateColumn', idx, 'isPrimaryKey', ($event.target as HTMLInputElement).checked)" />
+                <Key v-if="columns[idx]?.isPrimaryKey" class="size-2.5" />
               </label>
             </td>
             <!-- 非空 -->
             <td class="border-b border-border/50 px-1 py-0.5 text-center">
-              <label class="inline-flex items-center justify-center size-4 rounded border cursor-pointer transition-colors" :class="!columns[idx].nullable ? 'bg-orange-500/80 border-orange-500/80 text-white' : 'border-border hover:border-foreground/30'">
-                <input type="checkbox" :checked="!columns[idx].nullable" class="sr-only" @change="emit('updateColumn', idx, 'nullable', !($event.target as HTMLInputElement).checked)" />
-                <span v-if="!columns[idx].nullable" class="text-[9px] font-bold leading-none">!</span>
+              <label class="inline-flex items-center justify-center size-4 rounded border cursor-pointer transition-colors" :class="!columns[idx]?.nullable ? 'bg-orange-500/80 border-orange-500/80 text-white' : 'border-border hover:border-foreground/30'">
+                <input type="checkbox" :checked="!columns[idx]?.nullable" class="sr-only" @change="emit('updateColumn', idx, 'nullable', !($event.target as HTMLInputElement).checked)" />
+                <span v-if="!columns[idx]?.nullable" class="text-[9px] font-bold leading-none">!</span>
               </label>
             </td>
             <!-- 自增 -->
             <td class="border-b border-border/50 px-1 py-0.5 text-center">
-              <label class="inline-flex items-center justify-center size-4 rounded border cursor-pointer transition-colors" :class="columns[idx].autoIncrement ? 'bg-blue-500/80 border-blue-500/80 text-white' : 'border-border hover:border-foreground/30'">
-                <input type="checkbox" :checked="columns[idx].autoIncrement" class="sr-only" @change="emit('updateColumn', idx, 'autoIncrement', ($event.target as HTMLInputElement).checked)" />
-                <span v-if="columns[idx].autoIncrement" class="text-[9px] font-bold leading-none">+</span>
+              <label class="inline-flex items-center justify-center size-4 rounded border cursor-pointer transition-colors" :class="columns[idx]?.autoIncrement ? 'bg-blue-500/80 border-blue-500/80 text-white' : 'border-border hover:border-foreground/30'">
+                <input type="checkbox" :checked="columns[idx]?.autoIncrement" class="sr-only" @change="emit('updateColumn', idx, 'autoIncrement', ($event.target as HTMLInputElement).checked)" />
+                <span v-if="columns[idx]?.autoIncrement" class="text-[9px] font-bold leading-none">+</span>
               </label>
             </td>
             <!-- 默认值 -->
             <td class="border-b border-border/50 p-0.5">
-              <input :value="columns[idx].defaultValue ?? ''" class="w-full h-6 px-1.5 text-xs font-mono bg-transparent border border-transparent rounded focus:border-primary/50 focus:outline-none focus:bg-background hover:border-border/60" placeholder="NULL" @input="emit('updateColumn', idx, 'defaultValue', ($event.target as HTMLInputElement).value || null)" />
+              <input :value="columns[idx]?.defaultValue ?? ''" class="w-full h-6 px-1.5 text-xs font-mono bg-transparent border border-transparent rounded focus:border-primary/50 focus:outline-none focus:bg-background hover:border-border/60" placeholder="NULL" @input="emit('updateColumn', idx, 'defaultValue', ($event.target as HTMLInputElement).value || null)" />
             </td>
             <!-- 更新时（仅 MySQL） -->
             <td v-if="isMysql" class="border-b border-border/50 p-0.5">
-              <input :value="columns[idx].onUpdate ?? ''" class="w-full h-6 px-1.5 text-xs font-mono bg-transparent border border-transparent rounded focus:border-primary/50 focus:outline-none focus:bg-background hover:border-border/60 text-muted-foreground" placeholder="-" @input="emit('updateColumn', idx, 'onUpdate', ($event.target as HTMLInputElement).value || null)" />
+              <input :value="columns[idx]?.onUpdate ?? ''" class="w-full h-6 px-1.5 text-xs font-mono bg-transparent border border-transparent rounded focus:border-primary/50 focus:outline-none focus:bg-background hover:border-border/60 text-muted-foreground" placeholder="-" @input="emit('updateColumn', idx, 'onUpdate', ($event.target as HTMLInputElement).value || null)" />
             </td>
             <!-- 注释 -->
             <td class="border-b border-border/50 p-0.5">
-              <input :value="columns[idx].comment ?? ''" class="w-full h-6 px-1.5 text-xs bg-transparent border border-transparent rounded focus:border-primary/50 focus:outline-none focus:bg-background hover:border-border/60 text-muted-foreground" placeholder="-" @input="emit('updateColumn', idx, 'comment', ($event.target as HTMLInputElement).value || null)" />
+              <input :value="columns[idx]?.comment ?? ''" class="w-full h-6 px-1.5 text-xs bg-transparent border border-transparent rounded focus:border-primary/50 focus:outline-none focus:bg-background hover:border-border/60 text-muted-foreground" placeholder="-" @input="emit('updateColumn', idx, 'comment', ($event.target as HTMLInputElement).value || null)" />
             </td>
             <!-- 删除按钮 -->
             <td class="border-b border-border/50 px-0.5 py-0.5 text-center">

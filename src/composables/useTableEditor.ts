@@ -293,7 +293,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
     if (target < 0 || target >= columns.value.length) return
     pushHistory()
     const arr = [...columns.value]
-    ;[arr[idx], arr[target]] = [arr[target], arr[idx]]
+    ;[arr[idx], arr[target]] = [arr[target]!, arr[idx]!]
     columns.value = arr
     selectedRowIdx.value = target
   }
@@ -423,7 +423,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
     const startY = e.clientY
     const rows = columnsScrollRef.value?.querySelectorAll('tbody tr') as NodeListOf<HTMLElement> | undefined
     if (!rows) return
-    const rowHeight = rows.length > 0 ? rows[0].offsetHeight : 28
+    const rowHeight = rows.length > 0 ? rows[0]!.offsetHeight : 28
     const onMouseMove = (ev: MouseEvent) => {
       const delta = ev.clientY - startY
       const offset = Math.round(delta / rowHeight)
@@ -435,7 +435,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
       const target = dragOverIdx.value
       if (target !== null && target !== idx) {
         pushHistory()
-        const arr = [...columns.value]; const [moved] = arr.splice(idx, 1); arr.splice(target, 0, moved)
+        const arr = [...columns.value]; const [moved] = arr.splice(idx, 1); arr.splice(target, 0, moved!)
         columns.value = arr; selectedRowIdx.value = target
       }
       dragIdx.value = null; dragOverIdx.value = null

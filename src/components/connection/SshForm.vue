@@ -272,7 +272,7 @@ async function browsePrivateKey() {
           <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/60 px-1">{{ t('connection.proxyJumpHost') }}</Label>
           <Select
             :model-value="localValue.proxyJumpConnectionId"
-            @update:model-value="updateField('proxyJumpConnectionId', $event)"
+            @update:model-value="updateField('proxyJumpConnectionId', $event as string)"
           >
             <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs">
               <template #default>

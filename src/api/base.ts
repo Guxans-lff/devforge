@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import { useLogStore, type LogSource } from '@/stores/log'
-import { parseBackendError, type BackendError } from '@/types/error'
+import { parseBackendError } from '@/types/error'
 
 /**
  * 统一的 Tauri invoke 封装

@@ -10,6 +10,7 @@ import type {
   ImportTabContext,
   TableDataTabContext,
   SchemaCompareTabContext,
+  PerformanceTabContext,
 } from '@/types/database-workspace'
 
 /** 持久化快照中的标签页（只保存可恢复的最小信息） */
@@ -189,7 +190,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
   function updateTabContext(
     connectionId: string,
     tabId: string,
-    context: Partial<QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext>,
+    context: Partial<QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext>,
   ): void {
     const ws = workspaces.value.get(connectionId)
     if (!ws) return

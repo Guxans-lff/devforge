@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, type Ref } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -9,7 +9,7 @@ import {
 import QueryResultComponent from '@/components/database/QueryResult.vue'
 import ExplainPanel from '@/components/database/ExplainPanel.vue'
 import { useGridSearch } from '@/composables/useGridSearch'
-import type { QueryResult, ColumnDef } from '@/types/database'
+import type { QueryResult } from '@/types/database'
 import type { ResultTab, SubStatementResult } from '@/types/database-workspace'
 
 const props = defineProps<{
@@ -69,7 +69,7 @@ const emit = defineEmits<{
   closeExplain: []
 }>()
 
-const { t } = useI18n()
+const { t: _t } = useI18n()
 
 // 数据网格搜索
 const gridSearch = useGridSearch()
@@ -77,9 +77,6 @@ const gridSearch = useGridSearch()
 /** 跳转到指定行对话框 */
 const showGoToLineDialog = ref(false)
 const goToLineInput = ref('')
-
-/** 结果面板引用 */
-const resultPanelRef = ref<HTMLDivElement>()
 
 /** 快捷键处理 */
 function handleKeydown(e: KeyboardEvent) {

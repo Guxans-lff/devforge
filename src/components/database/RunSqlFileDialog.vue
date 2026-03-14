@@ -8,14 +8,11 @@ import {
   DialogContent,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Switch } from '@/components/ui/switch'
-import Progress from '@/components/ui/progress.vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { 
-  CheckCircle2, XCircle, AlertCircle, Loader2, Play, Database, FileText, 
-  FileDown, Check, Settings2, FolderOpen, Zap, ShieldCheck, Timer, ArrowRight, Copy 
+import {
+  CheckCircle2, XCircle, Loader2, Play, Database, FileText,
+  Check, FolderOpen, Zap, ShieldCheck, Timer, ArrowRight, Copy
 } from 'lucide-vue-next'
-import { Label } from '@/components/ui/label'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 
 const props = defineProps<{
@@ -179,7 +176,8 @@ async function handleStart() {
     isPaused.value = false
     if (timer) { clearInterval(timer); timer = null }
     if (progressRafId) { cancelAnimationFrame(progressRafId); progressRafId = null }
-    if (progressData.value && progressData.value.fail === 0 && progressData.value.isFinished) {
+    const finalProgress = progressData.value as SqlFileProgress | null
+    if (finalProgress && finalProgress.fail === 0 && finalProgress.isFinished) {
        emit('success')
     }
   } catch (e: any) {
@@ -271,7 +269,7 @@ async function handleSelectFile() {
       multiple: false,
     })
     if (selected) {
-      selectedFilePath.value = typeof selected === 'string' ? selected : selected.path
+      selectedFilePath.value = selected
     }
   } catch (e) {
     console.error('Failed to select file:', e)

@@ -9,7 +9,7 @@ import { dbGetServerStatus, dbGetProcessList, dbKillProcess, dbGetServerVariable
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import type { ServerStatus, ProcessInfo, ServerVariable } from '@/types/database'
 import type { PerformanceTabContext } from '@/types/database-workspace'
-import { Activity, Database, Gauge, Clock, AlertTriangle, RefreshCw, Terminal, Settings, Search, Trash2, Shield, Info, CheckCircle2 } from 'lucide-vue-next'
+import { Activity, Database, Gauge, Clock, AlertTriangle, RefreshCw, Terminal, Settings, Search, Trash2, Shield, Info } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -318,11 +318,11 @@ function drawChart() {
   const li = Math.max(1, Math.floor(lb.length / 6))
   for (let i = 0; i < lb.length; i += li) {
     const x = pad.left + (i / (MAX_DATA_POINTS - 1)) * cw
-    ctx.fillText(lb[i], x, height - 4)
+    ctx.fillText(lb[i]!, x, height - 4)
   }
   if (lb.length > 1) {
     const lx = pad.left + ((lb.length - 1) / (MAX_DATA_POINTS - 1)) * cw
-    ctx.fillText(lb[lb.length - 1], lx, height - 4)
+    ctx.fillText(lb[lb.length - 1]!, lx, height - 4)
   }
 
   /**
@@ -346,7 +346,7 @@ function drawChart() {
     const pts: Array<{ x: number; y: number }> = []
     for (let i = 0; i < data.length; i++) {
       const x = pad.left + (i / (MAX_DATA_POINTS - 1)) * cw
-      const y = pad.top + ch - (data[i] / maxV) * ch
+      const y = pad.top + ch - (data[i]! / maxV) * ch
       pts.push({ x, y })
       if (i === 0) ctx.moveTo(x, y)
       else ctx.lineTo(x, y)
@@ -360,18 +360,18 @@ function drawChart() {
     ctx.beginPath()
     ctx.strokeStyle = color
     ctx.lineWidth = 2.5
-    ctx.moveTo(pts[0].x, pts[0].y)
+    ctx.moveTo(pts[0]!.x, pts[0]!.y)
     for (let i = 1; i < pts.length; i++) {
-      ctx.lineTo(pts[i].x, pts[i].y)
+      ctx.lineTo(pts[i]!.x, pts[i]!.y)
     }
     ctx.stroke()
 
     // 3. 绘制平滑的渐变填充区域
     if (pts.length > 0) {
       ctx.beginPath()
-      ctx.moveTo(pts[0].x, pad.top + ch)
+      ctx.moveTo(pts[0]!.x, pad.top + ch)
       for (const p of pts) ctx.lineTo(p.x, p.y)
-      ctx.lineTo(pts[pts.length - 1].x, pad.top + ch)
+      ctx.lineTo(pts[pts.length - 1]!.x, pad.top + ch)
       ctx.closePath()
       const g = ctx.createLinearGradient(0, pad.top, 0, pad.top + ch)
       g.addColorStop(0, fill)

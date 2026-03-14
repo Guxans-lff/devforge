@@ -242,7 +242,7 @@ const collationMap: Record<string, { label: string, value: string }[]> = {
   ]
 }
 
-watch(charset, (newVal) => {
+watch(charset, (_newVal) => {
   // 只有当手动切换字符集时才重置排序规则，如果是初始化加载时不执行此操作
   if (!isLoading.value) {
     collation.value = 'default'

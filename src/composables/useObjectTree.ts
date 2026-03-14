@@ -2,7 +2,7 @@
  * 对象树核心业务逻辑 composable
  * 从 ObjectTree.vue 提取，负责树节点加载/搜索/展开/虚拟滚动等
  */
-import { ref, computed, watch, onActivated, onBeforeUnmount, markRaw, type Ref } from 'vue'
+import { ref, computed, watch, onActivated, markRaw, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import * as dbApi from '@/api/database'
@@ -37,7 +37,7 @@ export interface FlatNodeWrapper {
 
 export function useObjectTree(options: UseObjectTreeOptions) {
   const {
-    connectionId, connecting, parentRef,
+    connectionId, connecting: _connecting, parentRef,
     onSelectTable, onSelectDatabase, onSchemaUpdated,
   } = options
 

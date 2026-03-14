@@ -249,7 +249,7 @@ async function handleExecuteMigration() {
       // 找到第一个失败的语句，展示错误详情
       const firstError = results.find(r => r.result.isError)
       const errorDetail = firstError ? `\n语句 ${firstError.index}: ${firstError.result.error}` : ''
-      notification.warning(t('database.multiStatement.migrationFailed'), summaryMsg + errorDetail, true)
+      notification.warning(t('database.multiStatement.migrationFailed'), summaryMsg + errorDetail, 0)
     } else {
       notification.success(t('database.multiStatement.migrationSuccess'), summaryMsg, 5000)
     }

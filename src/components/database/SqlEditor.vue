@@ -226,7 +226,7 @@ function insertText(text: string) {
 }
 
 /** 格式化整个文档或选中部分 */
-function formatDocumentOrSelection(ed?: monaco.editor.IStandaloneCodeEditor) {
+function formatDocumentOrSelection(ed?: monaco.editor.ICodeEditor) {
   const target = ed ?? editor
   if (!target) return
   const model = target.getModel()

@@ -13,9 +13,7 @@ import {
   Clock,
   AlertCircle,
   CheckCircle2,
-  X,
   Calendar,
-  ChevronRight,
   Zap,
 } from 'lucide-vue-next'
 import * as historyApi from '@/api/query-history'
@@ -56,15 +54,6 @@ async function loadHistory(reset = false) {
     // 静默处理
   } finally {
     isLoading.value = false
-  }
-}
-
-async function handleDelete(id: string) {
-  try {
-    await historyApi.deleteQueryHistory(id)
-    records.value = records.value.filter((r) => r.id !== id)
-  } catch {
-    // 静默处理
   }
 }
 
