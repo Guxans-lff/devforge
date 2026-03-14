@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -73,6 +75,7 @@ pub struct ExportResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionExport {
     pub version: i32,
     pub exported_at: i64,
@@ -81,6 +84,7 @@ pub struct ConnectionExport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionExportItem {
     pub name: String,
     #[serde(rename = "type")]
@@ -95,12 +99,14 @@ pub struct ConnectionExportItem {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectionGroupExport {
     pub name: String,
     pub parent_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportOptions {
     pub conflict_strategy: ConflictStrategy,
     pub import_passwords: bool,
@@ -115,6 +121,7 @@ pub enum ConflictStrategy {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportResult {
     pub success: bool,
     pub imported: i32,
@@ -124,6 +131,7 @@ pub struct ImportResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ImportPreview {
     pub connections: Vec<ConnectionExportItem>,
     pub groups: Vec<ConnectionGroupExport>,

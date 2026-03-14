@@ -40,6 +40,8 @@ export interface AppSettings {
   shortcuts: ShortcutBinding[]
   /** Data storage path */
   dataStoragePath: string
+  /** 开发者模式 */
+  devMode: boolean
 }
 
 const defaultShortcuts: ShortcutBinding[] = [
@@ -103,6 +105,7 @@ const defaults: AppSettings = {
   uiFontSize: 14,
   shortcuts: defaultShortcuts,
   dataStoragePath: 'D:\\DevForgeData',
+  devMode: false,
 }
 
 /** 合并快捷键：保留用户自定义的绑定，同时补充新增的默认快捷键 */

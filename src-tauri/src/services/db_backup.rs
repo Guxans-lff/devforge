@@ -5,7 +5,6 @@ use tauri::{AppHandle, Emitter};
 use tokio::io::AsyncWriteExt;
 
 use std::sync::Arc;
-use sqlx::Executor;
 use crate::services::db_drivers::DriverPool;
 use crate::services::db_engine::DbEngine;
 use crate::services::sql_splitter;

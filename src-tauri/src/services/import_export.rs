@@ -1,5 +1,8 @@
+#![allow(dead_code)]
+
 use crate::models::connection::{Connection, ConnectionGroup};
 use crate::models::import_export::*;
+use crate::services::credential::CredentialManager;
 use crate::services::storage::Storage;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -18,7 +21,7 @@ impl<'a> ImportExportService<'a> {
         Self { storage }
     }
 
-    /// 导出连接
+    /// 导出连接（包含密码）
     pub async fn export_connections(
         &self,
         connection_ids: Option<Vec<String>>,
@@ -27,7 +30,7 @@ impl<'a> ImportExportService<'a> {
         let all_groups = self.storage.list_groups().await?;
 
         // 过滤连接
-        let connections_to_export = if let Some(ids) = connection_ids {
+        let connections_to_export: Vec<Connection> = if let Some(ids) = connection_ids {
             all_connections
                 .into_iter()
                 .filter(|c| ids.contains(&c.id))
@@ -42,7 +45,7 @@ impl<'a> ImportExportService<'a> {
             .map(|g| (g.id.clone(), g.name.clone()))
             .collect();
 
-        // 转换连接
+        // 转换连接（包含从凭据管理器读取密码）
         let mut export_items = Vec::new();
         for conn in connections_to_export {
             let config: HashMap<String, serde_json::Value> =
@@ -50,7 +53,15 @@ impl<'a> ImportExportService<'a> {
 
             let group_name = conn.group_id.and_then(|gid| group_map.get(&gid).cloned());
 
-            // 注意：不导出密码（安全考虑）
+            // 从 Windows Credential Manager 读取密码
+            let password = match CredentialManager::get(&conn.id) {
+                Ok(pwd) => pwd,
+                Err(e) => {
+                    log::warn!("Failed to read credential for '{}': {}", conn.name, e);
+                    None
+                }
+            };
+
             export_items.push(ConnectionExportItem {
                 name: conn.name,
                 conn_type: conn.connection_type,
@@ -58,7 +69,7 @@ impl<'a> ImportExportService<'a> {
                 host: conn.host,
                 port: conn.port as i32,
                 username: conn.username,
-                password: None,
+                password,
                 config,
                 color: conn.color,
             });
@@ -210,7 +221,8 @@ impl<'a> ImportExportService<'a> {
                     return Ok(false); // 跳过
                 }
                 ConflictStrategy::Overwrite => {
-                    // 删除现有连接
+                    // 删除现有连接及其凭据
+                    let _ = CredentialManager::delete(existing_id);
                     self.storage.delete_connection(existing_id).await?;
                 }
                 ConflictStrategy::Rename => {
@@ -254,7 +266,7 @@ impl<'a> ImportExportService<'a> {
     async fn create_connection_from_export(
         &self,
         conn_export: &ConnectionExportItem,
-        _options: &ImportOptions,
+        options: &ImportOptions,
         group_map: &HashMap<String, String>,
     ) -> Result<()> {
         let group_id = conn_export
@@ -282,6 +294,17 @@ impl<'a> ImportExportService<'a> {
 
         self.storage.create_connection(&conn).await
             .context("Failed to create connection")?;
+
+        // 如果 JSON 中有密码且用户选择导入密码，写入 Windows Credential Manager
+        if options.import_passwords {
+            if let Some(ref password) = conn_export.password {
+                if !password.is_empty() {
+                    if let Err(e) = CredentialManager::save(&conn.id, password) {
+                        log::warn!("Failed to save credential for '{}': {}", conn_export.name, e);
+                    }
+                }
+            }
+        }
 
         Ok(())
     }

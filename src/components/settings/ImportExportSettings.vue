@@ -8,19 +8,21 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useNotification } from '@/composables/useNotification'
+import { useConnectionStore } from '@/stores/connections'
 import * as importExportApi from '@/api/import-export'
 import type { ConnectionExport, ImportPreview, ImportOptions } from '@/api/import-export'
 import { Download, Upload, FileJson, AlertCircle, CheckCircle2 } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const notification = useNotification()
+const connectionStore = useConnectionStore()
 
 const isExporting = ref(false)
 const isImporting = ref(false)
 const importPreview = ref<ImportPreview | null>(null)
 const importData = ref<ConnectionExport | null>(null)
 const conflictStrategy = ref<ImportOptions['conflictStrategy']>('skip')
-const includePasswords = ref(false)
+const includePasswords = ref(true)
 
 // 读写文件的辅助函数
 async function readTextFile(path: string): Promise<string> {
@@ -59,10 +61,10 @@ async function handleExport() {
       t('importExport.exportSuccess'),
       t('importExport.exportSuccessDesc', { count: data.connections.length })
     )
-  } catch (error) {
+  } catch (error: any) {
     notification.error(
       t('importExport.exportFailed'),
-      String(error)
+      error?.message ?? String(error)
     )
   } finally {
     isExporting.value = false
@@ -101,10 +103,10 @@ async function handleSelectFile() {
         existing: preview.conflicts.length,
       })
     )
-  } catch (error) {
+  } catch (error: any) {
     notification.error(
       t('importExport.previewFailed'),
-      String(error)
+      error?.message ?? String(error)
     )
   }
 }
@@ -129,13 +131,16 @@ async function handleImport() {
       })
     )
 
+    // 刷新侧边栏连接列表
+    await connectionStore.loadConnections()
+
     // 清除预览和数据
     importPreview.value = null
     importData.value = null
-  } catch (error) {
+  } catch (error: any) {
     notification.error(
       t('importExport.importFailed'),
-      String(error)
+      error?.message ?? String(error)
     )
   } finally {
     isImporting.value = false

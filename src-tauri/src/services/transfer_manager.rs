@@ -41,7 +41,7 @@ pub enum TransferState {
 }
 
 /// 安全地获取 Mutex 锁（即使 mutex 被 poison 也不会 panic）
-fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<T> {
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
 }
 

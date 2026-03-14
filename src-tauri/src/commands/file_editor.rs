@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Emitter, State, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::commands::sftp::SftpEngineState;

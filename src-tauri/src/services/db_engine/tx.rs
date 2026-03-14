@@ -37,12 +37,10 @@ impl DbEngine {
         match txn_conn.as_ref() {
             TransactionConnection::MySql(conn) => {
                 let mut guard = conn.lock().await;
-                use sqlx::Executor;
                 sqlx::query("COMMIT").execute(&mut *guard as &mut sqlx::MySqlConnection).await.map_err(AppError::Database)?;
             }
             TransactionConnection::Postgres(conn) => {
                 let mut guard = conn.lock().await;
-                use sqlx::Executor;
                 sqlx::query("COMMIT").execute(&mut *guard as &mut sqlx::PgConnection).await.map_err(AppError::Database)?;
             }
         }
@@ -56,18 +54,17 @@ impl DbEngine {
         match txn_conn.as_ref() {
             TransactionConnection::MySql(conn) => {
                 let mut guard = conn.lock().await;
-                use sqlx::Executor;
                 sqlx::query("ROLLBACK").execute(&mut *guard as &mut sqlx::MySqlConnection).await.map_err(AppError::Database)?;
             }
             TransactionConnection::Postgres(conn) => {
                 let mut guard = conn.lock().await;
-                use sqlx::Executor;
                 sqlx::query("ROLLBACK").execute(&mut *guard as &mut sqlx::PgConnection).await.map_err(AppError::Database)?;
             }
         }
         Ok(true)
     }
 
+    #[allow(dead_code)]
     pub async fn execute_in_transaction(
         self: Arc<Self>,
         connection_id: String,

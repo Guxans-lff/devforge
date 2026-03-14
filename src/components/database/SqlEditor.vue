@@ -59,29 +59,29 @@ onMounted(async () => {
   await nextTick()
   if (!editorContainer.value) return
 
-  editor = monaco.editor.create(editorContainer.value, {
-    value: props.modelValue,
-    language: props.language,
-    theme: registerMonacoTheme(),
-    minimap: { enabled: settingsStore.settings.editorMinimap },
-    fontSize: settingsStore.settings.editorFontSize,
-    fontFamily: "'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace",
-    lineNumbers: 'on',
-    tabSize: settingsStore.settings.editorTabSize,
-    wordWrap: settingsStore.settings.editorWordWrap ? 'on' : 'off',
-    automaticLayout: true,
-    scrollBeyondLastLine: false,
-    padding: { top: 8, bottom: 8 },
-    renderLineHighlight: 'line',
-    cursorBlinking: 'smooth',
-    smoothScrolling: true,
-    bracketPairColorization: { enabled: true },
-    suggest: {
-      showKeywords: true,
-      showSnippets: true,
-    },
-    readOnly: props.readOnly,
-  })
+    editor = monaco.editor.create(editorContainer.value, {
+      value: props.modelValue,
+      language: props.language,
+      theme: registerMonacoTheme(),
+      minimap: { enabled: settingsStore.settings.editorMinimap },
+      fontSize: settingsStore.settings.editorFontSize,
+      fontFamily: "'JetBrains Mono', 'Cascadia Code', 'Fira Code', Consolas, monospace",
+      lineNumbers: 'on',
+      tabSize: settingsStore.settings.editorTabSize,
+      wordWrap: settingsStore.settings.editorWordWrap ? 'on' : 'off',
+      automaticLayout: true,
+      scrollBeyondLastLine: false,
+      padding: { top: 8, bottom: 8 },
+      renderLineHighlight: 'line',
+      cursorBlinking: 'smooth',
+      smoothScrolling: true,
+      bracketPairColorization: { enabled: true },
+      suggest: {
+        showKeywords: true,
+        showSnippets: true,
+      },
+      readOnly: props.readOnly,
+    })
 
   editor.onDidChangeModelContent(() => {
     const value = editor?.getValue() ?? ''

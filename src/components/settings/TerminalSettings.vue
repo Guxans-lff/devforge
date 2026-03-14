@@ -156,8 +156,8 @@ function handleCursorStyle(value: string) {
           <ScrollText class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">
-          <Label class="text-[15px] font-bold tracking-tight">{{ t('settings.terminalScrollback' as any) || '滚动缓冲区' }}</Label>
-          <p class="text-xs text-muted-foreground/60 font-medium">{{ t('settings.terminalScrollbackDesc' as any) || '终端可回滚查看的历史行数' }}</p>
+          <Label class="text-[15px] font-bold tracking-tight">{{ t('settings.terminalScrollback') }}</Label>
+          <p class="text-xs text-muted-foreground/60 font-medium">{{ t('settings.terminalScrollbackDesc') }}</p>
         </div>
       </div>
       <Select :model-value="String(settingsStore.settings.terminalScrollback ?? 5000)" @update:model-value="settingsStore.update({ terminalScrollback: Number($event) })">

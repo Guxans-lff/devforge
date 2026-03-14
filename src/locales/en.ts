@@ -88,6 +88,7 @@ export default {
     ready: 'Ready.',
     noLog: 'No log entries.',
     noTransfer: 'No active transfers.',
+    devTools: 'Dev',
   },
   placeholder: {
     databaseView: 'Database view - coming soon',
@@ -322,6 +323,8 @@ export default {
     cursorUnderline: 'Underline',
     cursorBar: 'Bar',
     customFont: 'Custom...',
+    terminalScrollback: 'Scrollback Buffer',
+    terminalScrollbackDesc: 'Number of lines the terminal keeps in scroll history.',
     resetAll: 'Reset All',
     resetConfirm: 'Reset all settings to defaults?',
     // Shortcut categories
@@ -390,6 +393,9 @@ export default {
     // Import/Export
     importExport: 'Import/Export',
     importExportDesc: 'Import or export connection configurations.',
+    developer: 'Developer',
+    devMode: 'Developer Mode',
+    devModeDesc: 'Enable to view all backend API calls, responses and errors in the bottom panel for debugging.',
     exportConnections: 'Export Connections',
     exportAll: 'Export All',
     exportSelected: 'Export Selected',
@@ -657,6 +663,14 @@ export default {
     clearAll: 'Clear',
     noHistory: 'No query history',
     loadMore: 'Load more',
+  },
+  devPanel: {
+    searchPlaceholder: 'Search command...',
+    all: 'All',
+    errorsOnly: 'Errors',
+    clear: 'Clear',
+    noRequests: 'No API requests. Enable developer mode and interact to see request logs.',
+    details: 'Details',
   },
   objectTree: {
     tables: 'Tables',

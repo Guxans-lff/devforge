@@ -4,7 +4,9 @@ import { useWorkspaceStore } from '@/stores/workspace'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useSettingsStore } from '@/stores/settings'
 import { useCommandPaletteStore } from '@/stores/command-palette'
+import { useMessageCenterStore } from '@/stores/message-center'
 import { useTheme } from '@/composables/useTheme'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 function parseShortcut(keys: string): { ctrl: boolean; shift: boolean; alt: boolean; key: string; isChord: boolean; chordKeys?: string[] } {
   // 检查是否是组合键（如 "Ctrl+K T"）
@@ -58,6 +60,7 @@ export function useKeyboardShortcuts() {
   const dbWorkspaceStore = useDatabaseWorkspaceStore()
   const settingsStore = useSettingsStore()
   const commandPaletteStore = useCommandPaletteStore()
+  const messageCenterStore = useMessageCenterStore()
   const { toggleTheme } = useTheme()
   const { t } = useI18n()
 
@@ -82,10 +85,36 @@ export function useKeyboardShortcuts() {
   }
 
   // Action handlers mapped by shortcut id
+  // 注意：编辑器快捷键（executeQuery, commentLine, formatSQL 等）由 Monaco Editor 内部处理，
+  // 不在此全局监听，避免与编辑器行为冲突。
   const actions: Record<string, () => void> = {
+    // === 连接管理 ===
     newConnection: () => {
       window.dispatchEvent(new CustomEvent('devforge:new-connection'))
     },
+    duplicateConnection: () => {
+      window.dispatchEvent(new CustomEvent('devforge:duplicate-connection'))
+    },
+    editConnection: () => {
+      window.dispatchEvent(new CustomEvent('devforge:edit-connection'))
+    },
+    disconnectConnection: () => {
+      window.dispatchEvent(new CustomEvent('devforge:disconnect-connection'))
+    },
+    reconnectConnection: () => {
+      window.dispatchEvent(new CustomEvent('devforge:reconnect-connection'))
+    },
+    refreshObjectTree: () => {
+      window.dispatchEvent(new CustomEvent('devforge:refresh-object-tree'))
+    },
+    testConnection: () => {
+      window.dispatchEvent(new CustomEvent('devforge:test-connection'))
+    },
+    connectionInfo: () => {
+      window.dispatchEvent(new CustomEvent('devforge:connection-info'))
+    },
+
+    // === 标签页管理 ===
     newTab: () => {
       const id = `tab-${Date.now()}`
       workspace.addTab({ id, type: 'welcome', title: t('tab.welcome'), closable: true })
@@ -98,32 +127,78 @@ export function useKeyboardShortcuts() {
     nextTab: () => {
       const tabs = workspace.tabs
       if (tabs.length <= 1) return
-      const currentIndex = tabs.findIndex(t => t.id === workspace.activeTabId)
+      const currentIndex = tabs.findIndex(tab => tab.id === workspace.activeTabId)
       const nextIndex = (currentIndex + 1) % tabs.length
       const nextTab = tabs[nextIndex]
       if (nextTab) workspace.setActiveTab(nextTab.id)
     },
-    settings: () => {
-      workspace.addTab({ id: 'settings', type: 'settings', title: t('tab.settings'), closable: true })
+    prevTab: () => {
+      const tabs = workspace.tabs
+      if (tabs.length <= 1) return
+      const currentIndex = tabs.findIndex(tab => tab.id === workspace.activeTabId)
+      const prevIndex = (currentIndex - 1 + tabs.length) % tabs.length
+      const prevTab = tabs[prevIndex]
+      if (prevTab) workspace.setActiveTab(prevTab.id)
     },
+    closeAllTabs: () => {
+      // 关闭所有可关闭的标签页
+      const closableTabs = workspace.tabs.filter(tab => tab.closable !== false)
+      closableTabs.forEach(tab => workspace.closeTab(tab.id))
+    },
+    reopenTab: () => {
+      // 从当前活跃的数据库标签页中恢复关闭的内部标签
+      const activeTab = workspace.tabs.find(tab => tab.id === workspace.activeTabId)
+      if (activeTab?.type === 'database' && activeTab.connectionId) {
+        dbWorkspaceStore.reopenLastClosedTab(activeTab.connectionId)
+      }
+    },
+    switchToTab1: () => {
+      const firstTab = workspace.tabs[0]
+      if (firstTab) workspace.setActiveTab(firstTab.id)
+    },
+
+    // === 视图控制 ===
     toggleSidebar: () => {
       workspace.toggleSidebar()
     },
     toggleBottomPanel: () => {
       workspace.toggleBottomPanel()
     },
+    focusObjectTree: () => {
+      // 确保侧边栏展开，然后聚焦到对象树
+      if (workspace.panelState.sidebarCollapsed) {
+        workspace.toggleSidebar()
+      }
+      window.dispatchEvent(new CustomEvent('devforge:focus-object-tree'))
+    },
+    focusEditor: () => {
+      window.dispatchEvent(new CustomEvent('devforge:focus-editor'))
+    },
+    toggleMessageCenter: () => {
+      messageCenterStore.togglePanel()
+    },
+    toggleFullscreen: () => {
+      getCurrentWindow().isFullscreen().then(isFs => {
+        getCurrentWindow().setFullscreen(!isFs)
+      })
+    },
+
+    // === 通用操作 ===
     commandPalette: () => {
       commandPaletteStore.toggle()
     },
     toggleTheme: () => {
       toggleTheme()
     },
-    reopenTab: () => {
-      // 从当前活跃的数据库标签页中恢复关闭的内部标签
-      const activeTab = workspace.tabs.find(t => t.id === workspace.activeTabId)
-      if (activeTab?.type === 'database' && activeTab.connectionId) {
-        dbWorkspaceStore.reopenLastClosedTab(activeTab.connectionId)
-      }
+    settings: () => {
+      workspace.addTab({ id: 'settings', type: 'settings', title: t('tab.settings'), closable: true })
+    },
+    help: () => {
+      // 打开帮助——通过命令面板的帮助入口
+      commandPaletteStore.open()
+    },
+    quit: () => {
+      getCurrentWindow().close()
     },
   }
 

@@ -3,6 +3,16 @@ import { setupMonacoLocale } from '@/utils/monacoLocale'
 // 必须在 Monaco Editor 加载之前初始化中文语言包
 setupMonacoLocale()
 
+// Monaco Editor Worker 配置
+// 使用 Vite 原生 ?worker 导入，确保 Worker 正确打包
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker&inline'
+
+;(self as any).MonacoEnvironment = {
+  getWorker(_workerId: string, _label: string) {
+    return new EditorWorker()
+  },
+}
+
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { createRouter, createWebHistory } from 'vue-router'

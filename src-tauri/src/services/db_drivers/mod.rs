@@ -28,6 +28,7 @@ pub enum DriverPool {
     Postgres(PgPool),
 }
 
+#[allow(dead_code)]
 impl DriverPool {
     pub async fn close(&self) {
         match self {

@@ -1,4 +1,4 @@
-use crate::models::query::{QueryResult, SqlFileProgress, SqlImportOptions};
+use crate::models::query::{SqlFileProgress, SqlImportOptions};
 use crate::services::db_engine::{DbEngine, get_import_states};
 use crate::utils::error::AppError;
 use std::sync::Arc;

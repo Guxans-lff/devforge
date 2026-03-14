@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use sqlx::postgres::{PgColumn, PgConnectOptions, PgConnection, PgPool, PgPoolOptions, PgRow, PgSslMode};
+use sqlx::postgres::{PgColumn, PgConnectOptions, PgPool, PgPoolOptions, PgRow, PgSslMode};
 use sqlx::pool::PoolConnection;
 use sqlx::{Column, Executor, Row, TypeInfo};
 
@@ -9,6 +9,7 @@ use crate::utils::error::AppError;
 use super::{escape_pg_ident, validate_sql_clause};
 
 /// 取消当前连接上所有活跃查询
+#[allow(dead_code)]
 pub async fn cancel_running_query(pool: &PgPool) -> Result<(), AppError> {
     let rows: Vec<PgRow> = sqlx::query(
         "SELECT pid FROM pg_stat_activity WHERE state = 'active' AND query NOT LIKE '%pg_stat_activity%' AND pid != pg_backend_pid()"

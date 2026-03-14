@@ -239,6 +239,7 @@ pub fn split_sql_statements(content: &str) -> Vec<String> {
 
 /// 解析 DELIMITER 指令，返回新的分隔符
 /// 输入示例："DELIMITER //" 或 "delimiter $$"
+#[allow(dead_code)]
 fn parse_delimiter_directive(line: &str) -> Option<String> {
     let upper = line.to_uppercase();
     if !upper.starts_with("DELIMITER") {

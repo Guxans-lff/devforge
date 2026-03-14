@@ -11,7 +11,8 @@ import EditorSettings from '@/components/settings/EditorSettings.vue'
 import TerminalSettings from '@/components/settings/TerminalSettings.vue'
 import ShortcutSettings from '@/components/settings/ShortcutSettings.vue'
 import ImportExportSettings from '@/components/settings/ImportExportSettings.vue'
-import { RotateCcw, Settings, Code, Terminal, Keyboard, ArrowLeftRight } from 'lucide-vue-next'
+import DeveloperSettings from '@/components/settings/DeveloperSettings.vue'
+import { RotateCcw, Settings, Code, Terminal, Keyboard, ArrowLeftRight, Bug } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -80,6 +81,10 @@ function confirmReset() {
                 <ArrowLeftRight class="h-3.5 w-3.5" />
                 {{ t('settings.importExport') }}
               </TabsTrigger>
+              <TabsTrigger value="developer" class="relative z-10 flex-1 gap-2 rounded-xl text-[13px] font-bold transition-all data-[state=active]:bg-background data-[state=active]:text-orange-500 data-[state=active]:shadow-lg">
+                <Bug class="h-3.5 w-3.5" />
+                {{ t('settings.developer') }}
+              </TabsTrigger>
             </TabsList>
           </div>
 
@@ -103,6 +108,10 @@ function confirmReset() {
 
             <TabsContent value="import-export">
               <ImportExportSettings />
+            </TabsContent>
+
+            <TabsContent value="developer">
+              <DeveloperSettings />
             </TabsContent>
           </div>
         </Tabs>

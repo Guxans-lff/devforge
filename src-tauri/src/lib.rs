@@ -7,6 +7,7 @@ use commands::connection::{self, StorageState};
 use commands::db::{self, DbEngineState};
 use commands::db_backup;
 use commands::import;
+use commands::import_export;
 use commands::query_history;
 use commands::schema_compare;
 use commands::sftp::{self, SftpEngineState};
@@ -263,6 +264,12 @@ pub fn run() {
             app_state::set_app_state,
             app_state::delete_app_state,
             app_state::list_app_state,
+            // Import/Export
+            import_export::export_connections,
+            import_export::preview_import,
+            import_export::import_connections,
+            import_export::import_navicat_xml,
+            import_export::import_termius_json,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,9 +3,11 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTransferStore } from '@/stores/transfer'
+import { useSettingsStore } from '@/stores/settings'
 import TransferQueue from '@/components/file-manager/TransferQueue.vue'
 import TransferHistory from '@/components/file-manager/TransferHistory.vue'
 import LogPanel from '@/components/layout/LogPanel.vue'
+import DevPanel from '@/components/layout/DevPanel.vue'
 import QueryHistoryPanel from '@/components/database/QueryHistoryPanel.vue'
 import { useLogStore } from '@/stores/log'
 import { onMounted } from 'vue'
@@ -16,12 +18,14 @@ import {
   ScrollText,
   ArrowUpDown,
   History,
+  Bug,
 } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const transferStore = useTransferStore()
 const logStore = useLogStore()
+const settingsStore = useSettingsStore()
 
 onMounted(() => {
   logStore.info('SYSTEM', t('log.systemInit'))
@@ -37,12 +41,19 @@ const activeTransferCount = computed(() => {
   return count
 })
 
-const panelTabs = [
+const baseTabs = [
   { id: 'query-history' as const, labelKey: 'bottomPanel.queryHistory', icon: Clock },
   { id: 'log' as const, labelKey: 'bottomPanel.log', icon: ScrollText },
   { id: 'transfer' as const, labelKey: 'bottomPanel.transfer', icon: ArrowUpDown },
   { id: 'history' as const, labelKey: 'bottomPanel.history', icon: History },
 ]
+
+const panelTabs = computed(() => {
+  if (settingsStore.settings.devMode) {
+    return [...baseTabs, { id: 'dev' as const, labelKey: 'bottomPanel.devTools', icon: Bug }]
+  }
+  return baseTabs
+})
 </script>
 
 <template>
@@ -145,6 +156,9 @@ const panelTabs = [
 
       <!-- History Tab -->
       <TransferHistory v-else-if="workspace.panelState.bottomPanelTab === 'history'" />
+
+      <!-- Dev Tools Tab -->
+      <DevPanel v-else-if="workspace.panelState.bottomPanelTab === 'dev'" />
     </div>
   </div>
 </template>

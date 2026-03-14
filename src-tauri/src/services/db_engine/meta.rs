@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use sqlx::Executor;
 use crate::models::query::{
     ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo,
     ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, ScriptOptions,

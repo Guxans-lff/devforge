@@ -6,8 +6,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-pub const DEFAULT_QUERY_TIMEOUT_SECS: u64 = 600;
-
 pub type StreamCallback = Arc<dyn Fn(QueryChunk) -> Result<(), String> + Send + Sync + 'static>;
 
 pub struct DbEngine {
@@ -137,9 +135,8 @@ impl DbEngine {
                 let use_sql = format!("USE `{}`", database);
                 (&mut **conn).execute(sqlx::raw_sql(&use_sql)).await.map_err(AppError::Database)?;
             }
-            DbSession::Postgres(conn_mutex) => { 
+            DbSession::Postgres(conn_mutex) => {
                 let mut conn = conn_mutex.lock().await;
-                use sqlx::Executor;
                 let sql = format!("SET search_path TO \"{}\"", database.replace('"', "\"\""));
                 sqlx::query(&sql).execute(&mut **conn).await.map_err(AppError::Database)?;
             }
@@ -313,8 +310,8 @@ impl DbEngine {
     async fn check_connection_alive(self: Arc<Self>, connection_id: String) -> bool {
         let pool = match self.clone().get_pool(connection_id).await { Ok(p) => p, Err(_) => return false };
         match pool.as_ref() {
-            DriverPool::MySql(p) => { use sqlx::Executor; sqlx::query("SELECT 1").execute(p).await.is_ok() }
-            DriverPool::Postgres(p) => { use sqlx::Executor; sqlx::query("SELECT 1").execute(p).await.is_ok() }
+            DriverPool::MySql(p) => { sqlx::query("SELECT 1").execute(p).await.is_ok() }
+            DriverPool::Postgres(p) => { sqlx::query("SELECT 1").execute(p).await.is_ok() }
         }
     }
 

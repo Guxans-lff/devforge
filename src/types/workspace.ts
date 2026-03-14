@@ -16,7 +16,7 @@ export interface PanelState {
   sidebarCollapsed: boolean
   bottomPanelHeight: number
   bottomPanelCollapsed: boolean
-  bottomPanelTab: 'query-history' | 'log' | 'transfer' | 'history'
+  bottomPanelTab: 'query-history' | 'log' | 'transfer' | 'history' | 'dev'
 }
 
 // 工作区快照 - 用于持久化

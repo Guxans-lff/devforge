@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-use tauri::{Manager, State};
+use tauri::Manager;
 
 use crate::commands::ssh::SshEngineState;
 use crate::services::terminal_recorder::{RecordingInfo, TerminalRecorder};

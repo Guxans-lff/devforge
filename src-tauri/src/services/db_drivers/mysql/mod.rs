@@ -198,6 +198,7 @@ pub async fn get_object_definition(pool: &MySqlPool, database: &str, name: &str,
     Ok(ddl)
 }
 
+#[allow(dead_code)]
 pub async fn cancel_running_query(pool: &MySqlPool) -> Result<(), AppError> {
     let rows: Vec<MySqlRow> = sqlx::query(
         "SELECT ID FROM information_schema.PROCESSLIST WHERE COMMAND != 'Sleep' AND INFO IS NOT NULL AND INFO NOT LIKE '%PROCESSLIST%' AND USER = CURRENT_USER()"

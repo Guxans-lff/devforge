@@ -1,7 +1,7 @@
 use crate::commands::connection::StorageState;
 use crate::models::import_export::*;
 use crate::services::import_export::ImportExportService;
-use tauri::{Manager, State};
+use tauri::Manager;
 
 #[tauri::command]
 pub async fn export_connections(

@@ -1,4 +1,4 @@
-use tauri::{command, State, ipc::Channel, AppHandle, Manager};
+use tauri::{command, ipc::Channel, AppHandle, Manager};
 
 use crate::commands::connection::StorageState;
 use crate::models::connection::{PoolConfig, PoolStatus, ReconnectParams, ReconnectResult, SslConfig};
@@ -10,7 +10,7 @@ use crate::models::query::{
     detect_statement_type, SqlFileProgress, SqlImportOptions, ForeignKeyRelation
 };
 use crate::services::credential::CredentialManager;
-use crate::services::db_engine::{DbEngine, is_select_query};
+use crate::services::db_engine::DbEngine;
 use crate::utils::error::AppError;
 
 use std::sync::Arc;
@@ -707,36 +707,47 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), AppErr
         return Err(AppError::Validation("Write denied: path must be absolute".into()));
     }
 
-    let target = raw
-        .canonicalize()
-        .map_err(|_| AppError::Validation("Write denied: invalid or non-existent parent directory".into()))?;
+    // 对父目录做 canonicalize（父目录必须存在），而不是对文件本身
+    // 因为文件可能还不存在（新建场景）
+    let parent = raw.parent()
+        .ok_or_else(|| AppError::Validation("Write denied: cannot determine parent directory".into()))?;
 
-    // 限制写入路径到用户文档目录和下载目录
+    let canonical_parent = parent
+        .canonicalize()
+        .map_err(|_| AppError::Validation("Write denied: parent directory does not exist".into()))?;
+
+    let file_name = raw.file_name()
+        .ok_or_else(|| AppError::Validation("Write denied: invalid file name".into()))?;
+
+    let target = canonical_parent.join(file_name);
+
+    // 限制写入路径到用户常用目录
+    // 注意：必须对 directories 返回的路径也做 canonicalize，
+    // 因为 Windows 上 canonicalize 会添加 \\?\ UNC 前缀，两边格式必须一致
     let allowed = if let Some(dirs) = directories::UserDirs::new() {
-        let mut ok = false;
+        let mut allowed_dirs: Vec<std::path::PathBuf> = Vec::new();
+
         if let Some(doc) = dirs.document_dir() {
-            if target.starts_with(doc) {
-                ok = true;
-            }
+            if let Ok(p) = doc.canonicalize() { allowed_dirs.push(p); }
         }
         if let Some(dl) = dirs.download_dir() {
-            if target.starts_with(dl) {
-                ok = true;
-            }
+            if let Ok(p) = dl.canonicalize() { allowed_dirs.push(p); }
         }
-        // 也允许桌面
         if let Some(desktop) = dirs.desktop_dir() {
-            if target.starts_with(desktop) {
-                ok = true;
-            }
+            if let Ok(p) = desktop.canonicalize() { allowed_dirs.push(p); }
         }
-        ok
+        // 也允许用户主目录下的任何位置
+        if let Some(home) = dirs.home_dir().canonicalize().ok() {
+            allowed_dirs.push(home);
+        }
+
+        allowed_dirs.iter().any(|d| canonical_parent.starts_with(d))
     } else {
         false
     };
 
     if !allowed {
-        return Err(AppError::Permission("Write denied: path must be within Documents, Downloads, or Desktop directory".into()));
+        return Err(AppError::Permission("Write denied: path must be within user home directory".into()));
     }
 
     tokio::fs::write(&target, content.as_bytes())

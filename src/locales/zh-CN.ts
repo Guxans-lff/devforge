@@ -95,6 +95,7 @@ export default {
     ready: '就绪',
     noLog: '暂无日志。',
     noTransfer: '暂无传输任务。',
+    devTools: '开发者',
   },
   placeholder: {
     databaseView: '数据库视图 - 即将推出',
@@ -348,6 +349,8 @@ export default {
     cursorUnderline: '下划线',
     cursorBar: '竖线',
     customFont: '自定义...',
+    terminalScrollback: '滚动缓冲区',
+    terminalScrollbackDesc: '终端可回滚查看的历史行数。',
     resetAll: '重置全部',
     resetConfirm: '确定将所有设置恢复为默认值？',
     // 快捷键分类
@@ -416,6 +419,9 @@ export default {
     // 导入/导出
     importExport: '导入/导出',
     importExportDesc: '导入或导出连接配置。',
+    developer: '开发者',
+    devMode: '开发者模式',
+    devModeDesc: '开启后可在底部面板查看所有后台 API 调用、响应和错误信息，便于排查问题。',
     exportConnections: '导出连接',
     exportAll: '导出全部',
     exportSelected: '导出选中',
@@ -686,6 +692,14 @@ export default {
     clearAll: '清空',
     noHistory: '暂无查询历史',
     loadMore: '加载更多',
+  },
+  devPanel: {
+    searchPlaceholder: '搜索命令名...',
+    all: '全部',
+    errorsOnly: '仅错误',
+    clear: '清空',
+    noRequests: '暂无 API 请求。开启开发者模式后操作即可看到请求日志。',
+    details: '详细信息',
   },
   objectTree: {
     tables: '表',
