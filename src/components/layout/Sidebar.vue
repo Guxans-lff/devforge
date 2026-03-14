@@ -338,35 +338,48 @@ const groupedNonFavorites = computed(() => {
 
 <template>
   <aside
-    class="flex h-full flex-col glass-sidebar transition-[width] duration-[var(--df-duration-normal)] ease-[var(--df-ease-out)] relative z-20"
+    class="flex h-full flex-col glass-sidebar transition-[width] duration-[var(--df-duration-normal)] ease-[var(--df-ease-out)] relative z-20 shadow-[1px_0_0_rgba(0,0,0,0.02)]"
+    :class="[
+      themeMode === 'light' 
+        ? 'bg-gradient-to-b from-[#fcfcfd] via-[#f8f9fb] to-[#f2f4f7]' 
+        : 'bg-[#0c0c0e]'
+    ]"
     :style="{ width: isCollapsed ? '48px' : `${workspace.panelState.sidebarWidth}px` }"
   >
-    <!-- Header: 搜索 + 新建 -->
-    <div v-if="!isCollapsed" class="flex items-center gap-1.5 px-3 pt-3 pb-2">
-      <div class="group relative flex-1">
-        <Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50 transition-colors group-focus-within:text-primary" />
+    <!-- Header: 搜索 + 新建 (Physical Inset Design) -->
+    <div v-if="!isCollapsed" class="flex flex-col gap-3 px-4 pt-5 pb-3">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-[10px] font-black uppercase tracking-[0.2em] text-foreground/30">{{ t('sidebar.workspace') || 'Workspace' }}</span>
+        <TooltipProvider :delay-duration="300">
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <button
+                class="flex h-5 w-5 items-center justify-center rounded-md border border-black/[0.05] dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] transition-all hover:bg-primary hover:text-white active:scale-90"
+                @click="handleNewConnection"
+              >
+                <Plus class="h-3 w-3" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" class="text-[10px]">{{ t('welcome.newConnection') }}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+
+      <div class="group relative flex items-center">
+        <!-- 物理槽体容器 (Physical Groove Container) -->
+        <div class="absolute inset-0 rounded-xl bg-black/[0.04] dark:bg-white/[0.02] shadow-[inset_0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_1px_rgba(0,0,0,0.04),0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.4),0_1px_0_rgba(255,255,255,0.05)] transition-all duration-300 group-focus-within:bg-white dark:group-focus-within:bg-black/40 group-focus-within:shadow-[inset_0_1px_2px_rgba(0,0,0,0.1),0_0_0_1px_var(--primary)]" />
+        
+        <Search class="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/20 transition-colors group-focus-within:text-primary z-10" />
         <Input
-          class="h-7 border-border bg-background pl-8 pr-10 text-[11px] select-text shadow-none focus-visible:ring-1 focus-visible:ring-primary/40 transition-all hover:bg-background/80"
+          class="h-9 w-full border-none bg-transparent pl-9 pr-10 text-[11px] font-medium placeholder:text-foreground/20 shadow-none focus-visible:ring-0 z-10"
           :placeholder="t('sidebar.searchConnections')"
           :model-value="connectionStore.searchQuery"
           @update:model-value="connectionStore.setSearchQuery($event as string)"
         />
+        <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-focus-within:opacity-100 transition-opacity z-10">
+           <span class="text-[9px] font-bold text-foreground/20 bg-foreground/5 px-1 rounded uppercase">Esc</span>
+        </div>
       </div>
-      <TooltipProvider :delay-duration="300">
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <Button
-              variant="outline"
-              size="icon"
-              class="h-7 w-7 shrink-0 border-border bg-background/50 shadow-none transition-all hover:bg-primary hover:text-primary-foreground hover:border-primary"
-              @click="handleNewConnection"
-            >
-              <Plus class="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom" class="text-[10px] font-medium">{{ t('welcome.newConnection') }}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
     </div>
 
     <!-- Collapsed: 新建按钮 -->
@@ -419,7 +432,7 @@ const groupedNonFavorites = computed(() => {
           <ContextMenu v-for="conn in connectionStore.filteredFavorites" :key="'fav-' + conn.record.id">
             <ContextMenuTrigger>
               <div
-                class="group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 transition-all duration-200 hover:bg-accent active:bg-accent/80 border border-transparent hover:border-border/50"
+                class="group relative flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-1.5 transition-all duration-300 hover:bg-white dark:hover:bg-white/5 active:bg-accent/80 border border-transparent hover:border-border/50 hover:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.05)]"
                 :class="{
                   'opacity-50': draggedConnectionId === conn.record.id,
                   'border-primary/50 bg-primary/5': dragOverConnectionId === conn.record.id,
@@ -527,7 +540,7 @@ const groupedNonFavorites = computed(() => {
             <ContextMenu v-for="conn in group.items" :key="conn.record.id">
               <ContextMenuTrigger>
               <div
-                class="group relative flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 transition-all duration-200 hover:bg-accent active:bg-accent/80 border border-transparent hover:border-border/50"
+                class="group relative flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-1.5 transition-all duration-300 hover:bg-white dark:hover:bg-white/5 active:bg-accent/80 border border-transparent hover:border-border/50 hover:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.05)]"
                 :class="{
                   'opacity-50': draggedConnectionId === conn.record.id,
                   'border-primary/50 bg-primary/5': dragOverConnectionId === conn.record.id,
@@ -655,9 +668,8 @@ const groupedNonFavorites = computed(() => {
       </div>
     </ScrollArea>
 
-    <!-- Footer -->
-    <Separator />
-    <div class="flex items-center px-2 py-2" :class="isCollapsed ? 'flex-col gap-1' : 'justify-between'">
+    <!-- Footer (Industrial Toolset) -->
+    <div class="flex items-center px-3 py-3 bg-black/[0.01] dark:bg-white/[0.01] border-t border-black/[0.02] dark:border-white/5" :class="isCollapsed ? 'flex-col gap-1' : 'justify-between'">
       <TooltipProvider :delay-duration="300">
         <div class="flex items-center" :class="isCollapsed ? 'flex-col gap-1' : 'gap-1'">
           <Tooltip>

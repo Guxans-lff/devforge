@@ -107,46 +107,58 @@ function closeAllTabs() {
 </script>
 
 <template>
-  <div class="relative z-30 flex h-10 items-center border-b border-border/40 bg-background/60 backdrop-blur-md">
-    <ScrollArea orientation="horizontal" class="flex-1">
-      <div class="flex h-10 items-center">
+  <div class="relative z-[35] flex h-11 items-center bg-[#f6f8fa] dark:bg-[#0c0c0e] select-none">
+    <!-- 极星技术底盘 (Subtle Monolithic Dock) -->
+    <div class="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.01)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.01)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none overflow-hidden" />
+    
+    <!-- 底部固态基准线 (Base Foundation Line) -->
+    <div class="absolute bottom-0 left-0 right-0 h-[1px] bg-black/[0.08] dark:bg-white/10 z-0" />
+    <ScrollArea orientation="horizontal" class="flex-1 h-11 relative z-10">
+      <div class="flex h-11 items-center">
         <TooltipProvider :delay-duration="500">
           <Tooltip v-for="tab in workspace.tabs" :key="tab.id">
             <TooltipTrigger as-child>
               <button
-                class="group relative flex h-full items-center gap-2 border-r border-border/30 px-4 text-xs font-medium transition-all duration-200"
+                class="group relative flex h-11 flex-none items-center gap-2.5 px-6 text-[11px] font-bold tracking-tight border-x transition-[background-color,color,border-color,box-shadow] duration-200"
                 :class="[
                   workspace.activeTabId === tab.id
-                    ? 'bg-primary/10 text-primary shadow-[inset_0_1px_1px_rgba(255,255,255,0.1)]'
-                    : 'bg-transparent text-muted-foreground/70 hover:bg-muted/30 hover:text-foreground',
+                    ? 'bg-white dark:bg-[#1a1a1c] text-foreground border-black/[0.08] dark:border-white/10 z-20'
+                    : 'bg-transparent text-muted-foreground/45 border-transparent hover:text-foreground/80 hover:bg-black/[0.02] dark:hover:bg-white/[0.01]',
                 ]"
                 @click="workspace.setActiveTab(tab.id)"
                 @mousedown="handleMiddleClick($event, tab.id)"
                 @contextmenu="handleContextMenu($event, tab.id)"
               >
-                <!-- Active indicator handled by before pseudo-element -->
+                <!-- 顶部精密装饰条 (Top Precision Bar) -->
+                <div 
+                  v-if="workspace.activeTabId === tab.id"
+                  class="absolute top-0 left-[-1px] right-[-1px] h-[2px] bg-primary z-30"
+                />
+                
+                <!-- 底部桥接融合 (Seamless Bridge): Covers the border layer with precision -->
+                <div 
+                  v-if="workspace.activeTabId === tab.id"
+                  class="absolute bottom-0 left-[-1px] right-[-1px] h-[1.5px] translate-y-[0.5px] bg-white dark:bg-[#1a1a1c] z-30"
+                />
 
-                <component :is="getTabIcon(tab.type)" class="h-3.5 w-3.5 shrink-0" />
-                <span class="max-w-[120px] truncate">{{ tab.type === 'welcome' ? t('tab.homepage') : tab.title }}</span>
+                <component :is="getTabIcon(tab.type)" class="h-3.5 w-3.5 shrink-0 transition-colors" :class="{ 'text-primary': workspace.activeTabId === tab.id }" />
+                <span class="max-w-[130px] truncate leading-none mt-[0.5px]">{{ tab.type === 'welcome' ? t('tab.homepage') : tab.title }}</span>
 
                 <!-- Dirty indicator -->
-                <div
-                  v-if="tab.dirty"
-                  class="h-1.5 w-1.5 rounded-full bg-primary"
-                />
+                <div v-if="tab.dirty" class="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(var(--primary),0.6)]" />
 
                 <!-- Close button -->
                 <button
                   v-if="tab.closable"
-                  class="ml-1 rounded p-0.5 opacity-0 transition-opacity duration-[var(--df-duration-fast)] hover:bg-accent group-hover:opacity-100"
-                  :class="{ 'opacity-100': workspace.activeTabId === tab.id }"
+                  class="ml-1 flex h-4 w-4 items-center justify-center rounded-sm opacity-0 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 group-hover:opacity-100"
+                  :class="{ 'opacity-100 text-muted-foreground/30': workspace.activeTabId === tab.id }"
                   @click.stop="workspace.closeTab(tab.id)"
                 >
                   <X class="h-3 w-3" />
                 </button>
               </button>
             </TooltipTrigger>
-            <TooltipContent side="bottom" class="text-xs">
+            <TooltipContent side="bottom" class="text-[10px] font-bold">
               {{ tab.title }}
             </TooltipContent>
           </Tooltip>
@@ -154,8 +166,8 @@ function closeAllTabs() {
       </div>
     </ScrollArea>
 
-    <!-- 右侧功能区 -->
-    <div class="flex h-full items-center gap-1 px-2 border-l border-border/40">
+    <!-- 右侧功能区 (Elevated for interaction) -->
+    <div class="relative z-[100] flex h-full items-center gap-1 px-2 border-l border-black/[0.04] dark:border-white/5 shrink-0 bg-[#f6f8fa] dark:bg-[#0c0c0e]">
       <!-- 消息中心按钮 -->
       <TooltipProvider :delay-duration="300">
         <Tooltip>
@@ -233,3 +245,26 @@ function closeAllTabs() {
     </div>
   </Teleport>
 </template>
+
+<style scoped>
+/* 滚动条彻底静音 (Mute Scrollbars) */
+:deep([data-slot="scroll-area-scrollbar"]) {
+  display: none !important;
+}
+
+:deep([data-slot="scroll-area-viewport"]) {
+  overflow-y: hidden !important;
+  /* 确保视口高度不被 border 挤占 */
+  height: 100% !important;
+}
+
+/* 针对 Webkit 的额外保险 */
+:deep(.scrollbar-none::-webkit-scrollbar) {
+  display: none !important;
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+</style>

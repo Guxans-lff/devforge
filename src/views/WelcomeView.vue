@@ -156,8 +156,10 @@ const statusColorMap: Record<string, string> = {
       <div class="absolute -bottom-[10%] left-[20%] h-[30%] w-[30%] rounded-full bg-emerald-500/10 blur-[120px] animate-blob-slow delay-1000"></div>
     </div>
     
-    <!-- 极细度网格层 -->
-    <div class="absolute inset-0 bg-[linear-gradient(rgba(128,128,128,0.02)_1px,transparent_1px),linear-gradient(90deg,rgba(128,128,128,0.02)_1px,transparent_1px)] bg-[size:40px_40px]"></div>
+    <!-- 旗舰级多层技术网格 (Multi-layer Tech Grid) -->
+    <div class="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.03)_1px,transparent_1px)] bg-[size:64px_64px] dark:bg-[linear-gradient(rgba(255,255,255,0.01)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.01)_1px,transparent_1px)]"></div>
+    <div class="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.015)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.015)_1px,transparent_1px)] bg-[size:16px_16px] dark:bg-[linear-gradient(rgba(255,255,255,0.005)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.005)_1px,transparent_1px)]"></div>
+    <div class="absolute inset-0 bg-gradient-to-b from-background via-transparent to-background/80 pointer-events-none"></div>
 
     <!-- 主容器 -->
     <div class="relative z-10 m-auto flex w-full max-w-5xl flex-col gap-10 px-8 py-16">
@@ -172,12 +174,15 @@ const statusColorMap: Record<string, string> = {
             </div>
           </div>
           <div class="flex flex-col gap-2">
-            <h1 class="text-3xl font-black tracking-tight text-foreground/90 tabular-nums">
-              {{ greeting }}, <span class="bg-gradient-to-br from-primary to-primary/60 bg-clip-text text-transparent">DevForge</span>
+            <h1 class="text-3xl font-black tracking-tighter text-foreground/90 tabular-nums">
+              {{ greeting }}, <span class="bg-gradient-to-br from-primary via-primary/80 to-primary/40 bg-clip-text text-transparent drop-shadow-sm">{{ t('welcome.titleName') || 'DevForge' }}</span>
             </h1>
-            <p class="text-[10px] font-black text-muted-foreground/40 uppercase tracking-[0.3em]">
-              {{ t('welcome.subtitle') }}
-            </p>
+            <div class="flex items-center gap-3">
+              <div class="h-[1px] w-8 bg-primary/20"></div>
+              <p class="text-[10px] font-black text-muted-foreground/30 uppercase tracking-[0.4em]">
+                {{ t('welcome.subtitle') }}
+              </p>
+            </div>
           </div>
         </div>
       </div>
@@ -192,11 +197,14 @@ const statusColorMap: Record<string, string> = {
             <button
               v-for="action in quickActions"
               :key="action.type"
-              class="group relative flex flex-col items-start gap-5 rounded-2xl border border-border/50 bg-card/40 backdrop-blur-xl p-5 transition-all duration-500 hover:border-primary/30 hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.1)] hover:-translate-y-1 active:scale-[0.97]"
+              class="group relative flex flex-col items-start gap-5 rounded-3xl border border-white/80 bg-white/40 dark:border-white/5 dark:bg-card/40 backdrop-blur-3xl p-6 transition-all duration-700 hover:border-primary/30 hover:shadow-[0_32px_64px_-16px_rgba(0,0,0,0.08)] hover:-translate-y-1.5 active:scale-[0.98] overflow-hidden"
               @click="handleQuickAction(action.type)"
             >
-              <!-- Glass Effect Highlight -->
-              <div class="absolute inset-0 rounded-2xl bg-gradient-to-br from-white/[0.03] to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+              <!-- Metallic Reflection Highlight (Day Mode Optimized) -->
+              <div class="absolute inset-0 bg-gradient-to-br from-white/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
+              <div class="absolute -right-4 -bottom-4 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity duration-700">
+                <component :is="action.icon" class="h-24 w-24 rotate-12" />
+              </div>
               
               <div class="flex h-11 w-11 items-center justify-center rounded-xl border border-border/50 bg-muted/20 transition-all duration-500 group-hover:border-primary/20 group-hover:bg-primary/5 group-hover:rotate-3">
                 <component :is="action.icon" class="h-6 w-6 text-muted-foreground/60 group-hover:text-primary transition-colors" />
@@ -208,12 +216,15 @@ const statusColorMap: Record<string, string> = {
             </button>
           </div>
 
-          <!-- 最近连接面板 (Dashboard Refined) -->
-          <div class="flex flex-col rounded-2xl border border-border/50 bg-card/40 backdrop-blur-xl overflow-hidden shadow-sm transition-all duration-500 hover:shadow-md">
-            <div class="flex h-12 items-center justify-between border-b border-border/40 bg-muted/20 px-5">
-              <div class="flex items-center gap-2.5">
-                <div class="h-1.5 w-1.5 rounded-full bg-primary/40 animate-pulse"></div>
-                <span class="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">
+          <!-- 最近连接面板 (Frosted Equipment Module) -->
+          <div class="flex flex-col rounded-[32px] border border-white/60 bg-white/30 dark:border-white/5 dark:bg-card/40 backdrop-blur-3xl overflow-hidden shadow-[0_8px_32px_-8px_rgba(0,0,0,0.04)] transition-all duration-700 hover:shadow-[0_16px_48px_-8px_rgba(0,0,0,0.08)]">
+            <div class="flex h-14 items-center justify-between border-b border-black/[0.03] dark:border-white/5 bg-black/[0.01] dark:bg-muted/20 px-7">
+              <div class="flex items-center gap-3">
+                <div class="relative flex h-2 w-2 items-center justify-center">
+                  <div class="absolute h-full w-full rounded-full bg-primary/20 animate-ping"></div>
+                  <div class="h-1.5 w-1.5 rounded-full bg-primary"></div>
+                </div>
+                <span class="text-[9px] font-black uppercase tracking-[0.3em] text-foreground/40">
                   {{ t('welcome.recentConnections') }}
                 </span>
               </div>
@@ -258,10 +269,10 @@ const statusColorMap: Record<string, string> = {
         <!-- 右侧：工业级快捷键面板 -->
         <div class="lg:col-span-4 flex flex-col gap-8 animate-in fade-in slide-in-from-right-8 duration-1000 delay-500 fill-mode-both">
           
-          <div class="flex flex-col rounded-2xl border border-border/50 bg-card/40 backdrop-blur-xl overflow-hidden transition-all duration-500 hover:shadow-md">
-            <div class="flex h-12 items-center gap-2.5 border-b border-border/40 bg-muted/20 px-5">
-              <Keyboard class="h-4 w-4 text-muted-foreground/40" />
-              <span class="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/60">
+          <div class="flex flex-col rounded-[32px] border border-white/60 bg-white/30 dark:border-white/5 dark:bg-card/40 backdrop-blur-3xl overflow-hidden transition-all duration-700 shadow-[0_8px_32px_-8px_rgba(0,0,0,0.04)] hover:shadow-[0_16px_48px_-8px_rgba(0,0,0,0.08)]">
+            <div class="flex h-14 items-center gap-3.5 border-b border-black/[0.03] dark:border-white/5 bg-black/[0.01] dark:bg-muted/20 px-7">
+              <Keyboard class="h-4 w-4 text-foreground/20" />
+              <span class="text-[9px] font-black uppercase tracking-[0.3em] text-foreground/40">
                   {{ t('welcome.shortcuts') }}
                 </span>
             </div>
@@ -295,12 +306,12 @@ const statusColorMap: Record<string, string> = {
                 <span class="text-[9px] font-black text-emerald-500 uppercase tracking-widest">{{ t('bottomPanel.ready') }}</span>
               </div>
             </div>
-            <div class="group relative rounded-2xl border border-border/50 bg-muted/10 p-3.5 overflow-hidden transition-all hover:bg-muted/20">
-              <div class="absolute top-0 right-0 p-3 opacity-5 group-hover:opacity-10 transition-opacity">
-                <Zap class="h-12 w-12" />
+            <div class="group relative rounded-3xl border border-black/[0.03] dark:border-white/5 bg-black/[0.02] dark:bg-muted/10 p-5 overflow-hidden transition-all duration-500 hover:bg-black/[0.04] dark:hover:bg-muted/20 shadow-inner">
+              <div class="absolute top-0 right-0 p-4 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity duration-700">
+                <Zap class="h-14 w-14 rotate-6" />
               </div>
-              <p class="relative z-10 text-[11px] font-black text-muted-foreground/60 leading-relaxed uppercase tracking-wide">
-                DevForge <span class="text-primary font-black">v{{ appVersion }}</span>. 
+              <p class="relative z-10 text-[11px] font-bold text-foreground/40 leading-relaxed uppercase tracking-widest">
+                DevForge <span class="text-primary/60 font-black">v{{ appVersion }}</span>. 
                 专业、高效、现代的数据库与终端管理工具。
               </p>
             </div>
