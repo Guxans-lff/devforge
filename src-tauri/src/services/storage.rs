@@ -179,6 +179,18 @@ impl Storage {
         .execute(&*pool)
         .await?;
 
+        // 通用 KV 存储表（用于应用状态持久化：设置、工作区、标签页等）
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS app_state (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&*pool)
+        .await?;
+
         Ok(())
     }
 
@@ -831,6 +843,80 @@ impl Storage {
             .await?;
         Ok(())
     }
+
+    // --- App State KV 存储 ---
+
+    /// 获取指定 key 的值
+    pub async fn get_app_state(&self, key: &str) -> Result<Option<AppStateRecord>, AppError> {
+        let row = sqlx::query(
+            "SELECT key, value, version, updated_at FROM app_state WHERE key = ?",
+        )
+        .bind(key)
+        .fetch_optional(&*self.pool().await)
+        .await?;
+
+        Ok(row.map(|r| AppStateRecord {
+            key: r.get("key"),
+            value: r.get("value"),
+            version: r.get("version"),
+            updated_at: r.get("updated_at"),
+        }))
+    }
+
+    /// 设置指定 key 的值（upsert）
+    pub async fn set_app_state(
+        &self,
+        key: &str,
+        value: &str,
+        version: i64,
+    ) -> Result<(), AppError> {
+        let now = Utc::now().timestamp_millis();
+        sqlx::query(
+            "INSERT INTO app_state (key, value, version, updated_at)
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(key) DO UPDATE SET
+               value = excluded.value,
+               version = excluded.version,
+               updated_at = excluded.updated_at",
+        )
+        .bind(key)
+        .bind(value)
+        .bind(version)
+        .bind(now)
+        .execute(&*self.pool().await)
+        .await?;
+        Ok(())
+    }
+
+    /// 删除指定 key
+    pub async fn delete_app_state(&self, key: &str) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM app_state WHERE key = ?")
+            .bind(key)
+            .execute(&*self.pool().await)
+            .await?;
+        Ok(())
+    }
+
+    /// 批量获取匹配前缀的所有 key
+    pub async fn list_app_state(&self, prefix: &str) -> Result<Vec<AppStateRecord>, AppError> {
+        let pattern = format!("{}%", prefix);
+        let rows = sqlx::query(
+            "SELECT key, value, version, updated_at FROM app_state WHERE key LIKE ? ORDER BY key",
+        )
+        .bind(&pattern)
+        .fetch_all(&*self.pool().await)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| AppStateRecord {
+                key: r.get("key"),
+                value: r.get("value"),
+                version: r.get("version"),
+                updated_at: r.get("updated_at"),
+            })
+            .collect())
+    }
 }
 
 // --- Data models for query history and snippets ---
@@ -875,5 +961,14 @@ pub struct CommandSnippetRecord {
     pub category: Option<String>,
     pub sort_order: i64,
     pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// 通用 KV 存储记录
+#[derive(Debug, serde::Serialize)]
+pub struct AppStateRecord {
+    pub key: String,
+    pub value: String,
+    pub version: i64,
     pub updated_at: i64,
 }

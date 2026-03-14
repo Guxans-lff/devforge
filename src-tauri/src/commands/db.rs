@@ -4,10 +4,10 @@ use crate::commands::connection::StorageState;
 use crate::models::connection::{PoolConfig, PoolStatus, ReconnectParams, ReconnectResult, SslConfig};
 use crate::models::import_export::{ExportRequest, ExportResult};
 use crate::models::query::{
-    ApplyChangesResult, ColumnInfo, ConnectResult, CreateUserRequest, DatabaseInfo, MysqlUser, 
-    ProcessInfo, QueryChunk, QueryResult, RoutineInfo, RowChange, ScriptOptions, 
-    ServerStatus, ServerVariable, StatementResult, TableInfo, TriggerInfo, ViewInfo, 
-    detect_statement_type, SqlFileProgress, SqlImportOptions
+    ApplyChangesResult, ColumnInfo, ConnectResult, CreateUserRequest, DatabaseInfo, MysqlUser,
+    ProcessInfo, QueryChunk, QueryResult, RoutineInfo, RowChange, ScriptOptions,
+    ServerStatus, ServerVariable, StatementResult, TableInfo, TriggerInfo, ViewInfo,
+    detect_statement_type, SqlFileProgress, SqlImportOptions, ForeignKeyRelation
 };
 use crate::services::credential::CredentialManager;
 use crate::services::db_engine::{DbEngine, is_select_query};
@@ -21,14 +21,13 @@ pub type DbEngineState = Arc<DbEngine>;
 pub async fn db_connect(
     app: AppHandle,
     connection_id: String,
-) -> Result<ConnectResult, String> {
+) -> Result<ConnectResult, AppError> {
     let storage = app.state::<StorageState>().inner().clone();
     let engine = app.state::<DbEngineState>().inner().clone();
-    
+
     let conn = storage
         .get_connection(&connection_id)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
     let password = match CredentialManager::get(&connection_id) {
         Ok(Some(pw)) => {
@@ -38,20 +37,19 @@ pub async fn db_connect(
         }
         Ok(None) => {
             log::warn!("db_connect: no credential found for '{}' (id={})", conn.name, connection_id);
-            return Err(format!(
+            return Err(AppError::Credential(format!(
                 "No password found for connection '{}'. Please edit the connection and re-enter the password.",
                 conn.name
-            ));
+            )));
         }
         Err(e) => {
             log::error!("db_connect: credential read error for '{}': {}", conn.name, e);
-            return Err(format!("Failed to read credential: {}", e));
+            return Err(AppError::Credential(format!("Failed to read credential: {}", e)));
         }
     };
 
     let config: serde_json::Value =
-        serde_json::from_str(&conn.config_json)
-            .map_err(|e| format!("连接配置数据损坏: {}", e))?;
+        serde_json::from_str(&conn.config_json)?;
 
     let driver = config
         .get("driver")
@@ -79,7 +77,7 @@ pub async fn db_connect(
 
     // 校验连接池参数
     if let Some(ref pc) = pool_config {
-        pc.validate().map_err(|e| e)?;
+        pc.validate().map_err(|e| AppError::Validation(e))?;
     }
 
     engine.clone().connect(
@@ -99,9 +97,9 @@ pub async fn db_connect(
         let detail = format!("[driver={}, user={}, host={}:{}]",
             driver, conn.username, conn.host, conn.port);
         if err_str.contains("Access denied") || err_str.contains("password authentication failed") {
-            format!("{}\n\nThe stored password may be incorrect. Please edit this connection, re-enter the password, and save.\n{}", err_str, detail)
+            AppError::Connection(format!("{}\n\nThe stored password may be incorrect. Please edit this connection, re-enter the password, and save.\n{}", err_str, detail))
         } else {
-            format!("{}  {}", err_str, detail)
+            AppError::Connection(format!("{}  {}", err_str, detail))
         }
     })?;
 
@@ -124,7 +122,7 @@ pub async fn db_connect(
 pub async fn db_disconnect(
     app: AppHandle,
     connection_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.disconnect(connection_id).await;
     Ok(true)
@@ -134,7 +132,7 @@ pub async fn db_disconnect(
 pub async fn db_is_connected(
     app: AppHandle,
     connection_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     Ok(engine.is_connected(connection_id).await)
 }
@@ -145,7 +143,7 @@ pub async fn db_execute_query(
     connection_id: String,
     sql: String,
     timeout_secs: Option<u64>,
-) -> Result<QueryResult, String> {
+) -> Result<QueryResult, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     match engine.execute_query(connection_id, None, sql, timeout_secs).await {
         Ok(result) => Ok(result),
@@ -174,7 +172,7 @@ pub async fn db_execute_query_stream(
     sql: String,
     timeout_secs: Option<u64>,
     on_chunk: Channel<QueryChunk>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     let on_chunk = Arc::new(std::sync::Mutex::new(on_chunk));
     engine
@@ -189,7 +187,6 @@ pub async fn db_execute_query_stream(
             }),
         )
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 在指定数据库上下文中执行查询
@@ -209,7 +206,7 @@ pub async fn db_execute_query_in_database(
     database: String,
     sql: String,
     timeout_secs: Option<u64>,
-) -> Result<QueryResult, String> {
+) -> Result<QueryResult, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     match engine.execute_query_in_database(connection_id, database, sql, timeout_secs).await {
         Ok(result) => Ok(result),
@@ -237,7 +234,7 @@ pub async fn db_execute_query_stream_in_database(
     sql: String,
     timeout_secs: Option<u64>,
     on_chunk: Channel<QueryChunk>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     let on_chunk = Arc::new(std::sync::Mutex::new(on_chunk));
     engine
@@ -252,7 +249,6 @@ pub async fn db_execute_query_stream_in_database(
             }),
         )
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -260,7 +256,7 @@ pub async fn db_execute_multi(
     app: AppHandle,
     connection_id: String,
     statements: Vec<String>,
-) -> Result<Vec<QueryResult>, String> {
+) -> Result<Vec<QueryResult>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     let mut results: Vec<QueryResult> = Vec::new();
 
@@ -321,7 +317,7 @@ pub async fn db_execute_multi_v2(
     database: Option<String>,
     error_strategy: Option<String>,
     timeout_secs: Option<u64>,
-) -> Result<Vec<StatementResult>, String> {
+) -> Result<Vec<StatementResult>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     use crate::services::sql_splitter;
 
@@ -387,7 +383,7 @@ pub async fn db_execute_multi_v2(
 
 
 #[command]
-pub async fn db_pause_sql_import(app: AppHandle, import_id: String) -> Result<(), String> {
+pub async fn db_pause_sql_import(app: AppHandle, import_id: String) -> Result<(), AppError> {
     let _engine = app.state::<DbEngineState>(); 
     if let Some(state) = crate::services::db_engine::get_import_states().read().await.get(&import_id) {
         state.store(1, std::sync::atomic::Ordering::Relaxed);
@@ -396,7 +392,7 @@ pub async fn db_pause_sql_import(app: AppHandle, import_id: String) -> Result<()
 }
 
 #[command]
-pub async fn db_resume_sql_import(app: AppHandle, import_id: String) -> Result<(), String> {
+pub async fn db_resume_sql_import(app: AppHandle, import_id: String) -> Result<(), AppError> {
     let _engine = app.state::<DbEngineState>();
     if let Some(state) = crate::services::db_engine::get_import_states().read().await.get(&import_id) {
         state.store(0, std::sync::atomic::Ordering::Relaxed);
@@ -405,7 +401,7 @@ pub async fn db_resume_sql_import(app: AppHandle, import_id: String) -> Result<(
 }
 
 #[command]
-pub async fn db_cancel_sql_import(app: AppHandle, import_id: String) -> Result<(), String> {
+pub async fn db_cancel_sql_import(app: AppHandle, import_id: String) -> Result<(), AppError> {
     let _engine = app.state::<DbEngineState>();
     if let Some(state) = crate::services::db_engine::get_import_states().read().await.get(&import_id) {
         state.store(2, std::sync::atomic::Ordering::Relaxed);
@@ -422,22 +418,20 @@ pub async fn db_run_sql_file_stream(
     options: SqlImportOptions,
     database: Option<String>,
     on_progress: Channel<SqlFileProgress>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.run_sql_file_stream(connection_id, import_id, file_path, options, database, on_progress)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
 pub async fn db_get_databases(
     app: AppHandle,
     connection_id: String,
-) -> Result<Vec<DatabaseInfo>, String> {
+) -> Result<Vec<DatabaseInfo>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_databases(connection_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -445,11 +439,10 @@ pub async fn db_get_tables(
     app: AppHandle,
     connection_id: String,
     database: String,
-) -> Result<Vec<TableInfo>, String> {
+) -> Result<Vec<TableInfo>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_tables(connection_id, database)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -458,11 +451,10 @@ pub async fn db_get_columns(
     connection_id: String,
     database: String,
     table: String,
-) -> Result<Vec<ColumnInfo>, String> {
+) -> Result<Vec<ColumnInfo>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_columns(connection_id, database, table)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -475,11 +467,10 @@ pub async fn db_get_table_data(
     page_size: u32,
     where_clause: Option<String>,
     order_by: Option<String>,
-) -> Result<QueryResult, String> {
+) -> Result<QueryResult, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_table_data(connection_id, database, table, page, page_size, where_clause, order_by)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -488,22 +479,20 @@ pub async fn db_get_create_table(
     connection_id: String,
     database: String,
     table: String,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_create_table(connection_id, database, table)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
 pub async fn db_cancel_query(
     app: AppHandle,
     connection_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().cancel_query(connection_id)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     Ok(true)
 }
 
@@ -512,11 +501,10 @@ pub async fn db_get_views(
     app: AppHandle,
     connection_id: String,
     database: String,
-) -> Result<Vec<ViewInfo>, String> {
+) -> Result<Vec<ViewInfo>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_views(connection_id, database)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -524,11 +512,10 @@ pub async fn db_get_procedures(
     app: AppHandle,
     connection_id: String,
     database: String,
-) -> Result<Vec<RoutineInfo>, String> {
+) -> Result<Vec<RoutineInfo>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_routines(connection_id, database, "PROCEDURE".to_string())
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -536,11 +523,10 @@ pub async fn db_get_functions(
     app: AppHandle,
     connection_id: String,
     database: String,
-) -> Result<Vec<RoutineInfo>, String> {
+) -> Result<Vec<RoutineInfo>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_routines(connection_id, database, "FUNCTION".to_string())
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -548,11 +534,10 @@ pub async fn db_get_triggers(
     app: AppHandle,
     connection_id: String,
     database: String,
-) -> Result<Vec<TriggerInfo>, String> {
+) -> Result<Vec<TriggerInfo>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_triggers(connection_id, database)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -562,11 +547,10 @@ pub async fn db_get_object_definition(
     database: String,
     name: String,
     object_type: String,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_object_definition(connection_id, database, name, object_type)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 获取连接池状态（活跃/空闲连接数）
@@ -574,10 +558,9 @@ pub async fn db_get_object_definition(
 pub async fn db_get_pool_status(
     app: AppHandle,
     connection_id: String,
-) -> Result<PoolStatus, String> {
+) -> Result<PoolStatus, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
-    let res: Result<PoolStatus, AppError> = engine.clone().get_pool_status(connection_id).await;
-    res.map_err(|e| e.to_string())
+    engine.clone().get_pool_status(connection_id).await
 }
 
 /// 检查连接状态并在断开时自动重连
@@ -589,10 +572,9 @@ pub async fn db_check_and_reconnect(
     app: AppHandle,
     connection_id: String,
     reconnect_params: ReconnectParams,
-) -> Result<ReconnectResult, String> {
+) -> Result<ReconnectResult, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
-    let res: Result<ReconnectResult, AppError> = engine.clone().check_and_reconnect(connection_id, reconnect_params).await;
-    res.map_err(|e| e.to_string())
+    engine.clone().check_and_reconnect(connection_id, reconnect_params).await
 }
 
 /// 开始事务
@@ -602,12 +584,11 @@ pub async fn db_check_and_reconnect(
 pub async fn db_begin_transaction(
     app: AppHandle,
     connection_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .begin_transaction(connection_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 提交事务
@@ -617,12 +598,11 @@ pub async fn db_begin_transaction(
 pub async fn db_commit(
     app: AppHandle,
     connection_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .commit_transaction(connection_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 回滚事务
@@ -632,12 +612,11 @@ pub async fn db_commit(
 pub async fn db_rollback(
     app: AppHandle,
     connection_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .rollback_transaction(connection_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 获取 SQL 执行计划
@@ -656,7 +635,7 @@ pub async fn db_explain(
     connection_id: String,
     sql: String,
     format: String,
-) -> Result<QueryResult, String> {
+) -> Result<QueryResult, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     let explain_sql = match format.as_str() {
         "json" => format!("EXPLAIN FORMAT=JSON {}", sql.trim()),
@@ -691,44 +670,46 @@ pub async fn db_apply_row_changes(
     app: AppHandle,
     connection_id: String,
     changes: Vec<RowChange>,
-) -> Result<ApplyChangesResult, String> {
+) -> Result<ApplyChangesResult, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .apply_row_changes(connection_id, changes)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 读取文本文件内容（用于运行 SQL 文件等场景）
 #[command]
-pub async fn read_text_file(path: String) -> Result<String, String> {
+pub async fn read_text_file(path: String) -> Result<String, AppError> {
     let raw = std::path::Path::new(&path);
 
     if !raw.is_absolute() {
-        return Err("Read denied: path must be absolute".to_string());
+        return Err(AppError::Validation("Read denied: path must be absolute".into()));
     }
 
     if !raw.exists() {
-        return Err(format!("File not found: {}", path));
+        return Err(AppError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("File not found: {}", path),
+        )));
     }
 
     tokio::fs::read_to_string(raw)
         .await
-        .map_err(|e| format!("Failed to read file: {}", e))
+        .map_err(AppError::from)
 }
 
 #[command]
-pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
+pub async fn write_text_file(path: String, content: String) -> Result<(), AppError> {
     let raw = std::path::Path::new(&path);
 
     // 路径必须是绝对路径
     if !raw.is_absolute() {
-        return Err("Write denied: path must be absolute".to_string());
+        return Err(AppError::Validation("Write denied: path must be absolute".into()));
     }
 
     let target = raw
         .canonicalize()
-        .map_err(|_| "Write denied: invalid or non-existent parent directory".to_string())?;
+        .map_err(|_| AppError::Validation("Write denied: invalid or non-existent parent directory".into()))?;
 
     // 限制写入路径到用户文档目录和下载目录
     let allowed = if let Some(dirs) = directories::UserDirs::new() {
@@ -755,12 +736,12 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
     };
 
     if !allowed {
-        return Err("Write denied: path must be within Documents, Downloads, or Desktop directory".to_string());
+        return Err(AppError::Permission("Write denied: path must be within Documents, Downloads, or Desktop directory".into()));
     }
 
     tokio::fs::write(&target, content.as_bytes())
         .await
-        .map_err(|e| format!("Failed to write file: {}", e))
+        .map_err(AppError::from)
 }
 
 // ===== 性能监控命令 =====
@@ -770,12 +751,11 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
 pub async fn db_get_server_status(
     app: AppHandle,
     connection_id: String,
-) -> Result<ServerStatus, String> {
+) -> Result<ServerStatus, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .get_server_status(connection_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 获取进程列表
@@ -783,12 +763,11 @@ pub async fn db_get_server_status(
 pub async fn db_get_process_list(
     app: AppHandle,
     connection_id: String,
-) -> Result<Vec<ProcessInfo>, String> {
+) -> Result<Vec<ProcessInfo>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .get_process_list(connection_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 终止指定进程
@@ -797,12 +776,11 @@ pub async fn db_kill_process(
     app: AppHandle,
     connection_id: String,
     process_id: u64,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .kill_process(connection_id, process_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 获取服务器变量
@@ -810,12 +788,11 @@ pub async fn db_kill_process(
 pub async fn db_get_server_variables(
     app: AppHandle,
     connection_id: String,
-) -> Result<Vec<ServerVariable>, String> {
+) -> Result<Vec<ServerVariable>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .get_server_variables(connection_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 // ===== 用户权限管理命令 =====
@@ -825,12 +802,11 @@ pub async fn db_get_server_variables(
 pub async fn db_get_users(
     app: AppHandle,
     connection_id: String,
-) -> Result<Vec<MysqlUser>, String> {
+) -> Result<Vec<MysqlUser>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .get_users(connection_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 创建新用户
@@ -839,12 +815,11 @@ pub async fn db_create_user(
     app: AppHandle,
     connection_id: String,
     request: CreateUserRequest,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .create_user(connection_id, request)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 删除用户
@@ -854,12 +829,11 @@ pub async fn db_drop_user(
     connection_id: String,
     username: String,
     host: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .drop_user(connection_id, username, host)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 获取用户权限
@@ -869,12 +843,11 @@ pub async fn db_get_user_grants(
     connection_id: String,
     username: String,
     host: String,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .get_user_grants(username, host, connection_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 批量执行 GRANT/REVOKE 语句
@@ -883,12 +856,11 @@ pub async fn db_apply_grants(
     app: AppHandle,
     connection_id: String,
     statements: Vec<String>,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .apply_grants(statements, connection_id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 // ===== 数据导出命令 =====
@@ -911,12 +883,11 @@ pub async fn db_export_data(
     app: AppHandle,
     connection_id: String,
     request: ExportRequest,
-) -> Result<ExportResult, String> {
+) -> Result<ExportResult, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .export_data(connection_id, request, app)
         .await
-        .map_err(|e| e.to_string())
 }
 
 // ===== DDL 脚本生成命令 =====
@@ -946,12 +917,11 @@ pub async fn db_generate_script(
     object_name: String,
     script_type: String,
     options: ScriptOptions,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .generate_script(connection_id, database, object_name, script_type, options)
         .await
-        .map_err(|e| e.to_string())
 }
 
 /// 导出整个数据库的 DDL 结构脚本
@@ -972,12 +942,11 @@ pub async fn db_export_database_ddl(
     connection_id: String,
     database: String,
     options: ScriptOptions,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .export_database_ddl(connection_id, database, options)
         .await
-        .map_err(|e| e.to_string())
 }
 
 // ===== Session 连接管理（企业级模式） =====
@@ -991,12 +960,11 @@ pub async fn db_acquire_session(
     app: AppHandle,
     connection_id: String,
     tab_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .acquire_session(connection_id, tab_id)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     Ok(true)
 }
 
@@ -1008,7 +976,7 @@ pub async fn db_release_session(
     app: AppHandle,
     connection_id: String,
     tab_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .release_session(connection_id, tab_id)
@@ -1026,12 +994,11 @@ pub async fn db_switch_database(
     connection_id: String,
     tab_id: String,
     database: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone()
         .switch_session_database(connection_id, tab_id, database)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     Ok(true)
 }
 
@@ -1047,7 +1014,7 @@ pub async fn db_execute_query_on_session(
     database: Option<String>,
     sql: String,
     timeout_secs: Option<u64>,
-) -> Result<QueryResult, String> {
+) -> Result<QueryResult, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     match engine.execute_query_on_session(connection_id, tab_id, database, sql, timeout_secs).await {
         Ok(result) => Ok(result),
@@ -1065,10 +1032,10 @@ pub async fn db_execute_query_stream_on_session(
     sql: String,
     timeout_secs: Option<u64>,
     on_chunk: Channel<QueryChunk>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     let on_chunk = Arc::new(std::sync::Mutex::new(on_chunk));
-    
+
     engine.execute_query_stream_on_session(
         connection_id,
         tab_id,
@@ -1079,5 +1046,18 @@ pub async fn db_execute_query_stream_on_session(
             let ch = on_chunk.lock().map_err(|e| e.to_string())?;
             ch.send(chunk).map_err(|e| e.to_string())
         }),
-    ).await.map_err(|e| e.to_string())
+    ).await
+}
+
+/// 获取指定数据库中所有外键关系（用于 SQL 补全 JOIN 推荐）
+#[command]
+pub async fn db_get_foreign_keys(
+    app: AppHandle,
+    connection_id: String,
+    database: String,
+) -> Result<Vec<ForeignKeyRelation>, AppError> {
+    let engine = app.state::<DbEngineState>().inner().clone();
+    engine
+        .get_foreign_keys(connection_id, database)
+        .await
 }

@@ -38,7 +38,9 @@ pub async fn connect(
         .idle_timeout(Duration::from_secs(
             pool_config.map(|c| c.idle_timeout_secs).unwrap_or(1800)
         ))
+        .max_lifetime(Duration::from_secs(3600)) // 连接最长存活 1 小时，防止服务端静默断开
         .acquire_timeout(Duration::from_secs(5))
+        .test_before_acquire(true) // 每次取连接前 ping 检活，避免使用已断开的连接
         .connect_with(options)
         .await
         .map_err(|e| AppError::Other(format!("MySQL connection failed: {}", e)))?;

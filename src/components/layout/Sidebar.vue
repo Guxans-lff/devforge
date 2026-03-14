@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, nextTick } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connections'
@@ -15,15 +15,13 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import ConnectionDialog from '@/components/connection/ConnectionDialog.vue'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast } from '@/composables/useToast'
-import { parseIsFavorite, updateConnection } from '@/api/connection'
+import { parseIsFavorite, parseEnvironment, updateConnection } from '@/api/connection'
+import { ENV_PRESETS, type EnvironmentType } from '@/types/environment'
 import {
   Database,
   Terminal,
@@ -44,8 +42,6 @@ import {
   Star,
   StarOff,
   Copy,
-  FolderInput,
-  Palette,
   X,
   ChevronDown,
 } from 'lucide-vue-next'
@@ -115,11 +111,6 @@ const themeIcon = computed(() => {
 })
 
 // 连接类型标签
-const typeLabels: Record<string, string> = {
-  database: 'DB',
-  ssh: 'SSH',
-  sftp: 'SFTP',
-}
 
 const typeBadgeColors: Record<string, string> = {
   database: 'bg-muted/20 text-muted-foreground group-hover:text-blue-500 group-hover:bg-blue-500/10 group-hover:border-blue-500/30',
@@ -131,7 +122,14 @@ const statusColors: Record<string, string> = {
   connected: 'bg-emerald-500 shadow-emerald-500/40 shadow-[0_0_4px]',
   disconnected: 'bg-muted-foreground/30',
   connecting: 'bg-amber-500 animate-pulse',
-  error: 'bg-destructive shadow-destructive/40 shadow-[0_0_4px]',
+  error: 'bg-destructive shadow-destructive/40 shadow-[0_0_4px] animate-shake',
+}
+
+/** 根据连接状态返回图标附加动画 class */
+function iconAnimClass(status: string): string {
+  if (status === 'connecting') return 'animate-spin'
+  if (status === 'error') return 'text-destructive'
+  return ''
 }
 
 const typeIcons: Record<string, typeof Database> = {
@@ -232,25 +230,7 @@ async function handleDuplicateConnection(conn: ConnectionRecord) {
   }
 }
 
-// --- 移动到分组 ---
-async function handleMoveToGroup(connectionId: string, groupId: string | null) {
-  try {
-    await connectionStore.moveConnectionToGroup(connectionId, groupId)
-  } catch (e) {
-    toast.error(t('connection.moveFailed'), String(e))
-  }
-}
-
 // --- 颜色标签 ---
-function openColorPicker(connectionId: string, event: MouseEvent) {
-  colorPickerConnectionId.value = connectionId
-  colorPickerPosition.value = { x: event.clientX, y: event.clientY }
-  // 延迟显示，避免被 document click 立即关闭
-  nextTick(() => {
-    showColorPicker.value = true
-  })
-}
-
 function closeColorPicker() {
   showColorPicker.value = false
   colorPickerConnectionId.value = null
@@ -329,6 +309,15 @@ function onDragEnd() {
 /** 判断连接是否为收藏 */
 function isFavorite(conn: ConnectionRecord): boolean {
   return parseIsFavorite(conn.configJson)
+}
+
+/** 获取连接的环境类型（仅数据库类型连接） */
+function getEnvironment(conn: ConnectionRecord): EnvironmentType | null {
+  if (conn.type !== 'database') return null
+  const env = parseEnvironment(conn.configJson)
+  // 仅对 production/staging 显示标记
+  if (env === 'production' || env === 'staging') return env
+  return null
 }
 
 /** 将非收藏连接按类型分组 */
@@ -454,7 +443,7 @@ const groupedNonFavorites = computed(() => {
                 <div class="relative flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border/10 transition-all duration-300"
                      :class="[typeBadgeColors[conn.record.type] ?? 'bg-muted text-muted-foreground']"
                      :style="conn.record.color ? { marginLeft: '4px' } : {}">
-                  <component :is="typeIcons[conn.record.type] ?? Database" class="h-3.5 w-3.5" />
+                  <component :is="typeIcons[conn.record.type] ?? Database" class="h-3.5 w-3.5" :class="iconAnimClass(conn.status)" />
                   <div class="absolute -bottom-0.5 -right-0.5 h-2 w-2.5 rounded-full border border-background flex items-center justify-center overflow-hidden bg-background shadow-xs">
                     <div class="relative h-1.5 w-1.5 rounded-full" :class="statusColors[conn.status] ?? 'bg-muted-foreground/30'" />
                   </div>
@@ -465,6 +454,15 @@ const groupedNonFavorites = computed(() => {
                   <div class="flex items-center gap-1">
                     <p class="truncate text-[12px] font-semibold text-foreground/90 group-hover:text-primary transition-colors">{{ conn.record.name }}</p>
                     <Star class="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
+                    <!-- 环境标记 -->
+                    <span
+                      v-if="getEnvironment(conn.record)"
+                      class="shrink-0 rounded px-1 py-px text-[8px] font-bold uppercase leading-none"
+                      :style="{
+                        color: ENV_PRESETS[getEnvironment(conn.record)!].color,
+                        backgroundColor: ENV_PRESETS[getEnvironment(conn.record)!].color + '18',
+                      }"
+                    >{{ getEnvironment(conn.record) === 'production' ? 'PROD' : 'STG' }}</span>
                   </div>
                   <p class="truncate text-[10px] text-muted-foreground/50 font-mono tracking-tight">{{ conn.record.host }}</p>
                 </div>
@@ -553,7 +551,7 @@ const groupedNonFavorites = computed(() => {
                 <div class="relative flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border/10 transition-all duration-300"
                      :class="[typeBadgeColors[conn.record.type] ?? 'bg-muted text-muted-foreground']"
                      :style="conn.record.color ? { marginLeft: '4px' } : {}">
-                  <component :is="typeIcons[conn.record.type] ?? Database" class="h-3.5 w-3.5" />
+                  <component :is="typeIcons[conn.record.type] ?? Database" class="h-3.5 w-3.5" :class="iconAnimClass(conn.status)" />
                   <div class="absolute -bottom-0.5 -right-0.5 h-2 w-2.5 rounded-full border border-background flex items-center justify-center overflow-hidden bg-background shadow-xs">
                     <div class="relative h-1.5 w-1.5 rounded-full" :class="statusColors[conn.status] ?? 'bg-muted-foreground/30'" />
                   </div>
@@ -561,7 +559,18 @@ const groupedNonFavorites = computed(() => {
 
                 <!-- 信息 -->
                 <div class="min-w-0 flex-1">
-                  <p class="truncate text-[12px] font-semibold text-foreground/90 group-hover:text-primary transition-colors">{{ conn.record.name }}</p>
+                  <div class="flex items-center gap-1">
+                    <p class="truncate text-[12px] font-semibold text-foreground/90 group-hover:text-primary transition-colors">{{ conn.record.name }}</p>
+                    <!-- 环境标记 -->
+                    <span
+                      v-if="getEnvironment(conn.record)"
+                      class="shrink-0 rounded px-1 py-px text-[8px] font-bold uppercase leading-none"
+                      :style="{
+                        color: ENV_PRESETS[getEnvironment(conn.record)!].color,
+                        backgroundColor: ENV_PRESETS[getEnvironment(conn.record)!].color + '18',
+                      }"
+                    >{{ getEnvironment(conn.record) === 'production' ? 'PROD' : 'STG' }}</span>
+                  </div>
                   <div class="flex items-center gap-1.5 overflow-hidden">
                     <p class="truncate text-[10px] text-muted-foreground/50 font-mono tracking-tight">{{ conn.record.host }}</p>
                   </div>
@@ -618,7 +627,7 @@ const groupedNonFavorites = computed(() => {
                 @dblclick="handleDoubleClick(conn)"
               >
                 <div class="flex h-7 w-7 items-center justify-center rounded-md" :class="typeBadgeColors[conn.record.type] ?? 'bg-muted text-muted-foreground'">
-                  <component :is="typeIcons[conn.record.type] ?? Database" class="h-3.5 w-3.5" />
+                  <component :is="typeIcons[conn.record.type] ?? Database" class="h-3.5 w-3.5" :class="iconAnimClass(conn.status)" />
                 </div>
                 <div
                   class="absolute bottom-1 right-1 h-2 w-2 rounded-full border border-sidebar"

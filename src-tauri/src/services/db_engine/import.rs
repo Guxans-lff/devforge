@@ -102,7 +102,6 @@ impl DbEngine {
                         executed += query_buffer.len();
                         fail += query_buffer.len();
                         query_buffer.clear();
-                        buffer_size = 0;
                     }
                     cancelled = true;
                     break;
@@ -169,7 +168,6 @@ impl DbEngine {
                                 fail += batch_count;
                                 cancelled = true;
                                 query_buffer.clear();
-                                buffer_size = 0;
                                 break;
                             }
                             match result {
@@ -190,7 +188,6 @@ impl DbEngine {
                             fail += batch_count;
                             cancelled = true;
                             query_buffer.clear();
-                            buffer_size = 0;
                             break;
                         }
                     }

@@ -1,7 +1,29 @@
 import { onBeforeUnmount, type Ref } from 'vue'
 import * as monaco from 'monaco-editor'
-import type { SchemaCache } from '@/types/database'
+import type { SchemaCache, ColumnInfo } from '@/types/database'
 import { getSnippetTemplates, getExtraFunctions } from '@/utils/sqlSnippets'
+import { getCompletionScore, recordCompletionUsage } from '@/utils/completionFrequency'
+
+// ── 全局命令：记录补全项选择频率（仅注册一次）──
+let recordCommandRegistered = false
+const RECORD_COMMAND_ID = 'devforge.recordCompletion'
+
+function ensureRecordCommandRegistered() {
+  if (recordCommandRegistered) return
+  recordCommandRegistered = true
+  monaco.editor.registerCommand(RECORD_COMMAND_ID, (_accessor, label: string) => {
+    if (label) recordCompletionUsage(label)
+  })
+}
+
+/** 构建补全项的 command 字段，用于在用户确认选择时记录频率 */
+function makeRecordCommand(label: string): monaco.languages.Command {
+  return {
+    id: RECORD_COMMAND_ID,
+    title: '记录补全选择',
+    arguments: [label],
+  }
+}
 
 // SQL keywords for completion
 const SQL_KEYWORDS = [
@@ -30,14 +52,15 @@ const SQL_FUNCTIONS = [
   'DENSE_RANK', 'LAG', 'LEAD', 'FIRST_VALUE', 'LAST_VALUE',
 ]
 
-// 模块级缓存：预构建静态建议项（不含 range，运行时合并）
+// ── 模块级缓存：预构建静态建议项（不含 range，运行时合并）──
+
 type PartialSuggestion = Omit<monaco.languages.CompletionItem, 'range'>
 
 const cachedKeywordSuggestions: PartialSuggestion[] = SQL_KEYWORDS.map(kw => ({
   label: kw,
   kind: monaco.languages.CompletionItemKind.Keyword,
   insertText: kw,
-  sortText: '5_' + kw,
+  sortText: buildSortText(5, kw),
 }))
 
 const cachedFunctionSuggestions: PartialSuggestion[] = SQL_FUNCTIONS.map(fn => ({
@@ -46,7 +69,7 @@ const cachedFunctionSuggestions: PartialSuggestion[] = SQL_FUNCTIONS.map(fn => (
   insertText: fn + '($0)',
   insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
   detail: 'Function',
-  sortText: '4_' + fn,
+  sortText: buildSortText(4, fn),
 }))
 
 // 按 driver 缓存 snippet/extraFn 建议项
@@ -63,7 +86,7 @@ function getCachedSnippets(driverKey: string): PartialSuggestion[] {
       insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
       detail: s.detail,
       documentation: s.documentation,
-      sortText: '6_' + s.label,
+      sortText: buildSortText(6, String(s.label)),
     }))
     snippetCache.set(driverKey, cached)
   }
@@ -80,23 +103,37 @@ function getCachedExtraFns(driverKey: string): PartialSuggestion[] {
       insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
       detail: fn.detail,
       documentation: fn.documentation,
-      sortText: '4_' + fn.label,
+      sortText: buildSortText(4, String(fn.label)),
     }))
     extraFnCache.set(driverKey, cached)
   }
   return cached
 }
 
-// Context detection: what kind of token precedes the cursor
+// ── 频率排序 ──
+
+/**
+ * 构建 Monaco sortText：优先级分组 + 频率分数 + 标签名
+ * Monaco 按字典序排列 sortText，值越小越靠前。
+ * 频率分数 0.0-1.0 映射为 z(低频)-a(高频)。
+ */
+function buildSortText(priority: number, label: string): string {
+  const score = getCompletionScore(label)
+  // 分数越高 → 字符越小 → 排越前
+  const scoreChar = String.fromCharCode(122 - Math.floor(score * 25))
+  return `${priority}_${scoreChar}_${label}`
+}
+
+// ── 上下文检测 ──
+
+/** 检测光标前的 SQL 上下文类型 */
 function getContextKeyword(textBeforeCursor: string): string | null {
-  // Remove string literals and comments
   const cleaned = textBeforeCursor
     .replace(/'[^']*'/g, '')
     .replace(/"[^"]*"/g, '')
     .replace(/--.*$/gm, '')
     .replace(/\/\*[\s\S]*?\*\//g, '')
 
-  // Find the last significant SQL keyword before cursor
   const tokens = cleaned.toUpperCase().split(/\s+/).filter(Boolean)
 
   for (let i = tokens.length - 1; i >= 0; i--) {
@@ -115,11 +152,9 @@ function getContextKeyword(textBeforeCursor: string): string | null {
   return null
 }
 
-// Extract table alias mappings from SQL text
-// Handles: FROM users u, FROM users AS u, JOIN orders o, JOIN orders AS o
+/** 提取 SQL 中的表别名映射 */
 function extractTableAliases(text: string): Map<string, string> {
   const aliasMap = new Map<string, string>()
-  // Clean string literals and comments
   const cleaned = text
     .replace(/'[^']*'/g, '')
     .replace(/"[^"]*"/g, '')
@@ -133,7 +168,6 @@ function extractTableAliases(text: string): Map<string, string> {
     const alias = match[3]
     if (alias) {
       const upper = alias.toUpperCase()
-      // Skip SQL keywords that look like aliases
       if (['ON', 'WHERE', 'SET', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'CROSS',
         'FULL', 'JOIN', 'AND', 'OR', 'ORDER', 'GROUP', 'HAVING', 'LIMIT',
         'UNION', 'INTO', 'VALUES', 'AS'].includes(upper)) continue
@@ -143,7 +177,7 @@ function extractTableAliases(text: string): Map<string, string> {
   return aliasMap
 }
 
-// Detect table names referenced in the query
+/** 提取 SQL 中引用的表名列表 */
 function extractTableContext(textBeforeCursor: string): string[] {
   const tablePattern = /(?:FROM|JOIN|UPDATE|INTO)\s+(?:`?(\w+)`?\.)?`?(\w+)`?/gi
   const tables: string[] = []
@@ -155,6 +189,184 @@ function extractTableContext(textBeforeCursor: string): string[] {
   }
   return tables
 }
+
+// ── CTE 解析 ──
+
+/**
+ * 解析 SQL 中的 CTE 定义名称
+ * 匹配 WITH name AS (...), name2 AS (...) 格式
+ */
+function extractCteNames(text: string): string[] {
+  const cleaned = text
+    .replace(/'[^']*'/g, '')
+    .replace(/"[^"]*"/g, '')
+    .replace(/--.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+
+  const names: string[] = []
+  const withPattern = /\bWITH\s+(?:RECURSIVE\s+)?/gi
+  const match = withPattern.exec(cleaned)
+  if (!match) return names
+
+  const afterWith = cleaned.substring(match.index + match[0].length)
+  const ctePattern = /(\w+)\s+AS\s*\(/gi
+  let cteMatch
+  while ((cteMatch = ctePattern.exec(afterWith)) !== null) {
+    names.push(cteMatch[1]!)
+  }
+
+  return names
+}
+
+// ── JOIN ON 智能推荐 ──
+
+/** 简单英语单数化（users → user, categories → category） */
+function singularize(name: string): string {
+  const lower = name.toLowerCase()
+  if (lower.endsWith('ies')) return lower.slice(0, -3) + 'y'
+  if (lower.endsWith('ses') || lower.endsWith('xes') || lower.endsWith('zes')) return lower.slice(0, -2)
+  if (lower.endsWith('s') && !lower.endsWith('ss')) return lower.slice(0, -1)
+  return lower
+}
+
+/** 从别名映射中反查表名对应的别名 */
+function findAlias(aliasMap: Map<string, string>, tableName: string): string {
+  for (const [alias, tbl] of aliasMap) {
+    if (tbl === tableName) return alias
+  }
+  return tableName
+}
+
+/**
+ * 基于命名模式推测 JOIN 条件
+ * 规则：tableA 有 "tableB_id" 列且 tableB 有 "id" 列 → tableA.tableB_id = tableB.id
+ */
+function guessJoinCondition(
+  tableA: string, colsA: ColumnInfo[],
+  tableB: string, colsB: ColumnInfo[],
+): Array<{ leftCol: string; rightCol: string }> {
+  const results: Array<{ leftCol: string; rightCol: string }> = []
+  const singularB = singularize(tableB)
+  const singularA = singularize(tableA)
+
+  // A 中有 B_id 样式的列
+  for (const col of colsA) {
+    const lower = col.name.toLowerCase()
+    if (lower === `${singularB}_id` || lower === `${tableB.toLowerCase()}_id`) {
+      const pkCol = colsB.find(c => c.isPrimaryKey) || colsB.find(c => c.name.toLowerCase() === 'id')
+      if (pkCol) {
+        results.push({ leftCol: col.name, rightCol: pkCol.name })
+      }
+    }
+  }
+
+  // B 中有 A_id 样式的列（反向）
+  for (const col of colsB) {
+    const lower = col.name.toLowerCase()
+    if (lower === `${singularA}_id` || lower === `${tableA.toLowerCase()}_id`) {
+      const pkCol = colsA.find(c => c.isPrimaryKey) || colsA.find(c => c.name.toLowerCase() === 'id')
+      if (pkCol) {
+        results.push({ leftCol: pkCol.name, rightCol: col.name })
+      }
+    }
+  }
+
+  return results
+}
+
+/**
+ * 检测 JOIN tableName 上下文，生成 ON 条件补全建议
+ * 策略 1：基于外键关系精确推荐
+ * 策略 2：基于命名模式推测
+ */
+function buildJoinOnSuggestions(
+  textBeforeCursor: string,
+  schema: SchemaCache | null,
+  range: monaco.IRange,
+): monaco.languages.CompletionItem[] {
+  if (!schema) return []
+
+  // 检测模式: ... JOIN tableName [AS alias] ⌃（空格结尾，尚未输入 ON）
+  const joinPattern = /(?:JOIN)\s+(?:`?(\w+)`?\.)?`?(\w+)`?(?:\s+(?:AS\s+)?(\w+))?\s+$/i
+  const match = joinPattern.exec(textBeforeCursor)
+  if (!match) return []
+
+  const joinedTable = match[2]!
+  const joinedAlias = match[3] || joinedTable
+
+  const aliasMap = extractTableAliases(textBeforeCursor)
+  const mainTables = extractTableContext(textBeforeCursor)
+    .filter(t => t !== joinedTable)
+
+  const suggestions: monaco.languages.CompletionItem[] = []
+
+  // 策略 1：基于外键关系
+  for (const [, dbSchema] of schema.databases) {
+    if (!dbSchema.foreignKeys) continue
+    for (const fk of dbSchema.foreignKeys) {
+      // joinedTable 有外键指向某个已出现的表
+      if (fk.tableName === joinedTable && mainTables.includes(fk.referencedTableName)) {
+        const mainAlias = findAlias(aliasMap, fk.referencedTableName)
+        const text = `ON ${joinedAlias}.${fk.columnName} = ${mainAlias}.${fk.referencedColumnName}`
+        suggestions.push({
+          label: text,
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: text,
+          range,
+          detail: '🔗 外键关系',
+          sortText: '0_join_a_' + fk.columnName,
+          preselect: true,
+        })
+      }
+      // 某个已出现的表有外键指向 joinedTable
+      if (fk.referencedTableName === joinedTable && mainTables.includes(fk.tableName)) {
+        const mainAlias = findAlias(aliasMap, fk.tableName)
+        const text = `ON ${mainAlias}.${fk.columnName} = ${joinedAlias}.${fk.referencedColumnName}`
+        suggestions.push({
+          label: text,
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: text,
+          range,
+          detail: '🔗 外键关系',
+          sortText: '0_join_a_' + fk.columnName,
+          preselect: true,
+        })
+      }
+    }
+  }
+
+  // 策略 2：命名模式推测（仅在外键无结果时）
+  if (suggestions.length === 0) {
+    for (const [, dbSchema] of schema.databases) {
+      const joinedTableSchema = dbSchema.tables.get(joinedTable)
+      if (!joinedTableSchema) continue
+      for (const mainTable of mainTables) {
+        const mainSchema = dbSchema.tables.get(mainTable)
+        if (!mainSchema) continue
+        const guesses = guessJoinCondition(
+          joinedTable, joinedTableSchema.columns,
+          mainTable, mainSchema.columns,
+        )
+        const mainAlias = findAlias(aliasMap, mainTable)
+        for (const g of guesses) {
+          const text = `ON ${joinedAlias}.${g.leftCol} = ${mainAlias}.${g.rightCol}`
+          suggestions.push({
+            label: text,
+            kind: monaco.languages.CompletionItemKind.Snippet,
+            insertText: text,
+            range,
+            detail: '💡 命名推测',
+            sortText: '0_join_b_' + g.leftCol,
+          })
+        }
+      }
+    }
+  }
+
+  return suggestions
+}
+
+// ── 主函数 ──
 
 export function useSqlCompletion(
   schema: Ref<SchemaCache | null>,
@@ -188,6 +400,16 @@ export function useSqlCompletion(
         const currentSchema = schema.value
         const currentDriver = driver?.value
 
+        /** 返回前统一附加频率记录命令 */
+        function finalize(): { suggestions: monaco.languages.CompletionItem[] } {
+          for (const s of suggestions) {
+            if (!s.command && s.insertText) {
+              s.command = makeRecordCommand(String(s.label))
+            }
+          }
+          return { suggestions }
+        }
+
         // Schema 缓存加载中时，显示加载提示项
         if (isLoadingSchema?.value) {
           suggestions.push({
@@ -201,7 +423,22 @@ export function useSqlCompletion(
           })
         }
 
-        // Check if we're after a dot (e.g., "database." or "table." or "alias.")
+        // ── JOIN ON 条件智能推荐（优先级最高）──
+        const joinOnSuggestions = buildJoinOnSuggestions(textUntilPosition, currentSchema, range)
+        if (joinOnSuggestions.length > 0) {
+          suggestions.push(...joinOnSuggestions)
+          // 同时保留 ON 关键字补全
+          suggestions.push({
+            label: 'ON',
+            kind: monaco.languages.CompletionItemKind.Keyword,
+            insertText: 'ON ',
+            range,
+            sortText: '0_ON',
+          })
+          return finalize()
+        }
+
+        // ── 点号补全（database.table 或 table.column）──
         const lineContent = model.getLineContent(position.lineNumber)
         const charBeforeWord = lineContent.charAt(word.startColumn - 2)
 
@@ -214,11 +451,10 @@ export function useSqlCompletion(
           if (beforeDot && currentSchema) {
             const prefix = beforeDot.word
 
-            // Try as database name first → suggest tables
+            // 尝试作为数据库名 → 建议表名
             const db = currentSchema.databases.get(prefix)
             if (db) {
               for (const [tableName, tableSchema] of db.tables) {
-                // 表补全项：显示表类型和表注释
                 const tableDetail = tableSchema.comment
                   ? `${tableSchema.tableType} - ${tableSchema.comment}`
                   : tableSchema.tableType
@@ -232,19 +468,17 @@ export function useSqlCompletion(
                   detail: tableDetail,
                 })
               }
-              return { suggestions }
+              return finalize()
             }
 
-            // Try as table alias → resolve to actual table name
+            // 尝试作为表别名 → 解析为实际表名 → 建议列名
             const aliasMap = extractTableAliases(textUntilPosition)
             const resolvedName = aliasMap.get(prefix) || prefix
 
-            // Try as table name → suggest columns
             for (const [, dbSchema] of currentSchema.databases) {
               const table = dbSchema.tables.get(resolvedName)
               if (table) {
                 for (const col of table.columns) {
-                  // 列补全项：格式 "列名 - 数据类型 - 注释"
                   const detailParts = [col.dataType]
                   if (col.comment) detailParts.push(col.comment)
                   const colDetail = col.isPrimaryKey
@@ -261,18 +495,18 @@ export function useSqlCompletion(
                     documentation: col.comment ?? undefined,
                   })
                 }
-                return { suggestions }
+                return finalize()
               }
             }
           }
-          return { suggestions }
+          return finalize()
         }
 
-        // Context-aware suggestions
+        // ── 上下文感知补全 ──
         const context = getContextKeyword(textUntilPosition)
 
         if (currentSchema) {
-          // Database names
+          // 数据库名
           if (!context || context === 'database') {
             for (const [dbName] of currentSchema.databases) {
               suggestions.push({
@@ -281,16 +515,15 @@ export function useSqlCompletion(
                 insertText: dbName,
                 range,
                 detail: 'Database',
-                sortText: '1_' + dbName,
+                sortText: buildSortText(1, dbName),
               })
             }
           }
 
-          // Table names
+          // 表名 + CTE 名称
           if (!context || context === 'table' || context === 'column') {
             for (const [, db] of currentSchema.databases) {
               for (const [tableName, tableSchema] of db.tables) {
-                // 表补全项：显示表类型和表注释
                 const tableDetail = tableSchema.comment
                   ? `${tableSchema.tableType} - ${tableSchema.comment}`
                   : tableSchema.tableType
@@ -302,17 +535,33 @@ export function useSqlCompletion(
                   insertText: tableName,
                   range,
                   detail: tableDetail,
-                  sortText: context === 'table' ? '0_' + tableName : '2_' + tableName,
+                  sortText: context === 'table'
+                    ? buildSortText(0, tableName)
+                    : buildSortText(2, tableName),
                 })
               }
             }
+
+            // CTE 名称作为虚拟表补全
+            const cteNames = extractCteNames(model.getValue())
+            for (const cteName of cteNames) {
+              suggestions.push({
+                label: cteName,
+                kind: monaco.languages.CompletionItemKind.Variable,
+                insertText: cteName,
+                range,
+                detail: 'CTE',
+                sortText: context === 'table'
+                  ? buildSortText(0, cteName)
+                  : buildSortText(2, cteName),
+              })
+            }
           }
 
-          // Column names - prioritize columns from referenced tables and aliases
+          // 列名 - 优先展示已引用表的列
           if (!context || context === 'column') {
             const referencedTables = extractTableContext(textUntilPosition)
             const aliasMap = extractTableAliases(textUntilPosition)
-            // Also include alias-resolved table names
             for (const [, tbl] of aliasMap) {
               if (!referencedTables.includes(tbl)) {
                 referencedTables.push(tbl)
@@ -327,7 +576,6 @@ export function useSqlCompletion(
                   for (const col of table.columns) {
                     if (!addedColumns.has(col.name)) {
                       addedColumns.add(col.name)
-                      // 列补全项：格式 "表名.数据类型 - 注释"
                       const detailParts = [`${tblName}.${col.dataType}`]
                       if (col.comment) detailParts.push(col.comment)
                       const colDetail = col.isPrimaryKey
@@ -342,7 +590,9 @@ export function useSqlCompletion(
                         range,
                         detail: colDetail,
                         documentation: col.comment ?? undefined,
-                        sortText: context === 'column' ? '0_' + col.name : '3_' + col.name,
+                        sortText: context === 'column'
+                          ? buildSortText(0, col.name)
+                          : buildSortText(3, col.name),
                       })
                     }
                   }
@@ -373,12 +623,15 @@ export function useSqlCompletion(
           suggestions.push({ ...fn, range })
         }
 
-        return { suggestions }
+        return finalize()
       },
     })
   }
 
-  // Register once — the provider reads schema.value reactively at call time
+  // 确保频率记录全局命令已注册
+  ensureRecordCommandRegistered()
+
+  // 注册一次 — provider 在运行时读取 schema.value
   register()
 
   onBeforeUnmount(() => {

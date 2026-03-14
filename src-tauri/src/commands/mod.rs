@@ -1,3 +1,4 @@
+pub mod app_state;
 pub mod command_snippet;
 pub mod connection;
 pub mod db;

@@ -120,6 +120,16 @@ export interface SchemaCache {
 
 export interface DatabaseSchema {
   tables: Map<string, TableSchema>
+  /** 外键关系列表（用于 JOIN 补全推荐） */
+  foreignKeys?: ForeignKeyRelation[]
+}
+
+/** 外键关系信息（用于 SQL 补全 JOIN 推荐） */
+export interface ForeignKeyRelation {
+  tableName: string
+  columnName: string
+  referencedTableName: string
+  referencedColumnName: string
 }
 
 export interface TableSchema {

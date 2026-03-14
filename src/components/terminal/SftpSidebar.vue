@@ -414,6 +414,7 @@ defineExpose({ syncToPath })
 
   <ConfirmDialog
     v-model:open="showRenameDialog"
+    title=""
     @confirm="confirmRename"
     class="max-w-[300px] p-0 overflow-hidden border border-border/60 shadow-2xl rounded-2xl bg-background/98 backdrop-blur-3xl"
   >

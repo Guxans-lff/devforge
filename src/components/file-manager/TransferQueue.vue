@@ -7,18 +7,15 @@ import { useToast } from '@/composables/useToast'
 import { useNotification } from '@/composables/useNotification'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
-import Progress from '@/components/ui/progress.vue'
 import {
   ArrowUp,
   ArrowDown,
   CheckCircle2,
-  XCircle,
   Pause,
   Play,
   X,
   RotateCcw,
   Trash2,
-  FileText,
   Zap,
 } from 'lucide-vue-next'
 

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 
 export interface ConnectionRecord {
   id: string
@@ -27,6 +27,40 @@ export function parseIsFavorite(configJson: string): boolean {
   try {
     const config = JSON.parse(configJson)
     return config.isFavorite === true
+  } catch {
+    return false
+  }
+}
+
+/** 从 configJson 中解析环境类型 */
+export function parseEnvironment(configJson: string): import('@/types/environment').EnvironmentType {
+  try {
+    const config = JSON.parse(configJson)
+    const valid = ['production', 'staging', 'development', 'testing', 'local']
+    return valid.includes(config.environment) ? config.environment : 'development'
+  } catch {
+    return 'development'
+  }
+}
+
+/** 从 configJson 中解析只读模式 */
+export function parseReadOnly(configJson: string): boolean {
+  try {
+    const config = JSON.parse(configJson)
+    return config.readOnly === true
+  } catch {
+    return false
+  }
+}
+
+/** 从 configJson 中解析危险操作确认开关 */
+export function parseConfirmDanger(configJson: string): boolean {
+  try {
+    const config = JSON.parse(configJson)
+    if (typeof config.confirmDanger === 'boolean') return config.confirmDanger
+    // 未显式设置时，production/staging 默认开启
+    const env = config.environment
+    return env === 'production' || env === 'staging'
   } catch {
     return false
   }
@@ -64,31 +98,31 @@ export interface TestResult {
 // --- Connection CRUD ---
 
 export function createConnection(req: CreateConnectionParams): Promise<ConnectionRecord> {
-  return invoke('create_connection', { req })
+  return invokeCommand('create_connection', { req })
 }
 
 export function updateConnection(id: string, req: UpdateConnectionParams): Promise<ConnectionRecord> {
-  return invoke('update_connection', { id, req })
+  return invokeCommand('update_connection', { id, req })
 }
 
 export function deleteConnection(id: string): Promise<boolean> {
-  return invoke('delete_connection', { id })
+  return invokeCommand('delete_connection', { id })
 }
 
 export function listConnections(): Promise<ConnectionRecord[]> {
-  return invoke('list_connections')
+  return invokeCommand('list_connections')
 }
 
 export function getConnectionById(id: string): Promise<ConnectionRecord> {
-  return invoke('get_connection_by_id', { id })
+  return invokeCommand('get_connection_by_id', { id })
 }
 
 export function reorderConnections(ids: string[]): Promise<boolean> {
-  return invoke('reorder_connections', { ids })
+  return invokeCommand('reorder_connections', { ids })
 }
 
 export function testConnection(id: string): Promise<TestResult> {
-  return invoke('test_connection', { id })
+  return invokeCommand('test_connection', { id })
 }
 
 export function testConnectionParams(params: {
@@ -99,56 +133,56 @@ export function testConnectionParams(params: {
   database?: string
   driver?: string
 }): Promise<TestResult> {
-  return invoke('test_connection_params', params)
+  return invokeCommand('test_connection_params', params)
 }
 
 // --- Groups ---
 
 export function listGroups(): Promise<ConnectionGroupRecord[]> {
-  return invoke('list_groups')
+  return invokeCommand('list_groups')
 }
 
 export function createGroup(name: string): Promise<ConnectionGroupRecord> {
-  return invoke('create_group', { name })
+  return invokeCommand('create_group', { name })
 }
 
 export function deleteGroup(id: string): Promise<boolean> {
-  return invoke('delete_group', { id })
+  return invokeCommand('delete_group', { id })
 }
 
 // --- Credentials ---
 
 export function getCredential(id: string): Promise<string | null> {
-  return invoke('get_credential', { id })
+  return invokeCommand('get_credential', { id })
 }
 
 export function saveCredential(id: string, password: string): Promise<boolean> {
-  return invoke('save_credential', { id, password })
+  return invokeCommand('save_credential', { id, password })
 }
 
 export function deleteCredential(id: string): Promise<boolean> {
-  return invoke('delete_credential', { id })
+  return invokeCommand('delete_credential', { id })
 }
 
 // --- 分组与收藏管理 ---
 
 /** 移动连接到指定分组（null 表示移到根级） */
 export function moveConnection(connectionId: string, targetGroupId: string | null): Promise<boolean> {
-  return invoke('move_connection', { connectionId, targetGroupId })
+  return invokeCommand('move_connection', { connectionId, targetGroupId })
 }
 
 /** 切换连接的收藏状态，返回切换后的状态 */
 export function toggleFavorite(connectionId: string): Promise<boolean> {
-  return invoke('toggle_favorite', { connectionId })
+  return invokeCommand('toggle_favorite', { connectionId })
 }
 
 /** 更新分组信息（名称、父级分组） */
 export function updateGroup(groupId: string, name: string, parentId?: string | null): Promise<ConnectionGroupRecord> {
-  return invoke('update_group', { groupId, name, parentId: parentId ?? null })
+  return invokeCommand('update_group', { groupId, name, parentId: parentId ?? null })
 }
 
 // --- App ---
 
 export function getAppVersion(): Promise<string> {
-  return invoke('get_app_version')
+  return invokeCommand('get_app_version')
 }

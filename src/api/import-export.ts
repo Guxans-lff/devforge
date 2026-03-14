@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 
 // 导出格式
 export interface ConnectionExport {
@@ -50,26 +50,26 @@ export interface ImportPreview {
 // API 函数
 
 export function exportConnections(connectionIds?: string[]): Promise<ConnectionExport> {
-  return invoke('export_connections', { connectionIds })
+  return invokeCommand('export_connections', { connectionIds })
 }
 
 export function importConnections(
   data: ConnectionExport,
   options: ImportOptions
 ): Promise<ImportResult> {
-  return invoke('import_connections', { data, options })
+  return invokeCommand('import_connections', { data, options })
 }
 
 export function previewImport(data: ConnectionExport): Promise<ImportPreview> {
-  return invoke('preview_import', { data })
+  return invokeCommand('preview_import', { data })
 }
 
 // Navicat 导入
 export function importNavicatXml(xmlContent: string): Promise<ConnectionExport> {
-  return invoke('import_navicat_xml', { xmlContent })
+  return invokeCommand('import_navicat_xml', { xmlContent })
 }
 
 // Termius 导入
 export function importTermiusJson(jsonContent: string): Promise<ConnectionExport> {
-  return invoke('import_termius_json', { jsonContent })
+  return invokeCommand('import_termius_json', { jsonContent })
 }

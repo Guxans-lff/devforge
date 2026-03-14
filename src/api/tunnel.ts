@@ -1,14 +1,14 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 import type { TunnelOpenParams, TunnelInfo } from '@/types/tunnel'
 
 export function tunnelOpen(params: TunnelOpenParams): Promise<TunnelInfo> {
-  return invoke('tunnel_open', { params })
+  return invokeCommand('tunnel_open', { params })
 }
 
 export function tunnelClose(tunnelId: string): Promise<boolean> {
-  return invoke('tunnel_close', { tunnelId })
+  return invokeCommand('tunnel_close', { tunnelId })
 }
 
 export function tunnelList(): Promise<TunnelInfo[]> {
-  return invoke('tunnel_list')
+  return invokeCommand('tunnel_list')
 }

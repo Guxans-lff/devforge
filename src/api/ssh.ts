@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 import { useLogStore } from '@/stores/log'
 import { i18n } from '@/locales'
 import type { SessionInfo } from '@/types/terminal'
@@ -11,22 +11,17 @@ export async function sshConnect(
 ): Promise<SessionInfo> {
   const logStore = useLogStore()
   logStore.info('SSH', (i18n.global as any).t('log.ssh.connecting', { id: connectionId }))
-  try {
-    const session = await invoke<SessionInfo>('ssh_connect', { connectionId, cols, rows })
-    logStore.info('SSH', (i18n.global as any).t('log.ssh.connected', { id: session.sessionId }))
-    return session
-  } catch (err: any) {
-    logStore.error('SSH', (i18n.global as any).t('log.ssh.failed', { error: err.toString() }))
-    throw err
-  }
+  const session = await invokeCommand<SessionInfo>('ssh_connect', { connectionId, cols, rows }, { source: 'SSH' })
+  logStore.info('SSH', (i18n.global as any).t('log.ssh.connected', { id: session.sessionId }))
+  return session
 }
 
 export function sshDisconnect(sessionId: string): Promise<boolean> {
-  return invoke('ssh_disconnect', { sessionId })
+  return invokeCommand('ssh_disconnect', { sessionId }, { source: 'SSH' })
 }
 
 export function sshSendData(sessionId: string, data: string): Promise<void> {
-  return invoke('ssh_send_data', { sessionId, data })
+  return invokeCommand('ssh_send_data', { sessionId, data }, { source: 'SSH', silent: true })
 }
 
 export function sshResize(
@@ -34,21 +29,21 @@ export function sshResize(
   cols: number,
   rows: number,
 ): Promise<void> {
-  return invoke('ssh_resize', { sessionId, cols, rows })
+  return invokeCommand('ssh_resize', { sessionId, cols, rows }, { source: 'SSH', silent: true })
 }
 
 /** 流控 ACK：通知后端前端 xterm.js 已处理的累计字节数 */
 export function sshFlowAck(sessionId: string, bytes: number): Promise<void> {
-  return invoke('ssh_flow_ack', { sessionId, bytes })
+  return invokeCommand('ssh_flow_ack', { sessionId, bytes }, { source: 'SSH', silent: true })
 }
 
 /** 获取终端当前工作目录（通过后端 exec channel，不在终端中执行命令） */
 export function sshGetCwd(sessionId: string): Promise<string> {
-  return invoke('ssh_get_cwd', { sessionId })
+  return invokeCommand('ssh_get_cwd', { sessionId }, { source: 'SSH' })
 }
 
 export function sshTestConnection(id: string): Promise<TestResult> {
-  return invoke('ssh_test_connection', { id })
+  return invokeCommand('ssh_test_connection', { id }, { source: 'SSH' })
 }
 
 export function sshTestConnectionParams(params: {
@@ -60,18 +55,13 @@ export function sshTestConnectionParams(params: {
   privateKeyPath?: string
   passphrase?: string
 }): Promise<TestResult> {
-  return invoke('ssh_test_connection_params', params)
+  return invokeCommand('ssh_test_connection_params', params, { source: 'SSH' })
 }
 
 export async function sshExecCommand(connectionId: string, command: string): Promise<string> {
   const logStore = useLogStore()
   logStore.debug('SSH', (i18n.global as any).t('log.ssh.executing', { cmd: command.slice(0, 50) + (command.length > 50 ? '...' : '') }))
-  try {
-    const output = await invoke<string>('ssh_exec_command', { connectionId, command })
-    logStore.debug('SSH', (i18n.global as any).t('log.ssh.executed', { len: output.length }))
-    return output
-  } catch (err: any) {
-    logStore.error('SSH', (i18n.global as any).t('log.ssh.execFailed', { error: err.toString() }), { command })
-    throw err
-  }
+  const output = await invokeCommand<string>('ssh_exec_command', { connectionId, command }, { source: 'SSH' })
+  logStore.debug('SSH', (i18n.global as any).t('log.ssh.executed', { len: output.length }))
+  return output
 }

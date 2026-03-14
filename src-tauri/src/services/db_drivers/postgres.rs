@@ -50,7 +50,9 @@ pub async fn connect(
 
     let pool = PgPoolOptions::new()
         .max_connections(10)
+        .max_lifetime(Duration::from_secs(3600)) // 连接最长存活 1 小时，防止服务端静默断开
         .acquire_timeout(Duration::from_secs(10))
+        .test_before_acquire(true) // 每次取连接前 ping 检活，避免使用已断开的连接
         .connect_with(options)
         .await
         .map_err(|e| AppError::Other(format!("PostgreSQL connection failed: {}", e)))?;

@@ -1,15 +1,20 @@
-import { ref, watch, type Ref } from 'vue'
+import { ref } from 'vue'
 import type { SchemaCache, DatabaseSchema, TableSchema, DatabaseTreeNode } from '@/types/database'
+import { dbGetForeignKeys } from '@/api/database'
 
 /**
  * Schema 缓存管理 composable
  * 负责从 ObjectTree 数据构建 SchemaCache，管理加载状态，
- * 并在数据库切换时自动刷新缓存。
+ * 并在数据库切换时自动刷新缓存。外键数据异步追加，不阻塞首次可用。
  *
  * @param treeNodesGetter - 获取当前 ObjectTree 节点数据的函数
+ * @param connectionIdGetter - 获取当前连接 ID 的函数（用于加载外键数据，可选）
  * @returns schemaCache、isLoadingSchema 状态及刷新方法
  */
-export function useSchemaCache(treeNodesGetter: () => DatabaseTreeNode[] | undefined) {
+export function useSchemaCache(
+  treeNodesGetter: () => DatabaseTreeNode[] | undefined,
+  connectionIdGetter?: () => string | undefined,
+) {
   /** Schema 缓存数据 */
   const schemaCache = ref<SchemaCache | null>(null)
   /** 是否正在加载 Schema */
@@ -60,18 +65,45 @@ export function useSchemaCache(treeNodesGetter: () => DatabaseTreeNode[] | undef
   }
 
   /**
+   * 异步加载外键数据并追加到 SchemaCache 中
+   * 加载失败时静默降级，不影响基础补全功能
+   */
+  async function loadForeignKeys(cache: SchemaCache) {
+    const connectionId = connectionIdGetter?.()
+    if (!connectionId) return
+
+    for (const [dbName, dbSchema] of cache.databases) {
+      try {
+        const fks = await dbGetForeignKeys(connectionId, dbName)
+        dbSchema.foreignKeys = fks
+      } catch (e) {
+        console.warn(`加载外键数据失败 [${dbName}]:`, e)
+      }
+    }
+
+    // 触发响应式更新
+    schemaCache.value = { databases: new Map(cache.databases) }
+  }
+
+  /**
    * 触发 Schema 缓存刷新（带 300ms 防抖）
    * 在 ObjectTree 数据变更时调用
    */
   function refreshSchemaCache() {
     if (schemaCacheTimer) clearTimeout(schemaCacheTimer)
     isLoadingSchema.value = true
-    schemaCacheTimer = setTimeout(() => {
+    schemaCacheTimer = setTimeout(async () => {
       const nodes = treeNodesGetter()
       if (nodes) {
-        schemaCache.value = buildSchemaCache(nodes)
+        const cache = buildSchemaCache(nodes)
+        // 先让 Schema 立即可用（无外键），再异步追加外键
+        schemaCache.value = cache
+        isLoadingSchema.value = false
+        // 异步加载外键数据，不阻塞补全
+        await loadForeignKeys(cache)
+      } else {
+        isLoadingSchema.value = false
       }
-      isLoadingSchema.value = false
     }, 300)
   }
 

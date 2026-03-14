@@ -1,6 +1,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useSettingsStore } from '@/stores/settings'
 import { useCommandPaletteStore } from '@/stores/command-palette'
 import { useTheme } from '@/composables/useTheme'
@@ -54,6 +55,7 @@ function matchesShortcut(e: KeyboardEvent, keys: string): boolean {
 
 export function useKeyboardShortcuts() {
   const workspace = useWorkspaceStore()
+  const dbWorkspaceStore = useDatabaseWorkspaceStore()
   const settingsStore = useSettingsStore()
   const commandPaletteStore = useCommandPaletteStore()
   const { toggleTheme } = useTheme()
@@ -115,6 +117,13 @@ export function useKeyboardShortcuts() {
     },
     toggleTheme: () => {
       toggleTheme()
+    },
+    reopenTab: () => {
+      // 从当前活跃的数据库标签页中恢复关闭的内部标签
+      const activeTab = workspace.tabs.find(t => t.id === workspace.activeTabId)
+      if (activeTab?.type === 'database' && activeTab.connectionId) {
+        dbWorkspaceStore.reopenLastClosedTab(activeTab.connectionId)
+      }
     },
   }
 

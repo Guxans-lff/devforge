@@ -1,48 +1,39 @@
-import { invoke, Channel } from '@tauri-apps/api/core'
+import { Channel } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 import { useLogStore } from '@/stores/log'
 import { i18n } from '@/locales'
-import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo, RowChange, ApplyChangesResult, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy } from '@/types/database'
+import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo, RowChange, ApplyChangesResult, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy, ForeignKeyRelation } from '@/types/database'
 import type { PoolStatus, ReconnectParams, ReconnectResult } from '@/types/connection'
 import type { ExportFormat } from '@/types/export'
 
 export async function dbConnect(connectionId: string): Promise<ConnectResult> {
   const logStore = useLogStore()
   logStore.info('DATABASE', (i18n.global as any).t('log.database.connecting', { id: connectionId }))
-  try {
-    const result = await invoke<ConnectResult>('db_connect', { connectionId })
-    logStore.info('DATABASE', (i18n.global as any).t('log.database.connected', { count: result.databases.length }))
-    return result
-  } catch (err: any) {
-    logStore.error('DATABASE', (i18n.global as any).t('log.database.failed', { error: err.toString() }))
-    throw err
-  }
+  const result = await invokeCommand<ConnectResult>('db_connect', { connectionId }, { source: 'DATABASE' })
+  logStore.info('DATABASE', (i18n.global as any).t('log.database.connected', { count: result.databases.length }))
+  return result
 }
 
 export function dbDisconnect(connectionId: string): Promise<boolean> {
-  return invoke('db_disconnect', { connectionId })
+  return invokeCommand('db_disconnect', { connectionId })
 }
 
 export function dbIsConnected(connectionId: string): Promise<boolean> {
-  return invoke('db_is_connected', { connectionId })
+  return invokeCommand('db_is_connected', { connectionId })
 }
 
 /** 执行 SQL 查询，支持可选的超时时间（秒） */
 export async function dbExecuteQuery(connectionId: string, sql: string, timeoutSecs?: number): Promise<QueryResult> {
   const logStore = useLogStore()
   logStore.debug('DATABASE', (i18n.global as any).t('log.database.executing', { sql: sql.slice(0, 100) + (sql.length > 100 ? '...' : '') }), { sql })
-  try {
-    const result = await invoke<QueryResult>('db_execute_query', { connectionId, sql, timeoutSecs: timeoutSecs ?? null })
-    logStore.debug('DATABASE', (i18n.global as any).t('log.database.success', { rows: result.rows.length, time: result.executionTimeMs }))
-    return result
-  } catch (err: any) {
-    logStore.error('DATABASE', (i18n.global as any).t('log.database.execFailed', { error: err.toString() }), { sql, error: err })
-    throw err
-  }
+  const result = await invokeCommand<QueryResult>('db_execute_query', { connectionId, sql, timeoutSecs: timeoutSecs ?? null }, { source: 'DATABASE' })
+  logStore.debug('DATABASE', (i18n.global as any).t('log.database.success', { rows: result.rows.length, time: result.executionTimeMs }))
+  return result
 }
 
 /** 在指定数据库上下文中执行 SQL 查询（同一连接上先 USE <database> 再执行） */
 export function dbExecuteQueryInDatabase(connectionId: string, database: string, sql: string, timeoutSecs?: number): Promise<QueryResult> {
-  return invoke('db_execute_query_in_database', { connectionId, database, sql, timeoutSecs: timeoutSecs ?? null })
+  return invokeCommand('db_execute_query_in_database', { connectionId, database, sql, timeoutSecs: timeoutSecs ?? null })
 }
 
 /**
@@ -64,7 +55,7 @@ export function dbExecuteQueryStream(
 ): Promise<void> {
   const channel = new Channel<QueryChunk>()
   channel.onmessage = onChunk
-  return invoke('db_execute_query_stream', {
+  return invokeCommand('db_execute_query_stream', {
     connectionId,
     sql,
     timeoutSecs: timeoutSecs ?? null,
@@ -87,7 +78,7 @@ export function dbExecuteQueryStreamInDatabase(
 ): Promise<void> {
   const channel = new Channel<QueryChunk>()
   channel.onmessage = onChunk
-  return invoke('db_execute_query_stream_in_database', {
+  return invokeCommand('db_execute_query_stream_in_database', {
     connectionId,
     database,
     sql,
@@ -97,11 +88,11 @@ export function dbExecuteQueryStreamInDatabase(
 }
 
 export function dbGetDatabases(connectionId: string): Promise<DatabaseInfo[]> {
-  return invoke('db_get_databases', { connectionId })
+  return invokeCommand('db_get_databases', { connectionId })
 }
 
 export function dbGetTables(connectionId: string, database: string): Promise<TableInfo[]> {
-  return invoke('db_get_tables', { connectionId, database })
+  return invokeCommand('db_get_tables', { connectionId, database })
 }
 
 export function dbGetColumns(
@@ -109,7 +100,7 @@ export function dbGetColumns(
   database: string,
   table: string,
 ): Promise<ColumnInfo[]> {
-  return invoke('db_get_columns', { connectionId, database, table })
+  return invokeCommand('db_get_columns', { connectionId, database, table })
 }
 
 export function dbGetTableData(
@@ -121,7 +112,7 @@ export function dbGetTableData(
   whereClause?: string | null,
   orderBy?: string | null,
 ): Promise<QueryResult> {
-  return invoke('db_get_table_data', {
+  return invokeCommand('db_get_table_data', {
     connectionId, database, table, page, pageSize,
     whereClause: whereClause ?? null,
     orderBy: orderBy ?? null,
@@ -133,27 +124,27 @@ export function dbGetCreateTable(
   database: string,
   table: string,
 ): Promise<string> {
-  return invoke('db_get_create_table', { connectionId, database, table })
+  return invokeCommand('db_get_create_table', { connectionId, database, table })
 }
 
 export function dbCancelQuery(connectionId: string): Promise<boolean> {
-  return invoke('db_cancel_query', { connectionId })
+  return invokeCommand('db_cancel_query', { connectionId })
 }
 
 export function dbGetViews(connectionId: string, database: string): Promise<ViewInfo[]> {
-  return invoke('db_get_views', { connectionId, database })
+  return invokeCommand('db_get_views', { connectionId, database })
 }
 
 export function dbGetProcedures(connectionId: string, database: string): Promise<RoutineInfo[]> {
-  return invoke('db_get_procedures', { connectionId, database })
+  return invokeCommand('db_get_procedures', { connectionId, database })
 }
 
 export function dbGetFunctions(connectionId: string, database: string): Promise<RoutineInfo[]> {
-  return invoke('db_get_functions', { connectionId, database })
+  return invokeCommand('db_get_functions', { connectionId, database })
 }
 
 export function dbGetTriggers(connectionId: string, database: string): Promise<TriggerInfo[]> {
-  return invoke('db_get_triggers', { connectionId, database })
+  return invokeCommand('db_get_triggers', { connectionId, database })
 }
 
 export function dbGetObjectDefinition(
@@ -162,51 +153,51 @@ export function dbGetObjectDefinition(
   name: string,
   objectType: string,
 ): Promise<string> {
-  return invoke('db_get_object_definition', { connectionId, database, name, objectType })
+  return invokeCommand('db_get_object_definition', { connectionId, database, name, objectType })
 }
 
 export function writeTextFile(path: string, content: string): Promise<void> {
-  return invoke('write_text_file', { path, content })
+  return invokeCommand('write_text_file', { path, content })
 }
 
 /** 读取文本文件内容（用于运行 SQL 文件等场景） */
 export function readTextFile(path: string): Promise<string> {
-  return invoke('read_text_file', { path })
+  return invokeCommand('read_text_file', { path })
 }
 
 /** 获取连接池运行状态（活跃/空闲连接数） */
 export function dbGetPoolStatus(connectionId: string): Promise<PoolStatus> {
-  return invoke('db_get_pool_status', { connectionId })
+  return invokeCommand('db_get_pool_status', { connectionId })
 }
 
 /** 检查连接是否存活，断开则自动重连（最多 3 次，间隔 5 秒） */
 export function dbCheckAndReconnect(connectionId: string, reconnectParams: ReconnectParams): Promise<ReconnectResult> {
-  return invoke('db_check_and_reconnect', { connectionId, reconnectParams })
+  return invokeCommand('db_check_and_reconnect', { connectionId, reconnectParams })
 }
 
 /** 开始事务 */
 export function dbBeginTransaction(connectionId: string): Promise<boolean> {
-  return invoke('db_begin_transaction', { connectionId })
+  return invokeCommand('db_begin_transaction', { connectionId })
 }
 
 /** 提交事务 */
 export function dbCommit(connectionId: string): Promise<boolean> {
-  return invoke('db_commit', { connectionId })
+  return invokeCommand('db_commit', { connectionId })
 }
 
 /** 回滚事务 */
 export function dbRollback(connectionId: string): Promise<boolean> {
-  return invoke('db_rollback', { connectionId })
+  return invokeCommand('db_rollback', { connectionId })
 }
 
 /** 获取 SQL 执行计划（支持 table 和 json 两种格式） */
 export function dbExplain(connectionId: string, sql: string, format: string): Promise<QueryResult> {
-  return invoke('db_explain', { connectionId, sql, format })
+  return invokeCommand('db_explain', { connectionId, sql, format })
 }
 
 /** 批量应用行数据变更（在事务中执行，任一失败全部回滚） */
 export function dbApplyRowChanges(connectionId: string, changes: RowChange[]): Promise<ApplyChangesResult> {
-  return invoke('db_apply_row_changes', { connectionId, changes })
+  return invokeCommand('db_apply_row_changes', { connectionId, changes })
 }
 
 
@@ -214,49 +205,49 @@ export function dbApplyRowChanges(connectionId: string, changes: RowChange[]): P
 
 /** 获取服务器状态指标（QPS、TPS、连接数等） */
 export function dbGetServerStatus(connectionId: string): Promise<ServerStatus> {
-  return invoke('db_get_server_status', { connectionId })
+  return invokeCommand('db_get_server_status', { connectionId })
 }
 
 /** 获取进程列表 */
 export function dbGetProcessList(connectionId: string): Promise<ProcessInfo[]> {
-  return invoke('db_get_process_list', { connectionId })
+  return invokeCommand('db_get_process_list', { connectionId })
 }
 
 /** 终止指定进程 */
 export function dbKillProcess(connectionId: string, processId: number): Promise<boolean> {
-  return invoke('db_kill_process', { connectionId, processId })
+  return invokeCommand('db_kill_process', { connectionId, processId })
 }
 
 /** 获取服务器变量 */
 export function dbGetServerVariables(connectionId: string): Promise<ServerVariable[]> {
-  return invoke('db_get_server_variables', { connectionId })
+  return invokeCommand('db_get_server_variables', { connectionId })
 }
 
 // ===== 用户权限管理 API =====
 
 /** 获取所有 MySQL 用户 */
 export function dbGetUsers(connectionId: string): Promise<MysqlUser[]> {
-  return invoke('db_get_users', { connectionId })
+  return invokeCommand('db_get_users', { connectionId })
 }
 
 /** 创建新用户 */
 export function dbCreateUser(connectionId: string, request: CreateUserRequest): Promise<boolean> {
-  return invoke('db_create_user', { connectionId, request })
+  return invokeCommand('db_create_user', { connectionId, request })
 }
 
 /** 删除用户 */
 export function dbDropUser(connectionId: string, username: string, host: string): Promise<boolean> {
-  return invoke('db_drop_user', { connectionId, username, host })
+  return invokeCommand('db_drop_user', { connectionId, username, host })
 }
 
 /** 获取用户权限 */
 export function dbGetUserGrants(connectionId: string, username: string, host: string): Promise<string[]> {
-  return invoke('db_get_user_grants', { connectionId, username, host })
+  return invokeCommand('db_get_user_grants', { connectionId, username, host })
 }
 
 /** 批量执行 GRANT/REVOKE 语句 */
 export function dbApplyGrants(connectionId: string, statements: string[]): Promise<boolean> {
-  return invoke('db_apply_grants', { connectionId, statements })
+  return invokeCommand('db_apply_grants', { connectionId, statements })
 }
 
 
@@ -292,7 +283,7 @@ export async function dbExportData(connectionId: string, request: {
     encoding?: string
   }
 }): Promise<{ success: boolean; rowCount: number; fileSize: number; error?: string }> {
-  return invoke('db_export_data', {
+  return invokeCommand('db_export_data', {
     connectionId,
     request: {
       source: request.source,
@@ -339,7 +330,7 @@ export function dbGenerateScript(
   scriptType: string,
   options: ScriptOptions,
 ): Promise<string> {
-  return invoke('db_generate_script', { connectionId, database, objectName, scriptType, options })
+  return invokeCommand('db_generate_script', { connectionId, database, objectName, scriptType, options })
 }
 
 /**
@@ -355,7 +346,7 @@ export function dbExportDatabaseDdl(
   database: string,
   options: ScriptOptions,
 ): Promise<string> {
-  return invoke('db_export_database_ddl', { connectionId, database, options })
+  return invokeCommand('db_export_database_ddl', { connectionId, database, options })
 }
 
 
@@ -383,22 +374,17 @@ export async function dbExecuteMultiV2(
 ): Promise<StatementResult[]> {
   const logStore = useLogStore()
   logStore.debug('DATABASE', `多语句执行: ${sql.slice(0, 80)}${sql.length > 80 ? '...' : ''}`)
-  try {
-    const results = await invoke<StatementResult[]>('db_execute_multi_v2', {
-      connectionId,
-      sql,
-      database: database ?? null,
-      errorStrategy: errorStrategy ?? null,
-      timeoutSecs: timeoutSecs ?? null,
-    })
-    const successCount = results.filter(r => !r.result.isError).length
-    const failCount = results.length - successCount
-    logStore.debug('DATABASE', `多语句执行完成: 共 ${results.length} 条，成功 ${successCount}，失败 ${failCount}`)
-    return results
-  } catch (err: any) {
-    logStore.error('DATABASE', `多语句执行失败: ${err.toString()}`)
-    throw err
-  }
+  const results = await invokeCommand<StatementResult[]>('db_execute_multi_v2', {
+    connectionId,
+    sql,
+    database: database ?? null,
+    errorStrategy: errorStrategy ?? null,
+    timeoutSecs: timeoutSecs ?? null,
+  }, { source: 'DATABASE' })
+  const successCount = results.filter(r => !r.result.isError).length
+  const failCount = results.length - successCount
+  logStore.debug('DATABASE', `多语句执行完成: 共 ${results.length} 条，成功 ${successCount}，失败 ${failCount}`)
+  return results
 }
 // ===== SQL File Stream API =====
 
@@ -441,7 +427,7 @@ export async function dbRunSqlFileStream(
     onProgress(message)
   }
 
-  await invoke('db_run_sql_file_stream', {
+  await invokeCommand('db_run_sql_file_stream', {
     connectionId,
     importId,
     filePath,
@@ -452,32 +438,32 @@ export async function dbRunSqlFileStream(
 }
 
 export async function dbPauseSqlImport(importId: string): Promise<void> {
-  await invoke('db_pause_sql_import', { importId })
+  await invokeCommand('db_pause_sql_import', { importId })
 }
 
 export async function dbResumeSqlImport(importId: string): Promise<void> {
-  await invoke('db_resume_sql_import', { importId })
+  await invokeCommand('db_resume_sql_import', { importId })
 }
 
 export async function dbCancelSqlImport(importId: string): Promise<void> {
-  await invoke('db_cancel_sql_import', { importId })
+  await invokeCommand('db_cancel_sql_import', { importId })
 }
 
 // ===== Session 连接管理（企业级模式） =====
 
 /** 为指定查询 Tab 获取专用 Session 连接 */
 export function dbAcquireSession(connectionId: string, tabId: string): Promise<boolean> {
-  return invoke('db_acquire_session', { connectionId, tabId })
+  return invokeCommand('db_acquire_session', { connectionId, tabId })
 }
 
 /** 释放指定查询 Tab 的 Session 连接 */
 export function dbReleaseSession(connectionId: string, tabId: string): Promise<boolean> {
-  return invoke('db_release_session', { connectionId, tabId })
+  return invokeCommand('db_release_session', { connectionId, tabId })
 }
 
 /** 在 Session 连接上切换数据库 */
 export function dbSwitchDatabase(connectionId: string, tabId: string, database: string): Promise<boolean> {
-  return invoke('db_switch_database', { connectionId, tabId, database })
+  return invokeCommand('db_switch_database', { connectionId, tabId, database })
 }
 
 /** 在 Session 连接上执行查询（企业级模式） */
@@ -488,7 +474,7 @@ export function dbExecuteQueryOnSession(
   database?: string,
   timeoutSecs?: number,
 ): Promise<QueryResult> {
-  return invoke('db_execute_query_on_session', {
+  return invokeCommand('db_execute_query_on_session', {
     connectionId,
     tabId,
     database: database ?? null,
@@ -510,7 +496,7 @@ export function dbExecuteQueryStreamOnSession(
 ): Promise<void> {
   const channel = new Channel<QueryChunk>()
   channel.onmessage = onChunk
-  return invoke('db_execute_query_stream_on_session', {
+  return invokeCommand('db_execute_query_stream_on_session', {
     connectionId,
     tabId,
     database: database ?? null,
@@ -518,4 +504,9 @@ export function dbExecuteQueryStreamOnSession(
     timeoutSecs: timeoutSecs ?? null,
     onChunk: channel,
   })
+}
+
+/** 获取指定数据库的所有外键关系（用于 SQL 补全 JOIN 推荐） */
+export function dbGetForeignKeys(connectionId: string, database: string): Promise<ForeignKeyRelation[]> {
+  return invokeCommand('db_get_foreign_keys', { connectionId, database })
 }

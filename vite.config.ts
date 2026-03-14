@@ -21,6 +21,14 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    fs: {
+      // 禁止 Vite 访问 Rust 构建产物目录
+      deny: ['src-tauri/target'],
+    },
+  },
+  optimizeDeps: {
+    // 排除 src-tauri 目录，避免 Vite 扫描 cargo doc 生成的 HTML 文件
+    exclude: ['src-tauri'],
   },
   build: {
     target: 'esnext',

@@ -1,6 +1,6 @@
 import type { QueryResult } from './database'
 
-export type InnerTabType = 'query' | 'table-editor' | 'import' | 'table-data' | 'schema-compare' | 'performance' | 'user-management'
+export type InnerTabType = 'query' | 'table-editor' | 'import' | 'table-data' | 'schema-compare' | 'performance' | 'user-management' | 'er-diagram'
 
 /** 查询结果标签页 */
 export interface ResultTab {
@@ -33,7 +33,7 @@ export interface InnerTab {
   title: string
   closable: boolean
   dirty?: boolean
-  context: QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext | UserManagementTabContext
+  context: QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext | UserManagementTabContext | ErDiagramTabContext
 }
 
 export interface QueryTabContext {
@@ -94,6 +94,13 @@ export interface PerformanceTabContext {
 /** 用户管理标签页上下文 */
 export interface UserManagementTabContext {
   type: 'user-management'
+}
+
+/** ER 图标签页上下文 */
+export interface ErDiagramTabContext {
+  type: 'er-diagram'
+  /** 数据库名 */
+  database: string
 }
 
 export interface ConnectionWorkspace {

@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Play, Table2, FileUp, Database, Plus, X, GitCompareArrows } from 'lucide-vue-next'
+import { Play, Table2, FileUp, Database, Plus, X, GitCompareArrows, Activity, Users, Network } from 'lucide-vue-next'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import type { InnerTabType } from '@/types/database-workspace'
+import type { EnvironmentType } from '@/types/environment'
+import { ENV_PRESETS } from '@/types/environment'
 
 const props = defineProps<{
   connectionId: string
+  /** 连接环境类型（用于显示环境色带） */
+  environment?: EnvironmentType
 }>()
 
 const { t } = useI18n()
@@ -22,6 +26,9 @@ const iconMap: Record<InnerTabType, typeof Play> = {
   'import': FileUp,
   'table-data': Database,
   'schema-compare': GitCompareArrows,
+  'performance': Activity,
+  'user-management': Users,
+  'er-diagram': Network,
 }
 
 // 右键菜单状态
@@ -104,10 +111,22 @@ function closeAllTabs() {
     store.closeInnerTab(props.connectionId, tab.id)
   }
 }
+
+function reopenClosedTab() {
+  closeContextMenu()
+  store.reopenLastClosedTab(props.connectionId)
+}
 </script>
 
 <template>
-  <div class="flex h-8 items-center border-b border-border bg-muted/30" role="tablist">
+  <div>
+    <!-- 环境色带 -->
+    <div
+      v-if="environment"
+      class="h-0.5 shrink-0"
+      :style="{ backgroundColor: ENV_PRESETS[environment]?.color ?? 'transparent' }"
+    />
+    <div class="flex h-8 items-center border-b border-border bg-muted/30" role="tablist">
     <div class="flex flex-1 items-center overflow-x-auto">
       <button
         v-for="tab in tabs"
@@ -192,7 +211,17 @@ function closeAllTabs() {
         >
           {{ t('innerTab.closeAll') }}
         </button>
+        <template v-if="store.getClosedTabCount(props.connectionId) > 0">
+          <div class="my-1 h-px bg-border" />
+          <button
+            class="flex w-full items-center rounded-sm px-2 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground"
+            @click="reopenClosedTab"
+          >
+            {{ t('innerTab.reopenClosed') }}
+          </button>
+        </template>
       </div>
     </Teleport>
+  </div>
   </div>
 </template>

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 
 export interface SyncEntry {
   path: string
@@ -25,5 +25,5 @@ export function syncCompare(
   localPath: string,
   remotePath: string,
 ): Promise<SyncDiff> {
-  return invoke('sync_compare', { connectionId, localPath, remotePath })
+  return invokeCommand('sync_compare', { connectionId, localPath, remotePath })
 }

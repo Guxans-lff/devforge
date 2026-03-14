@@ -2,7 +2,6 @@
 import { computed } from 'vue'
 import { useMessageCenterStore } from '@/stores/message-center'
 import { useI18n } from 'vue-i18n'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { CheckCircle2, XCircle, AlertTriangle, Info, Loader2, Trash2, X, TrendingUp } from 'lucide-vue-next'
 import type { Message } from '@/stores/message-center'
 import { Button } from '@/components/ui/button'
@@ -207,7 +206,7 @@ const groupedMessages = computed(() => {
                       <Button
                         v-for="(action, index) in msg.actions"
                         :key="index"
-                        :variant="action.variant || 'default'"
+                        :variant="(action.variant || 'default') as any"
                         size="sm"
                         class="h-7 text-[10px] font-bold uppercase tracking-wider px-3"
                         @click="action.action()"

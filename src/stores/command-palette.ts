@@ -9,7 +9,7 @@ export interface CommandItem {
   label: string
   description?: string
   icon?: string
-  category: 'connection' | 'view' | 'settings' | 'recent' | 'action'
+  category: 'connection' | 'view' | 'settings' | 'recent' | 'action' | 'schema' | 'column' | 'history'
   keywords?: string[]
   action: () => void
 }

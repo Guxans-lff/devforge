@@ -14,9 +14,6 @@ import {
   Plus,
   ArrowRight,
   Zap,
-  Moon,
-  Sun,
-  CloudSun,
 } from 'lucide-vue-next'
 import type { TabType } from '@/types/workspace'
 import ConnectionDialog from '@/components/connection/ConnectionDialog.vue'
@@ -40,13 +37,6 @@ const greeting = computed(() => {
   if (hour < 14) return t('welcome.greetingNoon') || '午安'
   if (hour < 18) return t('welcome.greetingAfternoon') || '下午好'
   return t('welcome.greetingEvening') || '晚上好'
-})
-
-const GreetingIcon = computed(() => {
-  const hour = currentTime.value.getHours()
-  if (hour < 6 || hour >= 18) return Moon
-  if (hour < 12) return Sun
-  return CloudSun
 })
 
 onMounted(async () => {
@@ -200,7 +190,7 @@ const statusColorMap: Record<string, string> = {
           
           <div class="grid grid-cols-3 gap-4">
             <button
-              v-for="(action, index) in quickActions"
+              v-for="action in quickActions"
               :key="action.type"
               class="group relative flex flex-col items-start gap-5 rounded-2xl border border-border/50 bg-card/40 backdrop-blur-xl p-5 transition-all duration-500 hover:border-primary/30 hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.1)] hover:-translate-y-1 active:scale-[0.97]"
               @click="handleQuickAction(action.type)"

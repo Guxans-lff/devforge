@@ -200,7 +200,7 @@ function goBack() {
   if (canGoBack.value) {
     navigatingFromHistory = true
     historyIndex.value--
-    const path = history.value[historyIndex.value]
+    const path = history.value[historyIndex.value]!
     pathInput.value = path
     emit('navigate', path)
   }
@@ -210,7 +210,7 @@ function goForward() {
   if (canGoForward.value) {
     navigatingFromHistory = true
     historyIndex.value++
-    const path = history.value[historyIndex.value]
+    const path = history.value[historyIndex.value]!
     pathInput.value = path
     emit('navigate', path)
   }

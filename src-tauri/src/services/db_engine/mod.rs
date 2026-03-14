@@ -227,8 +227,10 @@ impl DbEngine {
         };
         if let Some(session) = session {
             let start = std::time::Instant::now();
-            // 直接传 Arc<Mutex> 给 driver 函数，由函数内部 lock，避免 guard 跨越 await 点
-            // 通过 spawn 隔离驱动调用，彻底消除 HRTB (Higher-Rank Trait Bounds) 导致的 Send 约束报错
+            // 在执行 SQL 前，先切换到指定数据库上下文
+            if let Some(ref db) = database {
+                Self::ensure_session_database(&session, db).await?;
+            }
             return match session {
                 DbSession::Mysql(conn_mutex) => {
                     let is_select = is_select_query(&sql);
@@ -257,7 +259,10 @@ impl DbEngine {
             sessions.get(&connection_id).and_then(|s| s.get(&tab_id)).cloned()
         };
         if let Some(session) = session {
-            // 直接传 Arc<Mutex> 给 driver 函数，由函数内部 lock，避免 guard 跨越 await 点
+            // 在执行 SQL 前，先切换到指定数据库上下文
+            if let Some(ref db) = database {
+                Self::ensure_session_database(&session, db).await?;
+            }
             return match session {
                 DbSession::Mysql(conn_mutex) => {
                     mysql::execute_select_stream_on_conn(conn_mutex, sql, std::time::Instant::now(), on_chunk).await
@@ -311,6 +316,30 @@ impl DbEngine {
             DriverPool::MySql(p) => { use sqlx::Executor; sqlx::query("SELECT 1").execute(p).await.is_ok() }
             DriverPool::Postgres(p) => { use sqlx::Executor; sqlx::query("SELECT 1").execute(p).await.is_ok() }
         }
+    }
+
+    /// 确保 Session 连接已切换到指定数据库上下文
+    /// MySQL 执行 USE，PostgreSQL 执行 SET search_path
+    async fn ensure_session_database(session: &DbSession, database: &str) -> Result<(), AppError> {
+        match session {
+            DbSession::Mysql(conn_mutex) => {
+                let mut conn = conn_mutex.lock().await;
+                use sqlx::Executor as _;
+                let use_sql = format!("USE `{}`", database.replace('`', "``"));
+                (&mut **conn).execute(sqlx::raw_sql(&use_sql)).await.map_err(|e| {
+                    AppError::Other(format!("切换数据库失败: {}", e))
+                })?;
+            }
+            DbSession::Postgres(conn_mutex) => {
+                let mut conn = conn_mutex.lock().await;
+                use sqlx::Executor as _;
+                let sql = format!("SET search_path TO \"{}\"", database.replace('"', "\"\""));
+                (&mut **conn).execute(sqlx::raw_sql(&sql)).await.map_err(|e| {
+                    AppError::Other(format!("切换数据库失败: {}", e))
+                })?;
+            }
+        }
+        Ok(())
     }
 
     pub async fn cancel_query(self: Arc<Self>, _connection_id: String) -> Result<(), AppError> { Ok(()) }

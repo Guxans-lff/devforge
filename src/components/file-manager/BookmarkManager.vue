@@ -7,7 +7,6 @@ import {
   Dialog,
   DialogContent,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Bookmark, Trash2, GripVertical, ArrowUp, ArrowDown } from 'lucide-vue-next'
@@ -57,14 +56,14 @@ function removeItem(index: number) {
 function moveUp(index: number) {
   if (index <= 0) return
   const arr = [...items.value]
-  ;[arr[index - 1], arr[index]] = [arr[index], arr[index - 1]]
+  ;[arr[index - 1]!, arr[index]!] = [arr[index]!, arr[index - 1]!]
   items.value = arr
 }
 
 function moveDown(index: number) {
   if (index >= items.value.length - 1) return
   const arr = [...items.value]
-  ;[arr[index], arr[index + 1]] = [arr[index + 1], arr[index]]
+  ;[arr[index]!, arr[index + 1]!] = [arr[index + 1]!, arr[index]!]
   items.value = arr
 }
 

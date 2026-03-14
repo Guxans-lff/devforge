@@ -53,12 +53,12 @@ function extractMaxOverscan(source: string): number {
  */
 function hasTransitionOnVirtualRows(source: string, component: 'QueryResult' | 'ObjectTree'): boolean {
   if (component === 'QueryResult') {
-    // 检查虚拟行容器（v-for="vRow in rowVirtualizer.getVirtualItems()" 附近）
-    // 和单元格（v-for="cell in ..." 附近）是否有 transition-colors
-    const virtualRowSection = source.slice(
-      source.indexOf('v-for="vRow in rowVirtualizer.getVirtualItems()"'),
-    )
-    if (!virtualRowSection) return false
+    // 检查虚拟行容器（支持 composable 重构后的引用方式）
+    const marker = source.includes('v-for="vRow in rowVirtualizer.getVirtualItems()"')
+      ? 'v-for="vRow in rowVirtualizer.getVirtualItems()"'
+      : 'v-for="vRow in qr.rowVirtualizer.value.getVirtualItems()"'
+    const virtualRowSection = source.slice(source.indexOf(marker))
+    if (!virtualRowSection || source.indexOf(marker) < 0) return false
     // 截取虚拟行区域（到下一个主要 section）
     const sectionEnd = virtualRowSection.indexOf('<!-- Error state')
     const section = sectionEnd > 0 ? virtualRowSection.slice(0, sectionEnd) : virtualRowSection.slice(0, 2000)
@@ -66,11 +66,12 @@ function hasTransitionOnVirtualRows(source: string, component: 'QueryResult' | '
   }
 
   if (component === 'ObjectTree') {
-    // 检查虚拟行节点上的 transition-colors
-    const virtualRowSection = source.slice(
-      source.indexOf('v-for="virtualRow in virtualRows"'),
-    )
-    if (!virtualRowSection) return false
+    // 检查虚拟行节点上的 transition-colors（支持 composable 重构后的引用方式）
+    const marker = source.includes('v-for="virtualRow in virtualRows"')
+      ? 'v-for="virtualRow in virtualRows"'
+      : 'v-for="virtualRow in tree.virtualRows.value"'
+    const virtualRowSection = source.slice(source.indexOf(marker))
+    if (!virtualRowSection || source.indexOf(marker) < 0) return false
     const section = virtualRowSection.slice(0, 3000)
     return section.includes('transition-colors')
   }
@@ -133,18 +134,26 @@ function isBugCondition(
 }
 
 // ============================================================
-// 读取源代码
+// 读取源代码（组件模板 + composable 逻辑）
 // ============================================================
 
 const QUERY_RESULT_PATH = resolve(__dirname, '../QueryResult.vue')
 const OBJECT_TREE_PATH = resolve(__dirname, '../ObjectTree.vue')
+const USE_QUERY_RESULT_PATH = resolve(__dirname, '../../../composables/useQueryResult.ts')
+const USE_OBJECT_TREE_PATH = resolve(__dirname, '../../../composables/useObjectTree.ts')
 
+/** 组件模板源码（用于 CSS class / DOM 结构检查） */
 const queryResultSource = readFileSync(QUERY_RESULT_PATH, 'utf-8')
 const objectTreeSource = readFileSync(OBJECT_TREE_PATH, 'utf-8')
 
+/** composable 源码（用于配置值提取：overscan、CHUNK_SIZE 等） */
+const queryResultComposable = readFileSync(USE_QUERY_RESULT_PATH, 'utf-8')
+const objectTreeComposable = readFileSync(USE_OBJECT_TREE_PATH, 'utf-8')
+
 // 提取当前配置（使用 maxOverscan，因为快速滚动时自适应系统会提升到此值）
-const queryResultOverscan = extractMaxOverscan(queryResultSource)
-const objectTreeOverscan = extractMaxOverscan(objectTreeSource)
+// 配置值在 composable 中定义，从 composable 源码提取
+const queryResultOverscan = extractMaxOverscan(queryResultComposable)
+const objectTreeOverscan = extractMaxOverscan(objectTreeComposable)
 
 // ============================================================
 // 属性测试

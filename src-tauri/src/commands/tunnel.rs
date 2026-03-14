@@ -6,6 +6,7 @@ use tauri::Manager;
 
 use crate::models::ssh::{TunnelConfig, TunnelInfo};
 use crate::services::ssh_tunnel::SshTunnelEngine;
+use crate::utils::error::AppError;
 
 pub type SshTunnelEngineState = Arc<Mutex<SshTunnelEngine>>;
 
@@ -32,7 +33,7 @@ pub struct TunnelOpenParams {
 pub async fn tunnel_open(
     app: tauri::AppHandle,
     params: TunnelOpenParams,
-) -> Result<TunnelInfo, String> {
+) -> Result<TunnelInfo, AppError> {
     let tunnel_engine = app.state::<SshTunnelEngineState>().inner().clone();
     let tunnel_id = uuid::Uuid::new_v4().to_string();
 
@@ -51,26 +52,25 @@ pub async fn tunnel_open(
     };
 
     let mut engine = tunnel_engine.lock().await;
-    engine.open_tunnel(config).await.map_err(|e| e.to_string())
+    // SshTunnelEngine::open_tunnel 返回 Result<_, AppError>，直接 ? 传播
+    engine.open_tunnel(config).await
 }
 
 #[tauri::command]
 pub async fn tunnel_close(
     app: tauri::AppHandle,
     tunnel_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let tunnel_engine = app.state::<SshTunnelEngineState>().inner().clone();
     let mut engine = tunnel_engine.lock().await;
-    engine
-        .close_tunnel(&tunnel_id)
-        .await
-        .map_err(|e| e.to_string())
+    // SshTunnelEngine::close_tunnel 返回 Result<_, AppError>，直接 ? 传播
+    engine.close_tunnel(&tunnel_id).await
 }
 
 #[tauri::command]
 pub async fn tunnel_list(
     app: tauri::AppHandle,
-) -> Result<Vec<TunnelInfo>, String> {
+) -> Result<Vec<TunnelInfo>, AppError> {
     let tunnel_engine = app.state::<SshTunnelEngineState>().inner().clone();
     let engine = tunnel_engine.lock().await;
     Ok(engine.list_tunnels())

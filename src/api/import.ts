@@ -1,10 +1,10 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 import type { ImportConfig, ImportPreview, ImportResult } from '@/types/import'
 
 export function importPreview(filePath: string, fileType: string): Promise<ImportPreview> {
-  return invoke('import_preview', { filePath, fileType })
+  return invokeCommand('import_preview', { filePath, fileType })
 }
 
 export function importData(config: ImportConfig): Promise<ImportResult> {
-  return invoke('import_data', { config })
+  return invokeCommand('import_data', { config })
 }

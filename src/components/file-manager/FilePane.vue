@@ -20,7 +20,6 @@ import {
   Dialog,
   DialogContent,
   DialogFooter,
-  DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
 import PathBar from './PathBar.vue'
@@ -230,9 +229,6 @@ function handlePathNavigate(path: string) {
   emit('pathInput', path)
 }
 
-function handleAddBookmark(path: string) {
-  emit('addBookmark', path)
-}
 
 function handleKeyDown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'a') {

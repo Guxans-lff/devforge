@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 
 export interface CommandSnippet {
   id: string
@@ -15,17 +15,17 @@ export function listCommandSnippets(
   category?: string,
   search?: string,
 ): Promise<CommandSnippet[]> {
-  return invoke('list_command_snippets', { category, search })
+  return invokeCommand('list_command_snippets', { category, search })
 }
 
 export function createCommandSnippet(record: CommandSnippet): Promise<void> {
-  return invoke('create_command_snippet', { record })
+  return invokeCommand('create_command_snippet', { record })
 }
 
 export function updateCommandSnippet(record: CommandSnippet): Promise<void> {
-  return invoke('update_command_snippet', { record })
+  return invokeCommand('update_command_snippet', { record })
 }
 
 export function deleteCommandSnippet(id: string): Promise<void> {
-  return invoke('delete_command_snippet', { id })
+  return invokeCommand('delete_command_snippet', { id })
 }

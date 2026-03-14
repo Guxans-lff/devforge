@@ -86,9 +86,10 @@ watch(computedOctal, (val) => {
 })
 
 // 八进制输入变化时同步复选框
-function handleOctalInput(value: string) {
-  octalInput.value = value
-  const num = parseInt(value, 8)
+function handleOctalInput(value: string | number) {
+  const strValue = String(value)
+  octalInput.value = strValue
+  const num = parseInt(strValue, 8)
   if (!isNaN(num) && num >= 0 && num <= 0o777) {
     setFromOctal(num)
   }

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 
 export interface RecordingInfo {
   filePath: string
@@ -13,25 +13,25 @@ export function startRecording(
   height: number,
   outputPath?: string,
 ): Promise<string> {
-  return invoke('start_recording', { sessionId, outputPath, width, height })
+  return invokeCommand('start_recording', { sessionId, outputPath, width, height })
 }
 
 export function stopRecording(sessionId: string): Promise<string> {
-  return invoke('stop_recording', { sessionId })
+  return invokeCommand('stop_recording', { sessionId })
 }
 
 export function isRecording(sessionId: string): Promise<boolean> {
-  return invoke('is_recording', { sessionId })
+  return invokeCommand('is_recording', { sessionId })
 }
 
 export function listRecordings(): Promise<RecordingInfo[]> {
-  return invoke('list_recordings')
+  return invokeCommand('list_recordings')
 }
 
 export function readRecording(filePath: string): Promise<string> {
-  return invoke('read_recording', { filePath })
+  return invokeCommand('read_recording', { filePath })
 }
 
 export function exportRecording(sourcePath: string, targetPath: string): Promise<void> {
-  return invoke('export_recording', { sourcePath, targetPath })
+  return invokeCommand('export_recording', { sourcePath, targetPath })
 }

@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 import type { SchemaDiff } from '@/types/schema-compare'
 
 export function schemaCompare(
@@ -7,7 +7,7 @@ export function schemaCompare(
   targetConnectionId: string,
   targetDatabase: string,
 ): Promise<SchemaDiff> {
-  return invoke('schema_compare', {
+  return invokeCommand('schema_compare', {
     sourceConnectionId,
     sourceDatabase,
     targetConnectionId,
@@ -22,7 +22,7 @@ export function generateMigrationSql(
   sourceDatabase: string,
   targetDatabase: string,
 ): Promise<string> {
-  return invoke('generate_migration_sql', {
+  return invokeCommand('generate_migration_sql', {
     diff,
     driver,
     sourceConnectionId,

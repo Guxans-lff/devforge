@@ -21,7 +21,7 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
 } from 'lucide-vue-next'
-import { syncCompare, type SyncEntry, type SyncDiff } from '@/api/sync'
+import { syncCompare, type SyncDiff } from '@/api/sync'
 
 const props = defineProps<{
   open: boolean
@@ -73,10 +73,6 @@ function formatSize(bytes: number | null): string {
   return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`
 }
 
-function formatTime(ts: number | null): string {
-  if (ts == null) return '-'
-  return new Date(ts * 1000).toLocaleString()
-}
 
 function statusIcon(status: string) {
   switch (status) {

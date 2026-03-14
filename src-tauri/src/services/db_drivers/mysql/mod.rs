@@ -8,7 +8,7 @@ pub use util::{get_string, get_opt_string};
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{MySqlPool, Row};
-use crate::models::query::{DatabaseInfo, TableInfo, ColumnInfo, ViewInfo, RoutineInfo, TriggerInfo};
+use crate::models::query::{DatabaseInfo, TableInfo, ColumnInfo, ViewInfo, RoutineInfo, TriggerInfo, ForeignKeyRelation};
 use crate::utils::error::AppError;
 use super::escape_mysql_ident;
 
@@ -244,4 +244,29 @@ pub fn build_table_count_sql(database: &str, table: &str, where_clause: Option<&
         }
     }
     Ok(sql)
+}
+
+/// 获取指定数据库中所有外键关系（用于 SQL 补全 JOIN 推荐）
+pub async fn get_foreign_keys(pool: &MySqlPool, database: &str) -> Result<Vec<ForeignKeyRelation>, AppError> {
+    let rows: Vec<MySqlRow> = sqlx::query(
+        "SELECT CAST(kcu.TABLE_NAME AS CHAR) AS tbl,
+                CAST(kcu.COLUMN_NAME AS CHAR) AS col,
+                CAST(kcu.REFERENCED_TABLE_NAME AS CHAR) AS ref_tbl,
+                CAST(kcu.REFERENCED_COLUMN_NAME AS CHAR) AS ref_col
+         FROM information_schema.KEY_COLUMN_USAGE kcu
+         WHERE kcu.TABLE_SCHEMA = ?
+           AND kcu.REFERENCED_TABLE_NAME IS NOT NULL
+         ORDER BY kcu.TABLE_NAME, kcu.ORDINAL_POSITION"
+    )
+    .bind(database)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("获取外键关系失败: {}", e)))?;
+
+    Ok(rows.iter().map(|row| ForeignKeyRelation {
+        table_name: get_string(row, "tbl"),
+        column_name: get_string(row, "col"),
+        referenced_table_name: get_string(row, "ref_tbl"),
+        referenced_column_name: get_string(row, "ref_col"),
+    }).collect())
 }

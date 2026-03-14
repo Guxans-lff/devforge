@@ -1,4 +1,4 @@
-use tauri::{command, State, Manager};
+use tauri::{command, Manager};
 
 use crate::commands::connection::StorageState;
 use crate::services::storage::QueryHistoryRecord;
@@ -18,7 +18,7 @@ pub async fn save_query_history(
     affected_rows: i64,
     row_count: Option<i64>,
     executed_at: i64,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let storage = app.state::<StorageState>().inner().clone();
     storage
         .save_query_history(
@@ -35,7 +35,6 @@ pub async fn save_query_history(
             executed_at,
         )
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
@@ -45,7 +44,7 @@ pub async fn list_query_history(
     search_text: Option<String>,
     limit: u32,
     offset: u32,
-) -> Result<Vec<QueryHistoryRecord>, String> {
+) -> Result<Vec<QueryHistoryRecord>, AppError> {
     let storage = app.state::<StorageState>().inner().clone();
     storage
         .list_query_history(
@@ -55,29 +54,26 @@ pub async fn list_query_history(
             offset,
         )
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
 pub async fn delete_query_history(
     app: tauri::AppHandle,
     id: String,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let storage = app.state::<StorageState>().inner().clone();
     storage
         .delete_query_history(&id)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[command]
 pub async fn clear_query_history(
     app: tauri::AppHandle,
     connection_id: Option<String>,
-) -> Result<(), String> {
+) -> Result<(), AppError> {
     let storage = app.state::<StorageState>().inner().clone();
     storage
         .clear_query_history(connection_id.as_deref())
         .await
-        .map_err(|e| e.to_string())
 }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tauri::{Manager, State};
+use tauri::Manager;
 
 use crate::commands::connection::StorageState;
 use crate::models::transfer::{FileEntry, FileInfo};
@@ -14,18 +14,16 @@ pub type SftpEngineState = Arc<SftpEngine>;
 pub async fn sftp_connect(
     app: tauri::AppHandle,
     connection_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     let storage = app.state::<StorageState>().inner().clone();
     let conn = storage
         .get_connection(&connection_id)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
-    let auth = ssh_auth::parse_auth_config(&connection_id, &conn.config_json)
-        .map_err(|e| e.to_string())?;
+    let auth = ssh_auth::parse_auth_config(&connection_id, &conn.config_json)?;
 
-    // 解析跳板机配置
+    // 解析跳板机配置（resolve_proxy_from_config 已返回 AppError，直接 ? 传播）
     let proxy = crate::commands::ssh::resolve_proxy_from_config(&storage, &conn.config_json).await?;
 
     sftp_engine
@@ -37,8 +35,7 @@ pub async fn sftp_connect(
             &auth,
             proxy.as_ref(),
         )
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
     Ok(true)
 }
@@ -47,12 +44,11 @@ pub async fn sftp_connect(
 pub async fn sftp_disconnect(
     app: tauri::AppHandle,
     connection_id: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     sftp_engine
         .disconnect(&connection_id)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     Ok(true)
 }
 
@@ -61,12 +57,11 @@ pub async fn sftp_list_dir(
     app: tauri::AppHandle,
     connection_id: String,
     path: String,
-) -> Result<Vec<FileEntry>, String> {
+) -> Result<Vec<FileEntry>, AppError> {
     let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     sftp_engine
         .list_dir(&connection_id, &path)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -74,12 +69,11 @@ pub async fn sftp_stat(
     app: tauri::AppHandle,
     connection_id: String,
     path: String,
-) -> Result<FileInfo, String> {
+) -> Result<FileInfo, AppError> {
     let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     sftp_engine
         .stat(&connection_id, &path)
         .await
-        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -87,12 +81,11 @@ pub async fn sftp_mkdir(
     app: tauri::AppHandle,
     connection_id: String,
     path: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     sftp_engine
         .mkdir(&connection_id, &path)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     Ok(true)
 }
 
@@ -102,18 +95,16 @@ pub async fn sftp_delete(
     connection_id: String,
     path: String,
     is_dir: bool,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     if is_dir {
         sftp_engine
             .delete_dir(&connection_id, &path)
-            .await
-            .map_err(|e| e.to_string())?;
+            .await?;
     } else {
         sftp_engine
             .delete_file(&connection_id, &path)
-            .await
-            .map_err(|e| e.to_string())?;
+            .await?;
     }
     Ok(true)
 }
@@ -124,12 +115,11 @@ pub async fn sftp_rename(
     connection_id: String,
     old_path: String,
     new_path: String,
-) -> Result<bool, String> {
+) -> Result<bool, AppError> {
     let sftp_engine = app.state::<SftpEngineState>().inner().clone();
     sftp_engine
         .rename(&connection_id, &old_path, &new_path)
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
     Ok(true)
 }
 
@@ -139,7 +129,7 @@ pub async fn sftp_download(
     connection_id: String,
     remote_path: String,
     local_path: String,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let sftp_engine = app_handle.state::<SftpEngineState>().inner().clone();
     let transfer_id = uuid::Uuid::new_v4().to_string();
 
@@ -151,8 +141,7 @@ pub async fn sftp_download(
             &transfer_id,
             &app_handle,
         )
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
     Ok(transfer_id)
 }
@@ -163,7 +152,7 @@ pub async fn sftp_upload(
     connection_id: String,
     local_path: String,
     remote_path: String,
-) -> Result<String, String> {
+) -> Result<String, AppError> {
     let sftp_engine = app_handle.state::<SftpEngineState>().inner().clone();
     let transfer_id = uuid::Uuid::new_v4().to_string();
 
@@ -175,29 +164,20 @@ pub async fn sftp_upload(
             &transfer_id,
             &app_handle,
         )
-        .await
-        .map_err(|e| e.to_string())?;
+        .await?;
 
     Ok(transfer_id)
 }
 
-/// List local directory entries (for the local file pane).
+/// 列出本地目录条目（用于本地文件面板）
 #[tauri::command]
-pub async fn local_list_dir(path: String) -> Result<Vec<FileEntry>, String> {
+pub async fn local_list_dir(path: String) -> Result<Vec<FileEntry>, AppError> {
     let mut entries = Vec::new();
-    let mut read_dir = tokio::fs::read_dir(&path)
-        .await
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    // tokio::fs 返回 std::io::Error，AppError 已有 From<std::io::Error>，直接 ?
+    let mut read_dir = tokio::fs::read_dir(&path).await?;
 
-    while let Some(entry) = read_dir
-        .next_entry()
-        .await
-        .map_err(|e| format!("Failed to read entry: {}", e))?
-    {
-        let metadata = entry
-            .metadata()
-            .await
-            .map_err(|e| format!("Failed to read metadata: {}", e))?;
+    while let Some(entry) = read_dir.next_entry().await? {
+        let metadata = entry.metadata().await?;
 
         let name = entry.file_name().to_string_lossy().to_string();
         let full_path = entry.path().to_string_lossy().to_string();
@@ -220,7 +200,7 @@ pub async fn local_list_dir(path: String) -> Result<Vec<FileEntry>, String> {
         });
     }
 
-    // Sort: directories first, then by name
+    // 排序：目录在前，然后按名称排序
     entries.sort_by(|a, b| {
         b.is_dir
             .cmp(&a.is_dir)
@@ -231,38 +211,34 @@ pub async fn local_list_dir(path: String) -> Result<Vec<FileEntry>, String> {
 }
 
 #[tauri::command]
-pub async fn local_mkdir(path: String) -> Result<(), String> {
-    tokio::fs::create_dir_all(&path)
-        .await
-        .map_err(|e| format!("Failed to create directory: {}", e))
+pub async fn local_mkdir(path: String) -> Result<(), AppError> {
+    // std::io::Error 已有 From，直接 ?
+    tokio::fs::create_dir_all(&path).await?;
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn local_delete(path: String) -> Result<(), String> {
-    let metadata = tokio::fs::metadata(&path)
-        .await
-        .map_err(|e| format!("Failed to read path: {}", e))?;
+pub async fn local_delete(path: String) -> Result<(), AppError> {
+    // std::io::Error 已有 From，直接 ?
+    let metadata = tokio::fs::metadata(&path).await?;
     if metadata.is_dir() {
-        tokio::fs::remove_dir_all(&path)
-            .await
-            .map_err(|e| format!("Failed to delete directory: {}", e))
+        tokio::fs::remove_dir_all(&path).await?;
     } else {
-        tokio::fs::remove_file(&path)
-            .await
-            .map_err(|e| format!("Failed to delete file: {}", e))
+        tokio::fs::remove_file(&path).await?;
     }
+    Ok(())
 }
 
 #[tauri::command]
-pub async fn local_rename(old_path: String, new_path: String) -> Result<(), String> {
-    tokio::fs::rename(&old_path, &new_path)
-        .await
-        .map_err(|e| format!("Failed to rename: {}", e))
+pub async fn local_rename(old_path: String, new_path: String) -> Result<(), AppError> {
+    // std::io::Error 已有 From，直接 ?
+    tokio::fs::rename(&old_path, &new_path).await?;
+    Ok(())
 }
 
-/// Recursively list all files in a local directory
+/// 递归列出本地目录中的所有文件
 #[tauri::command]
-pub async fn local_list_recursive(path: String) -> Result<Vec<(String, u64)>, String> {
+pub async fn local_list_recursive(path: String) -> Result<Vec<(String, u64)>, AppError> {
     let mut files = Vec::new();
     collect_local_files(std::path::Path::new(&path), &mut files).await?;
     Ok(files)
@@ -271,24 +247,16 @@ pub async fn local_list_recursive(path: String) -> Result<Vec<(String, u64)>, St
 fn collect_local_files<'a>(
     dir: &'a std::path::Path,
     files: &'a mut Vec<(String, u64)>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + Send + 'a>> {
     Box::pin(async move {
-        let mut entries = tokio::fs::read_dir(dir)
-            .await
-            .map_err(|e| format!("Failed to read directory: {}", e))?;
+        // std::io::Error 已有 From<>，直接 ?
+        let mut entries = tokio::fs::read_dir(dir).await?;
 
-        while let Some(entry) = entries
-            .next_entry()
-            .await
-            .map_err(|e| format!("Failed to read entry: {}", e))?
-        {
+        while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
-            let metadata = entry
-                .metadata()
-                .await
-                .map_err(|e| format!("Failed to get metadata: {}", e))?;
+            let metadata = entry.metadata().await?;
 
-            // Skip symbolic links to avoid infinite loops
+            // 跳过符号链接以避免无限循环
             if metadata.is_symlink() {
                 continue;
             }
@@ -304,23 +272,27 @@ fn collect_local_files<'a>(
     })
 }
 
-/// Recursively list all files in a remote directory
+/// 递归列出远程目录中的所有文件
 #[tauri::command]
 pub async fn sftp_list_recursive(
     app: tauri::AppHandle,
     connection_id: String,
     path: String,
-) -> Result<Vec<(String, u64)>, String> {
+) -> Result<Vec<(String, u64)>, AppError> {
     let engine = app.state::<SftpEngineState>().inner().clone();
-    // Check if connected
+    // 检查是否已连接
     if !engine.is_connected(&connection_id).await {
-        return Err(format!("No SFTP session for connection: {}", connection_id));
+        return Err(AppError::ConnectionNotFound(
+            format!("No SFTP session for connection: {}", connection_id),
+        ));
     }
 
     let sftp: Arc<russh_sftp::client::SftpSession> = engine
         .get_sftp_session(&connection_id)
         .await
-        .ok_or_else(|| format!("No SFTP session for connection: {}", connection_id))?;
+        .ok_or_else(|| AppError::ConnectionNotFound(
+            format!("No SFTP session for connection: {}", connection_id),
+        ))?;
 
     let mut files = Vec::new();
     const MAX_RECURSION_DEPTH: u32 = 20;
@@ -334,20 +306,23 @@ fn collect_remote_files<'a>(
     files: &'a mut Vec<(String, u64)>,
     depth: u32,
     max_depth: u32,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + Send + 'a>> {
     Box::pin(async move {
         if depth >= max_depth {
-            return Err(format!("递归深度超过限制 ({})，可能存在循环引用: {}", max_depth, dir));
+            return Err(AppError::Validation(
+                format!("递归深度超过限制 ({})，可能存在循环引用: {}", max_depth, dir),
+            ));
         }
+        // russh_sftp 的错误包装为 AppError::Connection
         let entries = sftp
             .read_dir(dir)
             .await
-            .map_err(|e| format!("Failed to read remote directory: {}", e))?;
+            .map_err(|e| AppError::Connection(format!("Failed to read remote directory: {}", e)))?;
 
         for entry in entries {
             let file_name = entry.file_name();
 
-            // Skip . and ..
+            // 跳过 . 和 ..
             if file_name == "." || file_name == ".." {
                 continue;
             }
@@ -360,10 +335,10 @@ fn collect_remote_files<'a>(
 
             let attrs = entry.metadata();
 
-            // Check if it's a directory (using permission bits)
+            // 检查是否为目录（使用权限位）
             let is_dir = attrs.permissions.map(|p| p & 0o40000 != 0).unwrap_or(false);
 
-            // Check if it's a symbolic link (to avoid infinite loops)
+            // 检查是否为符号链接（避免无限循环）
             let is_symlink = attrs.permissions.map(|p| p & 0o120000 != 0).unwrap_or(false);
 
             if is_symlink {
@@ -382,9 +357,9 @@ fn collect_remote_files<'a>(
     })
 }
 
-/// Get available drives on Windows or mount points on Unix
+/// 获取 Windows 可用驱动器或 Unix 挂载点
 #[tauri::command]
-pub async fn get_available_drives() -> Result<Vec<String>, String> {
+pub async fn get_available_drives() -> Result<Vec<String>, AppError> {
     #[cfg(target_os = "windows")]
     {
         use winapi::um::fileapi::GetLogicalDrives;
@@ -404,7 +379,7 @@ pub async fn get_available_drives() -> Result<Vec<String>, String> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        // On Unix-like systems, return common mount points
+        // Unix 类系统返回常见挂载点
         Ok(vec!["/".to_string()])
     }
 }

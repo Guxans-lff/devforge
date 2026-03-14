@@ -382,3 +382,13 @@ pub fn detect_statement_type(sql: &str) -> String {
      pub multiple_queries: bool,
      pub disable_auto_commit: bool,
  }
+
+/// 外键关系信息（用于 SQL 补全的 JOIN 推荐）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForeignKeyRelation {
+    pub table_name: String,
+    pub column_name: String,
+    pub referenced_table_name: String,
+    pub referenced_column_name: String,
+}

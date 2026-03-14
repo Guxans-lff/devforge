@@ -12,22 +12,29 @@ import TableDataPanel from '@/components/database/TableDataPanel.vue'
 import SchemaComparePanel from '@/components/database/SchemaComparePanel.vue'
 import PerformanceDashboard from '@/components/database/PerformanceDashboard.vue'
 import UserManagementPanel from '@/components/database/UserManagementPanel.vue'
+import { defineAsyncComponent } from 'vue'
+
+/** 懒加载 ER 图面板（vue-flow + dagre 较大） */
+const ErDiagramPanel = defineAsyncComponent(() => import('@/components/database/ErDiagramPanel.vue'))
 import BackupDialog from '@/components/database/BackupDialog.vue'
 import RestoreDialog from '@/components/database/RestoreDialog.vue'
 import CreateDatabaseDialog from '@/components/database/CreateDatabaseDialog.vue'
 import EditDatabaseDialog from '@/components/database/EditDatabaseDialog.vue'
 import ConfirmDialog from '@/components/ui/confirm-dialog/ConfirmDialog.vue'
+import EnvironmentBanner from '@/components/database/EnvironmentBanner.vue'
+import BreadcrumbNav from '@/components/database/BreadcrumbNav.vue'
 import { useConnectionStore } from '@/stores/connections'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
+import { useSchemaRegistryStore } from '@/stores/schema-registry'
 import * as dbApi from '@/api/database'
-import { dbGetPoolStatus, dbGenerateScript, dbExportDatabaseDdl, readTextFile } from '@/api/database'
+import { dbGetPoolStatus, dbGenerateScript, dbExportDatabaseDdl } from '@/api/database'
 import type { ScriptOptions } from '@/api/database'
 import type { PoolStatus } from '@/types/connection'
-import type { DatabaseTreeNode } from '@/types/database'
 import type { TableEditorTabContext, ImportTabContext } from '@/types/database-workspace'
 import { useSchemaCache } from '@/composables/useSchemaCache'
 import { useNotification } from '@/composables/useNotification'
-import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
+import { parseEnvironment, parseReadOnly, parseConfirmDanger } from '@/api/connection'
+import type { EnvironmentType } from '@/types/environment'
 
 const props = defineProps<{
   connectionId: string
@@ -36,9 +43,11 @@ const props = defineProps<{
 
 const connectionStore = useConnectionStore()
 const dbWorkspaceStore = useDatabaseWorkspaceStore()
+const schemaRegistry = useSchemaRegistryStore()
 
 // 当前连接状态（用于状态栏展示重连信息）
 const connectionState = computed(() => connectionStore.connections.get(props.connectionId))
+const isReconnecting = computed(() => (connectionState.value?.status as string) === 'reconnecting')
 
 // 缓存 configJson 解析结果，避免 driver computed 每次求值都重复 JSON.parse
 const parsedConfig = computed(() => {
@@ -56,6 +65,30 @@ const driver = computed(() => {
   return (config?.driver as string) ?? 'mysql'
 })
 
+// 环境配置（从 configJson 解析）
+const environment = computed<EnvironmentType>(() => {
+  const state = connectionStore.connections.get(props.connectionId)
+  if (!state) return 'development'
+  return parseEnvironment(state.record.configJson)
+})
+
+const readOnly = computed(() => {
+  const state = connectionStore.connections.get(props.connectionId)
+  if (!state) return false
+  return parseReadOnly(state.record.configJson)
+})
+
+const confirmDanger = computed(() => {
+  const state = connectionStore.connections.get(props.connectionId)
+  if (!state) return false
+  return parseConfirmDanger(state.record.configJson)
+})
+
+const connectionHost = computed(() => {
+  const state = connectionStore.connections.get(props.connectionId)
+  return state?.record.host ?? ''
+})
+
 const { t } = useI18n()
 const notification = useNotification()
 const objectTreeRef = ref<InstanceType<typeof ObjectTree>>()
@@ -71,7 +104,28 @@ const {
   handleDatabaseSwitch,
   clearSchemaCache,
   dispose: disposeSchemaCache,
-} = useSchemaCache(() => objectTreeRef.value?.treeNodes)
+} = useSchemaCache(
+  () => objectTreeRef.value?.treeNodes,
+  () => props.connectionId,
+)
+
+// 注册 Schema 到全局注册表（跨连接搜索用）
+schemaRegistry.registerSchema(props.connectionId, props.connectionName, schemaCache)
+
+// 面包屑导航上下文
+const breadcrumbDatabase = computed(() => {
+  const tab = activeTab.value
+  if (!tab) return undefined
+  const ctx = tab.context as any
+  return ctx?.currentDatabase ?? ctx?.database ?? undefined
+})
+
+const breadcrumbTable = computed(() => {
+  const tab = activeTab.value
+  if (!tab) return undefined
+  const ctx = tab.context as any
+  return ctx?.tableBrowse?.table ?? ctx?.table ?? undefined
+})
 
 // 错误边界
 const panelError = ref<string | null>(null)
@@ -196,8 +250,12 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 onMounted(async () => {
   // 注册全局快捷键监听
   window.addEventListener('keydown', handleGlobalKeydown)
+  // 从 SQLite 恢复上次的标签页状态（首次调用，幂等）
+  await dbWorkspaceStore.restoreState().catch(() => {})
   // 确保该连接的 workspace 已初始化（副作用仅在此处执行一次）
   dbWorkspaceStore.getOrCreate(props.connectionId)
+  // 启用自动保存（标签页变更 → debounce 1s → 写入 SQLite）
+  dbWorkspaceStore.enableAutoSave()
   await connectAndLoad()
 })
 
@@ -244,6 +302,7 @@ onDeactivated(() => {
 
 onBeforeUnmount(async () => {
   disposeSchemaCache()
+  schemaRegistry.unregisterSchema(props.connectionId)
   stopPoolStatusPolling()
   window.removeEventListener('keydown', handleGlobalKeydown)
   if (isConnected.value) {
@@ -478,6 +537,10 @@ function handleOpenPerformance() {
   dbWorkspaceStore.openPerformance(props.connectionId)
 }
 
+function handleOpenErDiagram(database: string) {
+  dbWorkspaceStore.openErDiagram(props.connectionId, database)
+}
+
 /** 生成表对象的 DDL 脚本并在新查询标签页中打开 */
 async function handleGenerateScript(database: string, table: string, scriptType: string) {
   try {
@@ -572,7 +635,7 @@ function handleEditDatabaseSuccess() {
           <span class="text-foreground font-bold tabular-nums">{{ poolStatus.idleConnections }}</span>
         </div>
         <div class="flex h-4 items-center gap-2 pl-2">
-          <span class="text-muted-foreground/40 tabular-nums">总计 {{ poolStatus.totalConnections }}</span>
+          <span class="text-muted-foreground/40 tabular-nums">总计 {{ poolStatus.activeConnections + poolStatus.idleConnections }}</span>
           <span class="text-muted-foreground/20 italic">/</span>
           <span class="text-muted-foreground/50 font-medium tabular-nums">{{ poolStatus.maxConnections }}</span>
         </div>
@@ -581,13 +644,13 @@ function handleEditDatabaseSuccess() {
         <div
           class="h-1.5 w-1.5 rounded-full transition-colors duration-300"
           :class="{
-            'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]': isConnected && connectionState?.status !== 'reconnecting',
-            'bg-yellow-500 animate-pulse': connectionState?.status === 'reconnecting' || (isConnecting && connectionState?.status !== 'reconnecting'),
-            'bg-red-500': !isConnected && !isConnecting && connectionState?.status !== 'reconnecting',
+            'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]': isConnected && !isReconnecting,
+            'bg-yellow-500 animate-pulse': isReconnecting || (isConnecting && !isReconnecting),
+            'bg-red-500': !isConnected && !isConnecting && !isReconnecting,
           }"
         />
         <!-- 重连状态提示 -->
-        <span v-if="connectionState?.status === 'reconnecting'" class="text-amber-500">
+        <span v-if="isReconnecting" class="text-amber-500">
           正在重连（第 {{ connectionState?.reconnectAttempt ?? 1 }} 次尝试）
         </span>
         <span v-else>{{ connectionName }}</span>
@@ -617,6 +680,7 @@ function handleEditDatabaseSuccess() {
           @restore-database="handleRestoreDatabase"
           @open-user-management="handleOpenUserManagement"
           @open-performance="handleOpenPerformance"
+          @open-er-diagram="handleOpenErDiagram"
           @generate-script="handleGenerateScript"
           @export-database-ddl="handleExportDatabaseDdl"
           @run-sql-file="handleRunSqlFile"
@@ -628,7 +692,20 @@ function handleEditDatabaseSuccess() {
       <!-- Inner Tab Area -->
       <Pane :size="75">
         <div class="flex h-full flex-col">
-          <InnerTabBar :connection-id="connectionId" />
+          <EnvironmentBanner
+            :environment="environment"
+            :connection-name="connectionName"
+            :host="connectionHost"
+            :read-only="readOnly"
+          />
+          <InnerTabBar :connection-id="connectionId" :environment="environment" />
+          <BreadcrumbNav
+            :connection-name="connectionName"
+            :database="breadcrumbDatabase"
+            :table="breadcrumbTable"
+            :operation="activeTab?.type"
+            :environment="environment"
+          />
 
           <!-- Active Panel -->
           <div class="relative flex-1 min-h-0">
@@ -649,6 +726,9 @@ function handleEditDatabaseSuccess() {
                 :is-loading-schema="isLoadingSchema"
                 :driver="driver"
                 :databases="databaseNames"
+                :environment="environment"
+                :read-only="readOnly"
+                :confirm-danger="confirmDanger"
                 @reconnect="connectAndLoad"
                 @execute-success="handleExecuteSuccess"
                 @database-changed="handleDatabaseChanged"
@@ -697,6 +777,13 @@ function handleEditDatabaseSuccess() {
                 :key="activeTab.id"
                 :connection-id="connectionId"
                 :is-connected="isConnected"
+              />
+              <ErDiagramPanel
+                v-else-if="activeTab?.type === 'er-diagram'"
+                :key="activeTab.id"
+                :connection-id="connectionId"
+                :database="(activeTab.context as any).database"
+                @open-table-editor="(db: string, table: string) => dbWorkspaceStore.openTableEditor(connectionId, db, table)"
               />
             </KeepAlive>
           </div>

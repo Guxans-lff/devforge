@@ -77,7 +77,7 @@ async function loadTunnels() {
   }
 }
 
-async function handleSelectConnection(connId: string | number | boolean | Record<string, any> | null) {
+async function handleSelectConnection(connId: string | number | boolean | bigint | Record<string, any> | null | undefined) {
   const id = String(connId ?? '')
   selectedConnectionId.value = id
   if (!id) return
@@ -97,7 +97,7 @@ async function handleSelectConnection(connId: string | number | boolean | Record
   }
   // 加载密码/密码短语
   try {
-    const pwd = await getCredential(connId)
+    const pwd = await getCredential(id)
     form.value.sshPassword = pwd || ''
   } catch {
     form.value.sshPassword = ''

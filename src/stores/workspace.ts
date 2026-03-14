@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
+import { usePersistence } from '@/plugins/persistence'
 import type { Tab, PanelState, WorkspaceSnapshot } from '@/types/workspace'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useConnectionStore } from '@/stores/connections'
 
-const WORKSPACE_SNAPSHOT_KEY = 'devforge-workspace-snapshot'
-const SNAPSHOT_VERSION = 1
-const SAVE_DEBOUNCE_MS = 500
+/** localStorage 遗留 key（仅用于一次性迁移） */
+const LEGACY_SNAPSHOT_KEY = 'devforge-workspace-snapshot'
 
 export const useWorkspaceStore = defineStore('workspace', () => {
   const tabs = ref<Tab[]>([
@@ -105,95 +105,113 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  // 状态持久化
-  function createSnapshot(): WorkspaceSnapshot {
-    return {
-      version: SNAPSHOT_VERSION,
+  // ===== SQLite 持久化 =====
+  /** 持久化快照格式（只保存必要数据，不包含运行时状态） */
+  interface PersistedWorkspace {
+    tabs: Tab[]
+    activeTabId: string
+    panelState: PanelState
+  }
+
+  const persistence = usePersistence<PersistedWorkspace>({
+    key: 'workspace',
+    version: 1,
+    debounce: 500,
+    serialize: () => ({
       tabs: tabs.value,
       activeTabId: activeTabId.value,
       panelState: panelState.value,
-      timestamp: Date.now(),
-    }
-  }
-
-  function saveSnapshot() {
-    try {
-      const snapshot = createSnapshot()
-      localStorage.setItem(WORKSPACE_SNAPSHOT_KEY, JSON.stringify(snapshot))
-    } catch (err) {
-      console.warn('Failed to save workspace snapshot:', err)
-    }
-  }
-
-  function loadSnapshot(): WorkspaceSnapshot | null {
-    try {
-      const raw = localStorage.getItem(WORKSPACE_SNAPSHOT_KEY)
-      if (!raw) return null
-      const snapshot = JSON.parse(raw) as WorkspaceSnapshot
-      // 验证版本
-      if (snapshot.version !== SNAPSHOT_VERSION) {
-        console.warn('Workspace snapshot version mismatch, ignoring')
-        return null
-      }
-      return snapshot
-    } catch (err) {
-      console.warn('Failed to load workspace snapshot:', err)
-      return null
-    }
-  }
-
-  function restoreSnapshot(snapshot: WorkspaceSnapshot) {
-    // 恢复 tabs（过滤掉无效的 tabs）
-    const validTabs = snapshot.tabs.filter(tab => {
-      // Welcome tab 总是有效
-      if (tab.type === 'welcome' || tab.type === 'settings') return true
-      // 需要 connectionId 的 tab 必须有 connectionId
-      if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager') {
-        return !!tab.connectionId
-      }
-      return true
-    })
-
-    // 如果没有有效的 tabs，至少保留 welcome tab
-    if (validTabs.length === 0) {
-      validTabs.push({
-        id: 'welcome',
-        type: 'welcome',
-        title: 'Homepage',
-        closable: false,
+    }),
+    deserialize: (data) => {
+      // 恢复 tabs（过滤掉无效的 tabs）
+      const validTabs = (data.tabs ?? []).filter(tab => {
+        if (tab.type === 'welcome' || tab.type === 'settings') return true
+        if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager') {
+          return !!tab.connectionId
+        }
+        return true
       })
-    }
 
-    tabs.value = validTabs
+      if (validTabs.length === 0) {
+        validTabs.push({
+          id: 'welcome',
+          type: 'welcome',
+          title: 'Homepage',
+          closable: false,
+        })
+      }
 
-    // 恢复 activeTabId（如果无效则使用第一个 tab）
-    const validActiveTab = validTabs.find(t => t.id === snapshot.activeTabId)
-    activeTabId.value = validActiveTab ? snapshot.activeTabId : (validTabs[0]?.id ?? '')
+      tabs.value = validTabs
 
-    // 恢复面板状态
-    panelState.value = snapshot.panelState
-  }
+      const validActiveTab = validTabs.find(t => t.id === data.activeTabId)
+      activeTabId.value = validActiveTab ? data.activeTabId : (validTabs[0]?.id ?? '')
 
-  function clearSnapshot() {
-    try {
-      localStorage.removeItem(WORKSPACE_SNAPSHOT_KEY)
-    } catch (err) {
-      console.warn('Failed to clear workspace snapshot:', err)
-    }
-  }
-
-  // 监听状态变化，自动保存（防抖）
-  let saveTimer: ReturnType<typeof setTimeout> | null = null
-  watch(
-    [tabs, activeTabId, panelState],
-    () => {
-      if (saveTimer) clearTimeout(saveTimer)
-      saveTimer = setTimeout(() => {
-        saveSnapshot()
-      }, SAVE_DEBOUNCE_MS)
+      if (data.panelState) {
+        panelState.value = data.panelState
+      }
     },
-    { deep: false }
-  )
+  })
+
+  /** 从 SQLite 恢复状态，若无则自动迁移 localStorage 数据 */
+  let _restored = false
+  async function restoreState(): Promise<boolean> {
+    if (_restored) return true
+    _restored = true
+
+    // 优先从 SQLite 加载
+    const loaded = await persistence.load()
+    if (loaded) return true
+
+    // SQLite 无数据 → 尝试从 localStorage 一次性迁移
+    try {
+      const raw = localStorage.getItem(LEGACY_SNAPSHOT_KEY)
+      if (!raw) return false
+      const snapshot = JSON.parse(raw) as WorkspaceSnapshot
+      if (!snapshot || !Array.isArray(snapshot.tabs)) return false
+
+      // 通过 deserialize 恢复（含 tab 有效性过滤）
+      persistence.load() // no-op，但保持一致性
+      // 手动构建并恢复
+      const data: PersistedWorkspace = {
+        tabs: snapshot.tabs,
+        activeTabId: snapshot.activeTabId,
+        panelState: snapshot.panelState,
+      }
+      // 直接用 deserialize 逻辑
+      const validTabs = (data.tabs ?? []).filter(tab => {
+        if (tab.type === 'welcome' || tab.type === 'settings') return true
+        if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager') {
+          return !!tab.connectionId
+        }
+        return true
+      })
+      if (validTabs.length === 0) {
+        validTabs.push({ id: 'welcome', type: 'welcome', title: 'Homepage', closable: false })
+      }
+      tabs.value = validTabs
+      const validActiveTab = validTabs.find(t => t.id === data.activeTabId)
+      activeTabId.value = validActiveTab ? data.activeTabId : (validTabs[0]?.id ?? '')
+      if (data.panelState) panelState.value = data.panelState
+
+      // 立即写入 SQLite
+      await persistence.saveImmediate()
+      // 清理 localStorage 遗留
+      localStorage.removeItem(LEGACY_SNAPSHOT_KEY)
+      console.info('[Workspace] localStorage → SQLite 迁移完成')
+      return true
+    } catch (e) {
+      console.warn('[Workspace] localStorage 迁移失败:', e)
+      return false
+    }
+  }
+
+  /** 启用自动保存（幂等） */
+  let _autoSaveEnabled = false
+  function enableAutoSave(): void {
+    if (_autoSaveEnabled) return
+    _autoSaveEnabled = true
+    persistence.autoSave([tabs, activeTabId, panelState])
+  }
 
   return {
     tabs,
@@ -209,9 +227,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setBottomPanelHeight,
     setBottomPanelTab,
     // 持久化方法
-    saveSnapshot,
-    loadSnapshot,
-    restoreSnapshot,
-    clearSnapshot,
+    restoreState,
+    enableAutoSave,
   }
 })

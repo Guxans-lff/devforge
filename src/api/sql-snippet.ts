@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 
 export interface SqlSnippetRecord {
   id: string
@@ -16,20 +16,20 @@ export function listSqlSnippets(params?: {
   category?: string | null
   search?: string | null
 }): Promise<SqlSnippetRecord[]> {
-  return invoke('list_sql_snippets', {
+  return invokeCommand('list_sql_snippets', {
     category: params?.category ?? null,
     search: params?.search ?? null,
   })
 }
 
 export function createSqlSnippet(record: SqlSnippetRecord): Promise<void> {
-  return invoke('create_sql_snippet', { record })
+  return invokeCommand('create_sql_snippet', { record })
 }
 
 export function updateSqlSnippet(record: SqlSnippetRecord): Promise<void> {
-  return invoke('update_sql_snippet', { record })
+  return invokeCommand('update_sql_snippet', { record })
 }
 
 export function deleteSqlSnippet(id: string): Promise<void> {
-  return invoke('delete_sql_snippet', { id })
+  return invokeCommand('delete_sql_snippet', { id })
 }

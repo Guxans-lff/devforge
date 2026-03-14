@@ -19,7 +19,6 @@ import {
   Pencil,
   Trash2,
   Bookmark,
-  X,
 } from 'lucide-vue-next'
 import * as api from '@/api/command-snippet'
 import type { CommandSnippet } from '@/api/command-snippet'
@@ -56,11 +55,6 @@ const filteredSnippets = computed(() => {
       s.command.toLowerCase().includes(q) ||
       (s.description?.toLowerCase().includes(q) ?? false),
   )
-})
-
-const _categories = computed(() => {
-  const cats = new Set(snippets.value.map((s) => s.category || 'default'))
-  return Array.from(cats)
 })
 
 async function loadSnippets() {

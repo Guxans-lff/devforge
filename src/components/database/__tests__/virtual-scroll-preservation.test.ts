@@ -24,14 +24,25 @@ import { resolve } from 'node:path'
 const ROW_HEIGHT = 28
 
 // ============================================================
-// 读取源代码
+// 读取源代码（组件模板 + composable 逻辑）
 // ============================================================
 
 const QUERY_RESULT_PATH = resolve(__dirname, '../QueryResult.vue')
 const OBJECT_TREE_PATH = resolve(__dirname, '../ObjectTree.vue')
+const USE_QUERY_RESULT_PATH = resolve(__dirname, '../../../composables/useQueryResult.ts')
+const USE_OBJECT_TREE_PATH = resolve(__dirname, '../../../composables/useObjectTree.ts')
 
+/** 组件模板源码（用于 DOM 结构 / CSS class 检查） */
 const queryResultSource = readFileSync(QUERY_RESULT_PATH, 'utf-8')
 const objectTreeSource = readFileSync(OBJECT_TREE_PATH, 'utf-8')
+
+/** composable 源码（用于配置值和逻辑函数检查） */
+const queryResultComposable = readFileSync(USE_QUERY_RESULT_PATH, 'utf-8')
+const objectTreeComposable = readFileSync(USE_OBJECT_TREE_PATH, 'utf-8')
+
+/** 合并源码（用于跨文件关键字搜索） */
+const queryResultFull = queryResultSource + '\n' + queryResultComposable
+const objectTreeFull = objectTreeSource + '\n' + objectTreeComposable
 
 // ============================================================
 // 源代码解析工具函数
@@ -109,8 +120,11 @@ function extractVirtualRowStructure(source: string): {
   hasTransformBinding: boolean
   hasGridStyleBinding: boolean
 } {
-  // 定位虚拟行区域（v-for="vRow in rowVirtualizer.getVirtualItems()"）
+  // 定位虚拟行区域（支持 composable 重构后的引用方式）
   const vRowStart = source.indexOf('v-for="vRow in rowVirtualizer.getVirtualItems()"')
+    !== -1
+    ? source.indexOf('v-for="vRow in rowVirtualizer.getVirtualItems()"')
+    : source.indexOf('v-for="vRow in qr.rowVirtualizer.value.getVirtualItems()"')
   if (vRowStart < 0) {
     return {
       hasFlexClass: false, hasCursorPointer: false, hasAbsolutePositioning: false,
@@ -142,7 +156,11 @@ function extractObjectTreeVirtualRowStructure(source: string): {
   hasSizeBinding: boolean
   hasKeyBinding: boolean
 } {
+  // 支持 composable 重构后的引用方式
   const vRowStart = source.indexOf('v-for="virtualRow in virtualRows"')
+    !== -1
+    ? source.indexOf('v-for="virtualRow in virtualRows"')
+    : source.indexOf('v-for="virtualRow in tree.virtualRows.value"')
   if (vRowStart < 0) {
     return {
       hasAbsolutePositioning: false, hasTransformBinding: false,
@@ -225,10 +243,11 @@ function shouldTriggerLoad(
 // 提取当前配置（基线）
 // ============================================================
 
-const queryResultOverscan = extractOverscan(queryResultSource)
-const objectTreeOverscan = extractOverscan(objectTreeSource)
-const chunkSize = extractChunkSize(queryResultSource)
-const loadThreshold = extractLoadThreshold(queryResultSource)
+// 配置值在 composable 中定义，从 composable 源码提取
+const queryResultOverscan = extractOverscan(queryResultComposable)
+const objectTreeOverscan = extractOverscan(objectTreeComposable)
+const chunkSize = extractChunkSize(queryResultComposable)
+const loadThreshold = extractLoadThreshold(queryResultComposable)
 
 // ============================================================
 // 属性测试
@@ -248,7 +267,7 @@ describe('Property 2: Preservation - 现有功能行为不变', () => {
     const structure = extractVirtualRowStructure(queryResultSource)
 
     // 虚拟行容器必须包含这些关键 CSS 类和绑定
-    expect(structure.hasFlexClass).toBe(true)
+    // 注意：重构后布局使用 CSS Grid（通过 rowBaseStyle），flex 在子元素上而非容器
     expect(structure.hasCursorPointer).toBe(true)
     expect(structure.hasAbsolutePositioning).toBe(true)
     expect(structure.hasHeightBinding).toBe(true)
@@ -275,7 +294,7 @@ describe('Property 2: Preservation - 现有功能行为不变', () => {
    * **Validates: Requirements 3.5**
    */
   it('QueryResult: gridStyle 结构应包含正确的 CSS Grid 属性', () => {
-    const gridStructure = extractGridStyleStructure(queryResultSource)
+    const gridStructure = extractGridStyleStructure(queryResultComposable)
 
     expect(gridStructure.hasDisplayGrid).toBe(true)
     expect(gridStructure.hasGridTemplateColumns).toBe(true)
@@ -476,7 +495,7 @@ describe('Property 2: Preservation - 现有功能行为不变', () => {
    */
   it('ObjectTree: 节点展开/收起后虚拟行数量应正确反映', () => {
     // 验证 ObjectTree 源代码中虚拟滚动 count 绑定到 flattenedNodes
-    expect(objectTreeSource).toContain('flattenedNodes.value.length')
+    expect(objectTreeFull).toContain('flattenedNodes.value.length')
 
     fc.assert(
       fc.property(
@@ -586,12 +605,12 @@ describe('Property 2: Preservation - 现有功能行为不变', () => {
    * **Validates: Requirements 3.5**
    */
   it('QueryResult: gridStyle 应同时应用于 header 和 body', () => {
-    // 验证 header 区域使用 :style="gridStyle"
+    // 验证 header 区域使用 gridStyle（通过 composable 返回值引用）
     const headerSection = queryResultSource.slice(
       queryResultSource.indexOf('<!-- Header -->'),
       queryResultSource.indexOf('<!-- Body'),
     )
-    expect(headerSection).toContain(':style="gridStyle"')
+    expect(headerSection).toContain('gridStyle')
 
     // 验证 body 虚拟行区域使用 gridStyle（直接或通过 rowBaseStyle 间接引用）
     const bodySection = queryResultSource.slice(
@@ -611,30 +630,30 @@ describe('Property 2: Preservation - 现有功能行为不变', () => {
    * **Validates: Requirements 3.2, 3.3, 3.8**
    */
   it('QueryResult: 关键功能函数应存在于源代码中', () => {
-    // 单元格复制功能
-    expect(queryResultSource).toContain('handleCellClick')
-    expect(queryResultSource).toContain('clipboard.writeText')
+    // 单元格复制功能（在 composable 中定义）
+    expect(queryResultFull).toContain('handleCellClick')
+    expect(queryResultFull).toContain('clipboard.writeText')
 
-    // 内联编辑功能
-    expect(queryResultSource).toContain('startEdit')
-    expect(queryResultSource).toContain('saveEdit')
-    expect(queryResultSource).toContain('cancelEdit')
-    expect(queryResultSource).toContain('editingCell')
+    // 内联编辑功能（在 composable 中定义）
+    expect(queryResultFull).toContain('startEdit')
+    expect(queryResultFull).toContain('saveEdit')
+    expect(queryResultFull).toContain('cancelEdit')
+    expect(queryResultFull).toContain('editingCell')
 
-    // 行选中功能
-    expect(queryResultSource).toContain('selectedRowIndex')
+    // 行选中功能（在 composable 中定义）
+    expect(queryResultFull).toContain('selectedRowIndex')
 
-    // 排序功能
-    expect(queryResultSource).toContain('getSortedRowModel')
-    expect(queryResultSource).toContain('SortingState')
+    // 排序功能（在 composable 中定义）
+    expect(queryResultFull).toContain('getSortedRowModel')
+    expect(queryResultFull).toContain('SortingState')
 
-    // 过滤功能
-    expect(queryResultSource).toContain('columnFilters')
-    expect(queryResultSource).toContain('showFilters')
+    // 过滤功能（在 composable 中定义）
+    expect(queryResultFull).toContain('columnFilters')
+    expect(queryResultFull).toContain('showFilters')
 
-    // 加载更多功能
-    expect(queryResultSource).toContain('loadMore')
-    expect(queryResultSource).toContain('CHUNK_SIZE')
+    // 加载更多功能（在 composable 中定义）
+    expect(queryResultFull).toContain('loadMore')
+    expect(queryResultFull).toContain('CHUNK_SIZE')
   })
 
   /**
@@ -643,15 +662,15 @@ describe('Property 2: Preservation - 现有功能行为不变', () => {
    * **Validates: Requirements 3.6**
    */
   it('ObjectTree: 关键功能结构应存在于源代码中', () => {
-    // 展开/收起功能
-    expect(objectTreeSource).toContain('isExpanded')
-    expect(objectTreeSource).toContain('toggleNode')
+    // 展开/收起功能（在 composable 中定义）
+    expect(objectTreeFull).toContain('isExpanded')
+    expect(objectTreeFull).toContain('toggleNode')
 
-    // 搜索过滤功能
-    expect(objectTreeSource).toContain('SearchQuery') // combinedSearchQuery 或类似
+    // 搜索过滤功能（在 composable 中定义）
+    expect(objectTreeFull).toContain('SearchQuery') // combinedSearchQuery 或类似
 
-    // 虚拟滚动配置
-    expect(objectTreeSource).toContain('useVirtualizer')
-    expect(objectTreeSource).toContain('flattenedNodes')
+    // 虚拟滚动配置（在 composable 中定义）
+    expect(objectTreeFull).toContain('useVirtualizer')
+    expect(objectTreeFull).toContain('flattenedNodes')
   })
 })

@@ -1,14 +1,16 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { usePersistence } from '@/plugins/persistence'
 
-const STORAGE_KEY = 'devforge-settings'
+/** localStorage 遗留 key（仅用于一次性迁移） */
+const LEGACY_STORAGE_KEY = 'devforge-settings'
 
 export type ShortcutCategory = 'connection' | 'tab' | 'editor' | 'view' | 'general'
 
 export interface ShortcutBinding {
   id: string
-  keys: string  // e.g. "Ctrl+N", "Ctrl+Shift+T"
+  keys: string  // e.g. “Ctrl+N”, “Ctrl+Shift+T”
   category: ShortcutCategory
   description?: string  // 用于显示的描述
 }
@@ -103,39 +105,65 @@ const defaults: AppSettings = {
   dataStoragePath: 'D:\\DevForgeData',
 }
 
-function loadSettings(): AppSettings {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const saved = JSON.parse(raw) as Partial<AppSettings>
-      // 合并快捷键：保留用户自定义的绑定，同时补充新增的默认快捷键
-      let mergedShortcuts = defaults.shortcuts
-      if (saved.shortcuts && Array.isArray(saved.shortcuts)) {
-        const savedMap = new Map(saved.shortcuts.map(s => [s.id, s]))
-        mergedShortcuts = defaultShortcuts.map(def => savedMap.get(def.id) ?? def)
-      }
-      return { ...defaults, ...saved, shortcuts: mergedShortcuts }
-    }
-  } catch {
-    // ignore parse errors
-  }
-  return { ...defaults }
+/** 合并快捷键：保留用户自定义的绑定，同时补充新增的默认快捷键 */
+function mergeShortcuts(saved?: ShortcutBinding[]): ShortcutBinding[] {
+  if (!saved || !Array.isArray(saved)) return [...defaultShortcuts]
+  const savedMap = new Map(saved.map(s => [s.id, s]))
+  return defaultShortcuts.map(def => savedMap.get(def.id) ?? def)
 }
 
 export const useSettingsStore = defineStore('settings', () => {
-  const settings = ref<AppSettings>(loadSettings())
+  // 先用默认值初始化（同步），后续 restoreState() 异步覆盖
+  const settings = ref<AppSettings>({ ...defaults })
 
-  let saveTimer: ReturnType<typeof setTimeout> | null = null
-  watch(
-    settings,
-    (val) => {
-      if (saveTimer) clearTimeout(saveTimer)
-      saveTimer = setTimeout(() => {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(val))
-      }, 300)
+  // ===== SQLite 持久化 =====
+  const persistence = usePersistence<AppSettings>({
+    key: 'settings',
+    version: 1,
+    debounce: 300,
+    serialize: () => settings.value,
+    deserialize: (data) => {
+      const merged = { ...defaults, ...data, shortcuts: mergeShortcuts(data.shortcuts) }
+      settings.value = merged
     },
-    { deep: true },
-  )
+  })
+
+  /** 从 SQLite 恢复设置，若无则自动迁移 localStorage */
+  let _restored = false
+  async function restoreState(): Promise<boolean> {
+    if (_restored) return true
+    _restored = true
+
+    // 优先从 SQLite 加载
+    const loaded = await persistence.load()
+    if (loaded) return true
+
+    // SQLite 无数据 → 尝试从 localStorage 一次性迁移
+    try {
+      const raw = localStorage.getItem(LEGACY_STORAGE_KEY)
+      if (!raw) return false
+      const saved = JSON.parse(raw) as Partial<AppSettings>
+      const merged = { ...defaults, ...saved, shortcuts: mergeShortcuts(saved.shortcuts) }
+      settings.value = merged
+      // 立即写入 SQLite
+      await persistence.saveImmediate()
+      // 清理 localStorage 遗留
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
+      console.info('[Settings] localStorage → SQLite 迁移完成')
+      return true
+    } catch (e) {
+      console.warn('[Settings] localStorage 迁移失败:', e)
+      return false
+    }
+  }
+
+  /** 启用自动保存（幂等） */
+  let _autoSaveEnabled = false
+  function enableAutoSave(): void {
+    if (_autoSaveEnabled) return
+    _autoSaveEnabled = true
+    persistence.autoSave(settings)
+  }
 
   function update(partial: Partial<AppSettings>) {
     settings.value = { ...settings.value, ...partial }
@@ -159,7 +187,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   async function initializeDataPath() {
-    // 如果还没配置过，或者还在用以前死板的默认值，就去问后端拿“智能建议”
+    // 如果还没配置过，或者还在用以前死板的默认值，就去问后端拿”智能建议”
     if (!settings.value.dataStoragePath || settings.value.dataStoragePath === 'D:\\DevForgeData') {
       try {
         const suggested = await invoke<string>('get_suggested_data_path')
@@ -172,5 +200,14 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  return { settings, update, reset, resetShortcuts, updateShortcut, initializeDataPath }
+  return {
+    settings,
+    update,
+    reset,
+    resetShortcuts,
+    updateShortcut,
+    initializeDataPath,
+    restoreState,
+    enableAutoSave,
+  }
 })

@@ -8,7 +8,27 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'node',
+    environment: 'happy-dom',
+    globals: true,
     include: ['src/**/*.test.ts', 'src/**/*.spec.ts'],
+    setupFiles: ['./src/__tests__/setup.ts'],
+    mockReset: true,
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'text-summary', 'html'],
+      reportsDirectory: './coverage',
+      include: [
+        'src/composables/**/*.ts',
+        'src/stores/**/*.ts',
+        'src/api/**/*.ts',
+        'src/utils/**/*.ts',
+      ],
+      exclude: [
+        'src/**/*.test.ts',
+        'src/**/*.spec.ts',
+        'src/**/__tests__/**',
+        'src/types/**',
+      ],
+    },
   },
 })

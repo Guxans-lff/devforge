@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 
 export interface QueryHistoryRecord {
   id: string
@@ -27,7 +27,7 @@ export function saveQueryHistory(record: {
   rowCount?: number | null
   executedAt: number
 }): Promise<void> {
-  return invoke('save_query_history', record)
+  return invokeCommand('save_query_history', record)
 }
 
 export function listQueryHistory(params: {
@@ -36,13 +36,13 @@ export function listQueryHistory(params: {
   limit: number
   offset: number
 }): Promise<QueryHistoryRecord[]> {
-  return invoke('list_query_history', params)
+  return invokeCommand('list_query_history', params)
 }
 
 export function deleteQueryHistory(id: string): Promise<void> {
-  return invoke('delete_query_history', { id })
+  return invokeCommand('delete_query_history', { id })
 }
 
 export function clearQueryHistory(connectionId?: string | null): Promise<void> {
-  return invoke('clear_query_history', { connectionId: connectionId ?? null })
+  return invokeCommand('clear_query_history', { connectionId: connectionId ?? null })
 }

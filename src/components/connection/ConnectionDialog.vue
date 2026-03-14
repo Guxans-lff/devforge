@@ -8,21 +8,17 @@ import { useToast } from '@/composables/useToast'
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Database, Terminal, FolderOpen, Loader2, Plug, CheckCircle2, XCircle, Info, ShieldCheck, Cpu } from 'lucide-vue-next'
+import { Database, Terminal, FolderOpen, Loader2, Plug, CheckCircle2, XCircle, Cpu } from 'lucide-vue-next'
 import DatabaseForm from './DatabaseForm.vue'
 import SshForm from './SshForm.vue'
 import SftpForm from './SftpForm.vue'
 import type { ConnectionRecord } from '@/api/connection'
 import type { SslConfig } from '@/types/connection'
+import type { EnvironmentType } from '@/types/environment'
 
 const props = defineProps<{
   open: boolean
@@ -68,6 +64,9 @@ const form = ref({
     clientCertPath: '',
     clientKeyPath: '',
   } as SslConfig,
+  environment: 'development' as EnvironmentType,
+  readOnly: false,
+  confirmDanger: false,
 })
 
 const isEditing = computed(() => !!props.editingConnection)
@@ -106,6 +105,9 @@ const databaseFormData = computed({
     password: form.value.password,
     database: form.value.database,
     ssl: form.value.ssl,
+    environment: form.value.environment,
+    readOnly: form.value.readOnly,
+    confirmDanger: form.value.confirmDanger,
   }),
   set: (value) => {
     form.value.driver = value.driver
@@ -115,6 +117,9 @@ const databaseFormData = computed({
     form.value.password = value.password
     form.value.database = value.database
     form.value.ssl = value.ssl
+    form.value.environment = value.environment
+    form.value.readOnly = value.readOnly
+    form.value.confirmDanger = value.confirmDanger
   },
 })
 
@@ -207,6 +212,12 @@ watch(
         form.value.sshConnectionId = config.sshConnectionId ?? ''
         form.value.proxyJumpEnabled = !!config.proxyJump?.connectionId
         form.value.proxyJumpConnectionId = config.proxyJump?.connectionId ?? ''
+        // 加载环境配置
+        form.value.environment = config.environment ?? 'development'
+        form.value.readOnly = config.readOnly === true
+        form.value.confirmDanger = typeof config.confirmDanger === 'boolean'
+          ? config.confirmDanger
+          : (config.environment === 'production' || config.environment === 'staging')
         // 加载 SSL 配置
         if (config.ssl) {
           form.value.ssl = {
@@ -269,6 +280,9 @@ function resetForm() {
       clientCertPath: '',
       clientKeyPath: '',
     },
+    environment: 'development' as EnvironmentType,
+    readOnly: false,
+    confirmDanger: false,
   }
 }
 
@@ -327,6 +341,9 @@ function buildConfigJson(): string {
     const config: Record<string, unknown> = {
       driver: form.value.driver,
       database: form.value.database,
+      environment: form.value.environment,
+      readOnly: form.value.readOnly,
+      confirmDanger: form.value.confirmDanger,
     }
     // 仅在非 disabled 模式下保存 SSL 配置
     if (form.value.ssl && form.value.ssl.mode !== 'disabled') {

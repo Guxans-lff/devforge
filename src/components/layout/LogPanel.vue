@@ -1,17 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useLogStore, type LogEntry, type LogLevel, type LogSource } from '@/stores/log'
+import { useLogStore, type LogLevel, type LogSource } from '@/stores/log'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { 
-  Trash2, 
-  Trash,
-  Download, 
-  Terminal, 
-  Database, 
-  Files as FilesIcon, 
-  Monitor, 
+import {
+  Trash2,
+  Download,
+  Terminal,
+  Database,
+  Files as FilesIcon,
+  Monitor,
   Search,
   ChevronRight,
   ChevronDown,
@@ -26,7 +25,6 @@ const filterLevel = ref<LogLevel | 'ALL'>('ALL')
 const filterSource = ref<LogSource | 'ALL'>('ALL')
 const searchText = ref('')
 const isFollowMode = ref(true)
-const scrollContainer = ref<any>(null)
 
 // 过滤后的日志
 const filteredLogs = computed(() => {

@@ -12,8 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Eye, EyeOff, Globe, User, Lock, Database as DbIcon, Hash, ShieldCheck, FolderOpen, FileKey, FileLock } from 'lucide-vue-next'
+import { Eye, EyeOff, Globe, User, Lock, Database as DbIcon, Hash, ShieldCheck, FolderOpen, FileKey, FileLock, ShieldAlert } from 'lucide-vue-next'
+import { Switch } from '@/components/ui/switch'
 import type { SslConfig } from '@/types/connection'
+import type { EnvironmentType } from '@/types/environment'
+import { ENV_PRESETS, ENVIRONMENT_OPTIONS } from '@/types/environment'
 
 /** SSL 模式选项定义 */
 const SSL_MODE_OPTIONS = computed(() => [
@@ -32,6 +35,9 @@ export interface DatabaseFormData {
   password: string
   database: string
   ssl: SslConfig
+  environment: EnvironmentType
+  readOnly: boolean
+  confirmDanger: boolean
 }
 
 const props = defineProps<{
@@ -87,10 +93,14 @@ function togglePasswordVisibility() {
   emit('update:showPassword', !props.showPassword)
 }
 
-const driverIcons: Record<string, string> = {
-  mysql: '/icons/mysql.svg',
-  postgresql: '/icons/postgresql.svg',
-  sqlite: '/icons/sqlite.svg',
+/** 切换环境类型时自动同步 confirmDanger 默认值 */
+function handleEnvironmentChange(env: EnvironmentType) {
+  const preset = ENV_PRESETS[env]
+  localValue.value = {
+    ...localValue.value,
+    environment: env,
+    confirmDanger: preset.defaultConfirmDanger,
+  }
 }
 
 /** 是否需要显示证书文件选择器（仅 verify-ca 和 verify-identity 模式） */
@@ -300,6 +310,62 @@ async function browseClientKey() {
             class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs font-semibold text-foreground placeholder:text-muted-foreground/30"
           />
         </div>
+      </div>
+    </section>
+
+    <!-- Section 4: 环境与安全 -->
+    <section class="space-y-4">
+      <div class="flex items-center gap-2">
+        <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
+        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('environment.sectionTitle') }}</h3>
+        <div class="flex-1 h-[1px] bg-border/40"></div>
+      </div>
+
+      <!-- 环境类型选择器 -->
+      <div class="space-y-2">
+        <div class="flex items-center justify-between px-1">
+          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('environment.type') }}</Label>
+          <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">ENV</span>
+        </div>
+        <Select :model-value="localValue.environment" @update:model-value="handleEnvironmentChange($event as EnvironmentType)">
+          <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs shadow-none">
+            <template #default>
+              <div class="flex items-center gap-1.5 min-w-0 font-bold">
+                <div class="h-3 w-3 rounded-full shrink-0" :style="{ backgroundColor: ENV_PRESETS[localValue.environment]?.color ?? '#6B7280' }"></div>
+                <SelectValue />
+              </div>
+            </template>
+          </SelectTrigger>
+          <SelectContent class="bg-popover border-border rounded-xl shadow-2xl">
+            <SelectItem v-for="env in ENVIRONMENT_OPTIONS" :key="env" :value="env">
+              <div class="flex items-center gap-2">
+                <div class="h-2.5 w-2.5 rounded-full shrink-0" :style="{ backgroundColor: ENV_PRESETS[env].color }"></div>
+                <span>{{ t(`environment.${env}`) }}</span>
+              </div>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <!-- 只读模式 -->
+      <div class="flex items-center justify-between px-1 py-2">
+        <div class="space-y-0.5">
+          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('environment.readOnly') }}</Label>
+          <p class="text-[9px] text-muted-foreground/50">{{ t('environment.readOnlyDesc') }}</p>
+        </div>
+        <Switch :checked="localValue.readOnly" @update:checked="updateField('readOnly', $event)" />
+      </div>
+
+      <!-- 危险操作确认 -->
+      <div class="flex items-center justify-between px-1 py-2">
+        <div class="space-y-0.5">
+          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70 flex items-center gap-1">
+            <ShieldAlert class="h-3 w-3 text-destructive/60" />
+            {{ t('environment.confirmDanger') }}
+          </Label>
+          <p class="text-[9px] text-muted-foreground/50">{{ t('environment.confirmDangerDesc') }}</p>
+        </div>
+        <Switch :checked="localValue.confirmDanger" @update:checked="updateField('confirmDanger', $event)" />
       </div>
     </section>
 

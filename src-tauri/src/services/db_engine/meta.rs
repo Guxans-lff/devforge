@@ -3,7 +3,8 @@ use std::sync::Arc;
 use sqlx::Executor;
 use crate::models::query::{
     ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo,
-    ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, ScriptOptions
+    ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, ScriptOptions,
+    ForeignKeyRelation
 };
 use crate::services::db_drivers::{mysql, postgres, DriverPool};
 use crate::utils::error::AppError;
@@ -306,5 +307,14 @@ impl DbEngine {
             } 
         }
         Ok(parts.join("\n"))
+    }
+
+    /// 获取指定数据库中所有外键关系（用于 SQL 补全 JOIN 推荐）
+    pub async fn get_foreign_keys(self: Arc<Self>, connection_id: String, database: String) -> Result<Vec<ForeignKeyRelation>, AppError> {
+        let pool = self.get_pool(connection_id).await?;
+        match pool.as_ref() {
+            DriverPool::MySql(p) => mysql::get_foreign_keys(p, &database).await,
+            DriverPool::Postgres(_) => Ok(vec![]),
+        }
     }
 }

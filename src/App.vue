@@ -36,19 +36,23 @@ onMounted(async () => {
   const workspaceStore = useWorkspaceStore()
   const connectionStore = useConnectionStore()
 
-  // 1. 初始化智能数据路径（如果是随行搬迁模式）
+  // 1. 从 SQLite 恢复设置（首次自动迁移 localStorage）
+  await settingsStore.restoreState()
+  settingsStore.enableAutoSave()
+  // 恢复后立即应用字体大小
+  applyUiFontSize(settingsStore.settings.uiFontSize)
+
+  // 2. 初始化智能数据路径（如果是随行搬迁模式）
   await settingsStore.initializeDataPath()
 
-  // 2. 加载连接列表
+  // 3. 加载连接列表
   await connectionStore.loadConnections()
 
-  // 然后尝试恢复工作区状态
-  const snapshot = workspaceStore.loadSnapshot()
-  if (snapshot) {
-    workspaceStore.restoreSnapshot(snapshot)
-  }
+  // 4. 恢复工作区状态（SQLite，首次自动迁移 localStorage）
+  await workspaceStore.restoreState()
+  workspaceStore.enableAutoSave()
 
-  // 4. 全部就绪后显示窗口，彻底解决白屏闪烁
+  // 5. 全部就绪后显示窗口，彻底解决白屏闪烁
   try {
     const { invoke } = await import('@tauri-apps/api/core')
     // 给 Vue 渲染渲染最后一帧留一点缓冲时间

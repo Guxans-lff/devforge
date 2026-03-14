@@ -1,4 +1,4 @@
-import { invoke } from '@tauri-apps/api/core'
+import { invokeCommand } from '@/api/base'
 
 export function dbBackupDatabase(
   connectionId: string,
@@ -8,7 +8,7 @@ export function dbBackupDatabase(
   includeData: boolean,
   outputPath: string,
 ): Promise<void> {
-  return invoke('db_backup_database', {
+  return invokeCommand('db_backup_database', {
     connectionId,
     database,
     tables,
@@ -23,7 +23,7 @@ export function dbRestoreDatabase(
   database: string,
   filePath: string,
 ): Promise<void> {
-  return invoke('db_restore_database', {
+  return invokeCommand('db_restore_database', {
     connectionId,
     database,
     filePath,
