@@ -36,6 +36,7 @@ export default {
   },
   welcome: {
     title: 'Welcome to DevForge',
+    titleName: 'DevForge',
     subtitle: 'Unified developer tool for database management, SSH terminals, and file transfers.',
     database: 'Database',
     databaseDesc: 'Query & manage data',
@@ -298,7 +299,13 @@ export default {
     shortcuts: 'Keyboard Shortcuts',
 
     theme: 'Theme',
-    themeDesc: 'Select the color theme for the application.',
+    themeDesc: 'Choose theme switching mode and color theme.',
+    themeManual: 'Manual',
+    themeSystem: 'Follow System',
+    themeSchedule: 'Scheduled',
+    themeDay: 'Day Theme',
+    themeNight: 'Night Theme',
+    themeScheduleHint: 'Automatically switches between day and night themes at the set times',
     language: 'Language',
     languageDesc: 'Select the display language.',
     uiFontSize: 'UI Font Size',
@@ -947,6 +954,8 @@ export default {
     columns: 'Columns',
     history: 'Query History',
     connections: 'Connections',
+    snippets: 'SQL Snippets',
+    searchResults: 'Search Results',
   },
   onboarding: {
     gotIt: 'Got it',

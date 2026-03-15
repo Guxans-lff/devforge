@@ -1,24 +1,55 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { invoke } from '@tauri-apps/api/core'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
-import { useSettingsStore } from '@/stores/settings'
+import { useSettingsStore, type ThemeScheduleMode } from '@/stores/settings'
 import { useConnectionStore } from '@/stores/connections'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Palette, Languages, Type, FolderOpen } from 'lucide-vue-next'
+import { Palette, Languages, Type, FolderOpen, Sun, Moon, Clock } from 'lucide-vue-next'
 import { open } from '@tauri-apps/plugin-dialog'
+import { toast } from 'vue-sonner'
 
 const { t } = useI18n()
 const { activeThemeId, themes, setColorTheme } = useTheme()
 const { currentLocale, setLocale } = useLocale()
 const settingsStore = useSettingsStore()
 const connectionStore = useConnectionStore()
-import { toast } from 'vue-sonner'
+
+const scheduleMode = computed(() => settingsStore.settings.themeScheduleMode)
+const isManual = computed(() => scheduleMode.value === 'manual')
+const isSchedule = computed(() => scheduleMode.value === 'schedule')
+
+// 按类型分组主题列表
+const lightThemes = computed(() => themes.filter(t => t.type === 'light'))
+const darkThemes = computed(() => themes.filter(t => t.type === 'dark'))
 
 function handleThemeChange(value: string) {
   setColorTheme(value)
+}
+
+function handleScheduleModeChange(value: string) {
+  settingsStore.update({ themeScheduleMode: value as ThemeScheduleMode })
+}
+
+function handleThemeLightChange(value: string) {
+  settingsStore.update({ themeLightId: value })
+}
+
+function handleThemeDarkChange(value: string) {
+  settingsStore.update({ themeDarkId: value })
+}
+
+function handleScheduleLightChange(e: Event) {
+  const val = (e.target as HTMLInputElement).value
+  if (val) settingsStore.update({ scheduleLight: val })
+}
+
+function handleScheduleDarkChange(e: Event) {
+  const val = (e.target as HTMLInputElement).value
+  if (val) settingsStore.update({ scheduleDark: val })
 }
 
 function handleLocaleChange(value: string) {
@@ -36,15 +67,13 @@ async function handleChoosePath() {
     defaultPath: settingsStore.settings.dataStoragePath,
     title: t('settings.choosePath')
   })
-  
+
   if (selected && typeof selected === 'string') {
     settingsStore.update({ dataStoragePath: selected })
-    // 同步到后端 boot.json，并即时热重载
     try {
       await invoke('update_boot_config', { dataStoragePath: selected })
-      // 成功后立即触发全局数据刷新
       await connectionStore.loadConnections()
-      
+
       toast.success(t('settings.migrationSuccess'), {
         description: t('settings.dataReloadedSuccess') || '数据库已成功热重构，数据已即时更新',
         duration: 3000
@@ -61,32 +90,110 @@ async function handleChoosePath() {
 <template>
   <div class="grid gap-4">
     <!-- Theme Card -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
-      <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/60 transition-colors group-hover:bg-primary/10 group-hover:text-primary">
-          <Palette class="h-5 w-5" />
+    <div class="group p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+      <!-- 第一行：标题 + 调度模式选择 -->
+      <div class="flex items-center justify-between">
+        <div class="flex items-start gap-4">
+          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/60 transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+            <Palette class="h-5 w-5" />
+          </div>
+          <div class="space-y-0.5">
+            <Label class="text-[15px] font-bold tracking-tight">{{ t('settings.theme') }}</Label>
+            <p class="text-xs text-muted-foreground/60 font-medium">{{ t('settings.themeDesc') }}</p>
+          </div>
         </div>
-        <div class="space-y-0.5">
-          <Label class="text-[15px] font-bold tracking-tight">{{ t('settings.theme') }}</Label>
-          <p class="text-xs text-muted-foreground/60 font-medium">{{ t('settings.themeDesc') }}</p>
-        </div>
+        <Select :model-value="scheduleMode" @update:model-value="handleScheduleModeChange($event as string)">
+          <SelectTrigger class="w-48 h-10 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs ring-offset-background transition-all focus:ring-primary/20">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+            <SelectItem value="manual" class="rounded-lg font-medium">{{ t('settings.themeManual') }}</SelectItem>
+            <SelectItem value="system" class="rounded-lg font-medium">{{ t('settings.themeSystem') }}</SelectItem>
+            <SelectItem value="schedule" class="rounded-lg font-medium">{{ t('settings.themeSchedule') }}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
-      <Select :model-value="activeThemeId" @update:model-value="handleThemeChange($event as string)">
-        <SelectTrigger class="w-48 h-10 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs ring-offset-background transition-all focus:ring-primary/20">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
-          <SelectItem v-for="theme in themes" :key="theme.id" :value="theme.id" class="rounded-lg">
-            <div class="flex items-center gap-2.5">
-              <div
-                class="h-3 w-3 rounded-full border border-border/50"
-                :style="{ backgroundColor: theme.terminal.background }"
-              />
-              <span class="font-medium">{{ theme.name }}</span>
-            </div>
-          </SelectItem>
-        </SelectContent>
-      </Select>
+
+      <!-- 手动模式：直接选主题 -->
+      <div v-if="isManual" class="mt-4 pl-14">
+        <Select :model-value="activeThemeId" @update:model-value="handleThemeChange($event as string)">
+          <SelectTrigger class="w-full h-10 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs transition-all focus:ring-primary/20">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+            <SelectItem v-for="theme in themes" :key="theme.id" :value="theme.id" class="rounded-lg">
+              <div class="flex items-center gap-2.5">
+                <div
+                  class="h-3 w-3 rounded-full border border-border/50"
+                  :style="{ backgroundColor: theme.terminal.background }"
+                />
+                <span class="font-medium">{{ theme.name }}</span>
+              </div>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <!-- 跟随系统 / 定时切换 模式：白天+夜间主题选择 -->
+      <div v-if="!isManual" class="mt-4 pl-14 space-y-3">
+        <!-- 白天主题 -->
+        <div class="flex items-center gap-3">
+          <Sun class="h-4 w-4 text-amber-500 shrink-0" />
+          <Label class="text-xs font-medium text-muted-foreground w-16 shrink-0">{{ t('settings.themeDay') }}</Label>
+          <Select :model-value="settingsStore.settings.themeLightId" @update:model-value="handleThemeLightChange($event as string)">
+            <SelectTrigger class="flex-1 h-9 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs transition-all focus:ring-primary/20">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+              <SelectItem v-for="theme in lightThemes" :key="theme.id" :value="theme.id" class="rounded-lg">
+                <div class="flex items-center gap-2.5">
+                  <div class="h-3 w-3 rounded-full border border-border/50" :style="{ backgroundColor: theme.terminal.background }" />
+                  <span class="font-medium">{{ theme.name }}</span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <!-- 定时模式：白天开始时间 -->
+          <input
+            v-if="isSchedule"
+            type="time"
+            :value="settingsStore.settings.scheduleLight"
+            @change="handleScheduleLightChange"
+            class="h-9 w-28 rounded-xl bg-background shadow-sm border border-white/5 px-3 text-xs font-bold text-foreground transition-all focus:ring-1 focus:ring-primary/20 focus:outline-none"
+          />
+        </div>
+        <!-- 夜间主题 -->
+        <div class="flex items-center gap-3">
+          <Moon class="h-4 w-4 text-indigo-400 shrink-0" />
+          <Label class="text-xs font-medium text-muted-foreground w-16 shrink-0">{{ t('settings.themeNight') }}</Label>
+          <Select :model-value="settingsStore.settings.themeDarkId" @update:model-value="handleThemeDarkChange($event as string)">
+            <SelectTrigger class="flex-1 h-9 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs transition-all focus:ring-primary/20">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+              <SelectItem v-for="theme in darkThemes" :key="theme.id" :value="theme.id" class="rounded-lg">
+                <div class="flex items-center gap-2.5">
+                  <div class="h-3 w-3 rounded-full border border-border/50" :style="{ backgroundColor: theme.terminal.background }" />
+                  <span class="font-medium">{{ theme.name }}</span>
+                </div>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <!-- 定时模式：夜间开始时间 -->
+          <input
+            v-if="isSchedule"
+            type="time"
+            :value="settingsStore.settings.scheduleDark"
+            @change="handleScheduleDarkChange"
+            class="h-9 w-28 rounded-xl bg-background shadow-sm border border-white/5 px-3 text-xs font-bold text-foreground transition-all focus:ring-1 focus:ring-primary/20 focus:outline-none"
+          />
+        </div>
+        <!-- 定时模式提示 -->
+        <p v-if="isSchedule" class="text-[11px] text-muted-foreground/50 flex items-center gap-1.5">
+          <Clock class="h-3 w-3" />
+          {{ t('settings.themeScheduleHint') }}
+        </p>
+      </div>
     </div>
 
     <!-- Language Card -->
@@ -151,7 +258,7 @@ async function handleChoosePath() {
           </p>
         </div>
       </div>
-      <button 
+      <button
         @click="handleChoosePath"
         class="flex items-center gap-2 px-4 h-10 rounded-xl bg-background border border-white/5 hover:bg-muted/30 hover:border-primary/30 transition-all font-bold text-xs"
       >

@@ -15,6 +15,9 @@ export interface ShortcutBinding {
   description?: string  // 用于显示的描述
 }
 
+/** 主题调度模式 */
+export type ThemeScheduleMode = 'manual' | 'system' | 'schedule'
+
 export interface AppSettings {
   /** Editor font size in px */
   editorFontSize: number
@@ -42,6 +45,16 @@ export interface AppSettings {
   dataStoragePath: string
   /** 开发者模式 */
   devMode: boolean
+  /** 主题调度模式：manual=手动选择, system=跟随系统, schedule=按时间自动切换 */
+  themeScheduleMode: ThemeScheduleMode
+  /** 白天使用的主题 ID（schedule 模式） */
+  themeLightId: string
+  /** 夜间使用的主题 ID（schedule 模式） */
+  themeDarkId: string
+  /** 白天开始时间，格式 "HH:mm"（schedule 模式） */
+  scheduleLight: string
+  /** 夜间开始时间，格式 "HH:mm"（schedule 模式） */
+  scheduleDark: string
 }
 
 const defaultShortcuts: ShortcutBinding[] = [
@@ -106,6 +119,11 @@ const defaults: AppSettings = {
   shortcuts: defaultShortcuts,
   dataStoragePath: 'D:\\DevForgeData',
   devMode: false,
+  themeScheduleMode: 'manual',
+  themeLightId: 'default-light',
+  themeDarkId: 'default-dark',
+  scheduleLight: '07:00',
+  scheduleDark: '19:00',
 }
 
 /** 合并快捷键：保留用户自定义的绑定，同时补充新增的默认快捷键 */

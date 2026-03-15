@@ -36,6 +36,7 @@ export default {
   },
   welcome: {
     title: '欢迎使用 DevForge',
+    titleName: 'DevForge',
     subtitle: '集数据库管理、SSH 终端、文件传输于一体的统一开发者工具。',
     greetingMorning: '早安',
     greetingNoon: '午安',
@@ -318,7 +319,13 @@ export default {
     shortcuts: '快捷键',
 
     theme: '主题',
-    themeDesc: '选择应用程序的颜色主题。',
+    themeDesc: '选择主题切换方式和颜色主题。',
+    themeManual: '手动选择',
+    themeSystem: '跟随系统',
+    themeSchedule: '定时切换',
+    themeDay: '白天主题',
+    themeNight: '夜间主题',
+    themeScheduleHint: '根据设定的时间自动切换白天和夜间主题',
     language: '语言',
     languageDesc: '选择界面显示语言。',
     uiFontSize: '界面字体大小',
@@ -1056,6 +1063,8 @@ export default {
     columns: '列',
     history: '查询历史',
     connections: '连接',
+    snippets: 'SQL 片段',
+    searchResults: '搜索结果',
   },
   onboarding: {
     gotIt: '知道了',
