@@ -255,7 +255,7 @@ onBeforeUnmount(() => {
       <div v-if="activeFile?.isLoading" class="flex h-full items-center justify-center">
         <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
-      <div v-show="activeFile && !activeFile.isLoading" ref="editorContainer" class="h-full w-full" />
+      <div v-show="activeFile && !activeFile.isLoading" ref="editorContainer" class="h-full w-full select-text" />
     </div>
 
     <!-- 状态栏 -->

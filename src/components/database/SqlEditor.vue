@@ -361,5 +361,5 @@ defineExpose({ getSelectedText, focus, insertText, formatDocument })
 </script>
 
 <template>
-  <div ref="editorContainer" class="h-full w-full" />
+  <div ref="editorContainer" class="h-full w-full select-text" />
 </template>

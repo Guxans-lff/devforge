@@ -206,7 +206,7 @@ onBeforeUnmount(() => {
       <div v-if="loading" class="flex h-full items-center justify-center">
         <Loader2 class="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
-      <div v-show="!loading" ref="diffContainer" class="h-full w-full" />
+      <div v-show="!loading" ref="diffContainer" class="h-full w-full select-text" />
     </div>
   </div>
 </template>

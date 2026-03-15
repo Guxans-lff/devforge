@@ -157,7 +157,10 @@
   textarea,
   [contenteditable],
   pre,
-  code {
+  code,
+  .monaco-editor,
+  .monaco-editor *,
+  .xterm {
     user-select: text;
   }
 
