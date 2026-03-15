@@ -1,12 +1,12 @@
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use tauri::Manager;
 
 use crate::commands::ssh::SshEngineState;
 use crate::services::terminal_recorder::{RecordingInfo, TerminalRecorder};
 
-pub type TerminalRecorderState = Arc<Mutex<TerminalRecorder>>;
+/// 内部使用 RwLock，无需外层 Mutex
+pub type TerminalRecorderState = Arc<TerminalRecorder>;
 
 #[tauri::command]
 pub async fn start_recording(
@@ -26,8 +26,7 @@ pub async fn start_recording(
         None => return Err("SSH 会话不存在".to_string()),
     };
 
-    let mut rec = recorder.lock().await;
-    let (writer, file_path) = rec.start(&session_id, output_path, width, height)?;
+    let (writer, file_path) = recorder.start(&session_id, output_path, width, height).await?;
 
     // 将录制写入器注入到 I/O task 的共享引用中
     let mut guard = shared_writer.lock().await;
@@ -53,8 +52,7 @@ pub async fn stop_recording(
         *guard = None;
     }
 
-    let mut rec = recorder.lock().await;
-    rec.stop(&session_id)
+    recorder.stop(&session_id).await
 }
 
 #[tauri::command]
@@ -63,8 +61,7 @@ pub async fn is_recording(
     session_id: String,
 ) -> Result<bool, String> {
     let recorder = app.state::<TerminalRecorderState>().inner().clone();
-    let rec = recorder.lock().await;
-    Ok(rec.is_recording(&session_id))
+    Ok(recorder.is_recording(&session_id).await)
 }
 
 #[tauri::command]

@@ -8,6 +8,7 @@ use commands::db::{self, DbEngineState};
 use commands::db_backup;
 use commands::import;
 use commands::import_export;
+use commands::local_shell::{self, LocalShellEngineState};
 use commands::query_history;
 use commands::schema_compare;
 use commands::sftp::{self, SftpEngineState};
@@ -22,6 +23,7 @@ use commands::terminal_recorder::{self, TerminalRecorderState};
 use commands::tunnel::{self, SshTunnelEngineState};
 use commands::transfer;
 use services::db_engine::DbEngine;
+use services::local_shell_engine::LocalShellEngine;
 use services::sftp_engine::SftpEngine;
 use services::ssh_engine::SshEngine;
 use services::ssh_tunnel::SshTunnelEngine;
@@ -53,15 +55,20 @@ pub fn run() {
             let sftp_engine_state: SftpEngineState = Arc::new(SftpEngine::new());
             app.manage(sftp_engine_state);
 
-            // Initialize SshTunnelEngine
+            // Initialize SshTunnelEngine — 内部使用 RwLock，无需外层 Mutex
             let tunnel_engine_state: SshTunnelEngineState =
-                Arc::new(Mutex::new(SshTunnelEngine::new()));
+                Arc::new(SshTunnelEngine::new());
             app.manage(tunnel_engine_state);
 
-            // Initialize TerminalRecorder
+            // Initialize TerminalRecorder — 内部使用 RwLock，无需外层 Mutex
             let recorder_state: TerminalRecorderState =
-                Arc::new(Mutex::new(TerminalRecorder::new()));
+                Arc::new(TerminalRecorder::new());
             app.manage(recorder_state);
+
+            // Initialize LocalShellEngine — 内部使用 RwLock
+            let local_shell_state: LocalShellEngineState =
+                Arc::new(LocalShellEngine::new());
+            app.manage(local_shell_state);
 
             // Initialize TransferManager
             let transfer_manager = TransferManager::with_default_config();
@@ -142,6 +149,7 @@ pub fn run() {
             db::db_get_functions,
             db::db_get_triggers,
             db::db_get_object_definition,
+            db::db_get_routine_parameters,
             db::db_get_pool_status,
             db::db_check_and_reconnect,
             db::db_begin_transaction,
@@ -270,6 +278,11 @@ pub fn run() {
             import_export::import_connections,
             import_export::import_navicat_xml,
             import_export::import_termius_json,
+            // Local shell
+            local_shell::local_shell_spawn,
+            local_shell::local_shell_write,
+            local_shell::local_shell_resize,
+            local_shell::local_shell_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

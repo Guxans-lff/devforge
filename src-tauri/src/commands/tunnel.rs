@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 use serde::Deserialize;
 use tauri::Manager;
@@ -8,7 +7,8 @@ use crate::models::ssh::{TunnelConfig, TunnelInfo};
 use crate::services::ssh_tunnel::SshTunnelEngine;
 use crate::utils::error::AppError;
 
-pub type SshTunnelEngineState = Arc<Mutex<SshTunnelEngine>>;
+/// 内部使用 RwLock，无需外层 Mutex
+pub type SshTunnelEngineState = Arc<SshTunnelEngine>;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,9 +51,7 @@ pub async fn tunnel_open(
         remote_port: params.remote_port,
     };
 
-    let mut engine = tunnel_engine.lock().await;
-    // SshTunnelEngine::open_tunnel 返回 Result<_, AppError>，直接 ? 传播
-    engine.open_tunnel(config).await
+    tunnel_engine.open_tunnel(config).await
 }
 
 #[tauri::command]
@@ -62,9 +60,7 @@ pub async fn tunnel_close(
     tunnel_id: String,
 ) -> Result<bool, AppError> {
     let tunnel_engine = app.state::<SshTunnelEngineState>().inner().clone();
-    let mut engine = tunnel_engine.lock().await;
-    // SshTunnelEngine::close_tunnel 返回 Result<_, AppError>，直接 ? 传播
-    engine.close_tunnel(&tunnel_id).await
+    tunnel_engine.close_tunnel(&tunnel_id).await
 }
 
 #[tauri::command]
@@ -72,6 +68,5 @@ pub async fn tunnel_list(
     app: tauri::AppHandle,
 ) -> Result<Vec<TunnelInfo>, AppError> {
     let tunnel_engine = app.state::<SshTunnelEngineState>().inner().clone();
-    let engine = tunnel_engine.lock().await;
-    Ok(engine.list_tunnels())
+    Ok(tunnel_engine.list_tunnels().await)
 }

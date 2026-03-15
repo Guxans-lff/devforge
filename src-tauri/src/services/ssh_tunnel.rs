@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use russh::client;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
 use crate::models::ssh::{TunnelConfig, TunnelInfo};
@@ -23,6 +23,7 @@ impl client::Handler for TunnelSshClient {
         &mut self,
         _server_public_key: &ssh_key::PublicKey,
     ) -> Result<bool, Self::Error> {
+        // TODO: 实现 known_hosts 验证，当前跳过主机密钥检查（与 ssh_engine.rs 保持一致）
         Ok(true)
     }
 }
@@ -32,26 +33,30 @@ struct TunnelHandle {
     cancel_token: CancellationToken,
 }
 
+/// SSH 隧道引擎 — 内部 RwLock，无需外层 Mutex
 pub struct SshTunnelEngine {
-    tunnels: HashMap<String, TunnelHandle>,
+    tunnels: RwLock<HashMap<String, TunnelHandle>>,
 }
 
 impl SshTunnelEngine {
     pub fn new() -> Self {
         Self {
-            tunnels: HashMap::new(),
+            tunnels: RwLock::new(HashMap::new()),
         }
     }
 
-    pub async fn open_tunnel(&mut self, config: TunnelConfig) -> Result<TunnelInfo, AppError> {
-        // Clean up existing tunnel with same ID
-        if self.tunnels.contains_key(&config.tunnel_id) {
-            self.close_tunnel(&config.tunnel_id).await?;
+    pub async fn open_tunnel(&self, config: TunnelConfig) -> Result<TunnelInfo, AppError> {
+        // 先清理已有的同 ID 隧道（单次写锁操作避免 TOCTOU 竞态）
+        {
+            let mut tunnels = self.tunnels.write().await;
+            if let Some(old) = tunnels.remove(&config.tunnel_id) {
+                old.cancel_token.cancel();
+            }
         }
 
         let auth = config.to_auth_config();
 
-        // Connect to SSH server
+        // 连接 SSH 服务器
         let ssh_config = ssh_auth::create_ssh_config();
         let mut session =
             client::connect(ssh_config, (&*config.ssh_host, config.ssh_port), TunnelSshClient)
@@ -60,9 +65,9 @@ impl SshTunnelEngine {
 
         ssh_auth::authenticate(&mut session, &config.ssh_username, &auth).await?;
 
-        let session = Arc::new(Mutex::new(session));
+        let session = Arc::new(tokio::sync::Mutex::new(session));
 
-        // Bind local TCP listener
+        // 绑定本地 TCP 监听
         let listener = TcpListener::bind(("127.0.0.1", config.local_port))
             .await
             .map_err(|e| AppError::Other(format!("Failed to bind local port: {}", e)))?;
@@ -77,7 +82,7 @@ impl SshTunnelEngine {
         let remote_host = config.remote_host.clone();
         let remote_port = config.remote_port;
 
-        // Spawn the TCP accept loop that forwards connections through SSH
+        // 启动 TCP accept 循环，通过 SSH 转发连接
         tokio::spawn(async move {
             loop {
                 tokio::select! {
@@ -155,7 +160,7 @@ impl SshTunnelEngine {
             status: "active".to_string(),
         };
 
-        self.tunnels.insert(
+        self.tunnels.write().await.insert(
             config.tunnel_id,
             TunnelHandle {
                 info: info.clone(),
@@ -166,8 +171,8 @@ impl SshTunnelEngine {
         Ok(info)
     }
 
-    pub async fn close_tunnel(&mut self, tunnel_id: &str) -> Result<bool, AppError> {
-        if let Some(handle) = self.tunnels.remove(tunnel_id) {
+    pub async fn close_tunnel(&self, tunnel_id: &str) -> Result<bool, AppError> {
+        if let Some(handle) = self.tunnels.write().await.remove(tunnel_id) {
             handle.cancel_token.cancel();
             Ok(true)
         } else {
@@ -175,7 +180,7 @@ impl SshTunnelEngine {
         }
     }
 
-    pub fn list_tunnels(&self) -> Vec<TunnelInfo> {
-        self.tunnels.values().map(|h| h.info.clone()).collect()
+    pub async fn list_tunnels(&self) -> Vec<TunnelInfo> {
+        self.tunnels.read().await.values().map(|h| h.info.clone()).collect()
     }
 }

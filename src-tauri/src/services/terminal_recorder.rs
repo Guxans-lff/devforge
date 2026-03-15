@@ -4,12 +4,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 
 /// asciicast v2 格式的录制器
 /// 每个 session 独立录制，数据通过 I/O 循环写入
+/// 内部使用 RwLock，无需外层 Mutex
 pub struct TerminalRecorder {
-    recordings: HashMap<String, RecordingState>,
+    recordings: RwLock<HashMap<String, RecordingState>>,
 }
 
 struct RecordingState {
@@ -51,19 +52,19 @@ impl RecordingWriter {
 impl TerminalRecorder {
     pub fn new() -> Self {
         Self {
-            recordings: HashMap::new(),
+            recordings: RwLock::new(HashMap::new()),
         }
     }
 
     /// 开始录制，返回可在 I/O task 中共享的写入器
-    pub fn start(
-        &mut self,
+    pub async fn start(
+        &self,
         session_id: &str,
         output_path: Option<String>,
         width: u32,
         height: u32,
     ) -> Result<(SharedRecordingWriter, String), String> {
-        if self.recordings.contains_key(session_id) {
+        if self.recordings.read().await.contains_key(session_id) {
             return Err("该会话已在录制中".into());
         }
 
@@ -107,7 +108,7 @@ impl TerminalRecorder {
         })));
 
         // 保存状态用于 stop 时清理
-        self.recordings.insert(
+        self.recordings.write().await.insert(
             session_id.to_string(),
             RecordingState {
                 file_path: file_path.clone(),
@@ -118,17 +119,19 @@ impl TerminalRecorder {
     }
 
     /// 停止录制，返回文件路径
-    pub fn stop(&mut self, session_id: &str) -> Result<String, String> {
+    pub async fn stop(&self, session_id: &str) -> Result<String, String> {
         let state = self
             .recordings
+            .write()
+            .await
             .remove(session_id)
             .ok_or("该会话未在录制")?;
         Ok(state.file_path.to_string_lossy().to_string())
     }
 
     /// 检查是否正在录制
-    pub fn is_recording(&self, session_id: &str) -> bool {
-        self.recordings.contains_key(session_id)
+    pub async fn is_recording(&self, session_id: &str) -> bool {
+        self.recordings.read().await.contains_key(session_id)
     }
 
     /// 列出所有录制文件
