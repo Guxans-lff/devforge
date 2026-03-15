@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useConnectionStore } from '@/stores/connections'
 import { useMessageCenterStore } from '@/stores/message-center'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -17,9 +18,12 @@ import {
   TerminalSquare,
 } from 'lucide-vue-next'
 import type { TabType } from '@/types/workspace'
+import { parseEnvironment } from '@/api/connection'
+import { ENV_PRESETS } from '@/types/environment'
 import MessageCenter from './MessageCenter.vue'
 
 const workspace = useWorkspaceStore()
+const connectionStore = useConnectionStore()
 const messageCenter = useMessageCenterStore()
 const { t } = useI18n()
 
@@ -104,6 +108,16 @@ function closeAllTabs() {
     workspace.closeTab(tab.id)
   }
 }
+
+/** 获取标签页对应连接的环境色，无环境则返回 null */
+function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): string | null {
+  if (tab.type !== 'database' || !tab.connectionId) return null
+  const conn = connectionStore.connections.get(tab.connectionId)
+  if (!conn) return null
+  const env = parseEnvironment(conn.record.configJson)
+  if (!env) return null
+  return ENV_PRESETS[env]?.color ?? null
+}
 </script>
 
 <template>
@@ -129,10 +143,12 @@ function closeAllTabs() {
                 @mousedown="handleMiddleClick($event, tab.id)"
                 @contextmenu="handleContextMenu($event, tab.id)"
               >
-                <!-- 顶部精密装饰条 (Top Precision Bar) -->
-                <div 
+                <!-- 顶部精密装饰条 (Top Precision Bar) — 环境色优先 -->
+                <div
                   v-if="workspace.activeTabId === tab.id"
-                  class="absolute top-0 left-[-1px] right-[-1px] h-[2px] bg-primary z-30"
+                  class="absolute top-0 left-[-1px] right-[-1px] h-[2px] z-30"
+                  :class="{ 'bg-primary': !getTabEnvironmentColor(tab) }"
+                  :style="getTabEnvironmentColor(tab) ? { backgroundColor: getTabEnvironmentColor(tab)! } : {}"
                 />
                 
                 <!-- 底部桥接融合 (Seamless Bridge): Covers the border layer with precision -->

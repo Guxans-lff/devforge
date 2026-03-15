@@ -311,13 +311,19 @@ function isFavorite(conn: ConnectionRecord): boolean {
   return parseIsFavorite(conn.configJson)
 }
 
+/** 环境类型缩写映射 */
+const ENV_SHORT_LABELS: Record<EnvironmentType, string> = {
+  production: 'PROD',
+  staging: 'STG',
+  development: 'DEV',
+  testing: 'TEST',
+  local: 'LOCAL',
+}
+
 /** 获取连接的环境类型（仅数据库类型连接） */
 function getEnvironment(conn: ConnectionRecord): EnvironmentType | null {
   if (conn.type !== 'database') return null
-  const env = parseEnvironment(conn.configJson)
-  // 仅对 production/staging 显示标记
-  if (env === 'production' || env === 'staging') return env
-  return null
+  return parseEnvironment(conn.configJson) || null
 }
 
 /** 将非收藏连接按类型分组 */
@@ -475,7 +481,7 @@ const groupedNonFavorites = computed(() => {
                         color: ENV_PRESETS[getEnvironment(conn.record)!].color,
                         backgroundColor: ENV_PRESETS[getEnvironment(conn.record)!].color + '18',
                       }"
-                    >{{ getEnvironment(conn.record) === 'production' ? 'PROD' : 'STG' }}</span>
+                    >{{ ENV_SHORT_LABELS[getEnvironment(conn.record)!] }}</span>
                   </div>
                   <p class="truncate text-[10px] text-muted-foreground/50 font-mono tracking-tight">{{ conn.record.host }}</p>
                 </div>
@@ -582,7 +588,7 @@ const groupedNonFavorites = computed(() => {
                         color: ENV_PRESETS[getEnvironment(conn.record)!].color,
                         backgroundColor: ENV_PRESETS[getEnvironment(conn.record)!].color + '18',
                       }"
-                    >{{ getEnvironment(conn.record) === 'production' ? 'PROD' : 'STG' }}</span>
+                    >{{ ENV_SHORT_LABELS[getEnvironment(conn.record)!] }}</span>
                   </div>
                   <div class="flex items-center gap-1.5 overflow-hidden">
                     <p class="truncate text-[10px] text-muted-foreground/50 font-mono tracking-tight">{{ conn.record.host }}</p>
@@ -700,6 +706,23 @@ const groupedNonFavorites = computed(() => {
               </Button>
             </TooltipTrigger>
             <TooltipContent :side="isCollapsed ? 'right' : 'top'" class="text-[11px] font-medium"><p>{{ t('tooltip.multiExec') }}</p></TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10"
+                @click="() => {
+                  const existing = workspace.tabs.find(t => t.type === 'terminal' && t.meta?.isLocal)
+                  if (existing) { workspace.activeTabId = existing.id; return }
+                  workspace.addTab({ id: `local-terminal-${Date.now()}`, type: 'terminal', title: '本地终端', closable: true, meta: { isLocal: 'true' } })
+                }"
+              >
+                <Terminal class="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent :side="isCollapsed ? 'right' : 'top'" class="text-[11px] font-medium"><p>本地终端</p></TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as-child>
