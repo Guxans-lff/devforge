@@ -3,15 +3,17 @@ import { useSchemaRegistryStore, type SchemaSearchResult } from '@/stores/schema
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useCommandPaletteStore, type CommandItem } from '@/stores/command-palette'
 import { listQueryHistory, type QueryHistoryRecord } from '@/api/query-history'
+import { listSqlSnippets, type SqlSnippetRecord } from '@/api/sql-snippet'
+import { fuzzyFilter } from '@/utils/fuzzyMatch'
 
 /** 搜索前缀类型 */
-type SearchPrefix = '@' | '.' | ':' | '#' | null
+type SearchPrefix = '@' | '.' | ':' | '#' | '/' | null
 
 /** 解析搜索输入的前缀和查询词 */
 function parseSearchInput(input: string): { prefix: SearchPrefix; query: string } {
   if (!input) return { prefix: null, query: '' }
   const firstChar = input[0]
-  if (firstChar === '@' || firstChar === '.' || firstChar === ':' || firstChar === '#') {
+  if (firstChar === '@' || firstChar === '.' || firstChar === ':' || firstChar === '#' || firstChar === '/') {
     return { prefix: firstChar as SearchPrefix, query: input.slice(1).trim() }
   }
   return { prefix: null, query: input }
@@ -19,7 +21,8 @@ function parseSearchInput(input: string): { prefix: SearchPrefix; query: string 
 
 /**
  * 命令面板搜索增强
- * 支持前缀搜索：@ 表/视图、. 列名、: 查询历史、# 连接
+ * 支持前缀搜索：@ 表/视图、. 列名、: 查询历史、# 连接、/ SQL 片段
+ * 普通模式支持模糊匹配
  */
 export function useCommandPaletteSearch() {
   const schemaRegistry = useSchemaRegistryStore()
@@ -35,8 +38,10 @@ export function useCommandPaletteSearch() {
 
   /** 查询历史缓存 */
   const historyResults = ref<QueryHistoryRecord[]>([])
+  /** SQL 片段缓存 */
+  const snippetResults = ref<SqlSnippetRecord[]>([])
 
-  /** 监听前缀为 : 时加载查询历史 */
+  /** 监听前缀变化时加载对应数据 */
   watch([parsedPrefix, parsedQuery], async ([prefix, query]) => {
     if (prefix === ':') {
       try {
@@ -50,6 +55,18 @@ export function useCommandPaletteSearch() {
       }
     } else {
       historyResults.value = []
+    }
+
+    if (prefix === '/') {
+      try {
+        snippetResults.value = await listSqlSnippets({
+          search: query || null,
+        })
+      } catch {
+        snippetResults.value = []
+      }
+    } else {
+      snippetResults.value = []
     }
   })
 
@@ -78,7 +95,7 @@ export function useCommandPaletteSearch() {
         ? `${r.connectionName} / ${r.databaseName}`
         : `${r.columnType ?? ''} · ${r.connectionName} / ${r.databaseName}`,
       icon: type === 'table' ? 'Table2' : 'Columns3',
-      category: 'schema' as any,
+      category: 'schema',
       keywords: [],
       action: () => {
         // 切换到对应连接并生成 SELECT 语句
@@ -102,10 +119,26 @@ export function useCommandPaletteSearch() {
       label: r.sqlText.slice(0, 80),
       description: `${r.connectionName ?? ''} · ${new Date(r.executedAt).toLocaleString()}`,
       icon: 'Clock',
-      category: 'history' as any,
+      category: 'history',
       keywords: [],
       action: () => {
         // 插入 SQL 到当前活跃的查询面板
+        window.dispatchEvent(new CustomEvent('devforge:insert-sql', { detail: r.sqlText }))
+        commandPaletteStore.close()
+      },
+    }))
+  }
+
+  /** SQL 片段转换为 CommandItem */
+  function snippetToCommands(records: SqlSnippetRecord[]): CommandItem[] {
+    return records.map(r => ({
+      id: `snippet-${r.id}`,
+      label: r.title,
+      description: r.description || r.sqlText.slice(0, 60),
+      icon: 'Code',
+      category: 'snippet',
+      keywords: [],
+      action: () => {
         window.dispatchEvent(new CustomEvent('devforge:insert-sql', { detail: r.sqlText }))
         commandPaletteStore.close()
       },
@@ -144,6 +177,9 @@ export function useCommandPaletteSearch() {
       case '#': {
         return connectionToCommands(query)
       }
+      case '/': {
+        return snippetToCommands(snippetResults.value)
+      }
       default:
         return []
     }
@@ -152,11 +188,24 @@ export function useCommandPaletteSearch() {
   /** 是否处于前缀搜索模式 */
   const isPrefixMode = computed(() => parsedPrefix.value !== null)
 
+  /** 普通模式下的模糊搜索结果 */
+  const fuzzyResults = computed<CommandItem[]>(() => {
+    const query = parsedQuery.value
+    if (isPrefixMode.value || !query) return []
+
+    return fuzzyFilter(
+      commandPaletteStore.allCommands,
+      query,
+      (cmd) => `${cmd.label} ${cmd.description ?? ''} ${(cmd.keywords ?? []).join(' ')}`,
+    )
+  })
+
   return {
     searchInput,
     parsedPrefix,
     parsedQuery,
     prefixResults,
     isPrefixMode,
+    fuzzyResults,
   }
 }

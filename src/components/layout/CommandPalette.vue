@@ -24,11 +24,12 @@ import {
   Clock,
   Table2,
   Columns3,
+  Code,
 } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const commandPaletteStore = useCommandPaletteStore()
-const { searchInput, isPrefixMode, prefixResults, parsedPrefix } = useCommandPaletteSearch()
+const { searchInput, isPrefixMode, prefixResults, parsedPrefix, fuzzyResults } = useCommandPaletteSearch()
 
 const iconMap: Record<string, any> = {
   Database,
@@ -44,6 +45,7 @@ const iconMap: Record<string, any> = {
   Clock,
   Table2,
   Columns3,
+  Code,
 }
 
 /** 监听 CommandDialog 内输入变化（通过 DOM 事件冒泡） */
@@ -102,6 +104,7 @@ const prefixTitle = computed(() => {
     case '.': return t('search.columns')
     case ':': return t('search.history')
     case '#': return t('search.connections')
+    case '/': return t('search.snippets')
     default: return ''
   }
 })
@@ -152,6 +155,28 @@ function getIcon(iconName?: string) {
 
       <!-- 普通模式 -->
       <template v-else>
+        <!-- 模糊搜索结果（有输入文字时） -->
+        <template v-if="fuzzyResults.length > 0">
+          <CommandGroup :heading="t('search.searchResults')">
+            <CommandItem
+              v-for="cmd in fuzzyResults"
+              :key="cmd.id"
+              :value="`${cmd.label} ${cmd.description || ''}`"
+              @select="cmd.action"
+            >
+              <component :is="getIcon(cmd.icon)" v-if="cmd.icon" class="mr-2 h-4 w-4" />
+              <div class="flex flex-col min-w-0 flex-1">
+                <span class="truncate">{{ cmd.label }}</span>
+                <span v-if="cmd.description" class="text-[10px] text-muted-foreground truncate">
+                  {{ cmd.description }}
+                </span>
+              </div>
+            </CommandItem>
+          </CommandGroup>
+        </template>
+
+        <!-- 默认分组（无输入文字时） -->
+        <template v-else>
         <!-- 最近使用 -->
         <CommandGroup
           v-if="recentCommands.length > 0"
@@ -244,6 +269,7 @@ function getIcon(iconName?: string) {
             <span>{{ cmd.label }}</span>
           </CommandItem>
         </CommandGroup>
+        </template>
       </template>
     </CommandList>
 
@@ -259,6 +285,7 @@ function getIcon(iconName?: string) {
         <span class="opacity-60">.</span><span>{{ t('search.columns') }}</span>
         <span class="opacity-60">:</span><span>{{ t('search.history') }}</span>
         <span class="opacity-60">#</span><span>{{ t('search.connections') }}</span>
+        <span class="opacity-60">/</span><span>{{ t('search.snippets') }}</span>
       </div>
       <div class="ml-auto flex items-center gap-2">
         <kbd class="flex h-5 min-w-8 items-center justify-center rounded-md border border-border/60 bg-muted/60 px-1.5 font-sans text-[9px] font-bold text-muted-foreground/80 shadow-[0_1px_0_1px_rgba(0,0,0,0.1)]">ESC</kbd>
