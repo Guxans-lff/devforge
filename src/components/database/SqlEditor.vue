@@ -81,7 +81,17 @@ onMounted(async () => {
         showSnippets: true,
       },
       readOnly: props.readOnly,
+      // 允许外部拖放内容到编辑器
+      dropIntoEditor: { enabled: true },
     })
+
+  // 注册拖放事件 — 从对象树拖入表名/列名等
+  // 使用 capture phase，确保在 Monaco 内部 handler 之前拦截自定义 MIME 的拖放
+  const editorDom = editorContainer.value
+  if (editorDom) {
+    editorDom.addEventListener('dragover', handleEditorDragOver, true)
+    editorDom.addEventListener('drop', handleEditorDrop, true)
+  }
 
   editor.onDidChangeModelContent(() => {
     const value = editor?.getValue() ?? ''
@@ -155,6 +165,9 @@ onMounted(async () => {
       emit('save')
     },
   })
+
+  // 监听命令面板 insert-sql 事件（片段/历史插入到当前编辑器）
+  window.addEventListener('devforge:insert-sql', handleInsertSqlEvent)
 })
 
 watch(activeThemeId, () => {
@@ -188,10 +201,82 @@ watch(
   { deep: true },
 )
 
+/** 监听命令面板发出的 insert-sql 事件（片段/历史插入） */
+function handleInsertSqlEvent(e: Event) {
+  const sql = (e as CustomEvent).detail
+  if (typeof sql === 'string' && editor) {
+    insertText(sql)
+    editor.focus()
+  }
+}
+
 onBeforeUnmount(() => {
+  // 移除拖放事件监听（需与注册时 capture 参数一致）
+  if (editorContainer.value) {
+    editorContainer.value.removeEventListener('dragover', handleEditorDragOver, true)
+    editorContainer.value.removeEventListener('drop', handleEditorDrop, true)
+  }
+  window.removeEventListener('devforge:insert-sql', handleInsertSqlEvent)
   editor?.dispose()
   editor = null
 })
+
+/** MySQL 标识符转义（反引号内的反引号加倍） */
+function escapeIdentifier(name: string): string {
+  return `\`${name.replace(/`/g, '``')}\``
+}
+
+/** 根据拖入的节点数据生成对应 SQL 文本 */
+function generateDropSql(data: { type: string; database?: string; table?: string; name: string; objectType?: string }): string {
+  const db = data.database ? escapeIdentifier(data.database) : ''
+  const qualifiedName = db ? `${db}.${escapeIdentifier(data.name)}` : escapeIdentifier(data.name)
+  switch (data.type) {
+    case 'table':
+    case 'view':
+      return `SELECT * FROM ${qualifiedName} LIMIT 100;\n`
+    case 'column':
+      return escapeIdentifier(data.name)
+    case 'procedure':
+      return `CALL ${qualifiedName}();\n`
+    case 'function':
+      return `SELECT ${qualifiedName}();\n`
+    default:
+      return escapeIdentifier(data.name)
+  }
+}
+
+/** 拖拽经过编辑器时允许放置（capture phase 下需 stopPropagation 阻止 Monaco 内部处理） */
+function handleEditorDragOver(e: DragEvent) {
+  if (e.dataTransfer?.types.includes('application/devforge-node')) {
+    e.preventDefault()
+    e.stopPropagation()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+}
+
+/** 拖放到编辑器时插入生成的 SQL */
+function handleEditorDrop(e: DragEvent) {
+  const raw = e.dataTransfer?.getData('application/devforge-node')
+  if (!raw || !editor) return
+  e.preventDefault()
+  e.stopPropagation()
+
+  try {
+    const data = JSON.parse(raw)
+    const text = generateDropSql(data)
+
+    // 用 Monaco API 精确定位鼠标位置并插入
+    const target = editor.getTargetAtClientPoint(e.clientX, e.clientY)
+    if (target?.position) {
+      editor.setPosition(target.position)
+    }
+
+    insertText(text)
+    editor.focus()
+  } catch {
+    // 无效数据，忽略
+  }
+}
 
 function getSelectedText(): string {
   if (!editor) return ''

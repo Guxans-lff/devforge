@@ -16,7 +16,7 @@ import {
   Database, ChevronRight, Loader2, RefreshCw, Pencil,
   FileUp, Code, Plus, Search, X, FolderOpen, Folder,
   HardDrive, Upload, Users, Activity, FileCode, FileDown,
-  Trash2, Eraser, Network, GitCompareArrows,
+  Trash2, Eraser, Network, GitCompareArrows, Play,
 } from 'lucide-vue-next'
 import { useObjectTree } from '@/composables/useObjectTree'
 
@@ -47,7 +47,31 @@ const emit = defineEmits<{
   runSqlFile: [database: string]
   createDatabase: []
   editDatabase: [database: string]
+  executeRoutine: [database: string, name: string, routineType: string]
 }>()
+
+/** 可拖拽的节点类型 */
+const DRAGGABLE_TYPES = new Set(['table', 'view', 'column', 'procedure', 'function'])
+
+/** 判断节点是否可拖拽到 SQL 编辑器 */
+function isDraggableNode(node: import('@/types/database').DatabaseTreeNode): boolean {
+  return DRAGGABLE_TYPES.has(node.type)
+}
+
+/** 拖拽开始时设置传输数据 */
+function handleDragStart(event: DragEvent, node: import('@/types/database').DatabaseTreeNode) {
+  if (!event.dataTransfer) return
+  const dragData = {
+    type: node.type,
+    database: node.meta?.database,
+    table: node.meta?.table,
+    name: node.label,
+    objectType: node.meta?.objectType,
+  }
+  event.dataTransfer.setData('application/devforge-node', JSON.stringify(dragData))
+  event.dataTransfer.setData('text/plain', node.label)
+  event.dataTransfer.effectAllowed = 'copy'
+}
 
 const { t } = useI18n()
 const parentRef = ref<HTMLElement | null>(null)
@@ -113,6 +137,12 @@ function emitShowDefinition(node: any) {
   const db = tree.getNodeDatabase(node)
   const objectType = node.meta?.objectType
   if (db && objectType) emit('showObjectDefinition', db, node.label, objectType)
+}
+
+function emitExecuteRoutine(node: any) {
+  const db = tree.getNodeDatabase(node)
+  const routineType = node.meta?.objectType // PROCEDURE 或 FUNCTION
+  if (db && routineType) emit('executeRoutine', db, node.label, routineType)
 }
 
 function emitBackupDatabase(node: any) {
@@ -295,8 +325,10 @@ defineExpose({
                     class="group flex h-full grow cursor-pointer items-center gap-1 pr-2 text-xs hover:bg-muted/50"
                     :class="[{ 'bg-primary/10 ring-1 ring-primary/30 rounded-sm': tree.highlightedNodeId.value === item.node.id }]"
                     :style="{ paddingLeft: `${item.level * 12 + 8}px` }"
+                    :draggable="isDraggableNode(item.node)"
                     @click="tree.toggleNode(item.node)"
                     @dblclick="tree.handleDoubleClick(item.node)"
+                    @dragstart="handleDragStart($event, item.node)"
                   >
                     <div class="w-4 shrink-0 flex items-center justify-center">
                       <ChevronRight
@@ -402,6 +434,9 @@ defineExpose({
                   </template>
 
                   <template v-if="item.node.type === 'view' || item.node.type === 'procedure' || item.node.type === 'function'">
+                    <ContextMenuItem v-if="item.node.type === 'procedure' || item.node.type === 'function'" class="gap-2 text-xs" @click="emitExecuteRoutine(item.node)">
+                      <Play class="h-3.5 w-3.5" /> 执行
+                    </ContextMenuItem>
                     <ContextMenuItem class="gap-2 text-xs" @click="emitShowDefinition(item.node)">
                       <Code class="h-3.5 w-3.5" /> {{ t('objectTree.viewDefinition') }}
                     </ContextMenuItem>
