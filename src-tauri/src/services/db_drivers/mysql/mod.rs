@@ -8,7 +8,7 @@ pub use util::{get_string, get_opt_string};
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{MySqlPool, Row};
-use crate::models::query::{DatabaseInfo, TableInfo, ColumnInfo, ViewInfo, RoutineInfo, TriggerInfo, ForeignKeyRelation};
+use crate::models::query::{DatabaseInfo, TableInfo, ColumnInfo, ViewInfo, RoutineInfo, RoutineParameter, TriggerInfo, ForeignKeyRelation};
 use crate::utils::error::AppError;
 use super::escape_mysql_ident;
 
@@ -155,6 +155,47 @@ pub async fn get_routines(pool: &MySqlPool, database: &str, routine_type: &str) 
         modified: get_opt_string(row, "modified"),
         comment: get_opt_string(row, "comment"),
     }).collect())
+}
+
+/// 获取存储过程/函数的参数列表
+pub async fn get_routine_parameters(
+    pool: &MySqlPool,
+    database: &str,
+    routine_name: &str,
+    routine_type: &str,
+) -> Result<Vec<RoutineParameter>, AppError> {
+    let rows: Vec<MySqlRow> = sqlx::query(
+        "SELECT CAST(PARAMETER_NAME AS CHAR) as name,
+                CAST(DATA_TYPE AS CHAR) as data_type,
+                CAST(PARAMETER_MODE AS CHAR) as mode,
+                CAST(DTD_IDENTIFIER AS CHAR) as dtd_identifier,
+                ORDINAL_POSITION as position
+         FROM information_schema.PARAMETERS
+         WHERE SPECIFIC_SCHEMA = ? AND SPECIFIC_NAME = ? AND ROUTINE_TYPE = ?
+         ORDER BY ORDINAL_POSITION",
+    )
+    .bind(database)
+    .bind(routine_name)
+    .bind(routine_type)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to get routine parameters: {}", e)))?;
+
+    // PARAMETER_NAME 为 NULL 表示函数返回值（ORDINAL_POSITION = 0），过滤掉
+    Ok(rows
+        .iter()
+        .filter(|row| get_opt_string(row, "name").is_some())
+        .map(|row| {
+            let pos: i64 = row.get("position");
+            RoutineParameter {
+                name: get_string(row, "name"),
+                data_type: get_string(row, "data_type"),
+                dtd_identifier: get_string(row, "dtd_identifier"),
+                mode: get_opt_string(row, "mode").unwrap_or_else(|| "IN".to_string()),
+                position: pos.try_into().unwrap_or(0),
+            }
+        })
+        .collect())
 }
 
 pub async fn get_triggers(pool: &MySqlPool, database: &str) -> Result<Vec<TriggerInfo>, AppError> {

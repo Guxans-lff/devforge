@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use crate::models::query::{
-    ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo,
+    ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo,
     ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, ScriptOptions,
     ForeignKeyRelation
 };
@@ -83,6 +83,15 @@ impl DbEngine {
         match pool.as_ref() {
             DriverPool::MySql(p) => mysql::get_routines(p, &database, &routine_type).await,
             DriverPool::Postgres(p) => postgres::get_routines(p, &database, &routine_type).await,
+        }
+    }
+
+    /// 获取存储过程/函数的参数列表（仅 MySQL 支持）
+    pub async fn get_routine_parameters(self: Arc<Self>, connection_id: String, database: String, routine_name: String, routine_type: String) -> Result<Vec<RoutineParameter>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
+        match pool.as_ref() {
+            DriverPool::MySql(p) => mysql::get_routine_parameters(p, &database, &routine_name, &routine_type).await,
+            DriverPool::Postgres(_) => Err(AppError::Other("PostgreSQL routine parameters not supported yet".to_string())),
         }
     }
 

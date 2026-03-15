@@ -89,6 +89,15 @@ export interface TriggerInfo {
   statement: string | null
 }
 
+/** 存储过程/函数的参数信息 */
+export interface RoutineParameter {
+  name: string
+  dataType: string
+  dtdIdentifier: string
+  mode: string      // IN / OUT / INOUT
+  position: number
+}
+
 export interface DatabaseTreeNode {
   id: string
   label: string

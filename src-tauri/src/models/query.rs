@@ -152,6 +152,17 @@ pub struct RoutineInfo {
     pub comment: Option<String>,
 }
 
+/// 存储过程/函数的参数信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutineParameter {
+    pub name: String,
+    pub data_type: String,
+    pub dtd_identifier: String,
+    pub mode: String,      // IN / OUT / INOUT
+    pub position: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TriggerInfo {

@@ -2,7 +2,7 @@ import { Channel } from '@tauri-apps/api/core'
 import { invokeCommand } from '@/api/base'
 import { useLogStore } from '@/stores/log'
 import { i18n } from '@/locales'
-import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo, RowChange, ApplyChangesResult, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy, ForeignKeyRelation } from '@/types/database'
+import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo, RowChange, ApplyChangesResult, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy, ForeignKeyRelation } from '@/types/database'
 import type { PoolStatus, ReconnectParams, ReconnectResult } from '@/types/connection'
 import type { ExportFormat } from '@/types/export'
 
@@ -141,6 +141,15 @@ export function dbGetProcedures(connectionId: string, database: string): Promise
 
 export function dbGetFunctions(connectionId: string, database: string): Promise<RoutineInfo[]> {
   return invokeCommand('db_get_functions', { connectionId, database })
+}
+
+export function dbGetRoutineParameters(
+  connectionId: string,
+  database: string,
+  routineName: string,
+  routineType: string,
+): Promise<RoutineParameter[]> {
+  return invokeCommand('db_get_routine_parameters', { connectionId, database, routineName, routineType })
 }
 
 export function dbGetTriggers(connectionId: string, database: string): Promise<TriggerInfo[]> {

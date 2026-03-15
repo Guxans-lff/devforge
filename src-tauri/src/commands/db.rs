@@ -5,7 +5,7 @@ use crate::models::connection::{PoolConfig, PoolStatus, ReconnectParams, Reconne
 use crate::models::import_export::{ExportRequest, ExportResult};
 use crate::models::query::{
     ApplyChangesResult, ColumnInfo, ConnectResult, CreateUserRequest, DatabaseInfo, MysqlUser,
-    ProcessInfo, QueryChunk, QueryResult, RoutineInfo, RowChange, ScriptOptions,
+    ProcessInfo, QueryChunk, QueryResult, RoutineInfo, RoutineParameter, RowChange, ScriptOptions,
     ServerStatus, ServerVariable, StatementResult, TableInfo, TriggerInfo, ViewInfo,
     detect_statement_type, SqlFileProgress, SqlImportOptions, ForeignKeyRelation
 };
@@ -526,6 +526,19 @@ pub async fn db_get_functions(
 ) -> Result<Vec<RoutineInfo>, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().get_routines(connection_id, database, "FUNCTION".to_string())
+        .await
+}
+
+#[command]
+pub async fn db_get_routine_parameters(
+    app: AppHandle,
+    connection_id: String,
+    database: String,
+    routine_name: String,
+    routine_type: String,
+) -> Result<Vec<RoutineParameter>, AppError> {
+    let engine = app.state::<DbEngineState>().inner().clone();
+    engine.clone().get_routine_parameters(connection_id, database, routine_name, routine_type)
         .await
 }
 

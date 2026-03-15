@@ -20,6 +20,7 @@ import BackupDialog from '@/components/database/BackupDialog.vue'
 import RestoreDialog from '@/components/database/RestoreDialog.vue'
 import CreateDatabaseDialog from '@/components/database/CreateDatabaseDialog.vue'
 import EditDatabaseDialog from '@/components/database/EditDatabaseDialog.vue'
+import RoutineExecDialog from '@/components/database/RoutineExecDialog.vue'
 import ConfirmDialog from '@/components/ui/confirm-dialog/ConfirmDialog.vue'
 import EnvironmentBanner from '@/components/database/EnvironmentBanner.vue'
 import BreadcrumbNav from '@/components/database/BreadcrumbNav.vue'
@@ -495,6 +496,27 @@ async function handleShowObjectDefinition(database: string, name: string, object
   }
 }
 
+// ===== 存储过程/函数执行对话框 =====
+const routineExecState = ref<{
+  open: boolean
+  database: string
+  routineName: string
+  routineType: string
+}>({ open: false, database: '', routineName: '', routineType: '' })
+
+function handleExecuteRoutine(database: string, name: string, routineType: string) {
+  routineExecState.value = { open: true, database, routineName: name, routineType }
+}
+
+/** 存储过程执行对话框生成的 SQL 插入到当前查询标签页 */
+function handleRoutineExecSql(sql: string) {
+  const ws = workspace.value
+  const activeQueryTab = ws.tabs.find((t) => t.id === ws.activeTabId && t.type === 'query')
+  if (activeQueryTab) {
+    dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, { sql })
+  }
+}
+
 function handleTableEditorSuccess() {
   (objectTreeRef.value as any)?.silentRefresh()
 }
@@ -686,6 +708,7 @@ function handleEditDatabaseSuccess() {
           @run-sql-file="handleRunSqlFile"
           @create-database="handleCreateDatabase"
           @edit-database="handleEditDatabase"
+          @execute-routine="handleExecuteRoutine"
         />
       </Pane>
 
@@ -846,6 +869,17 @@ function handleEditDatabaseSuccess() {
       :connection-id="connectionId"
       :database="editDatabaseName"
       @success="handleEditDatabaseSuccess"
+    />
+
+    <!-- 存储过程/函数执行对话框 -->
+    <RoutineExecDialog
+      v-if="routineExecState.open"
+      v-model:open="routineExecState.open"
+      :connection-id="connectionId"
+      :database="routineExecState.database"
+      :routine-name="routineExecState.routineName"
+      :routine-type="routineExecState.routineType"
+      @execute="handleRoutineExecSql"
     />
   </div>
 </template>
