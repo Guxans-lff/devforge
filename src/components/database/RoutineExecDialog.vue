@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { useI18n } from 'vue-i18n'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,8 +21,6 @@ const emit = defineEmits<{
   'update:open': [value: boolean]
   execute: [sql: string]
 }>()
-
-const { t } = useI18n()
 
 const loading = ref(false)
 const parameters = ref<RoutineParameter[]>([])
