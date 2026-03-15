@@ -10,11 +10,12 @@ import {
 import type { ColumnDef as TanstackColumnDef, SortingState, ColumnResizeMode } from '@tanstack/vue-table'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { save } from '@tauri-apps/plugin-dialog'
-import { writeTextFile, dbExecuteQuery } from '@/api/database'
+import { writeTextFile, dbExecuteQueryInDatabase } from '@/api/database'
 import { formatData, getFilters, type ExportFormat } from '@/utils/exportData'
 import { useToast } from '@/composables/useToast'
 import { useAdaptiveOverscan } from '@/composables/useAdaptiveOverscan'
 import { computeColumnStatsAsync, type ColumnStatsResult } from '@/utils/columnStatistics'
+import { fetchPrimaryKeys } from '@/composables/usePrimaryKey'
 import type { QueryResult as QueryResultType } from '@/types/database'
 
 export type RowData = Record<string, unknown> & { __originalIndex: number }
@@ -62,10 +63,6 @@ export function useQueryResult(options: UseQueryResultOptions) {
   // ===== 行详情 =====
   const rowDetailOpen = ref(false)
 
-  // ===== 单元格预览 =====
-  const previewCell = ref<{ value: unknown; columnName: string; columnType: string } | null>(null)
-  const showPreview = ref(false)
-
   // ===== 列统计 =====
   const selectedStatsColumn = ref<string | null>(null)
   const columnStats = ref<ColumnStatsResult | null>(null)
@@ -74,8 +71,48 @@ export function useQueryResult(options: UseQueryResultOptions) {
   // ===== 图表 =====
   const showChart = ref(false)
 
+  // ===== 主键状态 =====
+  /** 当前表的主键列名列表（复合主键时有多个元素） */
+  const primaryKeys = ref<string[]>([])
+  /** 是否正在查询主键信息 */
+  const pkLoading = ref(false)
+
+  // 当 connectionId/database/tableName 变化时，自动拉取主键元数据
+  watch(
+    [connectionId, database, tableName],
+    async ([connId, db, tbl]) => {
+      if (!connId || !db || !tbl) {
+        primaryKeys.value = []
+        return
+      }
+      pkLoading.value = true
+      try {
+        primaryKeys.value = await fetchPrimaryKeys(connId, db, tbl)
+      } finally {
+        pkLoading.value = false
+      }
+    },
+    { immediate: true },
+  )
+
   // ===== 编辑状态 =====
-  const editable = computed(() => !!connectionId.value && !!database.value && !!tableName.value)
+  /**
+   * 说明当前结果集是否支持内联编辑及原因：
+   * - 'ok'        — 有主键，可以编辑
+   * - 'no-pk'     — 表无主键（唯一不可信），只读
+   * - 'no-table'  — 无法确定表名（如复杂关联查询），只读
+   * - 'no-conn'   — 未连接
+   */
+  const editableReason = computed<'ok' | 'no-pk' | 'no-table' | 'no-conn'>(() => {
+    if (!connectionId.value || !database.value) return 'no-conn'
+    if (!tableName.value) return 'no-table'
+    if (pkLoading.value) return 'no-pk' // 加载中暂时禁用
+    if (primaryKeys.value.length === 0) return 'no-pk'
+    return 'ok'
+  })
+
+  /** 是否可内联编辑 */
+  const editable = computed(() => editableReason.value === 'ok')
   const editingCell = ref<{ rowIndex: number; colName: string } | null>(null)
   const editingValue = ref('')
 
@@ -252,11 +289,8 @@ export function useQueryResult(options: UseQueryResultOptions) {
     }
   }
 
-  function handleCellClick(value: unknown, columnName?: string, columnType?: string) {
-    if (columnName) {
-      previewCell.value = { value, columnName, columnType: columnType ?? '' }
-      showPreview.value = true
-    }
+  function handleCellClick(value: unknown) {
+    // 单击只复制内容到剪贴板
     const text = value === null || value === undefined ? 'NULL' : String(value)
     navigator.clipboard.writeText(text).then(() => {
       toast.success(t('toast.copySuccess'))
@@ -332,14 +366,23 @@ export function useQueryResult(options: UseQueryResultOptions) {
 
   function cancelEdit() { editingCell.value = null; editingValue.value = '' }
 
+  /**
+   * 根据主键构建精准的 WHERE 子句
+   * 超越 Navicat 的关键：只用已验证的主键列，绝不使用时间戳/NULL/二进制等不安全类型
+   */
   function buildWhereClause(row: unknown[]): string {
-    if (!result.value) return '1=0'
-    return result.value.columns.map((col, i) => {
-      const val = row[i]
-      return val === null || val === undefined
-        ? `${quoteId(col.name)} IS NULL`
-        : `${quoteId(col.name)} = '${String(val).replace(/'/g, "''")}'`
-    }).join(' AND ')
+    if (!result.value || primaryKeys.value.length === 0) return '1=0'
+    
+    const columns = result.value.columns
+    const conditions = primaryKeys.value.map(pkName => {
+      const colIdx = columns.findIndex(c => c.name === pkName)
+      if (colIdx < 0) return null
+      const val = row[colIdx]
+      if (val === null || val === undefined) return `${quoteId(pkName)} IS NULL`
+      return `${quoteId(pkName)} = '${String(val).replace(/'/g, "''")}'`
+    }).filter(Boolean)
+    
+    return conditions.length > 0 ? conditions.join(' AND ') : '1=0'
   }
 
   function getOriginalRow(displayIndex: number): unknown[] | null {
@@ -353,16 +396,41 @@ export function useQueryResult(options: UseQueryResultOptions) {
     const { rowIndex, colName } = editingCell.value
     const row = getOriginalRow(rowIndex)
     if (!row) { cancelEdit(); return }
+    
+    // 获取数据库名，优先使用 options 传入的 database
+    const db = database.value
+    if (!db) {
+      toast.error(t('database.queryError'), '无法确定目标数据库，请先选择数据库')
+      cancelEdit()
+      return
+    }
+    
     const scrollTop = tableScrollRef.value?.scrollTop ?? 0
     const scrollLeft = tableScrollRef.value?.scrollLeft ?? 0
     const newVal = editingValue.value === '' ? 'NULL' : `'${editingValue.value.replace(/'/g, "''")}'`
-    const sql = `UPDATE ${quoteId(database.value!)}.${quoteId(tableName.value!)} SET ${quoteId(colName)} = ${newVal} WHERE ${buildWhereClause(row)} LIMIT 1`
+    // 直接使用表名，数据库上下文由 API 层处理
+    const tbl = tableName.value!
+    const sql = `UPDATE ${quoteId(tbl)} SET ${quoteId(colName)} = ${newVal} WHERE ${buildWhereClause(row)} LIMIT 1`
+    console.log('[saveEdit] 数据库:', db, '表:', tbl, '\nSQL:', sql)
     try {
-      const res = await dbExecuteQuery(connectionId.value!, sql)
-      if (res.isError) toast.error(t('database.queryError'), res.error ?? '')
-      else {
+      const res = await dbExecuteQueryInDatabase(connectionId.value!, db, sql)
+      console.log('[saveEdit] 执行结果:', JSON.stringify({ isError: res.isError, error: res.error, affectedRows: res.affectedRows }))
+      if (res.isError) {
+        toast.error(t('database.queryError'), res.error ?? '')
+      } else if (res.affectedRows === 0) {
+        toast.error('更新失败', `WHERE 条件未匹配到任何行，数据库: ${db}, 表: ${tbl}`)
+      } else {
         toast.success(t('database.updateSuccess'))
-        onRefresh()
+        // 本地更新单元格数据，避免全量刷新导致滚动位置等状态丢失
+        const colIndex = result.value.columns.findIndex(c => c.name === colName)
+        if (colIndex >= 0) {
+          const tableRow = table.getRowModel().rows[rowIndex]
+          if (tableRow) {
+            const originalIdx = tableRow.original.__originalIndex
+            const updatedValue = editingValue.value === '' ? null : editingValue.value
+            result.value.rows[originalIdx]![colIndex] = updatedValue
+          }
+        }
         nextTick(() => {
           if (tableScrollRef.value) {
             tableScrollRef.value.scrollTop = scrollTop
@@ -370,7 +438,10 @@ export function useQueryResult(options: UseQueryResultOptions) {
           }
         })
       }
-    } catch (e) { toast.error(t('database.queryError'), String(e)) }
+    } catch (e) {
+      console.error('[saveEdit] 异常:', e)
+      toast.error(t('database.queryError'), String(e))
+    }
     cancelEdit()
   }
 
@@ -391,11 +462,18 @@ export function useQueryResult(options: UseQueryResultOptions) {
     if (!result.value || !editable.value) return
     const row = getOriginalRow(displayIndex)
     if (!row) return
+    
+    const db = database.value
+    if (!db) {
+      toast.error(t('database.queryError'), '无法确定目标数据库，请先选择数据库')
+      return
+    }
+    
     const scrollTop = tableScrollRef.value?.scrollTop ?? 0
     const scrollLeft = tableScrollRef.value?.scrollLeft ?? 0
-    const sql = `DELETE FROM ${quoteId(database.value!)}.${quoteId(tableName.value!)} WHERE ${buildWhereClause(row)} LIMIT 1`
+    const sql = `DELETE FROM ${quoteId(tableName.value!)} WHERE ${buildWhereClause(row)} LIMIT 1`
     try {
-      const res = await dbExecuteQuery(connectionId.value!, sql)
+      const res = await dbExecuteQueryInDatabase(connectionId.value!, db, sql)
       if (res.isError) toast.error(t('database.queryError'), res.error ?? '')
       else {
         toast.success(t('database.deleteSuccess'))
@@ -414,10 +492,23 @@ export function useQueryResult(options: UseQueryResultOptions) {
 
   async function handleExport(format: ExportFormat) {
     if (!result.value || result.value.isError) return
-    const path = await save({ defaultPath: `export.${format}`, filters: getFilters(format) })
+    
+    // 生成专业文件名：[数据库名_]表名_时间戳.格式
+    const dbName = database.value || ''
+    const tablePart = tableName.value || result.value?.tableName || 'query_result'
+    const fullSourcePath = dbName ? `${dbName}_${tablePart}` : tablePart
+    
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16).replace('T', '_')
+    const defaultName = `${fullSourcePath}_${timestamp}.${format}`
+
+    const path = await save({ 
+      defaultPath: defaultName, 
+      filters: getFilters(format) 
+    })
+    
     if (!path) return
     try {
-      const content = formatData(result.value, format, 'exported_table')
+      const content = formatData(result.value, format, tablePart)
       await writeTextFile(path, content)
       toast.success(t('toast.exportSuccess'))
     } catch (e) { toast.error(t('toast.exportFailed'), String(e)) }
@@ -466,9 +557,6 @@ export function useQueryResult(options: UseQueryResultOptions) {
       e.preventDefault()
       if (selectedRowIndex.value !== null) openRowDetail(selectedRowIndex.value)
     }
-    if (e.key === ' ' && !['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) {
-      if (previewCell.value) { e.preventDefault(); showPreview.value = !showPreview.value }
-    }
   }
 
   document.addEventListener('keydown', handleGlobalKeydown)
@@ -489,14 +577,15 @@ export function useQueryResult(options: UseQueryResultOptions) {
     visibleCount, selectedRowIndex, totalRows, hasMore, tableData,
     // 行详情
     rowDetailOpen, selectedRowData, openRowDetail, handleRowDetailNavigate, copyRowAsJson,
-    // 单元格预览
-    previewCell, showPreview, handleCellClick,
+    // 单元格交互
+    handleCellClick,
     // 列统计
     selectedStatsColumn, columnStats, computingStats, triggerColumnStats,
     // 图表
     showChart,
     // 编辑
-    editable, editingCell, editingValue, startEdit, cancelEdit, saveEdit,
+    editable, editableReason, primaryKeys, pkLoading,
+    editingCell, editingValue, startEdit, cancelEdit, saveEdit,
     // 删除
     deleteConfirmOpen, pendingDeleteIndex, requestDeleteRow, confirmDeleteRow,
     // 导出

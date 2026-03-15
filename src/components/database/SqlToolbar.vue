@@ -1,12 +1,18 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
+  Popover, PopoverTrigger, PopoverContent,
+} from '@/components/ui/popover'
+import {
+  Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem,
+} from '@/components/ui/command'
+import {
   Play, Loader2, Square, WrapText, Bookmark, ListTree,
   PlayCircle, CheckCircle2, XCircle, Clock, Database,
-  ShieldAlert, ShieldCheck, Timer,
+  ShieldAlert, ShieldCheck, Timer, ChevronDown, Check,
 } from 'lucide-vue-next'
 import type { ErrorStrategy } from '@/types/database'
 
@@ -42,6 +48,13 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+const dbSelectorOpen = ref(false)
+
+function handleDbSelect(db: string) {
+  emit('update:currentDatabase', db)
+  dbSelectorOpen.value = false
+}
 
 const executeDisabledReason = computed(() => {
   if (!props.isConnected) return t('database.notConnected')
@@ -141,18 +154,51 @@ const databaseModel = computed({
       EXPLAIN
     </Button>
 
-    <!-- 数据库选择器 -->
-    <div class="w-px h-4 bg-border" />
     <div class="flex items-center gap-1">
-      <Database class="h-3 w-3 text-muted-foreground" />
-      <select
-        v-model="databaseModel"
-        class="h-6 rounded border border-border bg-background px-1.5 text-[11px] min-w-[100px] max-w-[200px] cursor-pointer hover:border-primary/50 transition-colors"
-        :title="t('database.selectDatabase')"
-      >
-        <option value="" disabled>{{ t('database.selectDatabase') }}</option>
-        <option v-for="db in databases" :key="db" :value="db">{{ db }}</option>
-      </select>
+      <Popover v-model:open="dbSelectorOpen">
+        <PopoverTrigger as-child>
+          <Button
+            variant="outline"
+            role="combobox"
+            class="h-6 min-w-[100px] max-w-[200px] justify-between px-2 text-[11px] font-normal hover:border-primary/50 transition-all bg-background border-border/50"
+          >
+            <div class="flex items-center gap-1.5 min-w-0">
+              <Database class="h-3 w-3 shrink-0 text-primary/70" />
+              <span class="truncate font-medium">{{ currentDatabase || t('database.selectDatabase') }}</span>
+            </div>
+            <ChevronDown class="ml-2 h-3 w-3 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent class="w-[220px] p-0 shadow-2xl border-primary/10 overflow-hidden" align="start">
+          <Command>
+            <CommandInput 
+              :placeholder="t('database.searchDatabase')" 
+              class="border-none ring-0 focus:ring-0" 
+            />
+            <CommandEmpty class="py-4 text-[10px] text-center text-muted-foreground">{{ t('common.noResults') }}</CommandEmpty>
+            <CommandList class="max-h-[300px] overflow-y-auto p-1 custom-scrollbar">
+              <CommandGroup>
+                <CommandItem
+                  v-for="db in databases"
+                  :key="db"
+                  :value="db"
+                  class="flex items-center gap-2 px-2 py-1.5 text-[11px] rounded-sm transition-colors cursor-pointer group/db"
+                  @select="handleDbSelect(db)"
+                >
+                  <div class="flex h-4 w-4 items-center justify-center rounded bg-primary/5 text-primary/40 group-hover/db:bg-primary/20 group-hover/db:text-primary transition-colors">
+                    <Database class="h-2.5 w-2.5" />
+                  </div>
+                  <span class="flex-1 truncate font-medium">{{ db }}</span>
+                  <Check
+                    v-if="currentDatabase === db"
+                    class="ml-auto h-3 w-3 text-primary animate-in zoom-in-50 duration-200"
+                  />
+                </CommandItem>
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
     </div>
 
     <!-- 错误策略 -->

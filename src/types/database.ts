@@ -13,6 +13,7 @@ export interface QueryResult {
     success: number
     fail: number
   }
+  tableName?: string
 }
 
 export interface ColumnDef {

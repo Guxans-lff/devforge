@@ -8,8 +8,11 @@ import { useI18n } from 'vue-i18n'
 import { FlexRender } from '@tanstack/vue-table'
 import {
   ArrowUpDown, ArrowUp, ArrowDown, Clock, AlertCircle, CheckCircle2,
-  Hash, Download, Trash2, Filter, ShieldAlert, WifiOff, KeyRound,
-  Activity, RotateCcw, BarChart3, Loader2,
+  Hash, Download, Trash2, Filter, ShieldAlert, WifiOff, KeyRound, Eye,
+  Loader2,
+  Table as TableIcon,
+  BarChart3,
+  Settings2,
 } from 'lucide-vue-next'
 import type { QueryResult as QueryResultType } from '@/types/database'
 import {
@@ -24,12 +27,16 @@ import {
 } from '@/components/ui/context-menu'
 import ExportDialog from '@/components/database/ExportDialog.vue'
 import RowDetailSheet from '@/components/database/RowDetailSheet.vue'
-import CellPreviewPanel from '@/components/database/CellPreviewPanel.vue'
 import ColumnStatsBar from '@/components/database/ColumnStatsBar.vue'
 import { useQueryResult } from '@/composables/useQueryResult'
 
 /** 懒加载图表面板 */
 const ChartPanel = defineAsyncComponent(() => import('@/components/database/chart/ChartPanel.vue'))
+
+/** 自动聚焦指令：解决虚拟列表中 autofocus 被浏览器拦截的问题 */
+const vFocus = {
+  mounted: (el: HTMLElement) => el.focus()
+}
 
 const props = defineProps<{
   result: QueryResultType | null
@@ -73,13 +80,18 @@ const qr = useQueryResult({
   onServerFilter: (where: string) => emit('serverFilter', where),
   onServerSort: (orderBy: string) => emit('serverSort', orderBy),
 })
+
+/** 控制图表侧边配置面板开关 */
+const chartConfigOpen = ref(false)
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden">
-    <!-- Status bar -->
+  <!-- 架构级 Grid 布局：严格隔离各功能板块 -->
+  <div class="flex h-full flex-col overflow-hidden bg-background">
+    
+    <!-- 状态栏 (Flex 子项) -->
     <div
-      class="flex h-8 items-center gap-6 border-b border-border bg-muted/20 px-4 text-[11px] text-muted-foreground transition-colors shrink-0"
+      class="flex h-[32px] items-center gap-6 border-b border-border bg-muted/20 px-4 text-[11px] text-muted-foreground shrink-0"
     >
       <template v-if="loading">
         <div class="flex items-center gap-2 text-primary animate-pulse">
@@ -115,14 +127,33 @@ const qr = useQueryResult({
           </div>
           <div class="flex-1" />
           <div class="flex items-center gap-1">
+            <div class="flex items-center bg-muted/40 rounded-lg p-0.5 border border-border/50">
+              <button
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium transition-all"
+                :class="!qr.showChart.value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                @click="qr.showChart.value = false"
+              >
+                <TableIcon class="h-3 w-3" />
+                表格数据
+              </button>
+              <button
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium transition-all"
+                :class="qr.showChart.value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                @click="qr.showChart.value = true"
+              >
+                <BarChart3 class="h-3 w-3" />
+                可视化分析
+              </button>
+            </div>
+            
             <Button
+              v-if="qr.showChart.value"
               variant="ghost" size="sm"
-              class="h-6 gap-1.5 text-[10px] px-2 hover:bg-muted/50 rounded-md transition-all active:scale-95"
-              :class="{ 'text-primary bg-primary/10': qr.showChart.value }"
-              @click="qr.showChart.value = !qr.showChart.value"
+              class="h-6 gap-1.5 text-[10px] px-2 hover:bg-muted/50 rounded-md transition-all active:scale-95 ml-1"
+              @click="chartConfigOpen = true"
             >
-              <BarChart3 class="h-3 w-3" />
-              图表
+              <Settings2 class="h-3 w-3" />
+              配置图表
             </Button>
             <div class="w-px h-3 bg-border/50 mx-1" />
             <Button
@@ -159,8 +190,10 @@ const qr = useQueryResult({
       </template>
     </div>
 
-    <!-- Table -->
-    <div ref="tableScrollRef" class="qr-scroll-area relative min-h-0 flex-1 overflow-auto bg-background/30 border-t border-border/50" style="contain: strict">
+    <!-- 主体内容 (自适应高度) -->
+    <div class="relative flex-1 min-h-0 flex flex-col overflow-hidden bg-background/30">
+      <!-- 视图 1: 经典表格 -->
+      <div v-show="!qr.showChart.value" ref="tableScrollRef" class="qr-scroll-area relative flex-1 min-h-0 overflow-auto">
       <div
         v-if="result && !result.isError && result.columns.length > 0"
         class="text-sm min-w-full inline-block align-top"
@@ -195,7 +228,6 @@ const qr = useQueryResult({
                   <ArrowUpDown v-else class="h-3 w-3 opacity-0 group-hover/header:opacity-30" />
                 </template>
               </div>
-              <!-- Resizer Handle -->
               <div
                 v-if="header.column.getCanResize()"
                 class="absolute right-0 top-0 h-full w-1 cursor-col-resize user-select-none touch-none hover:bg-primary/50 transition-colors"
@@ -209,7 +241,6 @@ const qr = useQueryResult({
               class="whitespace-nowrap border-b border-r border-border px-1 py-1.5 text-center text-xs font-medium text-muted-foreground"
             />
           </div>
-          <!-- Filter row -->
           <div v-if="qr.showFilters.value" class="flex" :style="qr.gridStyle.value">
             <div class="border-b border-r border-border px-1 py-0.5" />
             <div
@@ -254,11 +285,12 @@ const qr = useQueryResult({
           </div>
         </div>
 
-        <!-- Body (virtual rows) -->
+        <!-- Virtual Body -->
         <div :style="{ height: `${qr.rowVirtualizer.value.getTotalSize()}px`, position: 'relative' }" style="will-change: transform; contain: content">
           <ContextMenu v-for="vRow in qr.rowVirtualizer.value.getVirtualItems()" :key="vRow.index">
             <ContextMenuTrigger as-child>
               <div
+                v-if="vRow && qr.table.getRowModel().rows[vRow.index]"
                 v-memo="[vRow.index, vRow.start, qr.selectedRowIndex.value === vRow.index, qr.editingCell.value?.rowIndex === vRow.index, qr.table.getRowModel().rows[vRow.index]?.id, qr.table.getState().columnSizing]"
                 class="cursor-pointer absolute left-0 right-0"
                 :style="{ ...qr.rowBaseStyle.value, transform: `translateY(${vRow.start}px)` }"
@@ -277,14 +309,14 @@ const qr = useQueryResult({
                     'cursor-pointer hover:bg-primary/[0.02]': !qr.editingCell.value || qr.editingCell.value.rowIndex !== vRow.index || qr.editingCell.value.colName !== cell.column.id,
                     'text-primary font-bold': qr.selectedRowIndex.value === vRow.index
                   }"
-                  @click.stop="qr.handleCellClick(cell.getValue(), cell.column.id, result?.columns.find(c => c.name === cell.column.id)?.dataType)"
+                  @click.stop="qr.handleCellClick(cell.getValue())"
                   @dblclick="qr.editable.value ? qr.startEdit(vRow.index, cell.column.id, cell.getValue()) : undefined"
                 >
                   <template v-if="qr.editingCell.value && qr.editingCell.value.rowIndex === vRow.index && qr.editingCell.value.colName === cell.column.id">
                     <input
                       :value="qr.editingValue.value"
+                      v-focus
                       class="h-full w-full bg-background px-1 text-xs font-mono outline-none border border-primary rounded-sm"
-                      autofocus
                       @input="qr.editingValue.value = ($event.target as HTMLInputElement).value"
                       @keydown.enter="qr.saveEdit()"
                       @keydown.escape="qr.cancelEdit()"
@@ -329,9 +361,9 @@ const qr = useQueryResult({
         </div>
       </div>
 
-      <!-- 错误状态 -->
-      <div v-else-if="result && result.isError" class="flex flex-col h-full overflow-auto">
-        <div class="flex items-center gap-2 px-4 py-3 border-b border-destructive/20 bg-destructive/5">
+      <!-- Error State (Unified Scroll Container) -->
+      <div v-else-if="result && result.isError" class="flex h-full flex-col">
+        <div class="flex items-center gap-2 px-4 py-3 border-b border-destructive/20 bg-destructive/5 shrink-0">
           <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-destructive/10">
             <ShieldAlert v-if="qr.isConnectionError.value" class="h-4 w-4 text-destructive" />
             <AlertCircle v-else class="h-4 w-4 text-destructive" />
@@ -387,12 +419,12 @@ const qr = useQueryResult({
         </div>
       </div>
 
-      <!-- Empty initial state -->
+      <!-- Empty state -->
       <div v-else-if="!loading && !result" class="flex h-full items-center justify-center text-muted-foreground">
         <p class="text-sm font-medium tracking-wide">{{ t('database.noResults') }}</p>
       </div>
 
-      <!-- Success state for non-select queries -->
+      <!-- Success state -->
       <div
         v-else-if="!loading && result && !result.isError && result.columns.length === 0"
         class="flex h-full flex-col items-center justify-center text-muted-foreground gap-4 animate-in zoom-in-95 duration-300"
@@ -423,40 +455,56 @@ const qr = useQueryResult({
       </div>
     </div>
 
-    <!-- 单元格预览面板 -->
-    <CellPreviewPanel
-      v-if="qr.showPreview.value && qr.previewCell.value"
-      :value="qr.previewCell.value.value"
-      :column-name="qr.previewCell.value.columnName"
-      :column-type="qr.previewCell.value.columnType"
-      @close="qr.showPreview.value = false"
-    />
-
-    <!-- 列统计栏 -->
-    <ColumnStatsBar
-      v-if="qr.columnStats.value && qr.selectedStatsColumn.value"
-      :stats="qr.columnStats.value"
-      :column-name="qr.selectedStatsColumn.value"
-    />
-
-    <!-- 图表面板 -->
-    <div v-if="qr.showChart.value && result && !result.isError && result.columns.length > 0" class="h-[300px] shrink-0">
-      <ChartPanel :rows="result.rows" :columns="result.columns" />
+    <!-- 视图 2: 旗舰级图表看板 -->
+      <div v-if="qr.showChart.value && result && !result.isError && result.columns.length > 0" class="flex-1 min-h-0 overflow-hidden">
+        <ChartPanel :rows="result.rows" :columns="result.columns" v-model:configOpen="chartConfigOpen" />
+      </div>
     </div>
 
-    <!-- Status footer -->
+    <!-- 底部状态栏 -->
     <div
       v-if="result && !result.isError && result.columns.length > 0"
-      class="flex items-center justify-between border-t border-border bg-muted/30 px-3 py-1 text-xs text-muted-foreground shrink-0"
+      class="flex h-[26px] items-center justify-between border-t border-border bg-muted/30 px-3 text-[10px] text-muted-foreground shrink-0"
     >
       <span>
         {{ t('database.showing') }} {{ Math.min(qr.visibleCount.value, qr.totalRows.value) }} / {{ result.totalCount ?? qr.totalRows.value }} {{ t('database.rows') }}
         <template v-if="loadingMore"> ({{ t('database.loadingMore') }}...)</template>
       </span>
+      <!-- 主键 / 编辑状态展示 -->
+      <span class="flex items-center gap-2">
+        <!-- 可编辑：显示主键列名 -->
+        <template v-if="qr.editableReason.value === 'ok'">
+          <span class="flex items-center gap-1 text-emerald-500/80 font-medium">
+            <KeyRound class="h-3 w-3" />
+            PK: {{ qr.primaryKeys.value.join(', ') }}
+          </span>
+          <span class="text-muted-foreground/40">·</span>
+          <span class="text-muted-foreground/60">双击单元格可编辑</span>
+        </template>
+        <!-- 无主键：只读提示 -->
+        <template v-else-if="qr.editableReason.value === 'no-pk'">
+          <span class="flex items-center gap-1 text-amber-500/80">
+            <ShieldAlert class="h-3 w-3" />
+            无主键，只读模式
+          </span>
+        </template>
+        <!-- 无法确定表：复杂查询只读 -->
+        <template v-else-if="qr.editableReason.value === 'no-table'">
+          <span class="flex items-center gap-1 text-muted-foreground/50">
+            <Eye class="h-3 w-3" />
+            复杂查询，只读模式
+          </span>
+        </template>
+      </span>
       <span v-if="qr.hasMore.value" class="text-primary/70">{{ t('database.scrollForMore') }}</span>
     </div>
 
-    <!-- 删除确认对话框 -->
+    <!-- Overlays -->
+    <ColumnStatsBar
+      v-if="qr.columnStats.value && qr.selectedStatsColumn.value"
+      :stats="qr.columnStats.value"
+      :column-name="qr.selectedStatsColumn.value"
+    />
     <ConfirmDialog
       v-model:open="qr.deleteConfirmOpen.value"
       :title="t('database.confirmDeleteRow')"
@@ -466,16 +514,12 @@ const qr = useQueryResult({
       variant="destructive"
       @confirm="qr.confirmDeleteRow()"
     />
-
-    <!-- 多格式导出对话框 -->
     <ExportDialog
       v-if="connectionId"
       v-model:open="qr.exportDialogOpen.value"
       :connection-id="connectionId"
       :source="qr.exportSource.value"
     />
-
-    <!-- 行详情面板 -->
     <RowDetailSheet
       v-model:open="qr.rowDetailOpen.value"
       :columns="result?.columns ?? []"

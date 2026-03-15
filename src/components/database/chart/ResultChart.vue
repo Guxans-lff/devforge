@@ -35,6 +35,15 @@ const props = defineProps<{
   config: ChartConfig | null
 }>()
 
+/** 旗舰版配色方案 */
+const CHART_COLORS = [
+  ['#6366f1', '#a855f7'], // Indigo -> Purple
+  ['#3b82f6', '#2dd4bf'], // Blue -> Teal
+  ['#f59e0b', '#ef4444'], // Amber -> Red
+  ['#10b981', '#3b82f6'], // Emerald -> Blue
+  ['#8b5cf6', '#ec4899'], // Violet -> Pink
+]
+
 /** ECharts option */
 const chartOption = computed(() => {
   if (!props.config || !props.rows.length || !props.columnNames.length) return null
@@ -73,32 +82,151 @@ function buildDirectOption(
       const val = row ? toNumber(row[yIdx]) : 0
       dataMap.set(key, (dataMap.get(key) ?? 0) + val)
     }
+    const dataEntries = Array.from(dataMap.entries())
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+
+    // 智能归并：保留前 10 名，其余归入“其他”
+    const MAX_PIE_ITEMS = 10
+    let finalData = dataEntries
+    if (dataEntries.length > MAX_PIE_ITEMS) {
+      const top = dataEntries.slice(0, MAX_PIE_ITEMS)
+      const others = dataEntries.slice(MAX_PIE_ITEMS).reduce((sum, item) => sum + item.value, 0)
+      finalData = [...top, { name: '其他', value: others }]
+    }
+
+    const total = finalData.reduce((sum, d) => sum + d.value, 0)
+
     return {
-      tooltip: { trigger: 'item' },
+      tooltip: { 
+        trigger: 'item',
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderRadius: 8,
+        padding: [12, 16],
+        shadowBlur: 10,
+        shadowColor: 'rgba(0,0,0,0.1)',
+        textStyle: { color: '#333', fontSize: 12 },
+        formatter: (params: any) => {
+          return `<div style="font-weight:bold;margin-bottom:4px">${params.name}</div>
+                  <div style="display:flex;justify-content:space-between;gap:20px">
+                    <span style="color:#666">数值:</span>
+                    <span style="font-family:monospace">${params.value.toLocaleString()}</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;gap:20px">
+                    <span style="color:#666">占比:</span>
+                    <span style="font-family:monospace">${params.percent}%</span>
+                  </div>`
+        }
+      },
+      title: {
+        text: '总计',
+        subtext: total.toLocaleString(),
+        left: 'center',
+        top: 'middle',
+        textStyle: { fontSize: 14, color: '#888', fontWeight: 'normal' },
+        subtextStyle: { fontSize: 20, color: '#333', fontWeight: 'bold' }
+      },
       series: [{
         type: 'pie',
-        radius: ['30%', '70%'],
-        data: Array.from(dataMap.entries()).map(([name, value]) => ({ name, value })),
-        emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.3)' } },
+        radius: ['50%', '75%'],
+        data: finalData,
+        minAngle: 5,
+        avoidLabelOverlap: true,
+        itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+        label: { show: true, formatter: '{b}\n{d}%', fontSize: 11, minMargin: 5 },
+        emphasis: { 
+          scaleSize: 10,
+          itemStyle: { shadowBlur: 15, shadowColor: 'rgba(0,0,0,0.2)' } 
+        },
       }],
     }
   }
 
   // 柱状图/折线图/散点图
-  const series = yIdxList.map((yIdx, i) => ({
-    name: yColumnNames[i],
-    type: chartType === 'scatter' ? 'scatter' : chartType,
-    data: props.rows.map(r => toNumber(r[yIdx])),
-    smooth: chartType === 'line',
-  }))
+  const series = yIdxList.map((yIdx, i) => {
+    const colors = CHART_COLORS[i % CHART_COLORS.length] as [string, string]
+    const baseStyle = {
+      name: yColumnNames[i],
+      smooth: chartType === 'line',
+      emphasis: { focus: 'series', itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.2)' } },
+    }
+
+    if (chartType === 'bar') {
+      return {
+        ...baseStyle,
+        type: 'bar',
+        data: props.rows.map(r => toNumber(r[yIdx])),
+        itemStyle: {
+          borderRadius: [4, 4, 0, 0],
+          color: {
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [{ offset: 0, color: colors[0] }, { offset: 1, color: colors[1] }]
+          }
+        },
+        barMaxWidth: 40,
+      }
+    }
+
+    if (chartType === 'line') {
+      return {
+        ...baseStyle,
+        type: 'line',
+        data: props.rows.map(r => toNumber(r[yIdx])),
+        lineStyle: { width: 3, color: colors[0] },
+        itemStyle: { color: colors[0] },
+        areaStyle: {
+          opacity: 0.1,
+          color: {
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [{ offset: 0, color: colors[0] }, { offset: 1, color: 'rgba(255,255,255,0)' }]
+          }
+        },
+        symbol: 'circle',
+        symbolSize: 6,
+      }
+    }
+
+    return {
+      ...baseStyle,
+      type: 'scatter',
+      data: props.rows.map(r => toNumber(r[yIdx])),
+      itemStyle: { color: colors[0], opacity: 0.6 },
+      symbolSize: 10,
+    }
+  })
 
   return {
-    tooltip: { trigger: 'axis' },
-    legend: yColumnNames.length > 1 ? { data: yColumnNames } : undefined,
-    xAxis: { type: 'category' as const, data: xValues, axisLabel: { rotate: xValues.length > 20 ? 45 : 0 } },
-    yAxis: { type: 'value' as const },
+    tooltip: { 
+      trigger: 'axis',
+      axisPointer: { type: 'line', lineStyle: { color: 'rgba(0,0,0,0.1)', width: 1 } }
+    },
+    legend: yColumnNames.length > 1 ? { data: yColumnNames, bottom: 0, icon: 'circle' } : undefined,
+    xAxis: { 
+      type: 'category' as const, 
+      data: xValues, 
+      axisLabel: { 
+        rotate: xValues.length > 12 ? 30 : 0,
+        interval: 'auto',
+        hideOverlap: true,
+        fontSize: 10,
+        color: '#888',
+      },
+      axisLine: { lineStyle: { color: '#eee' } },
+      axisTick: { show: false },
+    },
+    yAxis: { 
+      type: 'value' as const,
+      splitLine: { lineStyle: { type: 'dashed', opacity: 0.2 } },
+      axisLine: { show: false },
+    },
     series,
-    grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
+    grid: { 
+      top: 40,
+      left: 10, 
+      right: 20, 
+      bottom: 70, 
+      containLabel: true 
+    },
   }
 }
 
@@ -125,7 +253,7 @@ function buildAggregatedOption(
 
   if (chartType === 'pie') {
     const yIdx = yIdxList[0] ?? 0
-    const data = categories.map(cat => {
+    const dataEntries = categories.map(cat => {
       const catRows = groups.get(cat) ?? []
       let value: number
       if (aggregation === 'count') {
@@ -137,35 +265,159 @@ function buildAggregatedOption(
         value = catRows.length > 0 ? sum / catRows.length : 0
       }
       return { name: cat, value: Math.round(value * 100) / 100 }
-    })
+    }).sort((a, b) => b.value - a.value)
+
+    /** 归并逻辑同上 */
+    const MAX_PIE_ITEMS = 10
+    let finalData = dataEntries
+    if (dataEntries.length > MAX_PIE_ITEMS) {
+      const top = dataEntries.slice(0, MAX_PIE_ITEMS)
+      const others = Math.round(dataEntries.slice(MAX_PIE_ITEMS).reduce((sum, item) => sum + item.value, 0) * 100) / 100
+      finalData = [...top, { name: '其他', value: others }]
+    }
+
+    const total = Math.round(finalData.reduce((sum, d) => sum + d.value, 0) * 100) / 100
+
     return {
-      tooltip: { trigger: 'item' },
-      series: [{ type: 'pie', radius: ['30%', '70%'], data }],
+      tooltip: { 
+        trigger: 'item',
+        backgroundColor: 'rgba(255,255,255,0.95)',
+        borderRadius: 8,
+        padding: [12, 16],
+        shadowBlur: 10,
+        shadowColor: 'rgba(0,0,0,0.1)',
+        textStyle: { color: '#333', fontSize: 12 },
+        formatter: (params: any) => {
+          return `<div style="font-weight:bold;margin-bottom:4px">${params.name}</div>
+                  <div style="display:flex;justify-content:space-between;gap:20px">
+                    <span style="color:#666">数值:</span>
+                    <span style="font-family:monospace">${params.value.toLocaleString()}</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;gap:20px">
+                    <span style="color:#666">占比:</span>
+                    <span style="font-family:monospace">${params.percent}%</span>
+                  </div>`
+        }
+      },
+      title: {
+        text: '总计',
+        subtext: total.toLocaleString(),
+        left: 'center',
+        top: 'middle',
+        textStyle: { fontSize: 14, color: '#888', fontWeight: 'normal' },
+        subtextStyle: { fontSize: 20, color: '#333', fontWeight: 'bold' }
+      },
+      series: [{ 
+        type: 'pie', 
+        radius: ['50%', '75%'], 
+        data: finalData,
+        minAngle: 5,
+        avoidLabelOverlap: true,
+        itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+        label: { show: true, formatter: '{b}\n{d}%', fontSize: 11, minMargin: 5 },
+        emphasis: { 
+          scaleSize: 10,
+          itemStyle: { shadowBlur: 15, shadowColor: 'rgba(0,0,0,0.2)' } 
+        }
+      }],
     }
   }
 
-  const series = yIdxList.map((yIdx, i) => ({
-    name: yColumnNames[i] ?? '',
-    type: chartType === 'scatter' ? 'scatter' : chartType,
-    data: categories.map(cat => {
+  const series = yIdxList.map((yIdx, i) => {
+    const colors = CHART_COLORS[i % CHART_COLORS.length] as [string, string]
+    const data = categories.map(cat => {
       const catRows = groups.get(cat) ?? []
       if (aggregation === 'count') return catRows.length
       if (aggregation === 'sum') return Math.round(catRows.reduce((s, r) => s + toNumber(r[yIdx]), 0) * 100) / 100
       const sum = catRows.reduce((s, r) => s + toNumber(r[yIdx]), 0)
       return catRows.length > 0 ? Math.round((sum / catRows.length) * 100) / 100 : 0
-    }),
-    smooth: chartType === 'line',
-  }))
+    })
+
+    const baseStyle = {
+      name: yColumnNames[i],
+      smooth: chartType === 'line',
+      emphasis: { focus: 'series', itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,0.2)' } },
+    }
+
+    if (chartType === 'bar') {
+      return {
+        ...baseStyle,
+        type: 'bar',
+        data,
+        itemStyle: {
+          borderRadius: [4, 4, 0, 0],
+          color: {
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [{ offset: 0, color: colors[0] }, { offset: 1, color: colors[1] }]
+          }
+        },
+        barMaxWidth: 40,
+      }
+    }
+
+    if (chartType === 'line') {
+      return {
+        ...baseStyle,
+        type: 'line',
+        data,
+        lineStyle: { width: 3, color: colors[0] },
+        itemStyle: { color: colors[0] },
+        areaStyle: {
+          opacity: 0.1,
+          color: {
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [{ offset: 0, color: colors[0] }, { offset: 1, color: 'rgba(255,255,255,0)' }]
+          }
+        },
+        symbol: 'circle',
+        symbolSize: 6,
+      }
+    }
+
+    return {
+      ...baseStyle,
+      type: 'scatter',
+      data,
+      itemStyle: { color: colors[0], opacity: 0.6 },
+      symbolSize: 10,
+    }
+  })
 
   return {
-    tooltip: { trigger: 'axis' },
-    legend: yColumnNames.length > 1 ? { data: yColumnNames } : undefined,
-    xAxis: { type: 'category' as const, data: categories, axisLabel: { rotate: categories.length > 20 ? 45 : 0 } },
-    yAxis: { type: 'value' as const },
+    tooltip: { 
+      trigger: 'axis',
+      axisPointer: { type: 'line', lineStyle: { color: 'rgba(0,0,0,0.1)', width: 1 } }
+    },
+    legend: yColumnNames.length > 1 ? { data: yColumnNames, bottom: 0, icon: 'circle' } : undefined,
+    xAxis: { 
+      type: 'category' as const, 
+      data: categories, 
+      axisLabel: { 
+        rotate: categories.length > 12 ? 30 : 0,
+        interval: 'auto',
+        hideOverlap: true,
+        fontSize: 10,
+        color: '#888',
+      },
+      axisLine: { lineStyle: { color: '#eee' } },
+      axisTick: { show: false },
+    },
+    yAxis: { 
+      type: 'value' as const,
+      splitLine: { lineStyle: { type: 'dashed', opacity: 0.2 } },
+      axisLine: { show: false },
+    },
     series,
-    grid: { left: '3%', right: '4%', bottom: '10%', containLabel: true },
+    grid: { 
+      top: 40,
+      left: 10, 
+      right: 20, 
+      bottom: 70, 
+      containLabel: true 
+    },
   }
 }
+
 
 function toNumber(val: unknown): number {
   if (typeof val === 'number') return val
@@ -176,17 +428,11 @@ function toNumber(val: unknown): number {
 
 <template>
   <div class="flex h-full w-full items-center justify-center">
-    <template v-if="chartOption">
-      <VChart
-        :option="chartOption"
-        autoresize
-        class="h-full w-full"
-      />
-    </template>
-    <template v-else>
-      <div class="text-xs text-muted-foreground/50">
-        请在左侧配置 X/Y 轴列生成图表
-      </div>
-    </template>
+    <VChart
+      v-if="chartOption"
+      :option="chartOption"
+      autoresize
+      class="h-full w-full"
+    />
   </div>
 </template>

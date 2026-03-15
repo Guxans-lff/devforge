@@ -242,6 +242,7 @@ watch(() => props.isConnected, (connected) => {
             :connection-id="connectionId"
             :current-browse-db="currentBrowseDb"
             :current-browse-table="currentBrowseTable"
+            :current-database="currentDatabase"
             :driver="driver"
             :is-table-browse="!!tabContext?.tableBrowse"
             :sub-results="resultTabsManager.subResults.value"

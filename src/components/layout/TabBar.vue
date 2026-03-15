@@ -121,57 +121,63 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
 </script>
 
 <template>
-  <div class="relative z-[35] flex h-11 items-center bg-[#f6f8fa] dark:bg-[#0c0c0e] select-none">
-    <!-- 极星技术底盘 (Subtle Monolithic Dock) -->
-    <div class="absolute inset-0 bg-[linear-gradient(rgba(0,0,0,0.01)_1px,transparent_1px),linear-gradient(90deg,rgba(0,0,0,0.01)_1px,transparent_1px)] bg-[size:20px_20px] pointer-events-none overflow-hidden" />
-    
+  <div class="relative z-[35] flex h-11 items-center bg-[#f1f3f4] dark:bg-[#101012] select-none transition-colors duration-200">
     <!-- 底部固态基准线 (Base Foundation Line) -->
-    <div class="absolute bottom-0 left-0 right-0 h-[1px] bg-black/[0.08] dark:bg-white/10 z-0" />
+    <div class="absolute bottom-0 left-0 right-0 h-[1px] bg-foreground/5 dark:bg-white/5 z-0" />
     <ScrollArea orientation="horizontal" class="flex-1 h-11 relative z-10">
-      <div class="flex h-11 items-center">
+      <div class="flex h-11 items-end px-2 pb-[1px]">
         <TooltipProvider :delay-duration="500">
           <Tooltip v-for="tab in workspace.tabs" :key="tab.id">
             <TooltipTrigger as-child>
               <button
-                class="group relative flex h-11 flex-none items-center gap-2.5 px-6 text-[11px] font-bold tracking-tight border-x transition-[background-color,color,border-color,box-shadow] duration-200"
+                class="tab-item group relative flex items-center h-[34px] transition-all duration-200 px-6 mx-[1px]"
                 :class="[
-                  workspace.activeTabId === tab.id
-                    ? 'bg-white dark:bg-[#1a1a1c] text-foreground border-black/[0.08] dark:border-white/10 z-20'
-                    : 'bg-transparent text-muted-foreground/45 border-transparent hover:text-foreground/80 hover:bg-black/[0.02] dark:hover:bg-white/[0.01]',
+                  workspace.activeTabId === tab.id ? 'active' : 'inactive'
                 ]"
                 @click="workspace.setActiveTab(tab.id)"
                 @mousedown="handleMiddleClick($event, tab.id)"
                 @contextmenu="handleContextMenu($event, tab.id)"
               >
-                <!-- 顶部精密装饰条 (Top Precision Bar) — 环境色优先 -->
-                <div
-                  v-if="workspace.activeTabId === tab.id"
-                  class="absolute top-0 left-[-1px] right-[-1px] h-[2px] z-30"
-                  :class="{ 'bg-primary': !getTabEnvironmentColor(tab) }"
-                  :style="getTabEnvironmentColor(tab) ? { backgroundColor: getTabEnvironmentColor(tab)! } : {}"
-                />
-                
-                <!-- 底部桥接融合 (Seamless Bridge): Covers the border layer with precision -->
+                <!-- 像素级 Chrome 背景层 (含动态环境色支持) -->
                 <div 
-                  v-if="workspace.activeTabId === tab.id"
-                  class="absolute bottom-0 left-[-1px] right-[-1px] h-[1.5px] translate-y-[0.5px] bg-white dark:bg-[#1a1a1c] z-30"
-                />
-
-                <component :is="getTabIcon(tab.type)" class="h-3.5 w-3.5 shrink-0 transition-colors" :class="{ 'text-primary': workspace.activeTabId === tab.id }" />
-                <span class="max-w-[130px] truncate leading-none mt-[0.5px]">{{ tab.type === 'welcome' ? t('tab.homepage') : tab.title }}</span>
-
-                <!-- Dirty indicator -->
-                <div v-if="tab.dirty" class="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(var(--primary),0.6)]" />
-
-                <!-- Close button -->
-                <button
-                  v-if="tab.closable"
-                  class="ml-1 flex h-4 w-4 items-center justify-center rounded-sm opacity-0 transition-all duration-300 hover:bg-black/5 dark:hover:bg-white/10 group-hover:opacity-100"
-                  :class="{ 'opacity-100 text-muted-foreground/30': workspace.activeTabId === tab.id }"
-                  @click.stop="workspace.closeTab(tab.id)"
+                  class="tab-shape-container absolute inset-0 -z-10 pointer-events-none"
+                  :class="{ 'is-active-shape': workspace.activeTabId === tab.id }"
+                  :style="workspace.activeTabId === tab.id && getTabEnvironmentColor(tab) ? { '--env-color': getTabEnvironmentColor(tab)! } : {}"
                 >
-                  <X class="h-3 w-3" />
-                </button>
+                  <div class="tab-shape-main" />
+                </div>
+                
+                <div class="relative flex items-center gap-2 z-10">
+                  <component 
+                    :is="getTabIcon(tab.type)" 
+                    class="h-3.5 w-3.5 shrink-0 transition-all duration-300"
+                    :class="workspace.activeTabId === tab.id ? 'text-foreground' : 'text-muted-foreground/50'"
+                  />
+                  
+                  <div class="tab-title-container relative flex-1 min-w-0 max-w-[140px] overflow-hidden">
+                    <span 
+                      class="text-[11px] font-bold tracking-tight whitespace-nowrap transition-colors duration-200 block mt-[0.5px]"
+                      :class="workspace.activeTabId === tab.id ? 'text-foreground' : 'text-muted-foreground/70'"
+                    >
+                      {{ tab.type === 'welcome' ? t('tab.homepage') : tab.title }}
+                    </span>
+                  </div>
+
+                  <!-- Dirty indicator -->
+                  <div v-if="tab.dirty" class="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_8px_rgba(var(--primary),0.6)]" />
+
+                  <!-- Close button -->
+                  <button
+                    v-if="tab.closable"
+                    class="tab-close-btn ml-1 flex h-4 w-4 items-center justify-center rounded-full transition-all duration-200"
+                    @click.stop="workspace.closeTab(tab.id)"
+                  >
+                    <X class="h-2.5 w-2.5" />
+                  </button>
+                </div>
+
+                <!-- 垂直分割线 (Vertical Separator) -->
+                <div class="tab-separator absolute right-[-1px] top-1/2 -translate-y-1/2 w-[1px] h-3 bg-foreground/10 dark:bg-foreground/5 transition-opacity duration-200" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom" class="text-[10px] font-bold">
@@ -263,20 +269,144 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
 </template>
 
 <style scoped>
-/* 滚动条彻底静音 (Mute Scrollbars) */
+@reference "tailwindcss";
+
+.tab-item {
+  position: relative;
+  flex-shrink: 0;
+  cursor: pointer;
+  z-index: 10;
+  margin-top: 7px; /* 预留顶部指示条空间并下压，使下沿贴底 */
+  padding-bottom: 0px;
+}
+
+.tab-item.active {
+  z-index: 30;
+}
+
+.tab-item.inactive:hover {
+  z-index: 20;
+}
+
+/* Chrome 风格背景容器 */
+.tab-shape-container {
+  transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+  bottom: 0;
+}
+
+/* 活跃 Tab 的物理层级：稍微提升 z-index 确保覆盖边缘 */
+.is-active-shape {
+  z-index: 10;
+}
+
+.tab-shape-main {
+  position: absolute;
+  inset: 0;
+  border-radius: 8px 8px 0 0;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 顶级设计师渐隐方案：仅在标题真正溢出时（> 110px）触发 30px 的高级淡出 */
+.tab-title-container {
+  mask-image: linear-gradient(to right, black 110px, transparent 140px);
+  -webkit-mask-image: linear-gradient(to right, black 110px, transparent 140px);
+}
+
+/* 分割线逻辑 (Separator Logic) */
+.tab-separator {
+  opacity: 0.4; /* 降噪处理：幽灵虚线级显现 */
+}
+
+/* 当自身活跃、或是下一个标签活跃时，隐藏右侧分割线 */
+.tab-item.active .tab-separator,
+.tab-item:has(+ .tab-item.active) .tab-separator,
+.tab-item:last-child .tab-separator {
+  opacity: 0;
+}
+
+/* 活跃状态：物理一体化同步 (打开式) */
+.active .tab-shape-main {
+  background-color: white;
+  border-top: 1.5px solid var(--env-color, var(--primary));
+  bottom: -1.5px; /* 物理沉降：刺穿底线 */
+}
+
+
+.dark .active .tab-shape-main {
+  background-color: #1e1e20;
+}
+
+.active .tab-shape-container::before,
+.active .tab-shape-container::after {
+  content: "";
+  position: absolute;
+  bottom: -1.5px; /* 同步沉降 */
+  width: 12px;
+  height: 12px;
+  background-color: white;
+  pointer-events: none;
+}
+
+
+.dark .active .tab-shape-container::before,
+.dark .active .tab-shape-container::after {
+  background-color: #1e1e20;
+}
+
+.active .tab-shape-container::before {
+  left: -12px;
+  mask: radial-gradient(circle at 0 0, transparent 12px, black 12.5px);
+  -webkit-mask: radial-gradient(circle at 0 0, transparent 12px, black 12.5px);
+}
+
+.active .tab-shape-container::after {
+  right: -12px;
+  mask: radial-gradient(circle at 12px 0, transparent 12px, black 12.5px);
+  -webkit-mask: radial-gradient(circle at 12px 0, transparent 12px, black 12.5px);
+}
+
+/* 悬浮状态：精致胶囊背景 (Pill Style) */
+.inactive:hover .tab-shape-main {
+  background-color: color-mix(in srgb, black, transparent 94%);
+  inset: 2px 4px 4px 4px;
+  border-radius: 6px;
+}
+
+.dark .inactive:hover .tab-shape-main {
+  background-color: color-mix(in srgb, white, transparent 92%);
+}
+
+/* 关闭按钮专业化 */
+.tab-close-btn {
+  @apply opacity-0 scale-75;
+  color: color-mix(in srgb, var(--foreground), transparent 80%);
+}
+
+.tab-close-btn:hover {
+  background-color: color-mix(in srgb, black, transparent 95%);
+  color: color-mix(in srgb, var(--foreground), transparent 40%);
+}
+
+.dark .tab-close-btn:hover {
+  background-color: color-mix(in srgb, white, transparent 90%);
+}
+
+.active .tab-close-btn {
+  @apply opacity-40 scale-100;
+}
+
+.tab-item:hover .tab-close-btn {
+  @apply opacity-100 scale-100;
+}
+
+/* 滚动条静音 */
 :deep([data-slot="scroll-area-scrollbar"]) {
   display: none !important;
 }
 
 :deep([data-slot="scroll-area-viewport"]) {
   overflow-y: hidden !important;
-  /* 确保视口高度不被 border 挤占 */
   height: 100% !important;
-}
-
-/* 针对 Webkit 的额外保险 */
-:deep(.scrollbar-none::-webkit-scrollbar) {
-  display: none !important;
 }
 
 .scrollbar-none {

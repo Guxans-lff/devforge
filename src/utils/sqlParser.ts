@@ -59,3 +59,33 @@ export function isMultiStatement(sql: string): boolean {
   }
   return false
 }
+
+/**
+ * 从 SELECT 语句中尝试提取表名
+ * 支持语法: SELECT ... FROM [db.]table ...
+ * 支持反引号转义
+ */
+export function extractTableName(sql: string): string | null {
+  if (!sql) return null
+  
+  // 移除多行注释
+  const cleanSql = sql.replace(/\/\*[\s\S]*?\*\//g, '')
+    // 移除单行注释
+    .replace(/(--|#).*$/gm, '')
+    .trim()
+
+  // 匹配 SELECT ... FROM [db.]table
+  // 考虑到可能的反引号和数据库前缀
+  // 1: 匹配 SELECT ... FROM
+  // 2: 匹配可能的 [database].
+  // 3: 匹配 table
+  const selectRegex = /SELECT\s+[\s\S]*?\s+FROM\s+(?:[`"']?([\w-]+)[`"']?\s*\.\s*)?[`"']?([\w-]+)[`"']?/i
+  const match = cleanSql.match(selectRegex)
+  
+  if (match) {
+    // match[2] 是表名，match[1] 是数据库名（如果有）
+    return match[2] || null
+  }
+  
+  return null
+}

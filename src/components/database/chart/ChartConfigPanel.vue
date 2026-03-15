@@ -6,6 +6,8 @@ import type { ColumnDef } from '@/types/database'
 const props = defineProps<{
   /** 可用的列定义 */
   columns: ColumnDef[]
+  /** 当前选中的配置 */
+  config?: ChartConfig | null
 }>()
 
 const emit = defineEmits<{
@@ -44,9 +46,20 @@ const categoricalColumns = computed(() =>
   }),
 )
 
-// 自动设置初始值
+// 如果有传入初始配置，则同步到内部状态
+watch(() => props.config, (newConfig) => {
+  if (newConfig) {
+    chartType.value = newConfig.chartType
+    xColumn.value = newConfig.xColumn
+    yColumns.value = [...newConfig.yColumns]
+    aggregation.value = newConfig.aggregation
+  }
+}, { immediate: true })
+
+// 自动推荐逻辑
 watch(() => props.columns, (cols) => {
-  if (cols.length > 0 && !xColumn.value) {
+  // 只有在完全没有配置记录的情况下才执行自动推荐
+  if (cols.length > 0 && !xColumn.value && !props.config) {
     // X 轴选第一个非数值列，没有则选第一列
     xColumn.value = categoricalColumns.value[0]?.name ?? cols[0]?.name ?? ''
     // Y 轴选第一个数值列
@@ -89,32 +102,32 @@ const chartTypes = [
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-y-auto p-3 space-y-4">
+  <div class="flex h-full flex-col overflow-y-auto thin-scrollbar p-5 space-y-6 bg-background">
     <!-- 图表类型 -->
-    <div>
-      <p class="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">图表类型</p>
-      <div class="grid grid-cols-2 gap-1.5">
+    <div class="space-y-3">
+      <p class="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em]">图表展示类型</p>
+      <div class="grid grid-cols-2 gap-2">
         <button
           v-for="ct in chartTypes"
           :key="ct.type"
-          class="flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-xs transition-colors"
+          class="flex flex-col items-center justify-center gap-1.5 rounded-lg border px-2 py-3 text-[11px] transition-all duration-200"
           :class="chartType === ct.type
-            ? 'border-primary bg-primary/10 text-primary'
-            : 'border-border/50 text-muted-foreground hover:bg-muted/50'"
+            ? 'border-primary bg-primary/5 text-primary shadow-sm ring-1 ring-primary/20'
+            : 'border-border/50 text-muted-foreground hover:bg-muted/50 hover:border-border'"
           @click="chartType = ct.type"
         >
-          <component :is="ct.icon" class="h-3.5 w-3.5" />
+          <component :is="ct.icon" class="h-4 w-4" />
           {{ ct.label }}
         </button>
       </div>
     </div>
 
     <!-- X 轴 -->
-    <div>
-      <p class="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">X 轴 / 分类</p>
+    <div class="space-y-3">
+      <p class="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em]">X 轴 / 维度</p>
       <select
         :value="xColumn"
-        class="w-full h-7 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-primary"
+        class="w-full h-9 rounded-md border border-border bg-muted/20 px-3 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
         @change="xColumn = ($event.target as HTMLSelectElement).value"
       >
         <option v-for="col in columns" :key="col.name" :value="col.name">
@@ -124,36 +137,36 @@ const chartTypes = [
     </div>
 
     <!-- Y 轴 -->
-    <div>
-      <p class="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">Y 轴 / 数值</p>
-      <div class="space-y-1 max-h-40 overflow-y-auto">
+    <div class="space-y-3">
+      <p class="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em]">Y 轴 / 指标</p>
+      <div class="space-y-1 max-h-40 overflow-y-auto thin-scrollbar border border-border/50 rounded-md p-1.5 bg-muted/10">
         <label
           v-for="col in columns"
           :key="col.name"
-          class="flex items-center gap-2 rounded-sm px-2 py-1 text-xs cursor-pointer hover:bg-muted/30"
-          :class="{ 'bg-primary/10': yColumns.includes(col.name) }"
+          class="flex items-center gap-2 rounded-md px-2 py-1.5 text-[11px] cursor-pointer hover:bg-muted/50 transition-colors group"
+          :class="{ 'bg-primary/10 text-primary': yColumns.includes(col.name) }"
         >
           <input
             type="checkbox"
             :checked="yColumns.includes(col.name)"
-            class="h-3 w-3 rounded border-border accent-primary"
+            class="h-3.5 w-3.5 rounded border-border accent-primary"
             @change="toggleYColumn(col.name)"
           />
           <span class="truncate">{{ col.name }}</span>
-          <span class="ml-auto text-[9px] text-muted-foreground/50 font-mono">{{ col.dataType }}</span>
+          <span class="ml-auto text-[9px] text-muted-foreground/40 font-mono group-hover:text-muted-foreground/60">{{ col.dataType }}</span>
         </label>
       </div>
     </div>
 
     <!-- 聚合方式 -->
-    <div>
-      <p class="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">聚合</p>
+    <div class="space-y-3 pb-4">
+      <p class="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em]">数据聚合方式</p>
       <select
         :value="aggregation"
-        class="w-full h-7 rounded-md border border-border bg-background px-2 text-xs outline-none focus:border-primary"
+        class="w-full h-9 rounded-md border border-border bg-muted/20 px-3 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
         @change="aggregation = ($event.target as HTMLSelectElement).value as ChartConfig['aggregation']"
       >
-        <option value="none">无聚合</option>
+        <option value="none">原始数据 (不聚合)</option>
         <option value="count">计数 (COUNT)</option>
         <option value="sum">求和 (SUM)</option>
         <option value="avg">平均值 (AVG)</option>

@@ -37,6 +37,8 @@ const props = defineProps<{
   driver: string
   /** 是否表浏览模式 */
   isTableBrowse: boolean
+  /** 当前 SQL 编辑器选中的数据库（用于 SQL 查询模式下的编辑回写） */
+  currentDatabase?: string
   /** 多语句子结果列表 */
   subResults: SubStatementResult[]
   /** 是否为多语句结果 */
@@ -280,8 +282,8 @@ defineExpose({ gridSearch })
       :has-more-server-rows="hasMoreServerRows"
       :show-reconnect="!isConnected"
       :connection-id="connectionId"
-      :database="currentBrowseDb"
-      :table-name="currentBrowseTable"
+      :database="currentBrowseDb || currentDatabase"
+      :table-name="currentBrowseTable || displayResult?.tableName"
       :driver="driver"
       :is-table-browse="isTableBrowse"
       class="flex-1 min-h-0"

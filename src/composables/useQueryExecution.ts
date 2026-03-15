@@ -8,7 +8,7 @@ import * as historyApi from '@/api/query-history'
 import type { QueryResult, QueryChunk, ErrorStrategy } from '@/types/database'
 import type { QueryTabContext, ResultTab, SubStatementResult } from '@/types/database-workspace'
 import { detectDangerousStatements, isReadOnlyStatement } from '@/utils/dangerousSqlDetector'
-import { isMultiStatement } from '@/utils/sqlParser'
+import { isMultiStatement, extractTableName } from '@/utils/sqlParser'
 import type { DangerousStatement, EnvironmentType } from '@/types/environment'
 
 /** useQueryExecution 入参 */
@@ -291,6 +291,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         error: lastError,
         totalCount: allRows.length,
         truncated: false,
+        tableName: extractTableName(sql) || undefined,
       }
 
       stopExecutionTimer()
@@ -325,6 +326,9 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       const result = await dbApi.dbExecuteQueryOnSession(
         connectionId.value, tabId.value, sql, currentDb, timeoutSecs,
       )
+      if (!result.isError) {
+        result.tableName = extractTableName(sql) || undefined
+      }
       stopExecutionTimer()
       store.updateTabContext(connectionId.value, tabId.value, {
         result,
