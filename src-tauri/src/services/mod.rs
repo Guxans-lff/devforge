@@ -5,6 +5,7 @@ pub mod db_drivers;
 pub mod db_engine;
 pub mod file_chunker;
 pub mod import_export;
+pub mod local_shell_engine;
 pub mod progress_tracker;
 pub mod schema_compare;
 pub mod sftp_engine;

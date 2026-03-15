@@ -82,6 +82,9 @@ urlencoding = "2.1"
 tauri-plugin-dialog = "2.6.0"
 base64 = "0.22.1"
 
+# Local terminal PTY (ConPTY on Windows)
+portable-pty = "0.8"
+
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["fileapi"] }
 

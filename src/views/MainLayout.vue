@@ -18,6 +18,7 @@ const FileManagerView = defineAsyncComponent(() => import('@/views/FileManagerVi
 const SettingsView = defineAsyncComponent(() => import('@/views/SettingsView.vue'))
 const MultiExecView = defineAsyncComponent(() => import('@/views/MultiExecView.vue'))
 const TerminalPlayerView = defineAsyncComponent(() => import('@/views/TerminalPlayerView.vue'))
+const LocalTerminalView = defineAsyncComponent(() => import('@/views/LocalTerminalView.vue'))
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
@@ -34,6 +35,8 @@ const activeTabComponent = computed(() => {
     case 'database':
       return tab.connectionId ? DatabaseView : null
     case 'terminal':
+      // 本地终端（无 connectionId，meta.isLocal）
+      if (tab.meta?.isLocal) return LocalTerminalView
       return tab.connectionId ? TerminalView : null
     case 'file-manager':
       return tab.connectionId ? FileManagerView : null
@@ -53,6 +56,10 @@ const activeTabProps = computed(() => {
   if (!tab) return {}
   if (tab.type === 'terminal-player' && tab.meta?.filePath) {
     return { filePath: tab.meta.filePath }
+  }
+  // 本地终端：传递 tabId 作为 sessionId
+  if (tab.type === 'terminal' && tab.meta?.isLocal) {
+    return { sessionId: tab.id }
   }
   if (tab.connectionId) {
     const base: Record<string, string> = {

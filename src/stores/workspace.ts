@@ -62,6 +62,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })
     }
 
+    // 关闭本地终端 tab 时清理后端 PTY 资源（KeepAlive 的 backup）
+    if (tab.type === 'terminal' && tab.meta?.isLocal) {
+      import('@/api/local-shell').then(({ localShellClose }) => {
+        localShellClose(tabId).catch(() => { })
+      })
+    }
+
     const index = tabs.value.findIndex((t) => t.id === tabId)
     tabs.value = tabs.value.filter((t) => t.id !== tabId)
 
@@ -124,6 +131,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }),
     deserialize: (data) => {
       // 恢复 tabs（过滤掉无效的 tabs）
+      // 本地终端 tab 无 connectionId，重启后 PTY 进程已丢失，不恢复
       const validTabs = (data.tabs ?? []).filter(tab => {
         if (tab.type === 'welcome' || tab.type === 'settings') return true
         if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager') {

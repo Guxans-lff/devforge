@@ -6,6 +6,7 @@ pub mod db_backup;
 pub mod file_editor;
 pub mod import;
 pub mod import_export;
+pub mod local_shell;
 pub mod query_history;
 pub mod schema_compare;
 pub mod sftp;

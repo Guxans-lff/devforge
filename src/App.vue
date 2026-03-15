@@ -7,7 +7,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { startPerformanceMonitoring } from '@/composables/usePerformance'
 
 // 初始化主题
-useTheme()
+const { initScheduler } = useTheme()
 
 // 全局 UI 字体大小响应：监听设置变化，实时应用到 document 根元素
 const settingsStore = useSettingsStore()
@@ -41,6 +41,9 @@ onMounted(async () => {
   settingsStore.enableAutoSave()
   // 恢复后立即应用字体大小
   applyUiFontSize(settingsStore.settings.uiFontSize)
+
+  // 1.5 设置加载完成后启动主题调度器
+  initScheduler()
 
   // 2. 初始化智能数据路径（如果是随行搬迁模式）
   await settingsStore.initializeDataPath()
