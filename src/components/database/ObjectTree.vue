@@ -23,6 +23,7 @@ import { useObjectTree } from '@/composables/useObjectTree'
 const props = defineProps<{
   connectionId: string
   connecting?: boolean
+  exportingDb?: string
 }>()
 
 const emit = defineEmits<{
@@ -379,8 +380,17 @@ defineExpose({
                       <Network class="h-3.5 w-3.5" /> ER 关系图
                     </ContextMenuItem>
                     <ContextMenuSeparator />
-                    <ContextMenuItem class="gap-2 text-xs" @click="emitExportDatabaseDdl(item.node)">
-                      <FileDown class="h-3.5 w-3.5" /> 导出数据库结构
+                    <ContextMenuItem
+                      class="gap-2 text-xs"
+                      :disabled="props.exportingDb === (item.node.meta?.database ?? item.node.label)"
+                      @click="emitExportDatabaseDdl(item.node)"
+                    >
+                      <Loader2
+                        v-if="props.exportingDb === (item.node.meta?.database ?? item.node.label)"
+                        class="h-3.5 w-3.5 animate-spin"
+                      />
+                      <FileDown v-else class="h-3.5 w-3.5" />
+                      导出数据库结构
                     </ContextMenuItem>
                     <ContextMenuItem class="gap-2 text-xs" @click="emit('runSqlFile', item.node.meta?.database ?? item.node.label)">
                       <Code class="h-3.5 w-3.5" /> 运行 SQL 文件

@@ -32,6 +32,7 @@ import { dbGetPoolStatus, dbGenerateScript, dbExportDatabaseDdl } from '@/api/da
 import type { ScriptOptions } from '@/api/database'
 import type { PoolStatus } from '@/types/connection'
 import type { TableEditorTabContext, ImportTabContext } from '@/types/database-workspace'
+import { useToast } from '@/composables/useToast'
 import { useSchemaCache } from '@/composables/useSchemaCache'
 import { useNotification } from '@/composables/useNotification'
 import { parseEnvironment, parseReadOnly, parseConfirmDanger } from '@/api/connection'
@@ -92,6 +93,7 @@ const connectionHost = computed(() => {
 
 const { t } = useI18n()
 const notification = useNotification()
+const toast = useToast()
 const objectTreeRef = ref<InstanceType<typeof ObjectTree>>()
 
 const isConnected = ref(false)
@@ -535,6 +537,9 @@ const backupDatabase = ref('')
 const restoreDialogOpen = ref(false)
 const restoreDatabase = ref('')
 
+// 导出数据库结构的 loading 状态
+const exportingDb = ref('')
+
 function handleBackupDatabase(database: string) {
   backupDatabase.value = database
   backupDialogOpen.value = true
@@ -582,17 +587,21 @@ async function handleGenerateScript(database: string, table: string, scriptType:
 
 /** 导出数据库结构并在新查询标签页中打开 */
 async function handleExportDatabaseDdl(database: string) {
+  exportingDb.value = database
   try {
     const options: ScriptOptions = {
       includeIfNotExists: true,
       includeIfExists: true,
     }
     const sql = await dbExportDatabaseDdl(props.connectionId, database, options)
-    // 创建新的查询标签页并填入导出的 DDL
     const tab = dbWorkspaceStore.addQueryTab(props.connectionId)
     dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, { sql })
+    toast.success(t('database.exportStructureSuccess', { db: database }))
   } catch (e) {
+    toast.error(t('database.exportStructureFailed'), String(e))
     console.error('导出数据库结构失败:', e)
+  } finally {
+    exportingDb.value = ''
   }
 }
 
@@ -687,6 +696,7 @@ function handleEditDatabaseSuccess() {
           ref="objectTreeRef"
           :connection-id="connectionId"
           :connecting="isConnecting"
+          :exporting-db="exportingDb"
           @select-table="handleSelectTable"
           @select-database="handleSelectDatabase"
           @edit-table="handleEditTable"

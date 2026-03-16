@@ -290,30 +290,120 @@ impl DbEngine {
         }
     }
 
+    /// 批量获取所有视图定义（一次 SQL）
+    pub async fn get_view_definitions(self: Arc<Self>, connection_id: String, database: String) -> Result<Vec<(String, String)>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
+        match pool.as_ref() {
+            DriverPool::MySql(p) => mysql::get_view_definitions(p, &database).await,
+            DriverPool::Postgres(p) => postgres::get_view_definitions(p, &database).await,
+        }
+    }
+
+    /// 批量获取所有存储过程/函数定义（一次 SQL）
+    pub async fn get_routine_definitions(self: Arc<Self>, connection_id: String, database: String, routine_type: String) -> Result<Vec<(String, String)>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
+        match pool.as_ref() {
+            DriverPool::MySql(p) => mysql::get_routine_definitions(p, &database, &routine_type).await,
+            DriverPool::Postgres(p) => postgres::get_routine_definitions(p, &database, &routine_type).await,
+        }
+    }
+
     pub async fn export_database_ddl(self: Arc<Self>, connection_id: String, db: String, opts: ScriptOptions) -> Result<String, AppError> {
         let mut parts = vec![format!("-- Export: `{}`\n-- Time: {}\n", db, chrono::Local::now().format("%Y-%m-%d %H:%M:%S"))];
+
+        // 1. 获取表列表
         let tables = self.clone().get_tables(connection_id.clone(), db.clone()).await?;
-        for t in tables.iter().filter(|t| t.table_type.to_uppercase() != "VIEW") {
-            parts.push(format!("\n-- Table: `{}`", t.name));
-            if opts.include_if_exists { parts.push(format!("DROP TABLE IF EXISTS `{}`;", t.name.replace('`', "``"))); }
-            if let Ok(ddl) = self.clone().get_create_table(connection_id.clone(), db.clone(), t.name.clone()).await {
-                parts.push(format!("{};", if opts.include_if_not_exists { ddl.replacen("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1) } else { ddl }));
+        let table_names: Vec<String> = tables.iter()
+            .filter(|t| t.table_type.to_uppercase() != "VIEW")
+            .map(|t| t.name.clone())
+            .collect();
+
+        // 2. 并发获取所有表 DDL（限制并发度）+ 批量获取视图、存储过程、函数定义
+        use futures::StreamExt;
+        // collect 成 owned Vec<String> 避免闭包捕获 &String 引起生命周期问题
+        let owned_table_names: Vec<String> = table_names.iter().cloned().collect();
+        let ddl_results: Vec<_> = futures::stream::iter(owned_table_names.into_iter().map(|table_name| {
+            let engine = self.clone();
+            let cid = connection_id.clone();
+            let database = db.clone();
+            async move {
+                engine.get_create_table(cid, database, table_name).await
+            }
+        }))
+        .buffered(4)
+        .collect()
+        .await;
+
+        let (view_defs, proc_defs, func_defs) = tokio::join!(
+            self.clone().get_view_definitions(connection_id.clone(), db.clone()),
+            self.clone().get_routine_definitions(connection_id.clone(), db.clone(), "PROCEDURE".to_string()),
+            self.clone().get_routine_definitions(connection_id.clone(), db.clone(), "FUNCTION".to_string())
+        );
+
+        // 3. 组装表 DDL
+        for (name, ddl_result) in table_names.iter().zip(ddl_results.into_iter()) {
+            parts.push(format!("\n-- Table: `{}`", name));
+            if opts.include_if_exists {
+                parts.push(format!("DROP TABLE IF EXISTS `{}`;", name.replace('`', "``")));
+            }
+            if let Ok(ddl) = ddl_result {
+                let ddl = if opts.include_if_not_exists {
+                    ddl.replacen("CREATE TABLE", "CREATE TABLE IF NOT EXISTS", 1)
+                } else {
+                    ddl
+                };
+                parts.push(format!("{};", ddl));
             }
         }
-        let views = self.clone().get_views(connection_id.clone(), db.clone()).await?;
-        for v in views { 
-            parts.push(format!("\n-- View: `{}`", v.name)); 
-            if let Ok(d) = self.clone().get_object_definition(connection_id.clone(), db.clone(), v.name.clone(), "VIEW".to_string()).await { 
-                parts.push(format!("{};", d)); 
-            } 
+
+        // 4. 组装视图定义（已批量获取，无需逐个请求）
+        match view_defs {
+            Ok(views) => {
+                for (name, def) in views {
+                    parts.push(format!("\n-- View: `{}`", name));
+                    if !def.is_empty() {
+                        parts.push(format!("CREATE OR REPLACE VIEW `{}` AS {};", name.replace('`', "``"), def));
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to export views for {}: {}", db, e);
+                parts.push(format!("\n-- WARNING: Failed to export views: {}", e));
+            }
         }
-        let procs = self.clone().get_routines(connection_id.clone(), db.clone(), "PROCEDURE".to_string()).await?;
-        for p in procs { 
-            parts.push(format!("\n-- Proc: `{}`\nDELIMITER ;;\n", p.name)); 
-            if let Ok(d) = self.clone().get_object_definition(connection_id.clone(), db.clone(), p.name.clone(), "PROCEDURE".to_string()).await { 
-                parts.push(format!("{};;\nDELIMITER ;", d)); 
-            } 
+
+        // 5. 组装存储过程定义（已批量获取）
+        match proc_defs {
+            Ok(procs) => {
+                for (name, def) in procs {
+                    parts.push(format!("\n-- Proc: `{}`\nDELIMITER ;;\n", name));
+                    if !def.is_empty() {
+                        parts.push(format!("{};;\nDELIMITER ;", def));
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to export procedures for {}: {}", db, e);
+                parts.push(format!("\n-- WARNING: Failed to export procedures: {}", e));
+            }
         }
+
+        // 6. 组装函数定义（已批量获取）
+        match func_defs {
+            Ok(funcs) => {
+                for (name, def) in funcs {
+                    parts.push(format!("\n-- Function: `{}`\nDELIMITER ;;\n", name));
+                    if !def.is_empty() {
+                        parts.push(format!("{};;\nDELIMITER ;", def));
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Failed to export functions for {}: {}", db, e);
+                parts.push(format!("\n-- WARNING: Failed to export functions: {}", e));
+            }
+        }
+
         Ok(parts.join("\n"))
     }
 

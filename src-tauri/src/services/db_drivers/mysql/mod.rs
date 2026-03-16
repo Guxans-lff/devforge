@@ -222,6 +222,102 @@ pub async fn get_triggers(pool: &MySqlPool, database: &str) -> Result<Vec<Trigge
     }).collect())
 }
 
+/// 批量获取所有视图定义（一次 SQL 返回全部，避免 N 次网络往返）
+pub async fn get_view_definitions(pool: &MySqlPool, database: &str) -> Result<Vec<(String, String)>, AppError> {
+    let rows: Vec<MySqlRow> = sqlx::query(
+        "SELECT CAST(TABLE_NAME AS CHAR) as name,
+                CAST(VIEW_DEFINITION AS CHAR) as def
+         FROM information_schema.VIEWS
+         WHERE TABLE_SCHEMA = ?
+         ORDER BY TABLE_NAME",
+    )
+    .bind(database)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to get view definitions: {}", e)))?;
+
+    Ok(rows.iter().map(|row| {
+        let name = get_string(row, "name");
+        let def = get_opt_string(row, "def").unwrap_or_default();
+        (name, def)
+    }).collect())
+}
+
+/// 批量获取所有存储过程/函数定义（一次 SQL 返回全部，含完整 CREATE 头部）
+pub async fn get_routine_definitions(pool: &MySqlPool, database: &str, routine_type: &str) -> Result<Vec<(String, String)>, AppError> {
+    // 从 information_schema 拼接完整 DDL：
+    // ROUTINE_DEFINITION 只含过程体，还需要拼接参数列表和特性声明
+    let rows: Vec<MySqlRow> = sqlx::query(
+        "SELECT CAST(r.ROUTINE_NAME AS CHAR) as name,
+                CAST(r.ROUTINE_TYPE AS CHAR) as rtype,
+                CAST(r.DTD_IDENTIFIER AS CHAR) as return_type,
+                CAST(r.IS_DETERMINISTIC AS CHAR) as is_deterministic,
+                CAST(r.SQL_DATA_ACCESS AS CHAR) as data_access,
+                CAST(r.SECURITY_TYPE AS CHAR) as security_type,
+                CAST(r.ROUTINE_DEFINITION AS CHAR) as body,
+                GROUP_CONCAT(
+                    CASE WHEN p.ORDINAL_POSITION > 0 THEN
+                        CONCAT(
+                            CASE p.PARAMETER_MODE WHEN 'IN' THEN 'IN ' WHEN 'OUT' THEN 'OUT ' WHEN 'INOUT' THEN 'INOUT ' ELSE '' END,
+                            CAST(p.PARAMETER_NAME AS CHAR), ' ',
+                            CAST(p.DTD_IDENTIFIER AS CHAR)
+                        )
+                    END
+                    ORDER BY p.ORDINAL_POSITION SEPARATOR ', '
+                ) as params
+         FROM information_schema.ROUTINES r
+         LEFT JOIN information_schema.PARAMETERS p
+           ON p.SPECIFIC_SCHEMA = r.ROUTINE_SCHEMA
+           AND p.SPECIFIC_NAME = r.ROUTINE_NAME
+           AND p.ROUTINE_TYPE = r.ROUTINE_TYPE
+         WHERE r.ROUTINE_SCHEMA = ? AND r.ROUTINE_TYPE = ?
+         GROUP BY r.ROUTINE_NAME, r.ROUTINE_TYPE, r.DTD_IDENTIFIER,
+                  r.IS_DETERMINISTIC, r.SQL_DATA_ACCESS, r.SECURITY_TYPE, r.ROUTINE_DEFINITION
+         ORDER BY r.ROUTINE_NAME",
+    )
+    .bind(database)
+    .bind(routine_type)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to get routine definitions: {}", e)))?;
+
+    Ok(rows.iter().map(|row| {
+        let name = get_string(row, "name");
+        let rtype = get_string(row, "rtype");
+        let body = get_opt_string(row, "body").unwrap_or_default();
+        let params = get_opt_string(row, "params").unwrap_or_default();
+        let is_det = get_string(row, "is_deterministic");
+        let data_access = get_string(row, "data_access");
+        let security = get_string(row, "security_type");
+
+        // 拼接完整 DDL：CREATE PROCEDURE/FUNCTION name(params) [特性] body
+        let det_clause = if is_det == "YES" { "DETERMINISTIC" } else { "NOT DETERMINISTIC" };
+        let access_clause = match data_access.as_str() {
+            "CONTAINS SQL"    => "CONTAINS SQL",
+            "NO SQL"          => "NO SQL",
+            "READS SQL DATA"  => "READS SQL DATA",
+            "MODIFIES SQL DATA" => "MODIFIES SQL DATA",
+            _ => "CONTAINS SQL",
+        };
+        let sec_clause = if security == "INVOKER" { "SQL SECURITY INVOKER" } else { "SQL SECURITY DEFINER" };
+
+        let ddl = if rtype == "FUNCTION" {
+            let ret = get_opt_string(row, "return_type").unwrap_or_default();
+            format!(
+                "CREATE FUNCTION `{}`({}) RETURNS {}\n    {} {} {}\n{}",
+                name.replace('`', "``"), params, ret, det_clause, access_clause, sec_clause, body
+            )
+        } else {
+            format!(
+                "CREATE PROCEDURE `{}`({})\n    {} {} {}\n{}",
+                name.replace('`', "``"), params, det_clause, access_clause, sec_clause, body
+            )
+        };
+
+        (name, ddl)
+    }).collect())
+}
+
 pub async fn get_object_definition(pool: &MySqlPool, database: &str, name: &str, object_type: &str) -> Result<String, AppError> {
     let sql = match object_type {
         "VIEW" => format!("SHOW CREATE VIEW `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(name)),

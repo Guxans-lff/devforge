@@ -81,6 +81,11 @@ onMounted(async () => {
         showSnippets: true,
       },
       readOnly: props.readOnly,
+      // 关闭模糊 Unicode 字符高亮（避免含中文的 SQL 注释触发 banner）
+      unicodeHighlight: {
+        ambiguousCharacters: false,
+        invisibleCharacters: false,
+      },
       // 允许外部拖放内容到编辑器
       dropIntoEditor: { enabled: true },
     })

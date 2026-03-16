@@ -649,6 +649,52 @@ pub async fn get_triggers(
     }).collect())
 }
 
+/// 批量获取所有视图定义（一次 SQL 返回全部，避免 N 次网络往返）
+pub async fn get_view_definitions(pool: &PgPool, schema: &str) -> Result<Vec<(String, String)>, AppError> {
+    let rows: Vec<PgRow> = sqlx::query(
+        "SELECT table_name as name,
+                view_definition as def
+         FROM information_schema.views
+         WHERE table_schema = $1
+         ORDER BY table_name",
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to get view definitions: {}", e)))?;
+
+    Ok(rows.iter().map(|row| {
+        let name = row.try_get::<String, _>("name").unwrap_or_default();
+        let def = row.try_get::<Option<String>, _>("def").unwrap_or(None).unwrap_or_default();
+        (name, def)
+    }).collect())
+}
+
+/// 批量获取所有存储过程/函数定义（一次 SQL 返回全部）
+pub async fn get_routine_definitions(pool: &PgPool, schema: &str, routine_type: &str) -> Result<Vec<(String, String)>, AppError> {
+    // PostgreSQL 用 pg_get_functiondef 获取完整定义
+    let pg_type = if routine_type == "PROCEDURE" { "p" } else { "f" };
+    let rows: Vec<PgRow> = sqlx::query(
+        "SELECT p.proname as name,
+                pg_get_functiondef(p.oid) as def
+         FROM pg_proc p
+         JOIN pg_namespace n ON p.pronamespace = n.oid
+         WHERE n.nspname = $1 AND p.prokind = $2
+         ORDER BY p.proname",
+    )
+    .bind(schema)
+    .bind(pg_type)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to get routine definitions: {}", e)))?;
+
+    Ok(rows.iter().map(|row| {
+        let name = row.try_get::<String, _>("name").unwrap_or_default();
+        let def = row.try_get::<Option<String>, _>("def").unwrap_or(None).unwrap_or_default();
+        (name, def)
+    }).collect())
+}
+
 pub async fn get_object_definition(
     pool: &PgPool,
     schema: &str,

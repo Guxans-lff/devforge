@@ -3,7 +3,7 @@ import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { save } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
-import { HardDrive, Loader2, Check, X } from 'lucide-vue-next'
+import { HardDrive, Loader2, Check, X, Search } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -43,6 +43,28 @@ const tables = ref<TableInfo[]>([])
 const loadingTables = ref(false)
 const selectedTables = ref<Set<string>>(new Set())
 
+// 搜索过滤
+const tableSearch = ref('')
+
+// 过滤后的表列表
+const filteredTables = computed(() => {
+  const q = tableSearch.value.trim().toLowerCase()
+  if (!q) return tables.value
+  return tables.value.filter((t) => t.name.toLowerCase().includes(q))
+})
+
+// 全选/半选基于过滤后的表
+const allSelected = computed(() =>
+  filteredTables.value.length > 0 &&
+  filteredTables.value.every((t) => selectedTables.value.has(t.name)),
+)
+
+const someSelected = computed(() => {
+  const filtered = filteredTables.value
+  const selectedInFiltered = filtered.filter((t) => selectedTables.value.has(t.name)).length
+  return selectedInFiltered > 0 && selectedInFiltered < filtered.length
+})
+
 // 选项
 const includeStructure = ref(true)
 const includeData = ref(true)
@@ -57,25 +79,67 @@ const tableIndex = ref(0)
 const totalTables = ref(0)
 const rowsExported = ref(0)
 
-const allSelected = computed(() =>
-  tables.value.length > 0 && selectedTables.value.size === tables.value.length,
-)
-
-const someSelected = computed(() =>
-  selectedTables.value.size > 0 && selectedTables.value.size < tables.value.length,
-)
+// 计时
+const startTime = ref<number>(0)
+const elapsedSeconds = ref(0)
+let timerHandle: ReturnType<typeof setInterval> | null = null
 
 const progressPercent = computed(() => {
   if (totalTables.value === 0) return 0
   return Math.round((tableIndex.value / totalTables.value) * 100)
 })
 
-function toggleAll() {
-  if (allSelected.value) {
-    selectedTables.value = new Set()
-  } else {
-    selectedTables.value = new Set(tables.value.map((t) => t.name))
+// 格式化秒数为 mm:ss 或 hh:mm:ss
+function formatSeconds(s: number): string {
+  s = Math.floor(s)
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  const sec = s % 60
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
   }
+  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+}
+
+// 已用时间（可读）
+const elapsedText = computed(() => formatSeconds(elapsedSeconds.value))
+
+// 预计完成时间（基于当前进度线性外推）
+const etaText = computed(() => {
+  const pct = progressPercent.value
+  if (pct <= 0 || elapsedSeconds.value <= 0) return '--:--'
+  const totalEstimated = elapsedSeconds.value / (pct / 100)
+  const remaining = totalEstimated - elapsedSeconds.value
+  if (remaining < 0) return '00:00'
+  return formatSeconds(remaining)
+})
+
+function startTimer() {
+  startTime.value = Date.now()
+  elapsedSeconds.value = 0
+  timerHandle = setInterval(() => {
+    elapsedSeconds.value = (Date.now() - startTime.value) / 1000
+  }, 500)
+}
+
+function stopTimer() {
+  if (timerHandle !== null) {
+    clearInterval(timerHandle)
+    timerHandle = null
+  }
+}
+
+function toggleAll() {
+  const filtered = filteredTables.value
+  const next = new Set(selectedTables.value)
+  if (allSelected.value) {
+    // 取消勾选当前过滤结果中的所有表
+    filtered.forEach((t) => next.delete(t.name))
+  } else {
+    // 勾选当前过滤结果中的所有表
+    filtered.forEach((t) => next.add(t.name))
+  }
+  selectedTables.value = next
 }
 
 function toggleTable(name: string) {
@@ -127,6 +191,8 @@ async function startBackup() {
   totalTables.value = selectedTables.value.size
   rowsExported.value = 0
 
+  startTimer()
+
   progressUnlisten = await listen<BackupProgress>('backup://progress', (event) => {
     const p = event.payload
     currentTable.value = p.currentTable
@@ -162,6 +228,7 @@ async function startBackup() {
     toast.error(t('backup.failed'), backupError.value ?? '')
   } finally {
     backing.value = false
+    stopTimer()
     progressUnlisten?.()
     progressUnlisten = null
   }
@@ -176,6 +243,9 @@ function reset() {
   tableIndex.value = 0
   totalTables.value = 0
   rowsExported.value = 0
+  tableSearch.value = ''
+  stopTimer()
+  elapsedSeconds.value = 0
 }
 
 watch(open, (val) => {
@@ -183,12 +253,14 @@ watch(open, (val) => {
     reset()
     loadTables()
   } else {
+    stopTimer()
     progressUnlisten?.()
     progressUnlisten = null
   }
 })
 
 onBeforeUnmount(() => {
+  stopTimer()
   progressUnlisten?.()
 })
 </script>
@@ -228,7 +300,18 @@ onBeforeUnmount(() => {
             </div>
 
             <div v-else class="space-y-1">
-              <!-- 全选 -->
+              <!-- 搜索框 -->
+              <div class="relative">
+                <Search class="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+                <input
+                  v-model="tableSearch"
+                  type="text"
+                  :placeholder="t('backup.searchTables')"
+                  class="w-full pl-6 pr-2 py-1 text-xs rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+
+              <!-- 全选（作用于过滤结果） -->
               <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/50 cursor-pointer">
                 <input
                   type="checkbox"
@@ -238,11 +321,18 @@ onBeforeUnmount(() => {
                   @change="toggleAll"
                 />
                 <span class="text-xs font-medium">{{ t('backup.selectAll') }}</span>
+                <span v-if="tableSearch" class="ml-auto text-xs text-muted-foreground">
+                  {{ filteredTables.length }} {{ t('backup.matchedTables') }}
+                </span>
               </label>
               <Separator />
               <div class="max-h-40 overflow-y-auto space-y-0.5">
+                <!-- 无搜索结果提示 -->
+                <div v-if="filteredTables.length === 0" class="px-2 py-3 text-xs text-muted-foreground text-center">
+                  {{ t('backup.noMatchedTables') }}
+                </div>
                 <label
-                  v-for="tbl in tables"
+                  v-for="tbl in filteredTables"
                   :key="tbl.name"
                   class="flex items-center gap-2 px-2 py-1 rounded hover:bg-muted/50 cursor-pointer"
                 >
@@ -301,6 +391,14 @@ onBeforeUnmount(() => {
               </div>
               <Progress :model-value="progressPercent" />
 
+              <!-- 耗时 / 预计完成时间 -->
+              <div class="flex items-center justify-between text-xs text-muted-foreground">
+                <span>{{ t('backup.elapsed') }}: {{ elapsedText }}</span>
+                <span v-if="backing && progressPercent > 0">
+                  {{ t('backup.eta') }}: {{ etaText }}
+                </span>
+              </div>
+
               <!-- 结果 -->
               <div
                 v-if="backupDone"
@@ -309,7 +407,7 @@ onBeforeUnmount(() => {
               >
                 <Check v-if="backupSuccess" class="size-3.5 shrink-0" />
                 <X v-else class="size-3.5 shrink-0" />
-                <span v-if="backupSuccess">{{ t('backup.success') }}</span>
+                <span v-if="backupSuccess">{{ t('backup.success') }} ({{ t('backup.elapsed') }}: {{ elapsedText }})</span>
                 <span v-else>{{ backupError ?? t('backup.failed') }}</span>
               </div>
             </div>
