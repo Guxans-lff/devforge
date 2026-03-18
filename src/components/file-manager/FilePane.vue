@@ -4,7 +4,7 @@ let dragSourcePanel: string | null = null
 </script>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Button } from '@/components/ui/button'
@@ -81,8 +81,54 @@ const dragOverPath = ref<string | null>(null)
 const dragCounter = ref(0)
 const draggedEntries = ref<FileEntry[]>([])
 
+// ==================== 框选（Marquee Selection）状态 ====================
+const MARQUEE_THRESHOLD = 4 // 最小拖拽距离（px），低于此值视为单击
+const AUTO_SCROLL_ZONE = 40
+const AUTO_SCROLL_SPEED = 8
+
+const isMarqueePending = ref(false)   // mousedown 了但还没超过阈值
+const isMarqueeActive = ref(false)    // 正式激活框选
+const marqueeOrigin = ref({ x: 0, y: 0 })  // mousedown 视口坐标
+const marqueeStart = ref({ x: 0, y: 0 })   // 内容坐标系（含 scrollTop）
+const marqueeEnd = ref({ x: 0, y: 0 })     // 内容坐标系
+const lastMouseViewportY = ref(0)
+const marqueeCtrlMode = ref(false)
+const marqueePreSelection = ref<Set<string>>(new Set())
+const autoScrollTimer = ref<ReturnType<typeof setInterval> | null>(null)
+
+// 框选矩形显示坐标（视口坐标系，用于渲染）
+const marqueeDisplayRect = computed(() => {
+  if (!isMarqueeActive.value || !scrollContainerRef.value) return null
+  const scrollTop = scrollContainerRef.value.scrollTop
+  const startY = marqueeStart.value.y - scrollTop
+  const endY = marqueeEnd.value.y - scrollTop
+  return {
+    left: Math.min(marqueeStart.value.x, marqueeEnd.value.x),
+    top: Math.min(startY, endY),
+    width: Math.abs(marqueeEnd.value.x - marqueeStart.value.x),
+    height: Math.abs(endY - startY),
+  }
+})
+
+// 框选矩形的 fixed 定位样式
+const marqueeStyle = computed(() => {
+  const rect = marqueeDisplayRect.value
+  if (!rect || !scrollContainerRef.value) return null
+  const cr = scrollContainerRef.value.getBoundingClientRect()
+  // clamp 到容器可见范围
+  const top = Math.max(0, rect.top)
+  const bottom = Math.min(cr.height, rect.top + rect.height)
+  if (bottom <= top) return null
+  return {
+    left: `${cr.left + rect.left}px`,
+    top: `${cr.top + top}px`,
+    width: `${rect.width}px`,
+    height: `${bottom - top}px`,
+  }
+})
 // Virtual scroll
 const scrollContainerRef = ref<HTMLDivElement | null>(null)
+const panelRef = ref<HTMLDivElement | null>(null)
 const ROW_HEIGHT = 28
 
 const virtualizer = useVirtualizer({
@@ -112,6 +158,7 @@ function handleDoubleClick(entry: FileEntry) {
 }
 
 function handleClick(entry: FileEntry, event: MouseEvent) {
+  panelRef.value?.focus()
   if (event.ctrlKey || event.metaKey) {
     // Toggle selection
     if (selectedEntries.value.has(entry.path)) {
@@ -399,10 +446,156 @@ function formatDate(timestamp: number | null): string {
     minute: '2-digit',
   })
 }
+
+// ==================== 框选（Marquee Selection）逻辑 ====================
+
+function handleMarqueeMouseDown(event: MouseEvent) {
+  // 只响应左键
+  if (event.button !== 0) return
+  // 点在文件行上 → 让原生 drag 接管
+  const target = event.target as HTMLElement
+  if (target.closest('[data-row-index]')) return
+
+  event.preventDefault()
+  panelRef.value?.focus()
+
+  const container = scrollContainerRef.value!
+  const cr = container.getBoundingClientRect()
+  const viewportX = event.clientX - cr.left
+  const viewportY = event.clientY - cr.top
+
+  marqueeOrigin.value = { x: viewportX, y: viewportY }
+  marqueeStart.value = { x: viewportX, y: viewportY + container.scrollTop }
+  marqueeEnd.value = { x: viewportX, y: viewportY + container.scrollTop }
+  lastMouseViewportY.value = viewportY
+
+  marqueeCtrlMode.value = event.ctrlKey || event.metaKey
+  if (marqueeCtrlMode.value) {
+    marqueePreSelection.value = new Set(selectedEntries.value)
+  } else {
+    marqueePreSelection.value = new Set()
+  }
+
+  isMarqueePending.value = true
+  isMarqueeActive.value = false
+
+  document.addEventListener('mousemove', handleMarqueeMouseMove)
+  document.addEventListener('mouseup', handleMarqueeMouseUp)
+}
+
+function handleMarqueeMouseMove(event: MouseEvent) {
+  const container = scrollContainerRef.value
+  if (!container) return
+
+  const cr = container.getBoundingClientRect()
+  const viewportX = event.clientX - cr.left
+  const viewportY = event.clientY - cr.top
+
+  // 还没激活 → 检查是否超过阈值
+  if (isMarqueePending.value) {
+    const dx = viewportX - marqueeOrigin.value.x
+    const dy = viewportY - marqueeOrigin.value.y
+    if (Math.sqrt(dx * dx + dy * dy) < MARQUEE_THRESHOLD) return
+
+    isMarqueePending.value = false
+    isMarqueeActive.value = true
+
+    // 非 Ctrl 模式下，激活框选时清空选择
+    if (!marqueeCtrlMode.value) {
+      clearSelection()
+    }
+  }
+
+  // 更新内容坐标
+  marqueeEnd.value = {
+    x: Math.max(0, Math.min(viewportX, cr.width)),
+    y: Math.max(0, viewportY) + container.scrollTop,
+  }
+  lastMouseViewportY.value = viewportY
+
+  handleAutoScroll(viewportY, cr.height)
+  updateMarqueeSelection()
+}
+
+function handleMarqueeMouseUp() {
+  // 没超过阈值 = 单击空白区域
+  if (isMarqueePending.value && !marqueeCtrlMode.value) {
+    clearSelection()
+  }
+
+  isMarqueePending.value = false
+  isMarqueeActive.value = false
+  stopAutoScroll()
+
+  document.removeEventListener('mousemove', handleMarqueeMouseMove)
+  document.removeEventListener('mouseup', handleMarqueeMouseUp)
+}
+
+function updateMarqueeSelection() {
+  const sy = marqueeStart.value.y
+  const ey = marqueeEnd.value.y
+  const top = Math.min(sy, ey)
+  const bottom = Math.max(sy, ey)
+
+  const startIndex = Math.max(0, Math.floor(top / ROW_HEIGHT))
+  const endIndex = Math.min(props.entries.length - 1, Math.floor(bottom / ROW_HEIGHT))
+
+  const newSelection = new Set(marqueePreSelection.value)
+
+  for (let i = startIndex; i <= endIndex; i++) {
+    const rowTop = i * ROW_HEIGHT
+    const rowBottom = rowTop + ROW_HEIGHT
+    if (rowBottom > top && rowTop < bottom) {
+      const entry = props.entries[i]
+      if (entry) newSelection.add(entry.path)
+    }
+  }
+
+  selectedEntries.value = newSelection
+}
+
+function handleAutoScroll(viewportY: number, containerHeight: number) {
+  stopAutoScroll()
+
+  let scrollDelta = 0
+  if (viewportY < AUTO_SCROLL_ZONE && viewportY < containerHeight) {
+    scrollDelta = -AUTO_SCROLL_SPEED * (1 - Math.max(0, viewportY) / AUTO_SCROLL_ZONE)
+  } else if (viewportY > containerHeight - AUTO_SCROLL_ZONE && viewportY > 0) {
+    scrollDelta = AUTO_SCROLL_SPEED * (1 - Math.max(0, containerHeight - viewportY) / AUTO_SCROLL_ZONE)
+  }
+
+  if (scrollDelta === 0) return
+
+  autoScrollTimer.value = setInterval(() => {
+    const container = scrollContainerRef.value
+    if (!container) return
+
+    container.scrollTop += scrollDelta
+    // 用 lastMouseViewportY + 新 scrollTop 重算 marqueeEnd.y
+    marqueeEnd.value = {
+      x: marqueeEnd.value.x,
+      y: Math.max(0, lastMouseViewportY.value) + container.scrollTop,
+    }
+    updateMarqueeSelection()
+  }, 16)
+}
+
+function stopAutoScroll() {
+  if (autoScrollTimer.value !== null) {
+    clearInterval(autoScrollTimer.value)
+    autoScrollTimer.value = null
+  }
+}
+
+onBeforeUnmount(() => {
+  stopAutoScroll()
+  document.removeEventListener('mousemove', handleMarqueeMouseMove)
+  document.removeEventListener('mouseup', handleMarqueeMouseUp)
+})
 </script>
 
 <template>
-  <div class="flex h-full flex-col overflow-hidden outline-none" tabindex="0" @keydown="handleKeyDown">
+  <div ref="panelRef" class="flex h-full flex-col overflow-hidden outline-none" tabindex="0" @keydown="handleKeyDown">
     <!-- Header -->
     <div class="flex items-center gap-1 border-b border-border px-2 py-1.5">
       <span class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -430,6 +623,7 @@ function formatDate(timestamp: number | null): string {
     <div
       ref="scrollContainerRef"
       class="min-h-0 flex-1 overflow-auto relative"
+      @mousedown="handleMarqueeMouseDown"
       @dragenter="handleDragEnter"
       @dragover="handleDragOver"
       @dragleave="handleDragLeave"
@@ -470,6 +664,7 @@ function formatDate(timestamp: number | null): string {
           <ContextMenu v-if="entries[vRow.index]">
             <ContextMenuTrigger>
               <div
+                :data-row-index="vRow.index"
                 class="group flex cursor-pointer items-center gap-3 px-3 text-[13px] transition-all duration-200 hover:bg-muted/40 absolute left-1 right-1 rounded-md"
                 :style="{ height: `${ROW_HEIGHT}px`, transform: `translateY(${vRow.start}px)` }"
                 :class="{
@@ -585,6 +780,13 @@ function formatDate(timestamp: number | null): string {
         </template>
       </div>
     </div>
+
+    <!-- 框选矩形（fixed 定位，裁剪到容器范围） -->
+    <div
+      v-if="marqueeStyle"
+      class="pointer-events-none fixed z-50 border border-primary/60 bg-primary/10 rounded-sm"
+      :style="marqueeStyle"
+    />
 
     <!-- Status bar -->
     <div class="flex items-center border-t border-border px-2 py-1 text-[10px] text-muted-foreground">
