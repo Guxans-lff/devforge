@@ -519,14 +519,14 @@ function formatDate(timestamp: number | null): string {
                   {{ t('sftp.editFile') }}
                 </ContextMenuItem>
                 <ContextMenuItem
-                  v-if="showTransferAction === 'download' && selectedItems[0] && !selectedItems[0].isDir"
+                  v-if="showTransferAction === 'download' && selectedItems[0]"
                   @click="handleTransferSelected"
                 >
                   <Download class="mr-2 h-4 w-4" />
                   {{ t('fileManager.download') }}
                 </ContextMenuItem>
                 <ContextMenuItem
-                  v-if="showTransferAction === 'upload' && selectedItems[0] && !selectedItems[0].isDir"
+                  v-if="showTransferAction === 'upload' && selectedItems[0]"
                   @click="handleTransferSelected"
                 >
                   <Upload class="mr-2 h-4 w-4" />

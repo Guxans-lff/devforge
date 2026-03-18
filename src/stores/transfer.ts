@@ -18,6 +18,12 @@ export interface TransferTask {
   error?: string
   startTime?: number
   endTime?: number
+  /** 打包传输阶段：packing / uploading / extracting / completed */
+  archivePhase?: string
+  /** 打包传输的压缩包大小 */
+  archiveSize?: number
+  /** 打包传输的文件数 */
+  archiveFileCount?: number
 }
 
 export const useTransferStore = defineStore('transfer', () => {
@@ -42,6 +48,38 @@ export const useTransferStore = defineStore('transfer', () => {
     if (listenersSetup) return
     listenersSetup = true
 
+    // 后端批量入队时自动注册任务（文件夹递归上传场景）
+    await listen<{
+      id: string
+      type: 'upload' | 'download'
+      fileName: string
+      localPath: string
+      remotePath: string
+      connectionId: string
+      totalBytes: number
+    }>(
+      'transfer://task-added',
+      (event) => {
+        const p = event.payload
+        if (!tasks.value.has(p.id)) {
+          tasks.value.set(p.id, {
+            id: p.id,
+            type: p.type,
+            fileName: p.fileName,
+            localPath: p.localPath,
+            remotePath: p.remotePath,
+            connectionId: p.connectionId,
+            totalBytes: p.totalBytes,
+            transferredBytes: 0,
+            speed: 0,
+            status: 'pending',
+            startTime: Date.now(),
+          })
+          tasks.value = new Map(tasks.value)
+        }
+      },
+    )
+
     // 传输进度
     await listen<{ id: string; transferred: number; total: number; speed: number }>(
       'transfer://progress',
@@ -55,6 +93,8 @@ export const useTransferStore = defineStore('transfer', () => {
             totalBytes: total,
             speed,
             status: 'transferring',
+            // 打包模式：保留 archivePhase，更新为 uploading 阶段
+            archivePhase: task.archivePhase ? 'uploading' : undefined,
           })
           // 节流：最多每 200ms 触发一次响应式更新
           pendingProgressUpdates = true
@@ -71,6 +111,18 @@ export const useTransferStore = defineStore('transfer', () => {
       (event) => {
         const task = tasks.value.get(event.payload.id)
         if (task) {
+          // 打包模式：压缩包上传完成后还有解压步骤，不直接标记 completed
+          // 等 archive-progress phase=completed 事件来最终标记
+          if (task.archivePhase) {
+            tasks.value.set(event.payload.id, {
+              ...task,
+              archivePhase: 'extracting',
+              status: 'transferring',
+            })
+            tasks.value = new Map(tasks.value)
+            return
+          }
+
           const completed = { ...task, status: 'completed' as const, endTime: Date.now() }
           tasks.value.set(event.payload.id, completed)
 
@@ -119,6 +171,68 @@ export const useTransferStore = defineStore('transfer', () => {
           // 触发响应式更新
           tasks.value = new Map(tasks.value)
         }
+      },
+    )
+
+    // 打包传输阶段进度
+    await listen<{
+      id: string
+      phase: string
+      totalBytes?: number
+      fileCount?: number
+      archiveSize?: number
+      originalSize?: number
+    }>(
+      'transfer://archive-progress',
+      (event) => {
+        const { id, phase, totalBytes, fileCount, archiveSize } = event.payload
+        let task = tasks.value.get(id)
+
+        if (!task) {
+          // 打包传输模式下，后端自动创建任务，前端需要补建
+          task = {
+            id,
+            type: 'upload',
+            fileName: `${fileCount ?? 0} 个文件 (打包传输)`,
+            localPath: '',
+            remotePath: '',
+            connectionId: '',
+            totalBytes: totalBytes ?? 0,
+            transferredBytes: 0,
+            speed: 0,
+            status: 'transferring',
+            startTime: Date.now(),
+            archivePhase: phase,
+            archiveFileCount: fileCount,
+            archiveSize,
+          }
+          tasks.value.set(id, task)
+        } else {
+          tasks.value.set(id, {
+            ...task,
+            status: phase === 'completed' ? 'completed' : 'transferring',
+            archivePhase: phase,
+            archiveSize: archiveSize ?? task.archiveSize,
+            archiveFileCount: fileCount ?? task.archiveFileCount,
+            totalBytes: totalBytes ?? task.totalBytes,
+            endTime: phase === 'completed' ? Date.now() : undefined,
+          })
+        }
+
+        if (phase === 'completed') {
+          const completed = tasks.value.get(id)!
+          const next = [{ ...completed }, ...history.value]
+          history.value = next.length > 100 ? next.slice(0, 100) : next
+          setTimeout(() => {
+            const current = tasks.value.get(id)
+            if (current && current.status === 'completed') {
+              tasks.value.delete(id)
+              tasks.value = new Map(tasks.value)
+            }
+          }, 3000)
+        }
+
+        tasks.value = new Map(tasks.value)
       },
     )
   }

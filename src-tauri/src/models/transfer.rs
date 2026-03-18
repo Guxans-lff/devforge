@@ -78,7 +78,7 @@ impl Default for TransferConfig {
             chunk_size: 16 * 1024 * 1024,      // 16MB — 减少 SFTP 往返次数，最大化吞吐量
             progress_emit_interval: 100,       // 100ms
             speed_window_size: 3,              // 3秒
-            max_concurrent_tasks: 3,
+            max_concurrent_tasks: 6,
             min_display_time_for_small_files: 200, // 200ms
         }
     }

@@ -367,10 +367,22 @@ watch(
             <!-- Stats Grid -->
             <div class="flex items-center justify-between text-[10px] font-bold tracking-tight">
               <div class="flex items-center gap-2">
-                <span class="text-foreground/60">{{ formatBytes(task.transferredBytes) }}</span>
-                <span class="text-muted-foreground/30 text-[8px]">OF</span>
-                <span class="text-foreground/40">{{ formatBytes(task.totalBytes) }}</span>
-                <span class="ml-1 rounded bg-muted/40 px-1 py-0.5 text-foreground/70">{{ getProgress(task) }}%</span>
+                <!-- 打包传输阶段显示 -->
+                <template v-if="task.archivePhase">
+                  <span v-if="task.archivePhase === 'packing'" class="text-amber-500">{{ t('transfer.packing') }}</span>
+                  <span v-else-if="task.archivePhase === 'uploading'" class="text-primary">{{ t('transfer.archiveUploading') }}</span>
+                  <span v-else-if="task.archivePhase === 'extracting'" class="text-violet-500">{{ t('transfer.extracting') }}</span>
+                  <span v-else-if="task.archivePhase === 'completed'" class="text-emerald-500">{{ t('transfer.archiveCompleted') }}</span>
+                  <span v-if="task.archiveFileCount" class="text-foreground/40">{{ task.archiveFileCount }} {{ t('transfer.files') }}</span>
+                  <span v-if="task.archiveSize" class="text-foreground/40">{{ formatBytes(task.archiveSize) }}</span>
+                </template>
+                <!-- 普通传输进度 -->
+                <template v-else>
+                  <span class="text-foreground/60">{{ formatBytes(task.transferredBytes) }}</span>
+                  <span class="text-muted-foreground/30 text-[8px]">OF</span>
+                  <span class="text-foreground/40">{{ formatBytes(task.totalBytes) }}</span>
+                  <span class="ml-1 rounded bg-muted/40 px-1 py-0.5 text-foreground/70">{{ getProgress(task) }}%</span>
+                </template>
               </div>
               
               <div class="flex items-center gap-2 transition-all">

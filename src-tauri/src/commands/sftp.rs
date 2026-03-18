@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 
 use crate::commands::connection::StorageState;
 use crate::models::transfer::{FileEntry, FileInfo};
@@ -97,15 +97,76 @@ pub async fn sftp_delete(
     is_dir: bool,
 ) -> Result<bool, AppError> {
     let sftp_engine = app.state::<SftpEngineState>().inner().clone();
+
     if is_dir {
-        sftp_engine
-            .delete_dir(&connection_id, &path)
-            .await?;
+        // 目录删除：用 SSH find 快速判断文件数，决定用 SSH rm -rf 还是逐个 SFTP 删除
+        const BULK_DELETE_THRESHOLD: usize = 100;
+
+        // 快速统计：SSH find | wc -l，只需要知道是否超过阈值
+        // 比 sftp_list_recursive 快几个数量级（不需要完整遍历）
+        let file_count = {
+            let count_cmd = format!(
+                "find '{}' -type f 2>/dev/null | head -{} | wc -l",
+                path.replace('\'', "'\\''"),
+                BULK_DELETE_THRESHOLD + 1
+            );
+            match sftp_engine.exec_command(&connection_id, &count_cmd, 15).await {
+                Ok((_code, output)) => {
+                    output.trim().parse::<usize>().unwrap_or(0)
+                }
+                Err(_) => {
+                    // SSH exec 失败，降级用 SFTP 递归列举
+                    match sftp_list_recursive(app.clone(), connection_id.clone(), path.clone()).await {
+                        Ok(files) => files.len(),
+                        Err(_) => 0,
+                    }
+                }
+            }
+        };
+
+        if file_count >= BULK_DELETE_THRESHOLD {
+            // 大目录：用 SSH rm -rf 快速删除
+            log::info!("[SFTP] 大目录删除 ({} 个文件)，使用 SSH rm -rf: {}", file_count, path);
+
+            let delete_id = uuid::Uuid::new_v4().to_string();
+            let _ = app.emit("sftp://delete-progress", serde_json::json!({
+                "id": &delete_id,
+                "path": &path,
+                "fileCount": file_count,
+                "phase": "deleting",
+            }));
+
+            let rm_cmd = format!("rm -rf '{}'", path.replace('\'', "'\\''"));
+            let (exit_code, output) = sftp_engine
+                .exec_command(&connection_id, &rm_cmd, 60)
+                .await
+                .map_err(|e| AppError::Other(format!("SSH 删除失败: {}", e)))?;
+
+            // exit_code == -1 表示 SSH 服务器未发送 ExitStatus，不一定是失败
+            if exit_code != 0 && exit_code != -1 {
+                let _ = app.emit("sftp://delete-progress", serde_json::json!({
+                    "id": &delete_id,
+                    "phase": "error",
+                    "error": format!("删除失败 (exit={}): {}", exit_code, output),
+                }));
+                return Err(AppError::Other(format!("删除失败 (exit={}): {}", exit_code, output)));
+            }
+
+            let _ = app.emit("sftp://delete-progress", serde_json::json!({
+                "id": &delete_id,
+                "phase": "completed",
+                "fileCount": file_count,
+            }));
+
+            log::info!("[SFTP] 删除完成: {}", path);
+        } else {
+            // 小目录：逐个 SFTP 删除
+            sftp_engine.delete_dir(&connection_id, &path).await?;
+        }
     } else {
-        sftp_engine
-            .delete_file(&connection_id, &path)
-            .await?;
+        sftp_engine.delete_file(&connection_id, &path).await?;
     }
+
     Ok(true)
 }
 

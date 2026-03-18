@@ -26,14 +26,17 @@ export function useToast() {
       promise: Promise<T>,
       opts: { loading: string; success: string; error: string }
     ) {
-      messageCenter.addMessage({ type: 'loading', title: opts.loading })
+      const loadingId = messageCenter.addMessage({ type: 'loading', title: opts.loading, persistent: true })
       return promise.then(
         (result) => {
-          messageCenter.addMessage({ type: 'success', title: opts.success })
+          messageCenter.updateMessage(loadingId, { type: 'success', title: opts.success, persistent: false, autoClose: 3000 })
+          // 手动设置 autoClose 定时器（updateMessage 不会自动触发）
+          setTimeout(() => messageCenter.deleteMessage(loadingId), 3000)
           return result
         },
         (err) => {
-          messageCenter.addMessage({ type: 'error', title: opts.error })
+          messageCenter.updateMessage(loadingId, { type: 'error', title: opts.error, persistent: false, autoClose: 5000 })
+          setTimeout(() => messageCenter.deleteMessage(loadingId), 5000)
           throw err
         },
       )

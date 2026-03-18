@@ -244,17 +244,56 @@ impl SftpEngine {
         Ok(())
     }
 
-    /// Delete a remote directory.
+    /// 递归删除远程目录（先删除所有子文件和子目录，再删除自身）
     pub async fn delete_dir(
         &self,
         connection_id: &str,
         path: &str,
     ) -> Result<(), AppError> {
         let sftp = self.get_sftp(connection_id).await?;
-        sftp.remove_dir(path)
-            .await
-            .map_err(|e| AppError::Other(format!("SFTP rmdir failed: {}", e)))?;
-        Ok(())
+        Self::remove_dir_recursive(&sftp, path).await
+    }
+
+    /// 递归删除远程目录的内部实现
+    fn remove_dir_recursive<'a>(
+        sftp: &'a SftpSession,
+        path: &'a str,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), AppError>> + Send + 'a>> {
+        Box::pin(async move {
+            // 列出目录内容
+            let entries = sftp.read_dir(path).await
+                .map_err(|e| AppError::Other(format!("SFTP readdir failed: {}", e)))?;
+
+            for entry in entries {
+                let name = entry.file_name();
+                if name == "." || name == ".." {
+                    continue;
+                }
+
+                let full_path = if path.ends_with('/') {
+                    format!("{}{}", path, name)
+                } else {
+                    format!("{}/{}", path, name)
+                };
+
+                let attrs = entry.metadata();
+                let is_dir = attrs.permissions.map(|p| p & 0o40000 != 0).unwrap_or(false);
+
+                if is_dir {
+                    // 递归删除子目录
+                    Self::remove_dir_recursive(sftp, &full_path).await?;
+                } else {
+                    // 删除文件
+                    sftp.remove_file(&full_path).await
+                        .map_err(|e| AppError::Other(format!("SFTP delete file failed: {}", e)))?;
+                }
+            }
+
+            // 目录已清空，删除空目录
+            sftp.remove_dir(path).await
+                .map_err(|e| AppError::Other(format!("SFTP rmdir failed: {}", e)))?;
+            Ok(())
+        })
     }
 
     /// Rename a remote file or directory.
@@ -557,5 +596,71 @@ impl SftpEngine {
         raw_session.set_timeout(3600).await;
 
         Ok(Arc::new(raw_session))
+    }
+
+    /// 在 SFTP 连接的 SSH 会话上执行远程命令（用于打包传输的解压等操作）
+    pub async fn exec_command(
+        &self,
+        connection_id: &str,
+        command: &str,
+        timeout_secs: u64,
+    ) -> Result<(i32, String), AppError> {
+        let mut channel = {
+            let connections = self.connections.read().await;
+            let conn = connections.get(connection_id)
+                .ok_or_else(|| AppError::Other(format!("连接不存在: {}", connection_id)))?;
+
+            conn.ssh_session
+                .channel_open_session()
+                .await
+                .map_err(|e| AppError::Other(format!("打开 exec channel 失败: {}", e)))?
+        };
+
+        // 执行命令
+        channel.exec(true, command.as_bytes())
+            .await
+            .map_err(|e| AppError::Other(format!("执行远程命令失败: {}", e)))?;
+
+        // 收集输出
+        let mut output = String::new();
+        let mut exit_code: i32 = -1;
+        let mut got_eof = false;
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            async {
+                loop {
+                    match channel.wait().await {
+                        Some(russh::ChannelMsg::Data { data }) => {
+                            output.push_str(&String::from_utf8_lossy(&data));
+                        }
+                        Some(russh::ChannelMsg::ExtendedData { data, .. }) => {
+                            output.push_str(&String::from_utf8_lossy(&data));
+                        }
+                        Some(russh::ChannelMsg::ExitStatus { exit_status }) => {
+                            exit_code = exit_status as i32;
+                            // ExitStatus 到了且 Eof 也到了，可以退出
+                            if got_eof { break; }
+                        }
+                        Some(russh::ChannelMsg::Eof) => {
+                            got_eof = true;
+                            // 如果已经收到 ExitStatus，直接退出
+                            if exit_code != -1 { break; }
+                            // 否则继续等 ExitStatus（可能紧随 Eof 之后）
+                        }
+                        None => break, // channel 关闭，真正退出
+                        _ => {}
+                    }
+                }
+            }
+        ).await;
+
+        let _ = channel.close().await;
+
+        if result.is_err() {
+            return Err(AppError::Other(format!("远程命令执行超时 ({}s): {}", timeout_secs, command)));
+        }
+
+        Ok((exit_code, output))
     }
 }

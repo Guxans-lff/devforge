@@ -218,7 +218,19 @@ function handleRemoteDelete(entry: FileEntry) {
     entry.path,
     async () => {
       try {
-        await sftpApi.sftpDelete(props.connectionId, entry.path, entry.isDir)
+        if (entry.isDir) {
+          // 目录删除可能耗时较长，用 promise toast 展示进度
+          await toast.promise(
+            sftpApi.sftpDelete(props.connectionId, entry.path, true),
+            {
+              loading: t('toast.deleting', { name: entry.name }),
+              success: t('toast.deleteSuccess'),
+              error: t('toast.deleteFailed'),
+            },
+          )
+        } else {
+          await sftpApi.sftpDelete(props.connectionId, entry.path, false)
+        }
         await loadRemote()
       } catch (e) {
         toast.error(t('toast.deleteFailed'), String(e))
@@ -251,63 +263,69 @@ async function handleRemoteRename(entry: FileEntry, newName: string) {
 }
 
 async function handleUpload(entry: FileEntry) {
-  // Upload local file to remote current directory
+  // Upload local file/folder to remote current directory
   try {
     const remoteTarget = remotePath.value.endsWith('/')
       ? `${remotePath.value}${entry.name}`
       : `${remotePath.value}/${entry.name}`
 
-    // 生成传输 ID
-    const transferId = crypto.randomUUID()
+    if (entry.isDir) {
+      // 文件夹：使用递归上传（后台执行，立即返回）
+      workspace.setBottomPanelTab('transfer')
+      sftpApi.uploadFolderRecursive(props.connectionId, entry.path, remoteTarget)
+        .catch((e: unknown) => toast.error(t('toast.uploadFailed'), String(e)))
+    } else {
+      // 单文件：分块上传
+      const transferId = crypto.randomUUID()
 
-    // 先添加到传输队列
-    transferStore.addTask({
-      id: transferId,
-      type: 'upload',
-      fileName: entry.name,
-      localPath: entry.path,
-      remotePath: remoteTarget,
-      connectionId: props.connectionId,
-      totalBytes: entry.size ?? 0,
-    })
+      transferStore.addTask({
+        id: transferId,
+        type: 'upload',
+        fileName: entry.name,
+        localPath: entry.path,
+        remotePath: remoteTarget,
+        connectionId: props.connectionId,
+        totalBytes: entry.size ?? 0,
+      })
 
-    // 自动展开底部面板显示传输进度
-    workspace.setBottomPanelTab('transfer')
-
-    // 调用分块上传命令（后台执行，立即返回）
-    await sftpApi.startUploadChunked(transferId, props.connectionId, entry.path, remoteTarget)
+      workspace.setBottomPanelTab('transfer')
+      await sftpApi.startUploadChunked(transferId, props.connectionId, entry.path, remoteTarget)
+    }
   } catch (e) {
     toast.error(t('toast.uploadFailed'), String(e))
   }
 }
 
 async function handleDownload(entry: FileEntry) {
-  // Download remote file to local current directory
+  // Download remote file/folder to local current directory
   try {
     const sep = localPath.value.includes('\\') ? '\\' : '/'
     const localTarget = localPath.value.endsWith(sep)
       ? `${localPath.value}${entry.name}`
       : `${localPath.value}${sep}${entry.name}`
 
-    // 生成传输 ID
-    const transferId = crypto.randomUUID()
+    if (entry.isDir) {
+      // 文件夹：使用递归下载（后台执行，立即返回）
+      workspace.setBottomPanelTab('transfer')
+      sftpApi.downloadFolderRecursive(props.connectionId, entry.path, localTarget)
+        .catch((e: unknown) => toast.error(t('toast.downloadFailed'), String(e)))
+    } else {
+      // 单文件：分块下载
+      const transferId = crypto.randomUUID()
 
-    // 先添加到传输队列
-    transferStore.addTask({
-      id: transferId,
-      type: 'download',
-      fileName: entry.name,
-      localPath: localTarget,
-      remotePath: entry.path,
-      connectionId: props.connectionId,
-      totalBytes: entry.size ?? 0,
-    })
+      transferStore.addTask({
+        id: transferId,
+        type: 'download',
+        fileName: entry.name,
+        localPath: localTarget,
+        remotePath: entry.path,
+        connectionId: props.connectionId,
+        totalBytes: entry.size ?? 0,
+      })
 
-    // 自动展开底部面板显示传输进度
-    workspace.setBottomPanelTab('transfer')
-
-    // 调用分块下载命令（后台执行，立即返回）
-    await sftpApi.startDownloadChunked(transferId, props.connectionId, entry.path, localTarget)
+      workspace.setBottomPanelTab('transfer')
+      await sftpApi.startDownloadChunked(transferId, props.connectionId, entry.path, localTarget)
+    }
   } catch (e) {
     toast.error(t('toast.downloadFailed'), String(e))
   }
@@ -357,13 +375,28 @@ function handleLocalBatchDelete(entries: FileEntry[]) {
 
 function handleRemoteBatchDelete(entries: FileEntry[]) {
   const names = entries.map((e) => e.name).join(', ')
+  const hasDirs = entries.some((e) => e.isDir)
   requestDeleteConfirm(
     t('fileManager.deleteSelected', { count: entries.length }),
     names,
     async () => {
       try {
-        for (const entry of entries) {
-          await sftpApi.sftpDelete(props.connectionId, entry.path, entry.isDir)
+        if (hasDirs) {
+          // 包含目录时展示删除进度
+          const deleteAll = async () => {
+            for (const entry of entries) {
+              await sftpApi.sftpDelete(props.connectionId, entry.path, entry.isDir)
+            }
+          }
+          await toast.promise(deleteAll(), {
+            loading: t('toast.deletingBatch', { count: entries.length }),
+            success: t('toast.deleteSuccess'),
+            error: t('toast.deleteFailed'),
+          })
+        } else {
+          for (const entry of entries) {
+            await sftpApi.sftpDelete(props.connectionId, entry.path, entry.isDir)
+          }
         }
         await loadRemote()
       } catch (e) {
