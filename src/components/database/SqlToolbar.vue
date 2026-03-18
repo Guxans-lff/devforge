@@ -67,10 +67,6 @@ const timeoutModel = computed({
   set: (val: number) => emit('update:queryTimeout', val),
 })
 
-const databaseModel = computed({
-  get: () => props.currentDatabase,
-  set: (val: string) => emit('update:currentDatabase', val),
-})
 </script>
 
 <template>

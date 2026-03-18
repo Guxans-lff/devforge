@@ -9,6 +9,7 @@ import DangerConfirmDialog from '@/components/database/DangerConfirmDialog.vue'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useQueryExecution } from '@/composables/useQueryExecution'
 import { useResultTabs } from '@/composables/useResultTabs'
+import { useI18n } from 'vue-i18n'
 import * as dbApi from '@/api/database'
 import type { SchemaCache } from '@/types/database'
 import type { QueryTabContext } from '@/types/database-workspace'
@@ -35,6 +36,7 @@ const emit = defineEmits<{
 }>()
 
 const store = useDatabaseWorkspaceStore()
+const { t } = useI18n()
 const editorRef = ref<InstanceType<typeof SqlEditor>>()
 
 // ===== Tab Context =====
@@ -94,6 +96,14 @@ const currentBrowseTable = computed(() => tabContext.value?.tableBrowse?.table)
 const snippetPanelOpen = ref(false)
 
 // ===== SQL 执行入口 =====
+
+/** 判断 SQL 是否不需要先选择数据库 */
+function isDatabaseIndependentSql(sql: string): boolean {
+  const trimmed = sql.trim().replace(/^--.*$/gm, '').trim()
+  const first = trimmed.split(/\s+/).slice(0, 3).join(' ').toUpperCase()
+  return /^(USE\s|SHOW\s+(DATABASES|SCHEMAS)|CREATE\s+DATABASE|DROP\s+DATABASE)/.test(first)
+}
+
 function executeCurrentSql() {
   const selected = (editorRef.value as any)?.getSelectedText()
   if (selected && selected.trim()) {
@@ -104,6 +114,24 @@ function executeCurrentSql() {
 }
 
 async function handleExecuteWithEmit(sql: string) {
+  // 数据库未选择校验（SQLite 无需选库；USE/SHOW DATABASES 等语句不依赖数据库上下文）
+  if (props.driver !== 'sqlite' && !currentDatabase.value && !isDatabaseIndependentSql(sql)) {
+    store.updateTabContext(props.connectionId, props.tabId, {
+      result: {
+        columns: [],
+        rows: [],
+        affectedRows: 0,
+        executionTimeMs: 0,
+        isError: true,
+        error: t('database.noDatabaseSelected'),
+        totalCount: null,
+        truncated: false,
+      },
+      isExecuting: false,
+    })
+    return
+  }
+
   const result = await execution.handleExecute(sql)
   if (result.success) {
     emit('executeSuccess', sql)

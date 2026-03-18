@@ -3,7 +3,7 @@
  * 本地终端面板 — 使用 portable-pty 创建本地 Shell
  * 简化版 TerminalPanel，无 SSH 流控逻辑
  */
-import { ref, onMounted, onBeforeUnmount, onDeactivated, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, onActivated, watch } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -203,9 +203,18 @@ onBeforeUnmount(async () => {
   await cleanup()
 })
 
-// KeepAlive 场景：组件被缓存 deactivate 时也需要清理 PTY 资源
-onDeactivated(async () => {
-  await cleanup()
+// KeepAlive 场景：切回时重新 fit 终端并恢复 WebGL 渲染
+onActivated(() => {
+  if (terminal && terminalRef.value) {
+    // WebGL 上下文可能在后台丢失，尝试重新加载
+    try {
+      terminal.loadAddon(new WebglAddon())
+    } catch {
+      // WebGL 不可用则保持 canvas 渲染
+    }
+    fitAddon?.fit()
+    terminal.focus()
+  }
 })
 
 defineExpose({

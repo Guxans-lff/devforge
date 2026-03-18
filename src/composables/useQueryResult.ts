@@ -289,12 +289,19 @@ export function useQueryResult(options: UseQueryResultOptions) {
     }
   }
 
+  let cellClickTimer: ReturnType<typeof setTimeout> | null = null
   function handleCellClick(value: unknown) {
-    // 单击只复制内容到剪贴板
-    const text = value === null || value === undefined ? 'NULL' : String(value)
-    navigator.clipboard.writeText(text).then(() => {
-      toast.success(t('toast.copySuccess'))
-    }).catch(err => console.warn('Failed to copy to clipboard:', err))
+    // 编辑中不触发复制
+    if (editingCell.value) return
+    // 防双击：延迟执行，双击时取消单击的复制
+    if (cellClickTimer) clearTimeout(cellClickTimer)
+    cellClickTimer = setTimeout(() => {
+      cellClickTimer = null
+      const text = value === null || value === undefined ? 'NULL' : String(value)
+      navigator.clipboard.writeText(text).then(() => {
+        toast.success(t('toast.copySuccess'))
+      }).catch(err => console.warn('Failed to copy to clipboard:', err))
+    }, 250)
   }
 
   // ===== 过滤 =====
@@ -360,6 +367,8 @@ export function useQueryResult(options: UseQueryResultOptions) {
 
   function startEdit(rowIndex: number, colName: string, currentValue: unknown) {
     if (!editable.value) return
+    // 取消双击前的单击复制
+    if (cellClickTimer) { clearTimeout(cellClickTimer); cellClickTimer = null }
     editingCell.value = { rowIndex, colName }
     editingValue.value = currentValue === null || currentValue === undefined ? '' : String(currentValue)
   }
@@ -396,7 +405,13 @@ export function useQueryResult(options: UseQueryResultOptions) {
     const { rowIndex, colName } = editingCell.value
     const row = getOriginalRow(rowIndex)
     if (!row) { cancelEdit(); return }
-    
+
+    // 值未变化则跳过更新
+    const colIndex = result.value.columns.findIndex(c => c.name === colName)
+    const originalValue = colIndex >= 0 ? row[colIndex] : undefined
+    const originalStr = originalValue === null || originalValue === undefined ? '' : String(originalValue)
+    if (editingValue.value === originalStr) { cancelEdit(); return }
+
     // 获取数据库名，优先使用 options 传入的 database
     const db = database.value
     if (!db) {

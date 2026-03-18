@@ -33,9 +33,14 @@ import { useQueryResult } from '@/composables/useQueryResult'
 /** 懒加载图表面板 */
 const ChartPanel = defineAsyncComponent(() => import('@/components/database/chart/ChartPanel.vue'))
 
-/** 自动聚焦指令：解决虚拟列表中 autofocus 被浏览器拦截的问题 */
+/** 自动聚焦并全选指令：解决虚拟列表中 autofocus 被浏览器拦截的问题，同时全选文本以支持直接粘贴覆盖 */
 const vFocus = {
-  mounted: (el: HTMLElement) => el.focus()
+  mounted: (el: HTMLElement) => {
+    el.focus()
+    if (el instanceof HTMLInputElement) {
+      el.select()
+    }
+  }
 }
 
 const props = defineProps<{

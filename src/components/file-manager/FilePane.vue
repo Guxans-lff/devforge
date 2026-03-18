@@ -63,6 +63,7 @@ const emit = defineEmits<{
   editFile: [entry: FileEntry]
   showPermissions: [entry: FileEntry]
   compareFile: [entry: FileEntry]
+  search: []
 }>()
 
 const { t } = useI18n()
@@ -417,10 +418,12 @@ function formatDate(timestamp: number | null): string {
       :current-path="currentPath"
       :is-remote="panelId === 'remote'"
       :loading="loading"
+      :show-search-button="panelId === 'remote'"
       @navigate="handlePathNavigate"
       @go-up="navigateUp"
       @refresh="emit('refresh')"
       @mkdir="showMkdirDialog = true"
+      @search="emit('search')"
     />
 
     <!-- File list -->

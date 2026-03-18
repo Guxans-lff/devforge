@@ -233,6 +233,7 @@ export default {
     execute: '执行',
     executing: '执行中...',
     notConnected: '请先连接数据库',
+    noDatabaseSelected: '请先选择数据库',
     rows: '行',
     rowsAffected: '行受影响',
     executeSuccess: '执行成功',
@@ -824,6 +825,9 @@ export default {
     deselectAll: '取消全选',
     noSshConnections: '暂无 SSH 连接',
     emptyHint: '选择目标服务器后开始批量执行命令',
+    emptyGuide: '选择要连接的服务器',
+    emptyGuideDesc: '勾选下方服务器，即可同时向多台主机发送命令',
+    commandSent: '命令已发送到 {count} 台服务器',
   },
   recording: {
     start: '开始录制',

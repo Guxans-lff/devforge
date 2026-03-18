@@ -18,6 +18,7 @@ import {
   ArrowUp,
   RefreshCw,
   FolderPlus,
+  Search,
   Star,
   StarOff,
   HardDrive,
@@ -32,6 +33,7 @@ const props = defineProps<{
   currentPath: string
   isRemote: boolean
   loading?: boolean
+  showSearchButton?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -39,6 +41,7 @@ const emit = defineEmits<{
   goUp: []
   refresh: []
   mkdir: []
+  search: []
 }>()
 
 const { t } = useI18n()
@@ -358,6 +361,21 @@ function updateBookmarks(updated: Bookmark[]) {
           </Button>
         </TooltipTrigger>
         <TooltipContent><p>{{ t('fileManager.newFolder') }}</p></TooltipContent>
+      </Tooltip>
+
+      <!-- Search button (remote only) -->
+      <Tooltip v-if="showSearchButton">
+        <TooltipTrigger as-child>
+          <Button
+            variant="ghost"
+            size="icon"
+            class="h-7 w-7 shrink-0"
+            @click="emit('search')"
+          >
+            <Search class="h-3.5 w-3.5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent><p>{{ t('fileEditor.search') }}</p></TooltipContent>
       </Tooltip>
 
       <!-- Bookmark toggle -->

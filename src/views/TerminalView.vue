@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, onActivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connections'
@@ -72,8 +72,13 @@ watch(splitMode, (mode) => {
 })
 
 onBeforeUnmount(() => {
-  connectionStore.updateConnectionStatus(props.connectionId, 'disconnected')
+  // 状态更新由 closeTab 统一处理（已检查同连接其他 tab），此处仅清理事件监听
   window.removeEventListener('keydown', handleGlobalKeydown)
+})
+
+// KeepAlive 重新激活时同步连接状态
+onActivated(() => {
+  syncConnectionStatus()
 })
 
 async function openFileTransfer() {

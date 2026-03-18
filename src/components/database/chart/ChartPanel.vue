@@ -10,9 +10,7 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from '@/components/ui/sheet'
-import { Button } from '@/components/ui/button'
 
 const props = defineProps<{
   /** 行数据 */

@@ -215,6 +215,7 @@ export default {
     execute: 'Execute',
     executing: 'Executing...',
     notConnected: 'Connect to database first',
+    noDatabaseSelected: 'Please select a database first',
     rows: 'rows',
     rowsAffected: 'rows affected',
     executeSuccess: 'Executed successfully',
@@ -794,6 +795,9 @@ export default {
     deselectAll: 'None',
     noSshConnections: 'No SSH connections',
     emptyHint: 'Select target servers to start batch execution',
+    emptyGuide: 'Select servers to connect',
+    emptyGuideDesc: 'Check the servers below to send commands to multiple hosts simultaneously',
+    commandSent: 'Command sent to {count} server(s)',
   },
   recording: {
     start: 'Start Recording',

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -13,11 +13,10 @@ import FileEditor from '@/components/file-manager/FileEditor.vue'
 import FileSearchPanel from '@/components/file-manager/FileSearchPanel.vue'
 import PermissionDialog from '@/components/file-manager/PermissionDialog.vue'
 import FileDiffView from '@/components/file-manager/FileDiffView.vue'
-import SyncPanel from '@/components/file-manager/SyncPanel.vue'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Loader2, Terminal as TerminalIcon, Search, PanelRightClose, PanelRightOpen, FolderSync } from 'lucide-vue-next'
+import { Loader2, Terminal as TerminalIcon, PanelRightClose, PanelRightOpen } from 'lucide-vue-next'
 import * as sftpApi from '@/api/sftp'
 import { sftpChmod } from '@/api/file-editor'
 import { useToast } from '@/composables/useToast'
@@ -91,8 +90,15 @@ const showDiffView = ref(false)
 const diffLocalPath = ref('')
 const diffRemotePath = ref('')
 
-// Sync dialog state
-const showSyncDialog = ref(false)
+// 当所有文件标签关闭时，自动隐藏编辑面板
+watch(
+  () => fileEditorStore.openFiles.size,
+  (size) => {
+    if (size === 0) {
+      showEditorPanel.value = false
+    }
+  },
+)
 
 let unlistenTransferComplete: any = null
 
@@ -577,6 +583,13 @@ onMounted(async () => {
   await connect()
 })
 
+// KeepAlive 重新激活时同步连接状态
+onActivated(() => {
+  if (status.value === 'connected') {
+    connectionStore.updateConnectionStatus(props.connectionId, 'connected')
+  }
+})
+
 onBeforeUnmount(async () => {
   if (refreshRemoteTimer) clearTimeout(refreshRemoteTimer)
   if (refreshLocalTimer) clearTimeout(refreshLocalTimer)
@@ -586,7 +599,7 @@ onBeforeUnmount(async () => {
   } catch {
     // ignore
   }
-  connectionStore.updateConnectionStatus(props.connectionId, 'disconnected')
+  // 状态更新由 closeTab 统一处理（已检查同连接其他 tab），此处仅清理资源
 })
 </script>
 
@@ -616,21 +629,6 @@ onBeforeUnmount(async () => {
               variant="ghost"
               size="icon"
               class="h-7 w-7 text-muted-foreground hover:text-foreground"
-              @click="toggleSearchPanel"
-            >
-              <Search class="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p>{{ t('fileEditor.search') }}</p>
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-7 w-7 text-muted-foreground hover:text-foreground"
               :class="showEditorPanel ? 'bg-accent' : ''"
               @click="showEditorPanel = !showEditorPanel"
             >
@@ -639,21 +637,6 @@ onBeforeUnmount(async () => {
           </TooltipTrigger>
           <TooltipContent side="bottom">
             <p>{{ t('fileEditor.toggleEditor') }}</p>
-          </TooltipContent>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger as-child>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-7 w-7 text-muted-foreground hover:text-foreground"
-              @click="showSyncDialog = true"
-            >
-              <FolderSync class="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <p>{{ t('sync.title') }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -748,6 +731,7 @@ onBeforeUnmount(async () => {
             @edit-file="handleEditFile"
             @show-permissions="handleShowPermissions"
             @compare-file="(entry) => handleCompareFile(entry, 'remote')"
+            @search="toggleSearchPanel"
           />
         </Pane>
       </Splitpanes>
@@ -798,14 +782,6 @@ onBeforeUnmount(async () => {
       :file-name="permissionTarget?.name ?? ''"
       :current-permissions="permissionTarget?.permissions ?? null"
       @confirm="handleChmod"
-    />
-
-    <!-- 目录同步对话框 -->
-    <SyncPanel
-      v-model:open="showSyncDialog"
-      :connection-id="connectionId"
-      :local-path="localPath"
-      :remote-path="remotePath"
     />
   </div>
 </template>

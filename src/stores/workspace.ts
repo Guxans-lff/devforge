@@ -69,6 +69,24 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })
     }
 
+    // 关闭 SSH 终端 / SFTP tab 时，若该连接无其他打开的 tab，则更新连接状态
+    if ((tab.type === 'terminal' || tab.type === 'file-manager') && tab.connectionId && !tab.meta?.isLocal) {
+      const connId = tab.connectionId
+      const hasOtherTabs = tabs.value.some(
+        (t) => t.id !== tabId && t.connectionId === connId,
+      )
+      if (!hasOtherTabs) {
+        const connectionStore = useConnectionStore()
+        connectionStore.updateConnectionStatus(connId, 'disconnected')
+        // SFTP 可以按 connectionId 断开；SSH 需要 sessionId，由组件 unmount 时处理
+        if (tab.type === 'file-manager') {
+          import('@/api/sftp').then(({ sftpDisconnect }) => {
+            sftpDisconnect(connId).catch(() => { })
+          })
+        }
+      }
+    }
+
     const index = tabs.value.findIndex((t) => t.id === tabId)
     tabs.value = tabs.value.filter((t) => t.id !== tabId)
 
