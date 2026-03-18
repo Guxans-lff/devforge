@@ -4,7 +4,7 @@ let dragSourcePanel: string | null = null
 </script>
 
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Button } from '@/components/ui/button'
@@ -35,6 +35,8 @@ import {
   FileEdit,
   Shield,
   ArrowLeftRight,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-vue-next'
 import type { FileEntry } from '@/types/fileManager'
 
@@ -131,15 +133,45 @@ const scrollContainerRef = ref<HTMLDivElement | null>(null)
 const panelRef = ref<HTMLDivElement | null>(null)
 const ROW_HEIGHT = 28
 
+// ==================== 排序 ====================
+type SortField = 'name' | 'size' | 'modified'
+type SortDirection = 'asc' | 'desc'
+const sortField = ref<SortField>('name')
+const sortDirection = ref<SortDirection>('asc')
+
+const sortedEntries = computed(() => {
+  const dirs = props.entries.filter(e => e.isDir)
+  const files = props.entries.filter(e => !e.isDir)
+  const compareFn = (a: FileEntry, b: FileEntry) => {
+    let cmp = 0
+    switch (sortField.value) {
+      case 'name': cmp = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }); break
+      case 'size': cmp = a.size - b.size; break
+      case 'modified': cmp = (a.modified ?? 0) - (b.modified ?? 0); break
+    }
+    return sortDirection.value === 'desc' ? -cmp : cmp
+  }
+  return [...dirs.sort(compareFn), ...files.sort(compareFn)]
+})
+
+function toggleSort(field: SortField) {
+  if (sortField.value === field) {
+    sortDirection.value = sortDirection.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortField.value = field
+    sortDirection.value = 'asc'
+  }
+}
+
 const virtualizer = useVirtualizer({
-  get count() { return props.entries.length },
+  get count() { return sortedEntries.value.length },
   getScrollElement: () => scrollContainerRef.value,
   estimateSize: () => ROW_HEIGHT,
   overscan: 10,
 })
 const selectedCount = computed(() => selectedEntries.value.size)
 const selectedItems = computed(() =>
-  props.entries.filter(e => selectedEntries.value.has(e.path))
+  sortedEntries.value.filter(e => selectedEntries.value.has(e.path))
 )
 
 watch(
@@ -170,15 +202,15 @@ function handleClick(entry: FileEntry, event: MouseEvent) {
   } else if (event.shiftKey && selectedEntries.value.size > 0) {
     // Range selection
     const lastSelected = Array.from(selectedEntries.value).pop()
-    const lastIndex = props.entries.findIndex(e => e.path === lastSelected)
-    const currentIndex = props.entries.findIndex(e => e.path === entry.path)
+    const lastIndex = sortedEntries.value.findIndex(e => e.path === lastSelected)
+    const currentIndex = sortedEntries.value.findIndex(e => e.path === entry.path)
 
     if (lastIndex !== -1 && currentIndex !== -1) {
       const start = Math.min(lastIndex, currentIndex)
       const end = Math.max(lastIndex, currentIndex)
 
       for (let i = start; i <= end; i++) {
-        const item = props.entries[i]
+        const item = sortedEntries.value[i]
         if (item) {
           selectedEntries.value.add(item.path)
         }
@@ -204,7 +236,7 @@ function handleContextMenu(entry: FileEntry) {
 }
 
 function selectAll() {
-  selectedEntries.value = new Set(props.entries.map(e => e.path))
+  selectedEntries.value = new Set(sortedEntries.value.map(e => e.path))
 }
 
 function clearSelection() {
@@ -278,12 +310,37 @@ function handlePathNavigate(path: string) {
 }
 
 
+// ==================== 键入跳转（Type-ahead） ====================
+let typeAheadBuffer = ''
+let typeAheadTimer: ReturnType<typeof setTimeout> | null = null
+
 function handleKeyDown(e: KeyboardEvent) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
     e.preventDefault()
     selectAll()
-  } else if (e.key === 'Escape') {
+    return
+  }
+  if (e.key === 'Escape') {
     clearSelection()
+    return
+  }
+
+  // 键入跳转：可打印字符，无修饰键
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.length === 1) {
+    e.preventDefault()
+    typeAheadBuffer += e.key
+    if (typeAheadTimer) clearTimeout(typeAheadTimer)
+    typeAheadTimer = setTimeout(() => { typeAheadBuffer = '' }, 500)
+
+    const idx = sortedEntries.value.findIndex(
+      entry => entry.name.toLowerCase().startsWith(typeAheadBuffer.toLowerCase())
+    )
+    if (idx !== -1) {
+      selectedEntries.value = new Set([sortedEntries.value[idx].path])
+      nextTick(() => {
+        virtualizer.value.scrollToIndex(idx, { align: 'center' })
+      })
+    }
   }
 }
 
@@ -538,7 +595,7 @@ function updateMarqueeSelection() {
   const bottom = Math.max(sy, ey)
 
   const startIndex = Math.max(0, Math.floor(top / ROW_HEIGHT))
-  const endIndex = Math.min(props.entries.length - 1, Math.floor(bottom / ROW_HEIGHT))
+  const endIndex = Math.min(sortedEntries.value.length - 1, Math.floor(bottom / ROW_HEIGHT))
 
   const newSelection = new Set(marqueePreSelection.value)
 
@@ -546,7 +603,7 @@ function updateMarqueeSelection() {
     const rowTop = i * ROW_HEIGHT
     const rowBottom = rowTop + ROW_HEIGHT
     if (rowBottom > top && rowTop < bottom) {
-      const entry = props.entries[i]
+      const entry = sortedEntries.value[i]
       if (entry) newSelection.add(entry.path)
     }
   }
@@ -589,6 +646,7 @@ function stopAutoScroll() {
 
 onBeforeUnmount(() => {
   stopAutoScroll()
+  if (typeAheadTimer) clearTimeout(typeAheadTimer)
   document.removeEventListener('mousemove', handleMarqueeMouseMove)
   document.removeEventListener('mouseup', handleMarqueeMouseUp)
 })
@@ -618,6 +676,38 @@ onBeforeUnmount(() => {
       @mkdir="showMkdirDialog = true"
       @search="emit('search')"
     />
+
+    <!-- 列标题表头 -->
+    <div
+      class="flex items-center gap-3 px-3 border-b border-border text-[11px] font-medium text-muted-foreground select-none mx-1"
+      :style="{ height: ROW_HEIGHT + 'px' }"
+    >
+      <div class="w-4 shrink-0" />
+      <div
+        class="flex-1 flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors"
+        @click="toggleSort('name')"
+      >
+        {{ t('fileManager.columnName') }}
+        <ArrowUp v-if="sortField === 'name' && sortDirection === 'asc'" class="h-3 w-3" />
+        <ArrowDown v-else-if="sortField === 'name' && sortDirection === 'desc'" class="h-3 w-3" />
+      </div>
+      <div
+        class="w-16 shrink-0 text-right flex items-center justify-end gap-1 cursor-pointer hover:text-foreground transition-colors"
+        @click="toggleSort('size')"
+      >
+        {{ t('fileManager.columnSize') }}
+        <ArrowUp v-if="sortField === 'size' && sortDirection === 'asc'" class="h-3 w-3" />
+        <ArrowDown v-else-if="sortField === 'size' && sortDirection === 'desc'" class="h-3 w-3" />
+      </div>
+      <div
+        class="w-28 shrink-0 text-right flex items-center justify-end gap-1 cursor-pointer hover:text-foreground transition-colors"
+        @click="toggleSort('modified')"
+      >
+        {{ t('fileManager.columnModified') }}
+        <ArrowUp v-if="sortField === 'modified' && sortDirection === 'asc'" class="h-3 w-3" />
+        <ArrowDown v-else-if="sortField === 'modified' && sortDirection === 'desc'" class="h-3 w-3" />
+      </div>
+    </div>
 
     <!-- File list -->
     <div
@@ -661,38 +751,38 @@ onBeforeUnmount(() => {
         :style="{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }"
       >
         <template v-for="vRow in virtualizer.getVirtualItems()" :key="vRow.key">
-          <ContextMenu v-if="entries[vRow.index]">
+          <ContextMenu v-if="sortedEntries[vRow.index]">
             <ContextMenuTrigger>
               <div
                 :data-row-index="vRow.index"
                 class="group flex cursor-pointer items-center gap-3 px-3 text-[13px] transition-all duration-200 hover:bg-muted/40 absolute left-1 right-1 rounded-md"
                 :style="{ height: `${ROW_HEIGHT}px`, transform: `translateY(${vRow.start}px)` }"
                 :class="{
-                  'bg-primary/10 text-primary': isSelected(entries[vRow.index]!),
-                  'ring-2 ring-primary/60 shadow-[0_0_15px_rgba(var(--color-primary)/0.2)]': dragOverPath === entries[vRow.index]!.path && entries[vRow.index]!.isDir,
+                  'bg-primary/10 text-primary': isSelected(sortedEntries[vRow.index]!),
+                  'ring-2 ring-primary/60 shadow-[0_0_15px_rgba(var(--color-primary)/0.2)]': dragOverPath === sortedEntries[vRow.index]!.path && sortedEntries[vRow.index]!.isDir,
                 }"
                 draggable="true"
-                @click="handleClick(entries[vRow.index]!, $event)"
-                @dblclick="handleDoubleClick(entries[vRow.index]!)"
-                @contextmenu="handleContextMenu(entries[vRow.index]!)"
-                @dragstart="handleDragStart(entries[vRow.index]!, $event)"
+                @click="handleClick(sortedEntries[vRow.index]!, $event)"
+                @dblclick="handleDoubleClick(sortedEntries[vRow.index]!)"
+                @contextmenu="handleContextMenu(sortedEntries[vRow.index]!)"
+                @dragstart="handleDragStart(sortedEntries[vRow.index]!, $event)"
                 @dragend="handleDragEnd"
-                @dragenter.stop="entries[vRow.index]!.isDir && handleDragEnter($event)"
-                @dragover.stop="handleDragOver($event, entries[vRow.index]!)"
-                @dragleave.stop="entries[vRow.index]!.isDir && handleDragLeave($event)"
-                @drop.stop="entries[vRow.index]!.isDir && handleDrop($event, entries[vRow.index]!)"
+                @dragenter.stop="sortedEntries[vRow.index]!.isDir && handleDragEnter($event)"
+                @dragover.stop="handleDragOver($event, sortedEntries[vRow.index]!)"
+                @dragleave.stop="sortedEntries[vRow.index]!.isDir && handleDragLeave($event)"
+                @drop.stop="sortedEntries[vRow.index]!.isDir && handleDrop($event, sortedEntries[vRow.index]!)"
               >
                 <component
-                  :is="entries[vRow.index]!.isDir ? Folder : File"
+                  :is="sortedEntries[vRow.index]!.isDir ? Folder : File"
                   class="h-4 w-4 shrink-0 transition-transform group-hover:scale-110"
-                  :class="entries[vRow.index]!.isDir ? 'text-[var(--df-warning)]' : 'text-muted-foreground'"
+                  :class="sortedEntries[vRow.index]!.isDir ? 'text-[var(--df-warning)]' : 'text-muted-foreground'"
                 />
-                <span class="flex-1 truncate group-hover:text-foreground transition-colors">{{ entries[vRow.index]!.name }}</span>
+                <span class="flex-1 truncate group-hover:text-foreground transition-colors">{{ sortedEntries[vRow.index]!.name }}</span>
                 <span class="w-16 shrink-0 text-right text-muted-foreground">
-                  {{ entries[vRow.index]!.isDir ? '' : formatSize(entries[vRow.index]!.size) }}
+                  {{ sortedEntries[vRow.index]!.isDir ? '' : formatSize(sortedEntries[vRow.index]!.size) }}
                 </span>
                 <span class="w-28 shrink-0 text-right text-muted-foreground">
-                  {{ formatDate(entries[vRow.index]!.modified) }}
+                  {{ formatDate(sortedEntries[vRow.index]!.modified) }}
                 </span>
               </div>
             </ContextMenuTrigger>
