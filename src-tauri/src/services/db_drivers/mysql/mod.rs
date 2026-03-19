@@ -85,6 +85,43 @@ pub async fn get_columns(pool: &MySqlPool, database: &str, table: &str) -> Resul
     }).collect())
 }
 
+/// 批量获取指定数据库中所有表的列信息（SQL 补全预加载用）
+pub async fn get_all_columns(pool: &MySqlPool, database: &str) -> Result<std::collections::HashMap<String, Vec<ColumnInfo>>, AppError> {
+    let rows: Vec<MySqlRow> = sqlx::query(
+        "SELECT CAST(TABLE_NAME AS CHAR) as table_name,
+                CAST(COLUMN_NAME AS CHAR) as name,
+                CAST(COLUMN_TYPE AS CHAR) as data_type,
+                CAST(IS_NULLABLE AS CHAR) as nullable,
+                CAST(COLUMN_DEFAULT AS CHAR) as default_value,
+                CAST(COLUMN_KEY AS CHAR) as column_key,
+                CAST(COLUMN_COMMENT AS CHAR) as comment
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ?
+         ORDER BY TABLE_NAME, ORDINAL_POSITION",
+    )
+    .bind(database)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to load all columns: {}", e)))?;
+
+    let mut map: std::collections::HashMap<String, Vec<ColumnInfo>> = std::collections::HashMap::new();
+    for row in &rows {
+        let table_name = get_string(row, "table_name");
+        let nullable_str = get_string(row, "nullable");
+        let key = get_string(row, "column_key");
+        let col = ColumnInfo {
+            name: get_string(row, "name"),
+            data_type: get_string(row, "data_type"),
+            nullable: nullable_str == "YES",
+            default_value: get_opt_string(row, "default_value"),
+            is_primary_key: key == "PRI",
+            comment: get_opt_string(row, "comment"),
+        };
+        map.entry(table_name).or_default().push(col);
+    }
+    Ok(map)
+}
+
 pub async fn get_create_table(pool: &MySqlPool, database: &str, table: &str) -> Result<String, AppError> {
     let sql = format!("SHOW CREATE TABLE `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(table));
     let row: MySqlRow = sqlx::query(&sql).fetch_one(pool).await

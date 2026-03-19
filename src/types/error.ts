@@ -39,9 +39,15 @@ export function parseBackendError(err: unknown): BackendError {
   if (err && typeof err === 'object') {
     const e = err as Record<string, unknown>
     if (isBackendError(e)) return e as unknown as BackendError
-    if (typeof e.message === 'string') {
-      return { kind: 'INTERNAL', message: e.message, retryable: false }
+    
+    // 尝试提取常见错误字段
+    const msg = e.message || e.msg || e.error || e.err
+    if (typeof msg === 'string') {
+      return { kind: 'INTERNAL', message: msg, retryable: false }
     }
+    
+    // 可能是 JS Error 对象的字符串化产物，或者是纯对象
+    return { kind: 'INTERNAL', message: JSON.stringify(err), retryable: false }
   }
 
   return { kind: 'INTERNAL', message: String(err), retryable: false }

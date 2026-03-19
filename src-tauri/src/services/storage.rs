@@ -86,6 +86,11 @@ impl Storage {
         self.pool.read().await
     }
 
+    /// 供内部模块（如审计日志）使用的 pool 访问
+    pub(crate) async fn get_pool(&self) -> tokio::sync::RwLockReadGuard<'_, SqlitePool> {
+        self.pool.read().await
+    }
+
     async fn run_migrations(&self) -> Result<(), AppError> {
         let pool = self.pool().await;
         sqlx::query(
@@ -190,6 +195,34 @@ impl Storage {
         )
         .execute(&*pool)
         .await?;
+
+        // 操作审计日志（记录 DDL/DML 操作，保留 30 天）
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS audit_logs (
+                id TEXT PRIMARY KEY,
+                connection_id TEXT NOT NULL,
+                connection_name TEXT,
+                database_name TEXT,
+                operation_type TEXT NOT NULL,
+                sql_text TEXT NOT NULL,
+                affected_rows INTEGER DEFAULT 0,
+                execution_time_ms INTEGER DEFAULT 0,
+                is_error INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                created_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&*pool)
+        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_audit_conn ON audit_logs(connection_id)")
+            .execute(&*pool)
+            .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(created_at DESC)")
+            .execute(&*pool)
+            .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_logs(operation_type)")
+            .execute(&*pool)
+            .await?;
 
         Ok(())
     }

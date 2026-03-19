@@ -66,6 +66,46 @@ pub fn mysql_value_to_json(
             .map(serde_json::Value::Number)
             .unwrap_or(serde_json::Value::Null),
 
+        // 日期时间类型：先尝试原生类型，再 fallback 字符串/二进制
+        "DATETIME" | "TIMESTAMP" => row
+            .try_get::<Option<chrono::NaiveDateTime>, _>(index)
+            .ok()
+            .flatten()
+            .map(|dt| serde_json::Value::String(dt.format("%Y-%m-%d %H:%M:%S").to_string()))
+            .or_else(|| {
+                row.try_get::<Option<String>, _>(index)
+                    .ok()
+                    .flatten()
+                    .map(serde_json::Value::String)
+            })
+            .unwrap_or(serde_json::Value::Null),
+
+        "DATE" => row
+            .try_get::<Option<chrono::NaiveDate>, _>(index)
+            .ok()
+            .flatten()
+            .map(|d| serde_json::Value::String(d.format("%Y-%m-%d").to_string()))
+            .or_else(|| {
+                row.try_get::<Option<String>, _>(index)
+                    .ok()
+                    .flatten()
+                    .map(serde_json::Value::String)
+            })
+            .unwrap_or(serde_json::Value::Null),
+
+        "TIME" => row
+            .try_get::<Option<chrono::NaiveTime>, _>(index)
+            .ok()
+            .flatten()
+            .map(|t| serde_json::Value::String(t.format("%H:%M:%S").to_string()))
+            .or_else(|| {
+                row.try_get::<Option<String>, _>(index)
+                    .ok()
+                    .flatten()
+                    .map(serde_json::Value::String)
+            })
+            .unwrap_or(serde_json::Value::Null),
+
         _ => row
             .try_get::<Option<String>, _>(index)
             .or_else(|_| {

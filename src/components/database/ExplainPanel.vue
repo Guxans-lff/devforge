@@ -5,17 +5,24 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import {
   X, AlertTriangle, CheckCircle, AlertCircle, ChevronDown, ChevronRight,
-  Zap, Table2, Search, Clock, Info,
+  Zap, Table2, Search, Clock, Info, Save,
 } from 'lucide-vue-next'
+import { setAppStateJson } from '@/api/app-state'
+import { useMessage } from '@/stores/message-center'
 
 const props = defineProps<{
   result: Record<string, unknown> | null
   tableRows: Record<string, unknown>[] | null
   loading: boolean
+  /** 关联的 SQL（用于保存计划时标识） */
+  sql?: string
+  connectionId?: string
+  database?: string
 }>()
 
 const emit = defineEmits<{ close: [] }>()
 const { t } = useI18n()
+const message = useMessage()
 
 interface ExplainNode {
   id: string
@@ -260,7 +267,31 @@ function getRowValue(row: Record<string, unknown>, colName: string): string {
   return val === null || val === undefined ? 'NULL' : String(val)
 }
 
-
+/** 保存当前执行计划到 KV 存储 */
+const savingPlan = ref(false)
+async function saveExplainPlan() {
+  if (!props.result || savingPlan.value) return
+  savingPlan.value = true
+  try {
+    const id = `explain_plan:${Date.now()}`
+    const plan = {
+      id,
+      sql: props.sql ?? '(unknown)',
+      connectionId: props.connectionId ?? '',
+      database: props.database ?? '',
+      result: props.result,
+      tableRows: props.tableRows,
+      summary: summary.value,
+      savedAt: new Date().toISOString(),
+    }
+    await setAppStateJson(id, plan)
+    message.success('执行计划已保存，可在"计划对比"中使用')
+  } catch (e) {
+    message.error('保存失败: ' + e)
+  } finally {
+    savingPlan.value = false
+  }
+}
 </script>
 
 <template>
@@ -295,9 +326,22 @@ function getRowValue(row: Record<string, unknown>, colName: string): string {
           </button>
         </div>
       </div>
-      <Button variant="ghost" size="icon" class="h-5 w-5" @click="$emit('close')">
-        <X class="h-3 w-3" />
-      </Button>
+      <div class="flex items-center gap-1">
+        <Button
+          v-if="nodes.length > 0 || (tableRows && tableRows.length > 0)"
+          variant="ghost"
+          size="sm"
+          class="h-5 gap-1 text-[10px] px-1.5"
+          :disabled="savingPlan"
+          @click="saveExplainPlan"
+        >
+          <Save class="h-3 w-3" />
+          保存计划
+        </Button>
+        <Button variant="ghost" size="icon" class="h-5 w-5" @click="$emit('close')">
+          <X class="h-3 w-3" />
+        </Button>
+      </div>
     </div>
 
     <ScrollArea class="flex-1 min-h-0">

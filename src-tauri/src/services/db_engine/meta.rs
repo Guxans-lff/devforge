@@ -34,6 +34,15 @@ impl DbEngine {
         }
     }
 
+    /// 批量获取指定数据库中所有表的列信息（SQL 补全预加载用）
+    pub async fn get_all_columns(self: Arc<Self>, connection_id: String, database: String) -> Result<std::collections::HashMap<String, Vec<ColumnInfo>>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
+        match pool.as_ref() {
+            DriverPool::MySql(p) => mysql::get_all_columns(p, &database).await,
+            DriverPool::Postgres(p) => postgres::get_all_columns(p, &database).await,
+        }
+    }
+
     pub async fn get_table_data(self: Arc<Self>, connection_id: String, database: String, table: String, page: u32, page_size: u32, where_clause: Option<String>, order_by: Option<String>) -> Result<QueryResult, AppError> {
         let pool = self.clone().get_pool(connection_id.clone()).await?;
         let offset = page.saturating_sub(1) * page_size;

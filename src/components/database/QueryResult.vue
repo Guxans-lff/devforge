@@ -9,10 +9,11 @@ import { FlexRender } from '@tanstack/vue-table'
 import {
   ArrowUpDown, ArrowUp, ArrowDown, Clock, AlertCircle, CheckCircle2,
   Hash, Download, Trash2, Filter, ShieldAlert, WifiOff, KeyRound, Eye,
-  Loader2,
+  Loader2, RotateCcw, Activity,
   Table as TableIcon,
   BarChart3,
   Settings2,
+  Pin, PinOff,
 } from 'lucide-vue-next'
 import type { QueryResult as QueryResultType } from '@/types/database'
 import {
@@ -66,6 +67,22 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const tableScrollRef = ref<HTMLDivElement | null>(null)
+
+// ── 共享右键菜单状态（避免每行创建 ContextMenu 实例）──
+const ctxRowIndex = ref<number | null>(null)
+const ctxMenuOpen = ref(false)
+const ctxMenuStyle = ref({ left: '0px', top: '0px' })
+
+function handleRowContextMenu(e: MouseEvent, rowIndex: number) {
+  e.preventDefault()
+  ctxRowIndex.value = rowIndex
+  ctxMenuStyle.value = { left: `${e.clientX}px`, top: `${e.clientY}px` }
+  ctxMenuOpen.value = true
+}
+
+function closeCtxMenu() {
+  ctxMenuOpen.value = false
+}
 
 const qr = useQueryResult({
   result: toRef(props, 'result'),
@@ -205,53 +222,78 @@ const chartConfigOpen = ref(false)
         :style="{ width: 'max-content' }"
       >
         <!-- Header -->
-        <div class="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm">
+        <div class="sticky top-0 z-10 bg-muted">
           <div class="w-full" :style="qr.gridStyle.value">
-            <div class="whitespace-nowrap border-b border-r border-border px-3 py-1.5 text-left text-xs font-medium text-muted-foreground">
+            <div class="whitespace-nowrap border-b border-r border-border px-3 py-1.5 text-left text-xs font-medium text-muted-foreground sticky left-0 z-20 bg-muted">
               #
             </div>
-            <div
-              v-for="header in qr.table.getFlatHeaders()"
-              :key="header.id"
-              class="group/header relative select-none whitespace-nowrap border-b border-r border-border px-3 py-1.5 text-left text-xs font-bold text-muted-foreground/80 hover:bg-muted/50 transition-colors"
-              :class="{ 'bg-primary/5 text-primary': qr.selectedStatsColumn.value === header.column.id }"
-              @contextmenu.prevent="qr.triggerColumnStats(header.column.id)"
-            >
-              <div
-                class="flex items-center gap-1 cursor-pointer"
-                @click="isTableBrowse ? qr.handleHeaderClick(header.column.id) : header.column.getToggleSortingHandler()?.($event)"
-              >
-                <FlexRender :render="header.column.columnDef.header" :props="header.getContext()" />
-                <template v-if="isTableBrowse">
-                  <ArrowUp v-if="qr.serverSortCol.value === header.column.id && qr.serverSortDir.value === 'ASC'" class="h-3 w-3 text-primary" />
-                  <ArrowDown v-else-if="qr.serverSortCol.value === header.column.id && qr.serverSortDir.value === 'DESC'" class="h-3 w-3 text-primary" />
-                  <ArrowUpDown v-else class="h-3 w-3 opacity-0 group-hover/header:opacity-30" />
-                </template>
-                <template v-else>
-                  <ArrowUp v-if="header.column.getIsSorted() === 'asc'" class="h-3 w-3 text-primary" />
-                  <ArrowDown v-else-if="header.column.getIsSorted() === 'desc'" class="h-3 w-3 text-primary" />
-                  <ArrowUpDown v-else class="h-3 w-3 opacity-0 group-hover/header:opacity-30" />
-                </template>
-              </div>
-              <div
-                v-if="header.column.getCanResize()"
-                class="absolute right-0 top-0 h-full w-1 cursor-col-resize user-select-none touch-none hover:bg-primary/50 transition-colors"
-                :class="{ 'bg-primary w-0.5 opacity-100': header.column.getIsResizing() }"
-                @mousedown="header.getResizeHandler()($event)"
-                @touchstart="header.getResizeHandler()($event)"
-              />
-            </div>
+            <ContextMenu v-for="header in qr.table.getFlatHeaders()" :key="'hctx-' + header.id">
+              <ContextMenuTrigger as-child>
+                <div
+                  class="group/header relative select-none whitespace-nowrap border-b border-r border-border px-3 py-1.5 text-left text-xs font-bold text-muted-foreground/80 hover:bg-muted/50 transition-colors"
+                  :class="{
+                    'bg-primary/5 text-primary': qr.selectedStatsColumn.value === header.column.id,
+                    'sticky z-20 bg-muted': qr.isColumnPinned(header.column.id),
+                  }"
+                  :style="qr.isColumnPinned(header.column.id) ? { left: qr.pinnedColumnOffsets.value[header.column.id] + 'px' } : undefined"
+                >
+                  <div
+                    class="flex items-center gap-1 cursor-pointer"
+                    @click="isTableBrowse ? qr.handleHeaderClick(header.column.id) : header.column.getToggleSortingHandler()?.($event)"
+                  >
+                    <Pin v-if="qr.isColumnPinned(header.column.id)" class="h-2.5 w-2.5 text-primary/50 shrink-0" />
+                    <FlexRender :render="header.column.columnDef.header" :props="header.getContext()" />
+                    <template v-if="isTableBrowse">
+                      <ArrowUp v-if="qr.serverSortCol.value === header.column.id && qr.serverSortDir.value === 'ASC'" class="h-3 w-3 text-primary" />
+                      <ArrowDown v-else-if="qr.serverSortCol.value === header.column.id && qr.serverSortDir.value === 'DESC'" class="h-3 w-3 text-primary" />
+                      <ArrowUpDown v-else class="h-3 w-3 opacity-0 group-hover/header:opacity-30" />
+                    </template>
+                    <template v-else>
+                      <ArrowUp v-if="header.column.getIsSorted() === 'asc'" class="h-3 w-3 text-primary" />
+                      <ArrowDown v-else-if="header.column.getIsSorted() === 'desc'" class="h-3 w-3 text-primary" />
+                      <ArrowUpDown v-else class="h-3 w-3 opacity-0 group-hover/header:opacity-30" />
+                    </template>
+                  </div>
+                  <div
+                    v-if="header.column.getCanResize()"
+                    class="absolute right-0 top-0 h-full w-1 cursor-col-resize user-select-none touch-none hover:bg-primary/50 transition-colors"
+                    :class="{ 'bg-primary w-0.5 opacity-100': header.column.getIsResizing() }"
+                    @mousedown="header.getResizeHandler()($event)"
+                    @touchstart="header.getResizeHandler()($event)"
+                  />
+                </div>
+              </ContextMenuTrigger>
+              <ContextMenuContent class="w-44">
+                <ContextMenuItem class="gap-2 text-xs" @click="qr.triggerColumnStats(header.column.id)">
+                  <Activity class="h-3.5 w-3.5" />
+                  列统计
+                </ContextMenuItem>
+                <ContextMenuSeparator />
+                <ContextMenuItem v-if="!qr.isColumnPinned(header.column.id)" class="gap-2 text-xs" @click="qr.pinColumnLeft(header.column.id)">
+                  <Pin class="h-3.5 w-3.5" />
+                  固定到左侧
+                </ContextMenuItem>
+                <ContextMenuItem v-else class="gap-2 text-xs" @click="qr.unpinColumn(header.column.id)">
+                  <PinOff class="h-3.5 w-3.5" />
+                  取消固定
+                </ContextMenuItem>
+              </ContextMenuContent>
+            </ContextMenu>
             <div
               v-if="qr.editable.value"
               class="whitespace-nowrap border-b border-r border-border px-1 py-1.5 text-center text-xs font-medium text-muted-foreground"
             />
           </div>
           <div v-if="qr.showFilters.value" class="flex" :style="qr.gridStyle.value">
-            <div class="border-b border-r border-border px-1 py-0.5" />
+            <div class="border-b border-r border-border px-1 py-0.5 sticky left-0 z-20 bg-muted/80" />
             <div
               v-for="header in qr.table.getFlatHeaders()"
               :key="'filter-' + header.id"
               class="border-b border-r border-border px-1 py-0.5"
+              :class="{
+                'sticky z-20 bg-muted/80': qr.isColumnPinned(header.column.id),
+              }"
+              :style="qr.isColumnPinned(header.column.id) ? { left: qr.pinnedColumnOffsets.value[header.column.id] + 'px' } : undefined"
             >
               <div v-if="isTableBrowse" class="flex gap-0.5">
                 <select
@@ -292,77 +334,72 @@ const chartConfigOpen = ref(false)
 
         <!-- Virtual Body -->
         <div :style="{ height: `${qr.rowVirtualizer.value.getTotalSize()}px`, position: 'relative' }" style="will-change: transform; contain: content">
-          <ContextMenu v-for="vRow in qr.rowVirtualizer.value.getVirtualItems()" :key="vRow.index">
-            <ContextMenuTrigger as-child>
+          <div
+            v-for="vRow in qr.rowVirtualizer.value.getVirtualItems()"
+            :key="vRow.index"
+            v-memo="[vRow.index, vRow.start, qr.selectedRowIndex.value === vRow.index, qr.editingCell.value?.rowIndex === vRow.index, qr.table.getRowModel().rows[vRow.index]?.id, qr.columnSizingKey.value]"
+          >
+            <div
+              v-if="vRow && qr.table.getRowModel().rows[vRow.index]"
+              class="cursor-pointer absolute left-0 right-0 group/row"
+              :style="{ ...qr.rowBaseStyle.value, transform: `translateY(${vRow.start}px)` }"
+              :class="qr.selectedRowIndex.value === vRow.index ? 'selected-row bg-primary/10' : ''"
+              @click="qr.selectedRowIndex.value = vRow.index"
+              @contextmenu="handleRowContextMenu($event, vRow.index)"
+            >
               <div
-                v-if="vRow && qr.table.getRowModel().rows[vRow.index]"
-                v-memo="[vRow.index, vRow.start, qr.selectedRowIndex.value === vRow.index, qr.editingCell.value?.rowIndex === vRow.index, qr.table.getRowModel().rows[vRow.index]?.id, qr.table.getState().columnSizing]"
-                class="cursor-pointer absolute left-0 right-0"
-                :style="{ ...qr.rowBaseStyle.value, transform: `translateY(${vRow.start}px)` }"
-                :class="qr.selectedRowIndex.value === vRow.index ? 'bg-primary/10' : 'hover:bg-muted/30'"
-                @click="qr.selectedRowIndex.value = vRow.index"
+                class="whitespace-nowrap border-b border-r border-border px-3 text-[10px] font-bold text-muted-foreground/40 tabular-nums flex items-center justify-center sticky left-0 z-[5]"
+                :class="qr.selectedRowIndex.value === vRow.index ? 'bg-primary/10' : 'bg-muted/5 group-hover/row:bg-muted-foreground/10'"
               >
-                <div class="whitespace-nowrap border-b border-r border-border bg-muted/5 px-3 text-[10px] font-bold text-muted-foreground/40 tabular-nums flex items-center justify-center">
-                  {{ vRow.index + 1 }}
-                </div>
-                <div
-                  v-for="cell in qr.table.getRowModel().rows[vRow.index]?.getVisibleCells()"
-                  :key="cell.id"
-                  class="select-text whitespace-nowrap border-b border-r border-border px-3 font-mono text-[12px] flex items-center overflow-hidden"
-                  :class="{
-                    'text-muted-foreground/40 italic font-sans': cell.getValue() === null || cell.getValue() === undefined,
-                    'cursor-pointer hover:bg-primary/[0.02]': !qr.editingCell.value || qr.editingCell.value.rowIndex !== vRow.index || qr.editingCell.value.colName !== cell.column.id,
-                    'text-primary font-bold': qr.selectedRowIndex.value === vRow.index
-                  }"
-                  @click.stop="qr.handleCellClick(cell.getValue())"
-                  @dblclick="qr.editable.value ? qr.startEdit(vRow.index, cell.column.id, cell.getValue()) : undefined"
-                >
-                  <template v-if="qr.editingCell.value && qr.editingCell.value.rowIndex === vRow.index && qr.editingCell.value.colName === cell.column.id">
-                    <input
-                      :value="qr.editingValue.value"
-                      v-focus
-                      class="h-full w-full bg-background px-1 text-xs font-mono outline-none border border-primary rounded-sm"
-                      @input="qr.editingValue.value = ($event.target as HTMLInputElement).value"
-                      @keydown.enter="qr.saveEdit()"
-                      @keydown.escape="qr.cancelEdit()"
-                      @blur="qr.saveEdit()"
-                    />
-                  </template>
-                  <template v-else>
-                    <span v-if="cell.getValue() === null || cell.getValue() === undefined">NULL</span>
-                    <span v-else>{{ String(cell.getValue()) }}</span>
-                  </template>
-                </div>
-                <div
-                  v-if="qr.editable.value"
-                  class="border-b border-r border-border flex items-center justify-center"
-                >
-                  <button
-                    class="h-5 w-5 flex items-center justify-center rounded-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                    :title="t('common.delete')"
-                    @click.stop="qr.requestDeleteRow(vRow.index)"
-                  >
-                    <Trash2 class="h-3 w-3" />
-                  </button>
-                </div>
+                {{ vRow.index + 1 }}
               </div>
-            </ContextMenuTrigger>
-            <ContextMenuContent class="w-48">
-              <ContextMenuItem class="gap-2 text-xs" @click="qr.openRowDetail(vRow.index)">
-                查看行详情
-                <span class="ml-auto text-[10px] text-muted-foreground">Ctrl+D</span>
-              </ContextMenuItem>
-              <ContextMenuItem class="gap-2 text-xs" @click="qr.copyRowAsJson(vRow.index)">
-                复制为 JSON
-              </ContextMenuItem>
-              <template v-if="qr.editable.value">
-                <ContextMenuSeparator />
-                <ContextMenuItem class="gap-2 text-xs text-destructive" @click="qr.requestDeleteRow(vRow.index)">
-                  删除行
-                </ContextMenuItem>
-              </template>
-            </ContextMenuContent>
-          </ContextMenu>
+              <div
+                v-for="cell in qr.table.getRowModel().rows[vRow.index]?.getVisibleCells()"
+                :key="cell.id"
+                class="select-text whitespace-nowrap border-b border-r border-border px-3 font-mono text-[12px] flex items-center overflow-hidden"
+                :class="{
+                  'text-muted-foreground/40 italic font-sans': cell.getValue() === null || cell.getValue() === undefined,
+                  'cursor-pointer': !qr.editingCell.value || qr.editingCell.value.rowIndex !== vRow.index || qr.editingCell.value.colName !== cell.column.id,
+                  'text-primary font-bold bg-primary/10': qr.selectedRowIndex.value === vRow.index,
+                  'group-hover/row:bg-muted-foreground/10': qr.selectedRowIndex.value !== vRow.index,
+                  'sticky z-[5]': qr.isColumnPinned(cell.column.id),
+                  '!bg-primary/10': qr.isColumnPinned(cell.column.id) && qr.selectedRowIndex.value === vRow.index,
+                  'bg-background group-hover/row:!bg-muted-foreground/10': qr.isColumnPinned(cell.column.id) && qr.selectedRowIndex.value !== vRow.index,
+                }"
+                :style="qr.isColumnPinned(cell.column.id) ? { left: qr.pinnedColumnOffsets.value[cell.column.id] + 'px' } : undefined"
+                @click.stop="qr.handleCellClick(cell.getValue())"
+                @dblclick="qr.editable.value ? qr.startEdit(vRow.index, cell.column.id, cell.getValue()) : undefined"
+              >
+                <template v-if="qr.editingCell.value && qr.editingCell.value.rowIndex === vRow.index && qr.editingCell.value.colName === cell.column.id">
+                  <input
+                    :value="qr.editingValue.value"
+                    v-focus
+                    class="h-full w-full bg-background px-1 text-xs font-mono outline-none border border-primary rounded-sm"
+                    @input="qr.editingValue.value = ($event.target as HTMLInputElement).value"
+                    @keydown.enter="qr.saveEdit()"
+                    @keydown.escape="qr.cancelEdit()"
+                    @blur="qr.saveEdit()"
+                  />
+                </template>
+                <template v-else>
+                  <span v-if="cell.getValue() === null || cell.getValue() === undefined">NULL</span>
+                  <span v-else>{{ String(cell.getValue()) }}</span>
+                </template>
+              </div>
+              <div
+                v-if="qr.editable.value"
+                class="border-b border-r border-border flex items-center justify-center"
+              >
+                <button
+                  class="h-5 w-5 flex items-center justify-center rounded-sm text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                  :title="t('common.delete')"
+                  @click.stop="qr.requestDeleteRow(vRow.index)"
+                >
+                  <Trash2 class="h-3 w-3" />
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -389,7 +426,7 @@ const chartConfigOpen = ref(false)
           </div>
         </div>
         <div class="flex-1 px-4 py-3 overflow-auto">
-          <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/80 select-text">{{ result.error }}</pre>
+          <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/80 select-text">{{ typeof result.error === 'string' ? result.error : (result.error?.message || result.error?.msg || JSON.stringify(result.error, null, 2)) }}</pre>
           <div class="mt-4 space-y-1.5">
             <p class="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">排查建议</p>
             <template v-if="qr.isConnectionError.value">
@@ -524,6 +561,8 @@ const chartConfigOpen = ref(false)
       v-model:open="qr.exportDialogOpen.value"
       :connection-id="connectionId"
       :source="qr.exportSource.value"
+      :preview-columns="result?.columns?.map(c => c.name) ?? []"
+      :preview-rows="(result?.rows ?? []).slice(0, 10)"
     />
     <RowDetailSheet
       v-model:open="qr.rowDetailOpen.value"
@@ -535,4 +574,44 @@ const chartConfigOpen = ref(false)
       @navigate="qr.handleRowDetailNavigate"
     />
   </div>
+
+  <!-- 共享行右键菜单（单例，避免每行创建 ContextMenu 实例） -->
+  <Teleport to="body">
+    <template v-if="ctxMenuOpen">
+      <div class="fixed inset-0 z-50" @click="closeCtxMenu()" @contextmenu.prevent="closeCtxMenu()" />
+      <div
+        class="fixed z-50 min-w-[192px] rounded-md border bg-popover p-1 shadow-md animate-in fade-in-0 zoom-in-95"
+        :style="ctxMenuStyle"
+      >
+        <button
+          class="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
+          @click="qr.openRowDetail(ctxRowIndex!); closeCtxMenu()"
+        >
+          查看行详情
+          <span class="ml-auto text-[10px] text-muted-foreground">Ctrl+D</span>
+        </button>
+        <button
+          class="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
+          @click="qr.copyRowAsJson(ctxRowIndex!); closeCtxMenu()"
+        >
+          复制为 JSON
+        </button>
+        <button
+          class="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-accent hover:text-accent-foreground"
+          @click="qr.copyRowAsSql(ctxRowIndex!); closeCtxMenu()"
+        >
+          复制为 SQL
+        </button>
+        <template v-if="qr.editable.value">
+          <div class="my-1 h-px bg-border" />
+          <button
+            class="flex w-full cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-xs text-destructive outline-none hover:bg-accent hover:text-destructive"
+            @click="qr.requestDeleteRow(ctxRowIndex!); closeCtxMenu()"
+          >
+            删除行
+          </button>
+        </template>
+      </div>
+    </template>
+  </Teleport>
 </template>

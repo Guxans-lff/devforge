@@ -7,7 +7,8 @@ import TerminalPanel from '@/components/terminal/TerminalPanelLazy.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Send, Eraser, LayoutGrid, Rows2, Columns2, Check, Monitor } from 'lucide-vue-next'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Send, Eraser, LayoutGrid, Rows2, Columns2, Check, Monitor, ChevronsUpDown, TerminalSquare, Search } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
@@ -19,6 +20,9 @@ const terminalRefs = ref<Map<string, InstanceType<typeof TerminalPanel>>>(new Ma
 const sessionStatuses = ref<Map<string, string>>(new Map())
 const layout = ref<'grid' | 'vertical' | 'horizontal'>('grid')
 const focusedId = ref<string | null>(null)
+const openPopover = ref(false)
+
+const searchTarget = ref('')
 
 // 命令历史（内存级，最近 20 条）
 const commandHistory = ref<string[]>([])
@@ -29,6 +33,14 @@ const MAX_HISTORY = 20
 const sshConnections = computed(() =>
   connectionStore.connectionList.filter((c) => c.record.type === 'ssh')
 )
+
+const filteredSshConnections = computed(() => {
+  if (!searchTarget.value) return sshConnections.value
+  const q = searchTarget.value.toLowerCase()
+  return sshConnections.value.filter((c) =>
+    c.record.name.toLowerCase().includes(q) || c.record.host.toLowerCase().includes(q)
+  )
+})
 
 const selectedConnections = computed(() =>
   sshConnections.value.filter((c) => selectedIds.value.has(c.record.id))
@@ -125,96 +137,146 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="flex h-full flex-col bg-background">
-    <!-- 顶部：命令输入 + 服务器选择 -->
-    <div class="border-b border-border/80 p-3 bg-card/60 backdrop-blur-md z-10 space-y-3 shadow-sm relative">
-      
-      <!-- 紧凑型命令输入框 -->
-      <div class="flex items-center gap-1.5 rounded-lg border border-input bg-background px-1 focus-within:ring-[2px] focus-within:ring-primary/20 focus-within:border-primary/50 transition-all duration-300 shadow-sm relative overflow-hidden">
-        <Input
-          v-model="commandInput"
-          :placeholder="t('multiExec.inputPlaceholder') + ' (↑/↓ 历史, Ctrl+Enter 发送)'"
-          class="flex-1 font-mono text-[13px] border-0 focus-visible:ring-0 shadow-none px-2 h-9 bg-transparent"
-          @keydown="handleKeydown"
-        />
-        <div class="flex items-center gap-1 pr-1 shrink-0">
-          <TooltipProvider :delay-duration="300">
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-md transition-colors" @click="clearInput" v-show="commandInput.length > 0">
-                  <Eraser class="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent><p>{{ t('multiExec.clear') }}</p></TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
-          <Button size="sm" class="h-7 rounded-md px-3 gap-1.5 bg-primary hover:bg-primary/90 transition-all disabled:opacity-50 font-medium" :disabled="!commandInput.trim() || selectedConnections.length === 0" @click="sendCommand">
-            <Send class="h-3 w-3" />
-            <span class="text-[12px]">{{ t('multiExec.send') }}</span>
-          </Button>
-        </div>
-      </div>
-
-      <!-- 服务器选择行 -->
-      <div class="flex items-center gap-3">
-        <!-- 基础操作组 -->
-        <div class="flex items-center gap-0.5 bg-muted/60 p-1 rounded-lg border border-border/60 shrink-0">
-           <Button variant="ghost" size="sm" class="h-6 px-2.5 text-[12px] font-medium hover:bg-background hover:shadow-sm transition-all rounded-md" @click="selectAll">{{ t('multiExec.selectAll') }}</Button>
-           <div class="w-px h-3 bg-border/80 mx-0.5"></div>
-           <Button variant="ghost" size="sm" class="h-6 px-2.5 text-[12px] font-medium hover:bg-background hover:shadow-sm transition-all rounded-md text-muted-foreground hover:text-foreground" @click="deselectAll">{{ t('multiExec.deselectAll') }}</Button>
-        </div>
+    <!-- 穹顶天际线：灵动指令岛 (Command Island) -->
+    <div class="relative z-20 px-4 xl:px-8 pt-6 pb-2">
+      <!-- 物理级悬浮外壳 -->
+      <div class="mx-auto flex items-center bg-card/70 backdrop-blur-[40px] border border-border/60 shadow-[0_8px_30px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.1)] rounded-[1.25rem] p-1.5 ring-1 ring-black/5 dark:ring-white/10 transition-all duration-500 hover:shadow-[0_8px_40px_rgba(0,0,0,0.08)] focus-within:shadow-[0_12px_50px_rgba(var(--primary),0.12)] focus-within:border-primary/30 focus-within:ring-primary/20 max-w-[1200px]">
         
-        <div class="w-px h-5 bg-border/60 shrink-0"></div>
-        
-        <!-- 服务器列表组 -->
-        <div class="flex-1 overflow-x-auto pb-1 -mb-1 hide-scrollbar flex items-center gap-2">
-          <button
-            v-for="conn in sshConnections"
-            :key="conn.record.id"
-            class="group relative flex items-center gap-1.5 cursor-pointer rounded-full border px-3 py-1 text-[11px] font-medium transition-all duration-300 overflow-hidden shrink-0"
-            :class="selectedIds.has(conn.record.id)
-              ? 'border-primary/40 bg-primary/10 text-primary shadow-sm hover:bg-primary/20 hover:border-primary/50'
-              : 'border-border bg-muted/30 text-muted-foreground hover:border-muted-foreground/50 hover:bg-muted/60 hover:text-foreground'"
-            @click="toggleConnection(conn.record.id)"
-          >
-            <div class="relative flex items-center gap-1 z-10 w-full">
+        <!-- 左侧：动态服务器胶囊舱 (Popover Selector) -->
+        <Popover v-model:open="openPopover">
+          <PopoverTrigger as-child>
+            <Button
+              variant="ghost"
+              role="combobox"
+              :aria-expanded="openPopover"
+              class="h-11 rounded-[14px] bg-muted/40 hover:bg-muted/80 px-4 font-medium flex items-center gap-2.5 shrink-0 border border-transparent hover:border-border/60 transition-all text-[13.5px] shadow-[inset_0_1px_1px_rgba(255,255,255,0.2)] dark:shadow-none"
+            >
               <div class="relative flex items-center justify-center">
-                <Monitor class="h-3 w-3 transition-all duration-300" :class="selectedIds.has(conn.record.id) ? 'text-primary scale-0 opacity-0 absolute' : 'text-muted-foreground/70 group-hover:text-foreground scale-100 opacity-100'" />
-                <Check class="h-3 w-3 text-primary transition-all duration-300" :class="selectedIds.has(conn.record.id) ? 'scale-100 opacity-100' : 'scale-50 opacity-0 absolute'" />
+                <Monitor class="h-4 w-4 text-primary drop-shadow-sm" />
+                <span v-if="selectedIds.size > 0" class="absolute -top-1 -right-1.5 flex h-2 w-2">
+                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                  <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary left-0.5 top-0.5"></span>
+                </span>
               </div>
-              <span class="truncate max-w-[120px]">{{ conn.record.name }}</span>
+              <span v-if="selectedIds.size === 0" class="text-muted-foreground tracking-wide">{{ t('multiExec.emptyGuide', '选择目标主机') }}</span>
+              <span v-else class="text-foreground font-bold tracking-tight">{{ selectedIds.size }} 台终端已就绪</span>
+              <ChevronsUpDown class="h-3.5 w-3.5 text-muted-foreground/50 ml-1" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent class="w-[320px] p-0 shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] border-border/50 rounded-[18px] overflow-hidden bg-background/95 backdrop-blur-2xl translate-y-3 flex flex-col" align="start">
+            <!-- 精致搜索框 -->
+            <div class="flex items-center px-4 border-b border-border/40 h-12 shrink-0">
+              <Search class="h-4 w-4 text-muted-foreground/60 shrink-0 mr-2" />
+              <input v-model="searchTarget" placeholder="搜索目标服务器..." class="flex-1 min-w-0 bg-transparent border-none outline-none focus:ring-0 text-[12.5px] placeholder:text-muted-foreground/50 text-foreground font-medium" />
             </div>
-          </button>
-          
-          <div v-if="sshConnections.length === 0" class="text-[12px] text-muted-foreground italic px-2">
-            {{ t('multiExec.noSshConnections') }}
+            
+            <div v-if="filteredSshConnections.length === 0" class="py-10 text-center text-[12.5px] text-muted-foreground">未找到匹配的终端机</div>
+            
+            <div v-else class="max-h-[300px] overflow-y-auto p-1.5 custom-scrollbar flex flex-col gap-0.5">
+              <div
+                v-for="conn in filteredSshConnections"
+                :key="conn.record.id"
+                class="group flex items-center gap-3.5 rounded-[12px] px-3.5 py-3 cursor-pointer text-[13px] transition-all duration-300 hover:bg-primary/10 select-none"
+                :class="selectedIds.has(conn.record.id) ? 'bg-primary/5 text-primary' : ''"
+                @click="toggleConnection(conn.record.id)"
+              >
+                <!-- 精致的复选框 -->
+                <div class="h-4 w-4 shrink-0 rounded-[6px] border flex items-center justify-center transition-all duration-300 shadow-sm"
+                     :class="selectedIds.has(conn.record.id) ? 'bg-primary border-primary text-primary-foreground shadow-[0_2px_10px_rgba(var(--primary),0.5)]' : 'bg-card border-border/80 text-transparent group-hover:border-primary/50'">
+                  <Check class="h-[10px] w-[10px]" :class="selectedIds.has(conn.record.id) ? 'scale-100 opacity-100' : 'scale-50 opacity-0'" />
+                </div>
+                
+                <!-- 图标与文本组 -->
+                <div class="flex items-center gap-3 min-w-0 flex-1 pl-0.5">
+                  <div class="h-8 w-8 rounded-[10px] bg-background border border-border/50 flex items-center justify-center shadow-sm shrink-0 transition-all duration-300 group-hover:border-primary/30 group-hover:bg-primary/5 group-hover:scale-105" :class="selectedIds.has(conn.record.id) ? 'border-primary/40 bg-primary/10' : ''">
+                    <TerminalSquare class="h-4 w-4 transition-colors duration-300" :class="selectedIds.has(conn.record.id) ? 'text-primary' : 'text-muted-foreground/60 group-hover:text-primary/70'" />
+                  </div>
+                  <div class="flex flex-col min-w-0 overflow-hidden justify-center space-y-0.5">
+                    <span class="font-semibold text-foreground truncate leading-tight transition-colors duration-300" :class="selectedIds.has(conn.record.id) ? 'text-primary' : ''">{{ conn.record.name }}</span>
+                    <span class="text-[11px] text-muted-foreground/60 font-mono truncate transition-colors duration-300 tracking-tight" :class="selectedIds.has(conn.record.id) ? 'text-primary/70' : ''">{{ conn.record.host }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <!-- 底部操作区 -->
+            <div class="p-2 border-t border-border/40 bg-card/40 backdrop-blur-xl flex gap-2 items-center justify-between shrink-0">
+              <span class="text-[11px] font-medium text-muted-foreground pl-2 flex items-center gap-1.5 opacity-80">
+                <div class="w-1.5 h-1.5 rounded-full" :class="selectedIds.size > 0 ? 'bg-primary animate-pulse' : 'bg-muted-foreground/30'"></div>
+                已选 {{ selectedIds.size }} / {{ sshConnections.length }}
+              </span>
+              <div class="flex items-center gap-1 pr-1">
+                <Button variant="ghost" size="sm" class="h-7 px-3 text-[11.5px] font-semibold rounded-[8px] hover:bg-background hover:shadow-sm transition-all" @click="selectAll" :disabled="selectedIds.size === sshConnections.length" :class="selectedIds.size === sshConnections.length ? 'opacity-40' : 'text-foreground'">
+                  全接管
+                </Button>
+                <Button variant="ghost" size="sm" class="h-7 px-3 text-[11.5px] font-medium rounded-[8px] hover:bg-background hover:text-destructive hover:shadow-sm transition-all" @click="deselectAll" :disabled="selectedIds.size === 0" :class="selectedIds.size === 0 ? 'opacity-40' : 'text-muted-foreground'">
+                  清空
+                </Button>
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        <!-- 极简分割线 -->
+        <div class="w-px h-6 bg-border/60 mx-3 shrink-0"></div>
+
+        <!-- 中枢：无界指令输入场 (Infinity Input) -->
+        <div class="flex-1 relative flex items-center group">
+          <input 
+            v-model="commandInput"
+            class="w-full h-11 bg-transparent border-none outline-none focus:ring-0 px-2 text-[14.5px] font-mono text-foreground placeholder:text-muted-foreground/40 transition-all font-medium"
+            placeholder="输入群控终端指令... (↑/↓ 翻页历史, Ctrl+Enter 闪击)"
+            @keydown="handleKeydown"
+          />
+          <!-- 擦除按钮 -->
+          <div class="absolute right-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity flex items-center">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:bg-destructive/10 hover:text-destructive rounded-xl transition-colors" @click="clearInput" v-show="commandInput.length > 0">
+                    <Eraser class="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom"><p>{{ t('multiExec.clear', '清空') }}</p></TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
         </div>
 
-        <!-- 布局切换 -->
-        <div class="ml-auto flex items-center gap-0.5 shrink-0 bg-muted/60 p-1 rounded-lg border border-border/60">
-          <Button
-            variant="ghost" size="icon" class="h-6 w-6 rounded-md transition-all"
-            :class="layout === 'grid' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/80 hover:text-foreground'"
-            @click="layout = 'grid'"
-          >
-            <LayoutGrid class="h-3.5 w-3.5" />
+        <!-- 右侧：火力发射与布局矩阵 -->
+        <div class="flex items-center gap-2 pl-3 pr-1 shrink-0 relative before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-px before:h-6 before:bg-border/60">
+          
+          <!-- 发射按钮 (Glow Effect) -->
+          <Button class="h-10 px-5 rounded-[12px] bg-primary hover:bg-primary/90 shadow-[0_4px_14px_rgba(var(--primary),0.3)] hover:shadow-[0_6px_20px_rgba(var(--primary),0.4)] hover:-translate-y-0.5 gap-2.5 transition-all duration-300 font-bold tracking-wider disabled:opacity-40 disabled:hover:translate-y-0 disabled:hover:shadow-[0_4px_14px_rgba(var(--primary),0.3)]" :disabled="!commandInput.trim() || selectedIds.size === 0" @click="sendCommand">
+            <Send class="h-4 w-4" />发送
           </Button>
-          <Button
-            variant="ghost" size="icon" class="h-6 w-6 rounded-md transition-all"
-            :class="layout === 'vertical' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/80 hover:text-foreground'"
-            @click="layout = 'vertical'"
-          >
-            <Columns2 class="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost" size="icon" class="h-6 w-6 rounded-md transition-all"
-            :class="layout === 'horizontal' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:bg-background/80 hover:text-foreground'"
-            @click="layout = 'horizontal'"
-          >
-            <Rows2 class="h-3.5 w-3.5" />
-          </Button>
+
+          <!-- 极客布局控件 -->
+          <div class="flex items-center gap-0.5 bg-muted/40 p-1 rounded-[12px] border border-border/50 ml-1">
+            <Button
+              variant="ghost" size="icon" class="h-8 w-8 rounded-[10px] transition-all"
+              :class="layout === 'grid' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'"
+              @click="layout = 'grid'"
+            >
+              <LayoutGrid class="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost" size="icon" class="h-8 w-8 rounded-[10px] transition-all"
+              :class="layout === 'vertical' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'"
+              @click="layout = 'vertical'"
+            >
+              <Columns2 class="h-4 w-4" />
+            </Button>
+            <Button
+              variant="ghost" size="icon" class="h-8 w-8 rounded-[10px] transition-all"
+              :class="layout === 'horizontal' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'"
+              @click="layout = 'horizontal'"
+            >
+              <Rows2 class="h-4 w-4" />
+            </Button>
+          </div>
         </div>
+
       </div>
     </div>
 
@@ -281,75 +343,30 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <!-- 空状态：引导卡片 -->
-    <div v-else class="flex-1 overflow-y-auto p-4 sm:p-6 bg-muted/10 flex items-center justify-center relative">
-      <div class="max-w-5xl w-full text-center animate-in fade-in zoom-in-[0.98] duration-700 bg-background/50 backdrop-blur-3xl border border-border/50 shadow-2xl rounded-[2.5rem] p-6 sm:p-10 mb-4 relative overflow-hidden">
+    <!-- 纯粹修身的高阶留白空状态 -->
+    <div v-else class="flex-1 overflow-y-auto p-4 sm:p-6 bg-muted/10 flex items-center justify-center relative select-none">
+      <div class="flex flex-col items-center justify-center text-center animate-in fade-in zoom-in-[0.98] duration-700 max-w-md mx-auto p-12 rounded-[2.5rem] bg-transparent relative z-10 transition-all">
         
-        <!-- 背景装饰圈 -->
-        <div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] bg-primary/10 rounded-full blur-[100px] pointer-events-none opacity-50"></div>
-        
-        <div class="relative space-y-4 z-10 mb-8 mt-2">
-          <div class="relative h-20 w-20 mx-auto group">
-            <div class="absolute inset-0 bg-primary/20 rounded-2xl blur-xl animate-pulse group-hover:bg-primary/30 transition-colors duration-700"></div>
-            <div class="relative h-full w-full rounded-xl bg-card border border-border/80 shadow-xl flex items-center justify-center ring-1 ring-primary/10 group-hover:-translate-y-1.5 group-hover:shadow-primary/20 transition-all duration-500">
-              <Monitor class="h-10 w-10 text-primary drop-shadow-md" />
-            </div>
-          </div>
-          <div class="space-y-1.5">
-            <h3 class="text-2xl font-bold tracking-tight text-foreground">{{ t('multiExec.emptyGuide') }}</h3>
-            <p class="text-[14px] text-muted-foreground max-w-sm mx-auto leading-relaxed">{{ t('multiExec.emptyGuideDesc') }}</p>
+        <!-- 中心光晕与拟物圆盘 -->
+        <div class="relative h-32 w-32 mb-10 flex items-center justify-center group">
+          <!-- 呼吸氛围灯 (背光) -->
+          <div class="absolute inset-0 bg-primary/20 rounded-full blur-[40px] animate-pulse opacity-60 transition-opacity duration-1000 group-hover:opacity-100"></div>
+          
+          <!-- 立体玻璃材质底座 -->
+          <div class="h-24 w-24 rounded-[1.75rem] bg-gradient-to-tr from-card to-background border border-border/60 shadow-[0_16px_50px_rgba(0,0,0,0.06),inset_0_1px_0_rgba(255,255,255,0.4)] flex items-center justify-center ring-1 ring-black/5 dark:ring-white/10 relative overflow-hidden transition-all duration-700 group-hover:scale-110">
+            <!-- 表面光泽映射 -->
+            <div class="absolute inset-0 bg-gradient-to-br from-white/30 via-transparent to-transparent dark:from-white/10 opacity-60"></div>
+            <!-- 主荧幕 Icon -->
+            <Monitor class="h-10 w-10 text-muted-foreground/60 drop-shadow-[0_1px_1px_rgba(255,255,255,0.8)] dark:drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] transition-all duration-500 group-hover:text-primary/80" />
           </div>
         </div>
 
-        <!-- 服务器快速选择卡片网格 -->
-        <div v-if="sshConnections.length > 0" class="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 text-left w-full mx-auto">
-          <button
-            v-for="conn in sshConnections"
-            :key="conn.record.id"
-            class="group relative flex overflow-hidden rounded-xl border transition-all duration-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 text-left bg-background/60 backdrop-blur-sm"
-            :class="selectedIds.has(conn.record.id) ? 'border-primary/60 ring-2 ring-primary/10 bg-primary/[0.03] shadow-md -translate-y-1' : 'border-border/80 hover:border-primary/50 hover:shadow-lg hover:-translate-y-1 hover:bg-card'"
-            @click="toggleConnection(conn.record.id)"
-          >
-            <!-- 左侧动态状态条 -->
-            <div class="w-1.5 shrink-0 transition-colors duration-300" :class="selectedIds.has(conn.record.id) ? 'bg-primary shadow-[0_0_8px_rgba(var(--primary),0.8)]' : 'bg-muted-foreground/10 group-hover:bg-primary/40'"></div>
-            
-            <div class="p-3.5 flex flex-col gap-2 relative w-full overflow-hidden">
-              <div class="flex items-start justify-between gap-2.5">
-                <div class="h-9 w-9 shrink-0 rounded-[8px] flex items-center justify-center transition-all duration-300 border"
-                     :class="selectedIds.has(conn.record.id) ? 'bg-primary text-primary-foreground border-primary shadow-sm' : 'bg-muted text-muted-foreground border-border/50 group-hover:bg-primary/10 group-hover:text-primary group-hover:border-primary/30 group-hover:scale-105 shadow-sm'">
-                  <Monitor class="h-4 w-4" />
-                </div>
-                
-                <div class="flex-1 min-w-0 flex flex-col justify-center pl-0.5">
-                  <!-- 加粗 Server Name -->
-                  <div class="font-bold text-[13.5px] text-foreground transition-colors truncate group-hover:text-primary mb-0.5 leading-tight" :title="conn.record.name">{{ conn.record.name }}</div>
-                  
-                  <!-- IP with Glowing dot -->
-                  <div class="text-[10.5px] text-muted-foreground font-mono flex items-center gap-1.5 whitespace-nowrap opacity-80" :title="conn.record.host">
-                    <span class="inline-block w-1.5 h-1.5 rounded-full shrink-0 transition-all duration-300" 
-                          :class="selectedIds.has(conn.record.id) ? 'bg-primary shadow-[0_0_4px_rgba(var(--primary),0.8)]' : 'bg-emerald-500 shadow-[0_0_4px_rgba(16,185,129,0.5)]'"></span>
-                    <span class="tracking-tighter">{{ conn.record.host }}</span>
-                  </div>
-                </div>
-
-                <!-- Checkbox Mock -->
-                <div class="h-4 w-4 shrink-0 rounded-[4px] border flex items-center justify-center transition-all duration-300 shadow-sm mt-0.5"
-                     :class="selectedIds.has(conn.record.id) ? 'bg-primary border-primary' : 'bg-background border-border group-hover:border-primary/40'">
-                   <Check class="h-[10px] w-[10px] text-primary-foreground transform transition-transform duration-300" :class="selectedIds.has(conn.record.id) ? 'scale-100' : 'scale-0'" />
-                </div>
-              </div>
-            </div>
-            
-            <!-- 底层环境光 -->
-            <div class="absolute inset-0 bg-gradient-to-br from-primary/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"></div>
-          </button>
-        </div>
-        
-        <div v-else class="text-sm text-muted-foreground bg-card/40 rounded-2xl p-8 border border-dashed border-border/80 max-w-lg mx-auto flex flex-col items-center justify-center gap-4 shadow-sm relative z-10 backdrop-blur-sm">
-          <div class="h-12 w-12 rounded-xl bg-muted flex items-center justify-center ring-1 ring-border/50 shadow-inner">
-            <Monitor class="h-6 w-6 text-muted-foreground/40" />
-          </div>
-          <p class="text-[14px] font-medium">{{ t('multiExec.noSshConnections') }}</p>
+        <!-- 极简排版文本 -->
+        <div class="space-y-3">
+          <h3 class="text-2xl font-bold tracking-tight text-foreground/85">{{ t('multiExec.emptyGuide', '选择连接的服务器') }}</h3>
+          <p class="text-[14.5px] text-muted-foreground/70 max-w-[280px] leading-relaxed mx-auto font-medium">
+            {{ sshConnections.length > 0 ? '点击顶部的选择器，勾选要同步执行指令的目标终端机。' : '当前资产库暂无 SSH 类型连接，请先去侧边栏添加。' }}
+          </p>
         </div>
       </div>
     </div>

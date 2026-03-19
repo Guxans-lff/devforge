@@ -1,15 +1,23 @@
+/**
+ * 查询执行核心协调器
+ * 组合 useDangerConfirm / useTableBrowse / useExplainAnalysis / useTransactionControl
+ * 负责：SQL 执行（流式/非流式/多语句）、数据库切换、查询历史
+ */
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useNotification } from '@/composables/useNotification'
 import { useExecutionTimer } from '@/composables/useExecutionTimer'
+import { useDangerConfirm } from '@/composables/useDangerConfirm'
+import { useTableBrowse } from '@/composables/useTableBrowse'
+import { useExplainAnalysis } from '@/composables/useExplainAnalysis'
+import { useTransactionControl } from '@/composables/useTransactionControl'
 import * as dbApi from '@/api/database'
 import * as historyApi from '@/api/query-history'
 import type { QueryResult, QueryChunk, ErrorStrategy } from '@/types/database'
 import type { QueryTabContext, ResultTab, SubStatementResult } from '@/types/database-workspace'
-import { detectDangerousStatements, isReadOnlyStatement } from '@/utils/dangerousSqlDetector'
 import { isMultiStatement, extractTableName } from '@/utils/sqlParser'
-import type { DangerousStatement, EnvironmentType } from '@/types/environment'
+import type { EnvironmentType } from '@/types/environment'
 
 /** useQueryExecution 入参 */
 export interface UseQueryExecutionOptions {
@@ -35,15 +43,9 @@ const MAX_RESULT_TABS = 10
  */
 export function useQueryExecution(options: UseQueryExecutionOptions) {
   const {
-    connectionId,
-    connectionName,
-    tabId,
-    isConnected,
-    environment,
-    readOnly,
-    confirmDanger,
-    addResultTab,
-    tabContext,
+    connectionId, connectionName, tabId, isConnected,
+    environment, readOnly, confirmDanger,
+    addResultTab, tabContext,
   } = options
 
   const { t } = useI18n()
@@ -51,40 +53,34 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   const notification = useNotification()
   const executionTimer = useExecutionTimer()
 
-  // ===== 状态 =====
-  const isLoadingMore = ref(false)
-  const pendingExecuteSql = ref<string | null>(null)
-
-  /** 错误策略（多语句执行） */
-  const errorStrategy = ref<ErrorStrategy>('stopOnError')
-
-  /** 长耗时通知定时器 ID */
-  let longRunningNotifyId: ReturnType<typeof setTimeout> | null = null
-
-  // ===== 危险操作确认 =====
-  const dangerConfirmOpen = ref(false)
-  const dangerConfirmSql = ref('')
-  const dangerStatements = ref<DangerousStatement[]>([])
-  const dangerConfirmInput = ref('')
-
-  const dangerNeedInput = computed(() => environment.value === 'production')
-  const dangerInputTarget = computed(() => {
-    const db = tabContext.value?.currentDatabase
-    return db || connectionName.value || ''
-  })
-  const dangerCanConfirm = computed(() =>
-    !dangerNeedInput.value || dangerConfirmInput.value === dangerInputTarget.value,
-  )
-
-  // ===== EXPLAIN =====
-  const explainResult = ref<Record<string, unknown> | null>(null)
-  const explainTableRows = ref<Record<string, unknown>[] | null>(null)
-  const showExplain = ref(false)
-  const isExplaining = ref(false)
-
-  // ===== 计算属性 =====
+  // ===== 子模块组合 =====
   const isExecuting = computed(() => tabContext.value?.isExecuting ?? false)
   const isInTransaction = computed(() => tabContext.value?.isInTransaction ?? false)
+
+  const dangerConfirm = useDangerConfirm({
+    environment,
+    readOnly,
+    confirmDanger,
+    connectionName,
+    currentDatabase: computed(() => tabContext.value?.currentDatabase),
+  })
+
+  const tableBrowse = useTableBrowse({
+    connectionId, tabId, isConnected, tabContext, isExecuting,
+  })
+
+  const explainAnalysis = useExplainAnalysis({
+    connectionId, isConnected,
+  })
+
+  const transactionControl = useTransactionControl({
+    connectionId, tabId, isConnected,
+  })
+
+  // ===== 状态 =====
+  const pendingExecuteSql = ref<string | null>(null)
+  const errorStrategy = ref<ErrorStrategy>('stopOnError')
+
   const queryTimeout = computed({
     get: () => tabContext.value?.queryTimeout ?? 30,
     set: (val: number) => {
@@ -92,7 +88,43 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     },
   })
 
-  // ===== 计时器管理 =====
+  // ===== 参数化查询 =====
+  /** 检测 SQL 中的 :paramName 占位符 */
+  const PARAM_REGEX = /(?<!')(?::([a-zA-Z_]\w*))(?!')/g
+  const paramDialogOpen = ref(false)
+  const paramNames = ref<string[]>([])
+  const paramValues = ref<Record<string, string>>({})
+  const paramPendingSql = ref('')
+
+  function detectParams(sql: string): string[] {
+    const found = new Set<string>()
+    let match: RegExpExecArray | null
+    const re = new RegExp(PARAM_REGEX.source, PARAM_REGEX.flags)
+    while ((match = re.exec(sql)) !== null) {
+      found.add(match[1]!)
+    }
+    return [...found]
+  }
+
+  function substituteParams(sql: string, params: Record<string, string>): string {
+    return sql.replace(new RegExp(PARAM_REGEX.source, PARAM_REGEX.flags), (full, name: string) => {
+      const val = params[name]
+      if (val === undefined || val === '') return full
+      // 数字直接替换，否则用单引号包裹并转义
+      if (/^-?\d+(\.\d+)?$/.test(val)) return val
+      return `'${val.replace(/'/g, "''")}'`
+    })
+  }
+
+  function executeWithParams(params: Record<string, string>) {
+    paramDialogOpen.value = false
+    const sql = substituteParams(paramPendingSql.value, params)
+    doExecute(sql)
+  }
+
+  // ===== 长耗时通知 =====
+  let longRunningNotifyId: ReturnType<typeof setTimeout> | null = null
+
   function startExecutionTimer() {
     executionTimer.start()
     clearLongRunningNotify()
@@ -123,25 +155,28 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   async function handleExecute(sql: string): Promise<{ success: boolean }> {
     if (!sql.trim() || !isConnected.value || isExecuting.value) return { success: false }
 
-    // 只读模式检查
-    if (readOnly.value && !isReadOnlyStatement(sql)) {
+    // 参数化查询检测
+    const params = detectParams(sql)
+    if (params.length > 0) {
+      paramPendingSql.value = sql
+      paramNames.value = params
+      // 保留上次同名参数的值
+      const prev = { ...paramValues.value }
+      paramValues.value = Object.fromEntries(params.map(p => [p, prev[p] ?? '']))
+      paramDialogOpen.value = true
+      return { success: false }
+    }
+
+    const check = dangerConfirm.checkExecution(sql)
+    if (check === 'readonly') {
       notification.error(
         t('environment.readOnlyBlocked'),
         t('environment.readOnlyBlockedDesc'),
       )
       return { success: false }
     }
-
-    // 危险操作检查
-    if (confirmDanger.value) {
-      const dangers = detectDangerousStatements(sql)
-      if (dangers.length > 0) {
-        dangerStatements.value = dangers
-        dangerConfirmSql.value = sql
-        dangerConfirmInput.value = ''
-        dangerConfirmOpen.value = true
-        return { success: false }
-      }
+    if (check === 'danger') {
+      return { success: false }
     }
 
     await doExecute(sql)
@@ -150,13 +185,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
 
   /** 确认危险操作后继续执行 */
   function handleDangerConfirm() {
-    if (!dangerCanConfirm.value) return
-    dangerConfirmOpen.value = false
-    const sql = dangerConfirmSql.value
-    dangerConfirmSql.value = ''
-    dangerStatements.value = []
-    dangerConfirmInput.value = ''
-    doExecute(sql)
+    const sql = dangerConfirm.confirmAndGetSql()
+    if (sql) doExecute(sql)
   }
 
   /** 核心执行逻辑（绕过危险检查） */
@@ -173,14 +203,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       store.updateTabContext(connectionId.value, tabId.value, {
         currentDatabase: dbName,
         result: {
-          columns: [],
-          rows: [],
-          affectedRows: 0,
-          executionTimeMs: 0,
-          isError: false,
-          error: null,
-          totalCount: null,
-          truncated: false,
+          columns: [], rows: [], affectedRows: 0, executionTimeMs: 0,
+          isError: false, error: null, totalCount: null, truncated: false,
         },
         isExecuting: false,
       })
@@ -191,21 +215,16 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
 
     // 清除旧状态
     store.updateTabContext(connectionId.value, tabId.value, {
-      isExecuting: true,
-      result: null,
-      tableBrowse: undefined,
-      activeResultTabId: undefined,
+      isExecuting: true, result: null, tableBrowse: undefined, activeResultTabId: undefined,
     })
 
     const startTime = Date.now()
 
-    // 多语句检测
     if (isMultiStatement(sql)) {
       await handleMultiExecute(sql, startTime)
       return
     }
 
-    // SELECT 类查询优先流式执行
     const firstWord = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? ''
     const isSelectLike = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN'].includes(firstWord)
 
@@ -216,7 +235,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     }
   }
 
-  /** 流式执行 SELECT 查询 */
+  // ===== 流式执行 =====
   async function handleStreamExecute(sql: string, startTime: number) {
     let allColumns: QueryResult['columns'] = []
     let allRows: unknown[][] = []
@@ -234,44 +253,26 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       })
 
       const onChunk = (chunk: QueryChunk) => {
-        if (chunk.columns && chunk.columns.length > 0) {
-          allColumns = chunk.columns
-        }
-        if (chunk.rows && chunk.rows.length > 0) {
-          allRows = [...allRows, ...chunk.rows]
-        }
-        if (chunk.error) {
-          lastError = chunk.error
-        }
-        if (chunk.totalTimeMs !== null && chunk.totalTimeMs !== undefined) {
-          totalTimeMs = chunk.totalTimeMs
-        }
+        if (chunk.columns && chunk.columns.length > 0) allColumns = chunk.columns
+        if (chunk.rows && chunk.rows.length > 0) allRows = [...allRows, ...chunk.rows]
+        if (chunk.error) lastError = chunk.error
+        if (chunk.totalTimeMs !== null && chunk.totalTimeMs !== undefined) totalTimeMs = chunk.totalTimeMs
 
-        // 实时更新结果
         store.updateTabContext(connectionId.value, tabId.value, {
           result: {
-            columns: allColumns,
-            rows: allRows,
-            affectedRows: 0,
+            columns: allColumns, rows: allRows, affectedRows: 0,
             executionTimeMs: totalTimeMs || (Date.now() - startTime),
-            isError: !!lastError,
-            error: lastError,
-            totalCount: chunk.isLast ? allRows.length : null,
-            truncated: false,
+            isError: !!lastError, error: lastError,
+            totalCount: chunk.isLast ? allRows.length : null, truncated: false,
           },
         })
-
-        if (chunk.isLast) {
-          resolveStream()
-        }
+        if (chunk.isLast) resolveStream()
       }
 
       const currentDb = tabContext.value?.currentDatabase
       const invokePromise = dbApi.dbExecuteQueryStreamOnSession(
         connectionId.value, tabId.value, sql, onChunk, currentDb, timeoutSecs,
-      ).catch(e => {
-        rejectStream!(e)
-      })
+      ).catch(e => { rejectStream!(e) })
 
       const waitTimeoutPromise = new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('流式查询响应超时')), 5000),
@@ -283,22 +284,15 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       ])
 
       const finalResult: QueryResult = {
-        columns: allColumns,
-        rows: allRows,
-        affectedRows: 0,
+        columns: allColumns, rows: allRows, affectedRows: 0,
         executionTimeMs: totalTimeMs || (Date.now() - startTime),
-        isError: !!lastError,
-        error: lastError,
-        totalCount: allRows.length,
-        truncated: false,
+        isError: !!lastError, error: lastError,
+        totalCount: allRows.length, truncated: false,
         tableName: extractTableName(sql) || undefined,
       }
 
       stopExecutionTimer()
-      store.updateTabContext(connectionId.value, tabId.value, {
-        result: finalResult,
-        isExecuting: false,
-      })
+      store.updateTabContext(connectionId.value, tabId.value, { result: finalResult, isExecuting: false })
 
       const executionTime = Date.now() - startTime
       if (!lastError) {
@@ -318,7 +312,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     }
   }
 
-  /** 非流式执行（INSERT/UPDATE/DELETE 等） */
+  // ===== 非流式执行 =====
   async function handleNonStreamExecute(sql: string, startTime: number) {
     try {
       const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
@@ -326,14 +320,10 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       const result = await dbApi.dbExecuteQueryOnSession(
         connectionId.value, tabId.value, sql, currentDb, timeoutSecs,
       )
-      if (!result.isError) {
-        result.tableName = extractTableName(sql) || undefined
-      }
+      if (!result.isError) result.tableName = extractTableName(sql) || undefined
+
       stopExecutionTimer()
-      store.updateTabContext(connectionId.value, tabId.value, {
-        result,
-        isExecuting: false,
-      })
+      store.updateTabContext(connectionId.value, tabId.value, { result, isExecuting: false })
 
       const executionTime = Date.now() - startTime
       if (result.isError) {
@@ -348,54 +338,38 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         )
       }
       saveHistory(sql, result)
-    } catch (e) {
+    } catch (e: any) {
+      const errorStr = typeof e === 'string' ? e : (e?.message || e?.msg || JSON.stringify(e))
       const errorResult: QueryResult = {
-        columns: [],
-        rows: [],
-        affectedRows: 0,
+        columns: [], rows: [], affectedRows: 0,
         executionTimeMs: Date.now() - startTime,
-        isError: true,
-        error: String(e),
-        totalCount: null,
-        truncated: false,
+        isError: true, error: errorStr, totalCount: null, truncated: false,
       }
       stopExecutionTimer()
-      store.updateTabContext(connectionId.value, tabId.value, {
-        result: errorResult,
-        isExecuting: false,
-      })
-      notification.error(t('database.queryFailed'), String(e), true)
+      store.updateTabContext(connectionId.value, tabId.value, { result: errorResult, isExecuting: false })
+      notification.error(t('database.queryFailed'), errorStr, true)
       saveHistory(sql, errorResult)
     }
   }
 
-  /** 多语句智能执行 */
+  // ===== 多语句执行 =====
   async function handleMultiExecute(sql: string, startTime: number) {
     try {
       const currentDb = tabContext.value?.currentDatabase
       const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
 
       const results = await dbApi.dbExecuteMultiV2(
-        connectionId.value,
-        sql,
-        currentDb,
-        errorStrategy.value,
-        timeoutSecs,
+        connectionId.value, sql, currentDb, errorStrategy.value, timeoutSecs,
       )
 
       const totalTime = Date.now() - startTime
       const successCount = results.filter(r => !r.result.isError).length
       const failCount = results.length - successCount
 
-      // 构建子结果列表
       const subResults: SubStatementResult[] = results.map(stmt => ({
-        index: stmt.index,
-        sql: stmt.sql,
-        statementType: stmt.statementType,
-        result: stmt.result,
+        index: stmt.index, sql: stmt.sql, statementType: stmt.statementType, result: stmt.result,
       }))
 
-      // 找到最后一条有数据的结果作为主展示
       const selectResult = results.find(r => !r.result.isError && r.result.columns.length > 0)
       const lastResult = selectResult?.result ?? (results.length > 0 ? results[results.length - 1]!.result : null)
 
@@ -404,47 +378,33 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         executionTimeMs: totalTime,
         multiStatementSummary: { total: results.length, success: successCount, fail: failCount },
       } : {
-        columns: [],
-        rows: [],
-        affectedRows: 0,
-        executionTimeMs: totalTime,
-        isError: false,
-        error: null,
-        totalCount: null,
-        truncated: false,
+        columns: [], rows: [], affectedRows: 0, executionTimeMs: totalTime,
+        isError: false, error: null, totalCount: null, truncated: false,
         multiStatementSummary: { total: results.length, success: successCount, fail: failCount },
       }
 
-      // 创建汇总结果 Tab
       const tabs = [...(tabContext.value?.resultTabs ?? [])]
       while (tabs.length >= MAX_RESULT_TABS) {
-        const unpinnedIdx = tabs.findIndex(t => !t.isPinned)
+        const unpinnedIdx = tabs.findIndex(tab => !tab.isPinned)
         if (unpinnedIdx === -1) break
         tabs.splice(unpinnedIdx, 1)
       }
       const newTab: ResultTab = {
         id: crypto.randomUUID(),
         title: `批量执行 (${successCount}/${results.length})`,
-        result: summaryResult,
-        sql: sql.trim(),
-        isPinned: false,
-        createdAt: Date.now(),
-        subResults,
+        result: summaryResult, sql: sql.trim(),
+        isPinned: false, createdAt: Date.now(), subResults,
       }
       tabs.push(newTab)
 
       stopExecutionTimer()
       store.updateTabContext(connectionId.value, tabId.value, {
-        resultTabs: tabs,
-        activeResultTabId: newTab.id,
-        result: summaryResult,
-        isExecuting: false,
+        resultTabs: tabs, activeResultTabId: newTab.id,
+        result: summaryResult, isExecuting: false,
       })
 
       const summaryMsg = t('database.multiStatement.executionSummary', {
-        total: results.length,
-        success: successCount,
-        fail: failCount,
+        total: results.length, success: successCount, fail: failCount,
         time: `${(totalTime / 1000).toFixed(1)}s`,
       })
 
@@ -454,31 +414,22 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         notification.success('执行完成', summaryMsg, 3000)
       }
 
-      if (lastResult) {
-        saveHistory(sql, lastResult)
-      }
-    } catch (e) {
+      if (lastResult) saveHistory(sql, lastResult)
+    } catch (e: any) {
+      const errorStr = typeof e === 'string' ? e : (e?.message || e?.msg || JSON.stringify(e))
       const errorResult: QueryResult = {
-        columns: [],
-        rows: [],
-        affectedRows: 0,
+        columns: [], rows: [], affectedRows: 0,
         executionTimeMs: Date.now() - startTime,
-        isError: true,
-        error: String(e),
-        totalCount: null,
-        truncated: false,
+        isError: true, error: errorStr, totalCount: null, truncated: false,
       }
       stopExecutionTimer()
-      store.updateTabContext(connectionId.value, tabId.value, {
-        result: errorResult,
-        isExecuting: false,
-      })
-      notification.error(t('database.queryFailed'), String(e), true)
+      store.updateTabContext(connectionId.value, tabId.value, { result: errorResult, isExecuting: false })
+      notification.error(t('database.queryFailed'), errorStr, true)
       saveHistory(sql, errorResult)
     }
   }
 
-  /** 保存查询历史 */
+  // ===== 查询历史 =====
   function saveHistory(sql: string, result: QueryResult) {
     historyApi.saveQueryHistory({
       id: crypto.randomUUID(),
@@ -492,90 +443,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       affectedRows: result.affectedRows,
       rowCount: result.totalCount ?? (result.isError ? null : result.rows.length),
       executedAt: Date.now(),
-    }).catch(() => {
-      // 静默处理
-    })
-  }
-
-  // ===== 表浏览模式 =====
-  async function browseTable(database: string, table: string, whereClause?: string, orderBy?: string) {
-    if (!isConnected.value || isExecuting.value) return
-
-    store.updateTabContext(connectionId.value, tabId.value, { isExecuting: true })
-    try {
-      const result = await dbApi.dbGetTableData(connectionId.value, database, table, 1, 200, whereClause, orderBy)
-      store.updateTabContext(connectionId.value, tabId.value, {
-        result,
-        isExecuting: false,
-        tableBrowse: { database, table, currentPage: 1, pageSize: 200, whereClause, orderBy },
-        activeResultTabId: undefined,
-      })
-    } catch (e) {
-      store.updateTabContext(connectionId.value, tabId.value, {
-        result: {
-          columns: [],
-          rows: [],
-          affectedRows: 0,
-          executionTimeMs: 0,
-          isError: true,
-          error: String(e),
-          totalCount: null,
-          truncated: false,
-        },
-        isExecuting: false,
-      })
-    }
-  }
-
-  async function loadMoreRows() {
-    const ctx = tabContext.value
-    if (!ctx?.tableBrowse || !ctx.result || isLoadingMore.value) return
-
-    const { database, table, currentPage, pageSize, whereClause, orderBy } = ctx.tableBrowse
-    const nextPage = currentPage + 1
-    isLoadingMore.value = true
-
-    try {
-      const moreResult = await dbApi.dbGetTableData(connectionId.value, database, table, nextPage, pageSize, whereClause, orderBy)
-      if (moreResult.rows.length > 0) {
-        const merged: typeof ctx.result = {
-          ...ctx.result,
-          rows: [...ctx.result.rows, ...moreResult.rows],
-          totalCount: moreResult.totalCount,
-        }
-        store.updateTabContext(connectionId.value, tabId.value, {
-          result: merged,
-          tableBrowse: { ...ctx.tableBrowse, currentPage: nextPage },
-        })
-      }
-    } catch (_e) {
-      // 静默失败
-    } finally {
-      isLoadingMore.value = false
-    }
-  }
-
-  function handleRefresh(sqlContent: string) {
-    const ctx = tabContext.value
-    if (ctx?.tableBrowse) {
-      browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, ctx.tableBrowse.whereClause, ctx.tableBrowse.orderBy)
-    } else if (sqlContent.trim()) {
-      handleExecute(sqlContent)
-    }
-  }
-
-  function handleServerFilter(whereClause: string) {
-    const ctx = tabContext.value
-    if (ctx?.tableBrowse) {
-      browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, whereClause || undefined, ctx.tableBrowse.orderBy)
-    }
-  }
-
-  function handleServerSort(orderBy: string) {
-    const ctx = tabContext.value
-    if (ctx?.tableBrowse) {
-      browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, ctx.tableBrowse.whereClause, orderBy || undefined)
-    }
+    }).catch(() => {})
   }
 
   // ===== 取消查询 =====
@@ -586,92 +454,18 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       // 静默处理
     } finally {
       stopExecutionTimer()
-      store.updateTabContext(connectionId.value, tabId.value, {
-        isExecuting: false,
-      })
+      store.updateTabContext(connectionId.value, tabId.value, { isExecuting: false })
     }
   }
 
-  // ===== 事务管理 =====
-  async function handleBeginTransaction() {
-    if (!isConnected.value) return
-    try {
-      await dbApi.dbBeginTransaction(connectionId.value)
-      store.updateTabContext(connectionId.value, tabId.value, {
-        isInTransaction: true,
-      })
-    } catch (e) {
-      notification.error('开始事务失败', String(e), true)
-    }
-  }
-
-  async function handleCommit() {
-    if (!isConnected.value) return
-    try {
-      await dbApi.dbCommit(connectionId.value)
-      store.updateTabContext(connectionId.value, tabId.value, {
-        isInTransaction: false,
-      })
-    } catch (e) {
-      notification.error('提交事务失败', String(e), true)
-    }
-  }
-
-  async function handleRollback() {
-    if (!isConnected.value) return
-    try {
-      await dbApi.dbRollback(connectionId.value)
-      store.updateTabContext(connectionId.value, tabId.value, {
-        isInTransaction: false,
-      })
-    } catch (e) {
-      notification.error('回滚事务失败', String(e), true)
-    }
-  }
-
-  // ===== EXPLAIN =====
-  async function handleExplain(getSql: () => string) {
-    const sql = getSql()
-    if (!sql || !isConnected.value) return
-
-    const cleanSql = sql.replace(/^\s*EXPLAIN\s+(FORMAT\s*=\s*\w+\s+|ANALYZE\s+|\(.*?\)\s+)*/i, '')
-    if (!cleanSql.trim()) return
-
-    isExplaining.value = true
-    showExplain.value = true
-    explainResult.value = null
-    explainTableRows.value = null
-
-    try {
-      const [jsonResult, tableResult] = await Promise.all([
-        dbApi.dbExplain(connectionId.value, cleanSql, 'json'),
-        dbApi.dbExplain(connectionId.value, cleanSql, 'table'),
-      ])
-
-      if (jsonResult.isError) {
-        explainResult.value = { error: jsonResult.error }
-      } else if (jsonResult.rows.length > 0) {
-        const raw = String(jsonResult.rows[0]![0] ?? '{}')
-        try {
-          explainResult.value = JSON.parse(raw)
-        } catch {
-          explainResult.value = { raw }
-        }
-      }
-
-      if (!tableResult.isError && tableResult.columns.length > 0) {
-        explainTableRows.value = tableResult.rows.map(row => {
-          const obj: Record<string, unknown> = {}
-          tableResult.columns.forEach((col, i) => {
-            obj[col.name] = row[i]
-          })
-          return obj
-        })
-      }
-    } catch (e) {
-      explainResult.value = { error: String(e) }
-    } finally {
-      isExplaining.value = false
+  // ===== 刷新 =====
+  function handleRefresh(sqlContent: string) {
+    const ctx = tabContext.value
+    if (ctx?.tableBrowse) {
+      tableBrowse.invalidateCache()
+      tableBrowse.browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, ctx.tableBrowse.whereClause, ctx.tableBrowse.orderBy)
+    } else if (sqlContent.trim()) {
+      handleExecute(sqlContent)
     }
   }
 
@@ -683,9 +477,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   // ===== 数据库切换 =====
   async function handleDatabaseSelect(database: string, emit: (event: 'databaseChanged', database: string) => void) {
     if (!database || !isConnected.value) return
-    store.updateTabContext(connectionId.value, tabId.value, {
-      currentDatabase: database,
-    })
+    store.updateTabContext(connectionId.value, tabId.value, { currentDatabase: database })
     try {
       await dbApi.dbSwitchDatabase(connectionId.value, tabId.value, database)
     } catch (e) {
@@ -697,7 +489,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   return {
     // 状态
     isExecuting,
-    isLoadingMore,
+    isLoadingMore: tableBrowse.isLoadingMore,
     isInTransaction,
     queryTimeout,
     errorStrategy,
@@ -705,38 +497,45 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     executionTimer,
 
     // 危险操作确认
-    dangerConfirmOpen,
-    dangerConfirmSql,
-    dangerStatements,
-    dangerConfirmInput,
-    dangerNeedInput,
-    dangerInputTarget,
-    dangerCanConfirm,
+    dangerConfirmOpen: dangerConfirm.dangerConfirmOpen,
+    dangerConfirmSql: dangerConfirm.dangerConfirmSql,
+    dangerStatements: dangerConfirm.dangerStatements,
+    dangerConfirmInput: dangerConfirm.dangerConfirmInput,
+    dangerNeedInput: dangerConfirm.dangerNeedInput,
+    dangerInputTarget: dangerConfirm.dangerInputTarget,
+    dangerCanConfirm: dangerConfirm.dangerCanConfirm,
     handleDangerConfirm,
 
     // EXPLAIN
-    explainResult,
-    explainTableRows,
-    showExplain,
-    isExplaining,
-    handleExplain,
+    explainResult: explainAnalysis.explainResult,
+    explainTableRows: explainAnalysis.explainTableRows,
+    showExplain: explainAnalysis.showExplain,
+    isExplaining: explainAnalysis.isExplaining,
+    handleExplain: explainAnalysis.handleExplain,
 
     // 执行相关
     handleExecute,
     doExecute,
     handleCancel,
-    browseTable,
-    loadMoreRows,
+
+    // 参数化查询
+    paramDialogOpen,
+    paramNames,
+    paramValues,
+    executeWithParams,
+    browseTable: tableBrowse.browseTable,
+    loadMoreRows: tableBrowse.loadMoreRows,
+    invalidateBrowseCache: tableBrowse.invalidateCache,
     handleRefresh,
-    handleServerFilter,
-    handleServerSort,
+    handleServerFilter: tableBrowse.handleServerFilter,
+    handleServerSort: tableBrowse.handleServerSort,
     handleDatabaseSelect,
     toggleErrorStrategy,
 
     // 事务
-    handleBeginTransaction,
-    handleCommit,
-    handleRollback,
+    handleBeginTransaction: transactionControl.handleBeginTransaction,
+    handleCommit: transactionControl.handleCommit,
+    handleRollback: transactionControl.handleRollback,
 
     // 清理
     clearLongRunningNotify,

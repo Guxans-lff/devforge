@@ -423,4 +423,74 @@ mod tests {
         let result = split_sql_statements(sql);
         assert_eq!(result, vec!["SELECT 'hello\\';world'", "SELECT 2"]);
     }
+
+    #[test]
+    fn test_nested_block_comment() {
+        // MySQL 不支持嵌套块注释，第一个 */ 结束注释
+        let sql = "SELECT /* outer /* inner */ 1; SELECT 2";
+        let result = split_sql_statements(sql);
+        assert_eq!(result, vec!["SELECT /* outer /* inner */ 1", "SELECT 2"]);
+    }
+
+    #[test]
+    fn test_delimiter_double_dollar() {
+        let sql = "DELIMITER $$\nCREATE FUNCTION f() RETURNS INT\nBEGIN\n  RETURN 1;\nEND $$\nDELIMITER ;\nSELECT f();";
+        let result = split_sql_statements(sql);
+        assert_eq!(result, vec![
+            "CREATE FUNCTION f() RETURNS INT\nBEGIN\n  RETURN 1;\nEND",
+            "SELECT f()",
+        ]);
+    }
+
+    #[test]
+    fn test_multiple_delimiter_switches() {
+        let sql = "DELIMITER //\nSELECT 1//\nDELIMITER $$\nSELECT 2$$\nDELIMITER ;\nSELECT 3;";
+        let result = split_sql_statements(sql);
+        assert_eq!(result, vec!["SELECT 1", "SELECT 2", "SELECT 3"]);
+    }
+
+    #[test]
+    fn test_mixed_comments_and_strings() {
+        let sql = "SELECT 'a' /* comment ; */ -- line comment\n; SELECT 2";
+        let result = split_sql_statements(sql);
+        assert_eq!(result, vec!["SELECT 'a' /* comment ; */ -- line comment", "SELECT 2"]);
+    }
+
+    #[test]
+    fn test_multiline_string() {
+        let sql = "INSERT INTO t VALUES ('line1\nline2\nline3'); SELECT 1";
+        let result = split_sql_statements(sql);
+        assert_eq!(result, vec!["INSERT INTO t VALUES ('line1\nline2\nline3')", "SELECT 1"]);
+    }
+
+    #[test]
+    fn test_empty_input() {
+        assert_eq!(split_sql_statements(""), Vec::<String>::new());
+        assert_eq!(split_sql_statements("  \n\t  "), Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_only_delimiter_directives() {
+        let sql = "DELIMITER //\nDELIMITER ;";
+        let result = split_sql_statements(sql);
+        assert_eq!(result, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_semicolon_inside_backtick_identifier() {
+        let sql = "CREATE TABLE `my;table` (id INT); SELECT 1";
+        let result = split_sql_statements(sql);
+        assert_eq!(result, vec!["CREATE TABLE `my;table` (id INT)", "SELECT 1"]);
+    }
+
+    #[test]
+    fn test_large_batch_basic() {
+        // 模拟 mysqldump 常见的批量 INSERT
+        let stmts: Vec<String> = (0..100).map(|i| format!("INSERT INTO t VALUES ({})", i)).collect();
+        let sql = stmts.join(";\n");
+        let result = split_sql_statements(&sql);
+        assert_eq!(result.len(), 100);
+        assert_eq!(result[0], "INSERT INTO t VALUES (0)");
+        assert_eq!(result[99], "INSERT INTO t VALUES (99)");
+    }
 }

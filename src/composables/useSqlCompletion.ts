@@ -366,6 +366,14 @@ function buildJoinOnSuggestions(
   return suggestions
 }
 
+// ── 模块级单例：确保全局仅注册一个 SQL CompletionItemProvider ──
+// 多个 useSqlCompletion 实例共享同一个 provider，通过闭包引用各自的 schema/driver/isLoadingSchema
+let globalDisposable: monaco.IDisposable | null = null
+let activeSchema: Ref<SchemaCache | null> | null = null
+let activeDriver: Ref<string | undefined> | undefined
+let activeIsLoadingSchema: Ref<boolean> | undefined
+let activeInstanceCount = 0
+
 // ── 主函数 ──
 
 export function useSqlCompletion(
@@ -373,12 +381,20 @@ export function useSqlCompletion(
   driver?: Ref<string | undefined>,
   isLoadingSchema?: Ref<boolean>,
 ) {
-  let disposable: monaco.IDisposable | null = null
+  // 更新活跃引用（最新挂载的实例优先）
+  activeSchema = schema
+  activeDriver = driver
+  activeIsLoadingSchema = isLoadingSchema
+  activeInstanceCount++
 
   function register() {
-    disposable?.dispose()
+    // 如果全局 provider 已存在，只需更新引用即可，不重复注册
+    activeSchema = schema
+    activeDriver = driver
+    activeIsLoadingSchema = isLoadingSchema
+    if (globalDisposable) return
 
-    disposable = monaco.languages.registerCompletionItemProvider('sql', {
+    globalDisposable = monaco.languages.registerCompletionItemProvider('sql', {
       triggerCharacters: ['.', ' ', '`'],
       provideCompletionItems(model, position) {
         const textUntilPosition = model.getValueInRange({
@@ -397,8 +413,9 @@ export function useSqlCompletion(
         }
 
         const suggestions: monaco.languages.CompletionItem[] = []
-        const currentSchema = schema.value
-        const currentDriver = driver?.value
+        // 使用全局活跃引用，确保始终读取最新挂载实例的数据
+        const currentSchema = activeSchema?.value ?? null
+        const currentDriver = activeDriver?.value
 
         /** 返回前统一附加频率记录命令 */
         function finalize(): { suggestions: monaco.languages.CompletionItem[] } {
@@ -411,7 +428,7 @@ export function useSqlCompletion(
         }
 
         // Schema 缓存加载中时，显示加载提示项
-        if (isLoadingSchema?.value) {
+        if (activeIsLoadingSchema?.value) {
           suggestions.push({
             label: '正在加载 Schema...',
             kind: monaco.languages.CompletionItemKind.Text,
@@ -631,12 +648,20 @@ export function useSqlCompletion(
   // 确保频率记录全局命令已注册
   ensureRecordCommandRegistered()
 
-  // 注册一次 — provider 在运行时读取 schema.value
+  // 注册一次 — provider 在运行时读取全局活跃引用
   register()
 
   onBeforeUnmount(() => {
-    disposable?.dispose()
-    disposable = null
+    activeInstanceCount--
+    // 仅当所有实例都销毁时才释放全局 provider
+    if (activeInstanceCount <= 0) {
+      globalDisposable?.dispose()
+      globalDisposable = null
+      activeSchema = null
+      activeDriver = undefined
+      activeIsLoadingSchema = undefined
+      activeInstanceCount = 0
+    }
   })
 
   return { register }

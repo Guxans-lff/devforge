@@ -9,12 +9,17 @@ import { dbGetServerStatus, dbGetProcessList, dbKillProcess, dbGetServerVariable
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import type { ServerStatus, ProcessInfo, ServerVariable } from '@/types/database'
 import type { PerformanceTabContext } from '@/types/database-workspace'
-import { Activity, Database, Gauge, Clock, AlertTriangle, RefreshCw, Terminal, Settings, Search, Trash2, Shield, Info } from 'lucide-vue-next'
+import { Activity, Database, Gauge, Clock, AlertTriangle, RefreshCw, Terminal, Settings, Search, Trash2, Shield, Info, GitCompare } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useMessage } from '@/stores/message-center'
+import SlowQueryPanel from './SlowQueryPanel.vue'
+import InnoDbPanel from './InnoDbPanel.vue'
+import IndexAdvisorPanel from './IndexAdvisorPanel.vue'
+import ExplainComparePanel from './ExplainComparePanel.vue'
+import AuditLogPanel from './AuditLogPanel.vue'
 
 const props = defineProps<{
   connectionId: string
@@ -64,7 +69,12 @@ const activeSubTab = computed(() => {
 const subTabs: Array<{ key: PerformanceTabContext['activeSubTab']; label: string, icon: any }> = [
   { key: 'dashboard', label: '实时仪表盘', icon: Activity },
   { key: 'processes', label: '会话进程', icon: Terminal },
-  { key: 'variables', label: '全量全局变量', icon: Settings },
+  { key: 'slow-queries', label: '慢查询分析', icon: Clock },
+  { key: 'innodb', label: 'InnoDB 状态', icon: Database },
+  { key: 'index-advisor', label: '索引顾问', icon: Search },
+  { key: 'explain-compare', label: '计划对比', icon: GitCompare },
+  { key: 'audit-log', label: '审计日志', icon: Shield },
+  { key: 'variables', label: '全局变量', icon: Settings },
 ]
 
 /** 获取子标签页描述 */
@@ -582,6 +592,38 @@ watch(activeSubTab, () => {
         </ScrollArea>
       </div>
     </div>
+
+    <!-- 慢查询分析 -->
+    <SlowQueryPanel
+      v-else-if="activeSubTab === 'slow-queries'"
+      :connection-id="props.connectionId"
+      :is-connected="props.isConnected"
+    />
+
+    <!-- InnoDB 引擎状态 -->
+    <InnoDbPanel
+      v-else-if="activeSubTab === 'innodb'"
+      :connection-id="props.connectionId"
+      :is-connected="props.isConnected"
+    />
+
+    <!-- 索引分析顾问 -->
+    <IndexAdvisorPanel
+      v-else-if="activeSubTab === 'index-advisor'"
+      :connection-id="props.connectionId"
+      :is-connected="props.isConnected"
+    />
+
+    <!-- EXPLAIN 执行计划对比 -->
+    <ExplainComparePanel
+      v-else-if="activeSubTab === 'explain-compare'"
+    />
+
+    <!-- 审计日志 -->
+    <AuditLogPanel
+      v-else-if="activeSubTab === 'audit-log'"
+      :connection-id="props.connectionId"
+    />
 
     <!-- 服务器变量 (变量配置中心) -->
     <div v-else-if="activeSubTab === 'variables'" class="flex-1 flex flex-col overflow-hidden px-6 pt-4">

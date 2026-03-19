@@ -149,38 +149,6 @@ export interface TableSchema {
   comment?: string | null
 }
 
-/** 行变更类型 */
-export type ChangeType = 'update' | 'insert' | 'delete'
-
-/** 主键列名-值对 */
-export interface KeyValue {
-  column: string
-  value: unknown
-}
-
-/** 列名-新值对 */
-export interface ColumnValue {
-  column: string
-  value: unknown
-}
-
-/** 单行数据变更（发送给后端） */
-export interface RowChange {
-  changeType: ChangeType
-  database: string
-  table: string
-  primaryKeys: KeyValue[]
-  values: ColumnValue[]
-}
-
-/** 批量变更执行结果 */
-export interface ApplyChangesResult {
-  success: boolean
-  affectedRows: number
-  generatedSql: string[]
-  error: string | null
-}
-
 // ===== 性能监控相关类型 =====
 
 /** 服务器状态指标 */
@@ -254,3 +222,98 @@ export interface StatementResult {
 
 /** 多语句执行的错误策略 */
 export type ErrorStrategy = 'stopOnError' | 'continueOnError'
+
+// ===== 索引分析相关类型 =====
+
+/** 索引分析综合结果 */
+export interface IndexAnalysisResult {
+  /** 冗余索引列表 */
+  redundantIndexes: RedundantIndex[]
+  /** 未使用索引列表 */
+  unusedIndexes: UnusedIndex[]
+  /** 索引建议 */
+  suggestions: IndexSuggestion[]
+}
+
+/** 冗余索引信息 */
+export interface RedundantIndex {
+  tableName: string
+  indexName: string
+  indexColumns: string[]
+  coveredBy: string
+  coveredByColumns: string[]
+  dropSql: string
+}
+
+/** 未使用索引信息 */
+export interface UnusedIndex {
+  tableName: string
+  indexName: string
+  indexColumns: string[]
+  sizeEstimate: string
+  dropSql: string
+}
+
+/** 索引建议 */
+export interface IndexSuggestion {
+  tableName: string
+  columns: string[]
+  reason: string
+  estimatedImprovement: string
+  createSql: string
+}
+
+// ===== 性能诊断相关类型 =====
+
+/** 慢查询摘要（来自 performance_schema） */
+export interface SlowQueryDigest {
+  digestText: string
+  execCount: number
+  avgTimeMs: number
+  maxTimeMs: number
+  totalTimeMs: number
+  rowsExamined: number
+  rowsSent: number
+  firstSeen: string | null
+  lastSeen: string | null
+}
+
+/** InnoDB 引擎状态 */
+export interface InnoDbStatus {
+  bufferPoolPagesTotal: number
+  bufferPoolPagesFree: number
+  bufferPoolPagesDirty: number
+  bufferPoolHitRate: number
+  rowLockCurrentWaits: number
+  rowLockTimeAvgMs: number
+  deadlocks: number
+  logBytesWritten: number
+  logPendingFsyncs: number
+  rowsRead: number
+  rowsInserted: number
+  rowsUpdated: number
+  rowsDeleted: number
+}
+
+/** 审计日志条目 */
+export interface AuditLogEntry {
+  id: string
+  connectionId: string
+  connectionName: string | null
+  databaseName: string | null
+  operationType: string
+  sqlText: string
+  affectedRows: number
+  executionTimeMs: number
+  isError: boolean
+  errorMessage: string | null
+  createdAt: number
+}
+
+/** 审计日志统计 */
+export interface AuditStats {
+  total: number
+  errorCount: number
+  earliest: number | null
+  latest: number | null
+}

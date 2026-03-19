@@ -49,6 +49,12 @@ const emit = defineEmits<{
   createDatabase: []
   editDatabase: [database: string]
   executeRoutine: [database: string, name: string, routineType: string]
+  /** 对象编辑：新建 */
+  createObject: [database: string, objectType: string, tableName?: string]
+  /** 对象编辑：编辑现有对象 */
+  editObject: [database: string, objectName: string, objectType: string]
+  /** 对象删除 */
+  dropObject: [database: string, objectName: string, objectType: string]
 }>()
 
 /** 可拖拽的节点类型 */
@@ -146,6 +152,26 @@ function emitExecuteRoutine(node: any) {
   if (db && routineType) emit('executeRoutine', db, node.label, routineType)
 }
 
+/** 新建对象（从文件夹节点触发） */
+function emitCreateObject(node: any, objectType: string) {
+  const db = tree.getNodeDatabase(node)
+  if (db) emit('createObject', db, objectType)
+}
+
+/** 编辑对象（从对象节点触发） */
+function emitEditObject(node: any) {
+  const db = tree.getNodeDatabase(node)
+  const objectType = node.meta?.objectType
+  if (db && objectType) emit('editObject', db, node.label, objectType)
+}
+
+/** 删除对象 */
+function emitDropObject(node: any) {
+  const db = tree.getNodeDatabase(node)
+  const objectType = node.meta?.objectType
+  if (db && objectType) emit('dropObject', db, node.label, objectType)
+}
+
 function emitBackupDatabase(node: any) {
   const db = tree.getNodeDatabase(node)
   if (db) emit('backupDatabase', db)
@@ -192,23 +218,26 @@ defineExpose({
       </div>
     </div>
 
-    <!-- 统一智能搜索框 -->
-    <div class="px-2 pt-2 border-b border-border/10 pb-2 relative">
-      <div class="relative group">
-        <Search class="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/50 transition-colors group-focus-within:text-primary" />
+    <!-- 统一智能搜索框 (Neu/Glass Pill Design) -->
+    <div class="px-3 pt-2 pb-2 relative border-b border-border/5">
+      <div class="relative group flex items-center h-8">
+        <!-- Pill Background Container (拟物底座) -->
+        <div class="absolute inset-0 rounded-full bg-zinc-100/50 dark:bg-black/20 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.04),inset_0_0_0_1px_rgba(0,0,0,0.03),0_0.5px_0_rgba(255,255,255,0.6)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(255,255,255,0.04),0_0.5px_0_rgba(255,255,255,0.02)] transform-gpu transition-all duration-300 group-focus-within:bg-white dark:group-focus-within:bg-[#1C1C1E] group-focus-within:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05),0_4px_10px_rgba(0,0,0,0.03),0_0_0_1.5px_rgba(var(--primary-rgb),0.15)] dark:group-focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1),0_4px_12px_rgba(0,0,0,0.4),0_0_0_1.5px_rgba(var(--primary-rgb),0.2)]" />
+        
+        <Search class="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 transition-colors group-focus-within:text-primary z-10" />
         <Input
           v-model="tree.combinedSearchQuery.value"
-          class="h-8 pl-8 pr-8 text-xs bg-muted/20 border-border/20 focus-visible:ring-1 focus-visible:ring-primary/30 transition-all rounded-md"
+          class="h-full w-full border-none bg-transparent pl-9 pr-8 text-[11px] font-medium text-zinc-700 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 shadow-none focus-visible:ring-0 z-10"
           :placeholder="t('objectTree.searchPlaceholder')"
           @keydown.escape="tree.combinedSearchQuery.value = ''; tree.showObjectSearchDropdown.value = false"
           @focus="tree.isObjectSearching.value && (tree.showObjectSearchDropdown.value = true)"
         />
         <button
           v-if="tree.combinedSearchQuery.value"
-          class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground/40 hover:text-foreground hover:bg-muted transition-all"
+          class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400/60 hover:text-destructive hover:bg-destructive/5 transition-all z-20"
           @click="tree.combinedSearchQuery.value = ''; tree.showObjectSearchDropdown.value = false"
         >
-          <X class="h-3 w-3" />
+          <X class="h-2.5 w-2.5" />
         </button>
       </div>
 
@@ -230,7 +259,7 @@ defineExpose({
             <div
               v-for="(item, idx) in tree.objectSearchResults.value"
               :key="item.node.id + '-' + idx"
-              class="group/item flex cursor-pointer items-center gap-2.5 px-3 py-2 text-xs hover:bg-primary/5 transition-colors border-l-2 border-transparent hover:border-primary"
+              class="group/item flex cursor-pointer items-center gap-2.5 px-3 py-2 text-xs transition-all duration-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] border-l-2 border-transparent hover:border-primary"
               @click="tree.handleSearchResultClick(item)"
             >
               <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted/40 text-muted-foreground">
@@ -289,7 +318,7 @@ defineExpose({
               <!-- 系统文件夹节点 -->
               <div
                 v-if="item.isSystemFolder"
-                class="group flex h-full grow cursor-pointer items-center gap-1 px-2 text-xs hover:bg-muted/50"
+                class="group flex h-full grow cursor-pointer items-center gap-1 px-2 mx-1.5 rounded-[6px] text-xs transition-all duration-300 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
                 @click="tree.isSystemExpanded.value = !tree.isSystemExpanded.value"
               >
                 <div class="w-4 shrink-0 flex items-center justify-center">
@@ -306,7 +335,7 @@ defineExpose({
               <!-- 系统子入口节点 -->
               <div
                 v-else-if="item.isSystem"
-                class="group flex h-full grow cursor-pointer items-center gap-1 text-xs hover:bg-muted/50"
+                class="group flex h-full grow cursor-pointer items-center gap-1 mx-1.5 rounded-[6px] text-xs transition-all duration-300 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
                 :style="{ paddingLeft: `${item.level * 12 + 12}px` }"
                 @click="item.systemAction === 'user' ? emit('openUserManagement') : emit('openPerformance')"
               >
@@ -323,14 +352,24 @@ defineExpose({
               <ContextMenu v-else-if="item.node">
                 <ContextMenuTrigger as-child>
                   <div
-                    class="group flex h-full grow cursor-pointer items-center gap-1 pr-2 text-xs hover:bg-muted/50"
-                    :class="[{ 'bg-primary/10 ring-1 ring-primary/30 rounded-sm': tree.highlightedNodeId.value === item.node.id }]"
+                    class="group relative flex h-full grow cursor-pointer items-center gap-1 pr-2 mx-1.5 rounded-[6px] text-xs transition-all duration-300 transform-gpu hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
+                    :class="[
+                      tree.highlightedNodeId.value === item.node.id 
+                        ? 'bg-primary/10 dark:bg-primary/20 shadow-[inset_0_0_0_1px_rgba(var(--primary-rgb),0.2)]' 
+                        : 'border-transparent'
+                    ]"
                     :style="{ paddingLeft: `${item.level * 12 + 8}px` }"
                     :draggable="isDraggableNode(item.node)"
                     @click="tree.toggleNode(item.node)"
                     @dblclick="tree.handleDoubleClick(item.node)"
                     @dragstart="handleDragStart($event, item.node)"
                   >
+                    <!-- 左侧激活指示条 (Apple Style Indicator) -->
+                    <div 
+                      class="absolute left-0 top-1.5 bottom-1.5 w-[2.5px] rounded-full bg-primary transition-all duration-500 transform-gpu origin-center"
+                      :class="tree.highlightedNodeId.value === item.node.id ? 'scale-y-100 opacity-100' : 'scale-y-0 opacity-0'"
+                    />
+
                     <div class="w-4 shrink-0 flex items-center justify-center">
                       <ChevronRight
                         v-if="item.node.type !== 'column' && item.node.type !== 'procedure' && item.node.type !== 'function' && item.node.type !== 'trigger'"
@@ -339,8 +378,8 @@ defineExpose({
                       />
                     </div>
                     <Loader2 v-if="item.node.isLoading" class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                    <component :is="tree.getNodeIcon(item.node)" v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground" :class="{ 'text-amber-500': item.node.type === 'column' && item.node.meta?.isPrimaryKey }" />
-                    <span class="truncate" :class="{ 'text-muted-foreground': item.node.type === 'column' }">{{ item.node.label }}</span>
+                    <component :is="tree.getNodeIcon(item.node)" v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors duration-300 group-hover:text-primary/80" :class="{ 'text-amber-500': item.node.type === 'column' && item.node.meta?.isPrimaryKey }" />
+                    <span class="truncate transition-colors duration-300 group-hover:text-primary font-medium" :class="{ 'text-muted-foreground': item.node.type === 'column' }">{{ item.node.label }}</span>
 
                     <span
                       v-if="item.node.meta?.comment && (item.node.type === 'table' || item.node.type === 'view')"
@@ -405,6 +444,18 @@ defineExpose({
                     <ContextMenuItem v-if="item.node.folderType === 'tables'" class="gap-2 text-xs" @click="emitCreateTable(item.node)">
                       <Plus class="h-3.5 w-3.5" /> {{ t('tableEditor.createTable') }}
                     </ContextMenuItem>
+                    <ContextMenuItem v-if="item.node.folderType === 'views'" class="gap-2 text-xs" @click="emitCreateObject(item.node, 'VIEW')">
+                      <Plus class="h-3.5 w-3.5" /> 新建视图
+                    </ContextMenuItem>
+                    <ContextMenuItem v-if="item.node.folderType === 'procedures'" class="gap-2 text-xs" @click="emitCreateObject(item.node, 'PROCEDURE')">
+                      <Plus class="h-3.5 w-3.5" /> 新建存储过程
+                    </ContextMenuItem>
+                    <ContextMenuItem v-if="item.node.folderType === 'functions'" class="gap-2 text-xs" @click="emitCreateObject(item.node, 'FUNCTION')">
+                      <Plus class="h-3.5 w-3.5" /> 新建函数
+                    </ContextMenuItem>
+                    <ContextMenuItem v-if="item.node.folderType === 'triggers'" class="gap-2 text-xs" @click="emitCreateObject(item.node, 'TRIGGER')">
+                      <Plus class="h-3.5 w-3.5" /> 新建触发器
+                    </ContextMenuItem>
                     <ContextMenuItem class="gap-2 text-xs" @click="tree.handleRefreshFolder(item.node)">
                       <RefreshCw class="h-3.5 w-3.5" /> 刷新
                     </ContextMenuItem>
@@ -443,12 +494,19 @@ defineExpose({
                     </ContextMenuSub>
                   </template>
 
-                  <template v-if="item.node.type === 'view' || item.node.type === 'procedure' || item.node.type === 'function'">
+                  <template v-if="item.node.type === 'view' || item.node.type === 'procedure' || item.node.type === 'function' || item.node.type === 'trigger'">
                     <ContextMenuItem v-if="item.node.type === 'procedure' || item.node.type === 'function'" class="gap-2 text-xs" @click="emitExecuteRoutine(item.node)">
                       <Play class="h-3.5 w-3.5" /> 执行
                     </ContextMenuItem>
                     <ContextMenuItem class="gap-2 text-xs" @click="emitShowDefinition(item.node)">
                       <Code class="h-3.5 w-3.5" /> {{ t('objectTree.viewDefinition') }}
+                    </ContextMenuItem>
+                    <ContextMenuItem class="gap-2 text-xs" @click="emitEditObject(item.node)">
+                      <Pencil class="h-3.5 w-3.5" /> 编辑
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem class="gap-2 text-xs text-destructive focus:bg-destructive/10 focus:text-destructive" @click="emitDropObject(item.node)">
+                      <Trash2 class="h-3.5 w-3.5" /> 删除
                     </ContextMenuItem>
                   </template>
                 </ContextMenuContent>

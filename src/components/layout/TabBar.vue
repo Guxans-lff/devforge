@@ -327,7 +327,6 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
 /* 活跃状态：物理一体化同步 (打开式) */
 .active .tab-shape-main {
   background-color: white;
-  border-top: 1.5px solid var(--env-color, var(--primary));
   bottom: -1.5px; /* 物理沉降：刺穿底线 */
 }
 

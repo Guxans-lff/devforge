@@ -6,6 +6,7 @@ import SqlSnippetPanel from '@/components/database/SqlSnippetPanel.vue'
 import SqlToolbar from '@/components/database/SqlToolbar.vue'
 import QueryResultSection from '@/components/database/QueryResultSection.vue'
 import DangerConfirmDialog from '@/components/database/DangerConfirmDialog.vue'
+import ParamInputDialog from '@/components/database/ParamInputDialog.vue'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useQueryExecution } from '@/composables/useQueryExecution'
 import { useResultTabs } from '@/composables/useResultTabs'
@@ -320,5 +321,14 @@ watch(() => props.isConnected, (connected) => {
     @update:open="execution.dangerConfirmOpen.value = $event"
     @update:confirm-input="execution.dangerConfirmInput.value = $event"
     @confirm="execution.handleDangerConfirm"
+  />
+
+  <!-- 参数化查询输入弹窗 -->
+  <ParamInputDialog
+    :open="execution.paramDialogOpen.value"
+    :param-names="execution.paramNames.value"
+    :param-values="execution.paramValues.value"
+    @update:open="execution.paramDialogOpen.value = $event"
+    @execute="execution.executeWithParams"
   />
 </template>

@@ -7,7 +7,7 @@ import { useI18n } from 'vue-i18n'
 import {
   useVueTable, getCoreRowModel, getSortedRowModel, createColumnHelper,
 } from '@tanstack/vue-table'
-import type { ColumnDef as TanstackColumnDef, SortingState, ColumnResizeMode } from '@tanstack/vue-table'
+import type { ColumnDef as TanstackColumnDef, SortingState, ColumnResizeMode, ColumnPinningState } from '@tanstack/vue-table'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeTextFile, dbExecuteQueryInDatabase } from '@/api/database'
@@ -56,6 +56,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
 
   // ===== 核心状态 =====
   const sorting = ref<SortingState>([])
+  const columnPinning = ref<ColumnPinningState>({ left: [], right: [] })
   const visibleCount = ref(CHUNK_SIZE)
   const selectedRowIndex = ref<number | null>(null)
   const columnResizeMode = ref<ColumnResizeMode>('onChange')
@@ -199,9 +200,15 @@ export function useQueryResult(options: UseQueryResultOptions) {
   const table = useVueTable({
     get data() { return tableData.value },
     get columns() { return columns.value },
-    state: { get sorting() { return sorting.value } },
+    state: {
+      get sorting() { return sorting.value },
+      get columnPinning() { return columnPinning.value },
+    },
     onSortingChange: updater => {
       sorting.value = typeof updater === 'function' ? updater(sorting.value) : updater
+    },
+    onColumnPinningChange: updater => {
+      columnPinning.value = typeof updater === 'function' ? updater(columnPinning.value) : updater
     },
     columnResizeMode: columnResizeMode.value,
     getCoreRowModel: getCoreRowModel(),
@@ -220,9 +227,15 @@ export function useQueryResult(options: UseQueryResultOptions) {
 
   const rowBaseStyle = computed(() => ({ ...gridStyle.value, height: `${ROW_HEIGHT}px` }))
 
+  /** 列宽指纹：序列化为字符串，避免 v-memo 因对象引用变化而失效 */
+  const columnSizingKey = computed(() => {
+    const sizing = table.getState().columnSizing
+    return Object.keys(sizing).length === 0 ? '' : JSON.stringify(sizing)
+  })
+
   const { overscan: adaptiveOverscan, attach: attachOverscan, detach: detachOverscan } = useAdaptiveOverscan(
     tableScrollRef,
-    { baseOverscan: 20, maxOverscan: 80, rowHeight: ROW_HEIGHT, velocityThreshold: 15, decayDelay: 300 },
+    { baseOverscan: 20, maxOverscan: 80, rowHeight: ROW_HEIGHT, velocityThreshold: 15, decayDelay: 600 },
   )
 
   const rowVirtualizer = useVirtualizer({
@@ -266,6 +279,27 @@ export function useQueryResult(options: UseQueryResultOptions) {
     const obj: Record<string, unknown> = {}
     result.value.columns.forEach((col, i) => { obj[col.name] = row[i] })
     navigator.clipboard.writeText(JSON.stringify(obj, null, 2)).then(() => {
+      toast.success(t('toast.copySuccess'))
+    }).catch(() => {})
+  }
+
+  /** 复制行数据为 INSERT SQL 语句 */
+  function copyRowAsSql(displayIndex: number) {
+    if (!result.value) return
+    const tableRow = table.getRowModel().rows[displayIndex]
+    if (!tableRow) return
+    const row = result.value.rows[tableRow.original.__originalIndex]
+    if (!row) return
+    const tbl = tableName.value || 'table_name'
+    const cols = result.value.columns.map(c => quoteId(c.name)).join(', ')
+    const vals = result.value.columns.map((_, i) => {
+      const v = row[i]
+      if (v === null || v === undefined) return 'NULL'
+      if (typeof v === 'number') return String(v)
+      return `'${String(v).replace(/'/g, "''")}'`
+    }).join(', ')
+    const sql = `INSERT INTO ${quoteId(tbl)} (${cols}) VALUES (${vals});`
+    navigator.clipboard.writeText(sql).then(() => {
       toast.success(t('toast.copySuccess'))
     }).catch(() => {})
   }
@@ -363,6 +397,46 @@ export function useQueryResult(options: UseQueryResultOptions) {
     onServerSort(orderBy)
   }
 
+  // ===== 列冻结/固定 =====
+
+  /** 固定列到左侧 */
+  function pinColumnLeft(columnId: string) {
+    const left = [...(columnPinning.value.left ?? [])]
+    if (!left.includes(columnId)) left.push(columnId)
+    columnPinning.value = { ...columnPinning.value, left }
+  }
+
+  /** 取消列固定 */
+  function unpinColumn(columnId: string) {
+    const left = (columnPinning.value.left ?? []).filter(id => id !== columnId)
+    const right = (columnPinning.value.right ?? []).filter(id => id !== columnId)
+    columnPinning.value = { left, right }
+  }
+
+  /** 判断列是否已固定 */
+  function isColumnPinned(columnId: string): boolean {
+    return (columnPinning.value.left ?? []).includes(columnId)
+      || (columnPinning.value.right ?? []).includes(columnId)
+  }
+
+  /**
+   * 计算固定列的 sticky left 偏移值
+   * 行号列宽度 60px + 前面各固定列的宽度累加
+   */
+  const pinnedColumnOffsets = computed<Record<string, number>>(() => {
+    const offsets: Record<string, number> = {}
+    const pinnedIds = columnPinning.value.left ?? []
+    if (pinnedIds.length === 0) return offsets
+    const headers = table.getFlatHeaders()
+    let offset = 60 // 行号列宽度
+    for (const id of pinnedIds) {
+      const header = headers.find(h => h.column.id === id)
+      offsets[id] = offset
+      offset += header ? header.getSize() : 150
+    }
+    return offsets
+  })
+
   // ===== 内联编辑 =====
 
   function startEdit(rowIndex: number, colName: string, currentValue: unknown) {
@@ -381,7 +455,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
    */
   function buildWhereClause(row: unknown[]): string {
     if (!result.value || primaryKeys.value.length === 0) return '1=0'
-    
+
     const columns = result.value.columns
     const conditions = primaryKeys.value.map(pkName => {
       const colIdx = columns.findIndex(c => c.name === pkName)
@@ -390,7 +464,129 @@ export function useQueryResult(options: UseQueryResultOptions) {
       if (val === null || val === undefined) return `${quoteId(pkName)} IS NULL`
       return `${quoteId(pkName)} = '${String(val).replace(/'/g, "''")}'`
     }).filter(Boolean)
-    
+
+    return conditions.length > 0 ? conditions.join(' AND ') : '1=0'
+  }
+
+  /**
+   * 根据列类型生成类型感知的 SQL 比较条件
+   * 解决前端值序列化格式与数据库存储格式不一致的问题：
+   * - 数字类型：无引号直接比较，避免隐式转换
+   * - 日期时间：使用 CAST 消除格式差异（ISO vs MySQL 格式）
+   * - 字符串类型：标准引号包裹
+   * - 跳过不安全类型：BLOB/BINARY/JSON/空间类型等
+   */
+  function buildTypedCondition(colName: string, dataType: string, val: unknown): string | null {
+    if (val === null || val === undefined) {
+      return `${quoteId(colName)} IS NULL`
+    }
+
+    const strVal = String(val)
+    if (strVal.length > 500) return null // 超长值跳过
+
+    const t = dataType.toLowerCase()
+
+    // 跳过不可靠的比较类型
+    const SKIP = ['blob', 'binary', 'varbinary', 'longblob', 'mediumblob', 'tinyblob',
+      'geometry', 'point', 'linestring', 'polygon', 'multipoint', 'multilinestring',
+      'multipolygon', 'geometrycollection', 'json', 'longtext', 'mediumtext']
+    if (SKIP.some(s => t.includes(s))) return null
+
+    // 整数类型：无引号比较
+    if (['int', 'integer', 'bigint', 'smallint', 'tinyint', 'mediumint'].some(s => t.includes(s))) {
+      // tinyint(1) 可能是 bool，js 端可能为 true/false/0/1
+      const numVal = Number(val)
+      if (Number.isFinite(numVal)) {
+        return `${quoteId(colName)} = ${numVal}`
+      }
+      return `${quoteId(colName)} = '${strVal.replace(/'/g, "''")}'`
+    }
+
+    // 浮点/定点类型：无引号比较，处理精度
+    if (['float', 'double', 'decimal', 'numeric', 'real'].some(s => t.includes(s))) {
+      const numVal = Number(val)
+      if (Number.isFinite(numVal)) {
+        return `${quoteId(colName)} = ${numVal}`
+      }
+      return null // 非数字值跳过
+    }
+
+    // 日期时间类型：CAST 消除 ISO8601 vs MySQL 格式差异
+    if (['datetime', 'timestamp'].some(s => t.includes(s))) {
+      // 前端可能拿到 "2024-01-01T00:00:00" 或 "2024-01-01 00:00:00"
+      // 统一用 CAST 让 MySQL 自己解析
+      const cleaned = strVal.replace('T', ' ').replace(/\.\d{3}Z?$/, '').replace(/Z$/, '')
+      return `${quoteId(colName)} = CAST('${cleaned.replace(/'/g, "''")}' AS DATETIME)`
+    }
+
+    if (t === 'date') {
+      // 取日期部分
+      const datePart = strVal.substring(0, 10)
+      return `${quoteId(colName)} = CAST('${datePart}' AS DATE)`
+    }
+
+    if (t === 'time') {
+      return `${quoteId(colName)} = CAST('${strVal.replace(/'/g, "''")}' AS TIME)`
+    }
+
+    if (t === 'year') {
+      const numVal = Number(val)
+      if (Number.isFinite(numVal)) {
+        return `${quoteId(colName)} = ${numVal}`
+      }
+      return null
+    }
+
+    // bit 类型
+    if (t.includes('bit')) {
+      const numVal = Number(val)
+      if (Number.isFinite(numVal)) {
+        return `${quoteId(colName)} = ${numVal}`
+      }
+      return null
+    }
+
+    // 枚举/Set/普通字符串类型：标准字符串比较
+    return `${quoteId(colName)} = '${strVal.replace(/'/g, "''")}'`
+  }
+
+  /**
+   * 构建带乐观锁的 WHERE 子句：主键定位 + 原始值校验
+   * 确保 UPDATE/DELETE 操作时，目标行未被其他客户端修改
+   * 如果任意列的当前值与本地快照不一致，affected_rows=0 → 前端提示冲突
+   */
+  function buildOptimisticWhereClause(row: unknown[]): string {
+    if (!result.value || primaryKeys.value.length === 0) return '1=0'
+
+    const columns = result.value.columns
+    const conditions: string[] = []
+    const debugInfo: string[] = [] // 调试：记录每个列的条件生成过程
+
+    // 1. 主键条件（必须）
+    for (const pkName of primaryKeys.value) {
+      const colIdx = columns.findIndex(c => c.name === pkName)
+      if (colIdx < 0) continue
+      const cond = buildTypedCondition(pkName, columns[colIdx]!.dataType, row[colIdx])
+      if (cond) {
+        conditions.push(cond)
+        debugInfo.push(`[PK] ${pkName}(${columns[colIdx]!.dataType}): val=${JSON.stringify(row[colIdx])} → ${cond}`)
+      }
+    }
+
+    // 2. 非主键列的原始值校验（乐观锁核心）
+    for (let i = 0; i < columns.length; i++) {
+      const col = columns[i]!
+      if (primaryKeys.value.includes(col.name)) continue
+      const cond = buildTypedCondition(col.name, col.dataType, row[i])
+      if (cond) {
+        conditions.push(cond)
+        debugInfo.push(`[COL] ${col.name}(${col.dataType}): val=${JSON.stringify(row[i])} → ${cond}`)
+      } else {
+        debugInfo.push(`[SKIP] ${col.name}(${col.dataType}): val=${JSON.stringify(row[i])?.substring(0, 50)} → skipped`)
+      }
+    }
+
+    console.log('[OptimisticLock] 条件明细:\n' + debugInfo.join('\n'))
     return conditions.length > 0 ? conditions.join(' AND ') : '1=0'
   }
 
@@ -425,7 +621,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     const newVal = editingValue.value === '' ? 'NULL' : `'${editingValue.value.replace(/'/g, "''")}'`
     // 直接使用表名，数据库上下文由 API 层处理
     const tbl = tableName.value!
-    const sql = `UPDATE ${quoteId(tbl)} SET ${quoteId(colName)} = ${newVal} WHERE ${buildWhereClause(row)} LIMIT 1`
+    const sql = `UPDATE ${quoteId(tbl)} SET ${quoteId(colName)} = ${newVal} WHERE ${buildOptimisticWhereClause(row)} LIMIT 1`
     console.log('[saveEdit] 数据库:', db, '表:', tbl, '\nSQL:', sql)
     try {
       const res = await dbExecuteQueryInDatabase(connectionId.value!, db, sql)
@@ -433,7 +629,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
       if (res.isError) {
         toast.error(t('database.queryError'), res.error ?? '')
       } else if (res.affectedRows === 0) {
-        toast.error('更新失败', `WHERE 条件未匹配到任何行，数据库: ${db}, 表: ${tbl}`)
+        toast.error('更新冲突', `该行数据可能已被其他客户端修改或删除，请刷新后重试`)
       } else {
         toast.success(t('database.updateSuccess'))
         // 本地更新单元格数据，避免全量刷新导致滚动位置等状态丢失
@@ -453,9 +649,10 @@ export function useQueryResult(options: UseQueryResultOptions) {
           }
         })
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error('[saveEdit] 异常:', e)
-      toast.error(t('database.queryError'), String(e))
+      const errorMsg = e?.message || e?.msg || (typeof e === 'string' ? e : JSON.stringify(e))
+      toast.error(t('database.queryError'), errorMsg as string)
     }
     cancelEdit()
   }
@@ -486,7 +683,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     
     const scrollTop = tableScrollRef.value?.scrollTop ?? 0
     const scrollLeft = tableScrollRef.value?.scrollLeft ?? 0
-    const sql = `DELETE FROM ${quoteId(tableName.value!)} WHERE ${buildWhereClause(row)} LIMIT 1`
+    const sql = `DELETE FROM ${quoteId(tableName.value!)} WHERE ${buildOptimisticWhereClause(row)} LIMIT 1`
     try {
       const res = await dbExecuteQueryInDatabase(connectionId.value!, db, sql)
       if (res.isError) toast.error(t('database.queryError'), res.error ?? '')
@@ -500,7 +697,10 @@ export function useQueryResult(options: UseQueryResultOptions) {
           }
         })
       }
-    } catch (e) { toast.error(t('database.queryError'), String(e)) }
+    } catch (e: any) {
+      const errorMsg = e?.message || e?.msg || (typeof e === 'string' ? e : JSON.stringify(e))
+      toast.error(t('database.queryError'), errorMsg as string)
+    }
   }
 
   // ===== 导出 =====
@@ -526,7 +726,10 @@ export function useQueryResult(options: UseQueryResultOptions) {
       const content = formatData(result.value, format, tablePart)
       await writeTextFile(path, content)
       toast.success(t('toast.exportSuccess'))
-    } catch (e) { toast.error(t('toast.exportFailed'), String(e)) }
+    } catch (e: any) {
+      const errorMsg = e?.message || e?.msg || (typeof e === 'string' ? e : JSON.stringify(e))
+      toast.error(t('toast.exportFailed'), errorMsg as string)
+    }
   }
 
   // ===== 分页加载 =====
@@ -585,13 +788,13 @@ export function useQueryResult(options: UseQueryResultOptions) {
     // 常量
     ROW_HEIGHT,
     // TanStack Table
-    table, sorting, columnResizeMode,
+    table, sorting, columnResizeMode, columnPinning,
     // 虚拟滚动
-    rowVirtualizer, gridStyle, rowBaseStyle,
+    rowVirtualizer, gridStyle, rowBaseStyle, columnSizingKey,
     // 核心状态
     visibleCount, selectedRowIndex, totalRows, hasMore, tableData,
     // 行详情
-    rowDetailOpen, selectedRowData, openRowDetail, handleRowDetailNavigate, copyRowAsJson,
+    rowDetailOpen, selectedRowData, openRowDetail, handleRowDetailNavigate, copyRowAsJson, copyRowAsSql,
     // 单元格交互
     handleCellClick,
     // 列统计
@@ -610,6 +813,8 @@ export function useQueryResult(options: UseQueryResultOptions) {
     toggleFilters, handleFilterChange, handleOperatorChange,
     // 排序
     serverSortCol, serverSortDir, handleHeaderClick,
+    // 列冻结
+    pinColumnLeft, unpinColumn, isColumnPinned, pinnedColumnOffsets,
     // 错误
     isConnectionError,
     // 操作

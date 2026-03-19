@@ -4,7 +4,7 @@
  * 根据滚动速度动态调整虚拟滚动的 overscan 值：
  * - 慢速滚动（正常浏览）：使用较小的 overscan，减少 DOM 节点数
  * - 快速滚动（拖动滚动条）：自动增大 overscan，确保缓冲区覆盖滚动距离
- * - 停止滚动后：逐步回落到基础值，释放多余 DOM 节点
+ * - 停止滚动后：阶梯式回落到基础值，避免 DOM 大批量卸载导致帧率跌落
  *
  * @module useAdaptiveOverscan
  */
@@ -30,7 +30,7 @@ const DEFAULTS = {
   maxOverscan: 80,
   rowHeight: 28,
   velocityThreshold: 15,
-  decayDelay: 300,
+  decayDelay: 600,
 } as const
 
 /**
@@ -60,11 +60,22 @@ export function useAdaptiveOverscan(
   let lastScrollTime = 0
   /** 回落定时器 */
   let decayTimer: ReturnType<typeof setTimeout> | null = null
+  /** rAF 节流 ID */
+  let rafId: number | null = null
 
   /**
-   * 滚动事件处理：计算滚动速度并动态调整 overscan
+   * 滚动事件处理：用 rAF 节流，保证每帧最多处理一次
    */
   function handleScroll() {
+    if (rafId !== null) return
+    rafId = requestAnimationFrame(processScroll)
+  }
+
+  /**
+   * 实际滚动处理：计算滚动速度并动态调整 overscan
+   */
+  function processScroll() {
+    rafId = null
     const el = scrollElementRef.value
     if (!el) return
 
@@ -79,7 +90,6 @@ export function useAdaptiveOverscan(
 
       if (velocity > velocityThreshold) {
         // 快速滚动：根据速度线性插值 overscan
-        // 速度越快，overscan 越大，确保缓冲区覆盖滚动距离
         const speedRatio = Math.min(velocity / (velocityThreshold * 4), 1)
         const targetOverscan = Math.round(
           baseOverscan + (maxOverscan - baseOverscan) * speedRatio,
@@ -92,10 +102,14 @@ export function useAdaptiveOverscan(
           decayTimer = null
         }
 
-        // 设置新的回落定时器
+        // 阶梯式回落：分 2 步回到 base，避免 DOM 大批量卸载
         decayTimer = setTimeout(() => {
-          overscan.value = baseOverscan
-          decayTimer = null
+          const mid = Math.round((overscan.value + baseOverscan) / 2)
+          overscan.value = Math.max(mid, baseOverscan)
+          decayTimer = setTimeout(() => {
+            overscan.value = baseOverscan
+            decayTimer = null
+          }, 200)
         }, decayDelay)
       }
     }
@@ -117,16 +131,21 @@ export function useAdaptiveOverscan(
     }
   }
 
-  /** 手动绑定/解绑（供 watch scrollElementRef 使用） */
+  /** 手动绑定（供 watch scrollElementRef 使用） */
   function attach() {
     bind(scrollElementRef.value)
   }
 
+  /** 手动解绑 */
   function detach() {
     bind(null)
     if (decayTimer) {
       clearTimeout(decayTimer)
       decayTimer = null
+    }
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId)
+      rafId = null
     }
   }
 

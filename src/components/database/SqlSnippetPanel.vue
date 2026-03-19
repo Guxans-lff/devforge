@@ -11,7 +11,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { Search, Plus, Pencil, Trash2, Copy, Play, X } from 'lucide-vue-next'
+import { Search, Plus, Pencil, Trash2, Copy, Play, X, CodeXml, FileCode2 } from 'lucide-vue-next'
 import * as snippetApi from '@/api/sql-snippet'
 import type { SqlSnippetRecord } from '@/api/sql-snippet'
 
@@ -110,77 +110,150 @@ defineExpose({ saveFromSelection })
 </script>
 
 <template>
-  <div class="flex h-full flex-col border-l border-border bg-background" style="width: 320px">
-    <!-- Header -->
-    <div class="flex items-center justify-between border-b border-border px-3 py-2">
-      <span class="text-xs font-medium">{{ t('sqlSnippet.title') }}</span>
-      <div class="flex items-center gap-1">
-        <Button variant="ghost" size="icon" class="h-5 w-5" @click="openNew">
-          <Plus class="h-3 w-3" />
-        </Button>
-        <Button variant="ghost" size="icon" class="h-5 w-5" @click="$emit('close')">
-          <X class="h-3 w-3" />
-        </Button>
+  <div class="flex h-full flex-col border-l border-border/50 bg-muted/20 w-80">
+    <!-- 头部 -->
+    <div class="flex items-center justify-between px-4 py-3">
+      <div class="flex items-center gap-2">
+        <FileCode2 class="h-4 w-4 text-primary/70" />
+        <span class="text-sm font-semibold tracking-tight">{{ t('sqlSnippet.title') }}</span>
+      </div>
+      <div class="flex items-center gap-0.5">
+        <button
+          class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/60 transition-all hover:bg-primary/10 hover:text-primary"
+          @click="openNew"
+          title="新建片段"
+        >
+          <Plus class="h-4 w-4" />
+        </button>
+        <button
+          class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 transition-all hover:bg-muted hover:text-foreground/70"
+          @click="$emit('close')"
+        >
+          <X class="h-4 w-4" />
+        </button>
       </div>
     </div>
 
-    <!-- Search -->
-    <div class="px-2 py-1.5 border-b border-border">
+    <!-- 搜索框 -->
+    <div class="px-3 pb-3">
       <div class="relative">
-        <Search class="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-        <Input v-model="searchQuery" class="h-6 pl-6 text-xs" :placeholder="t('sqlSnippet.searchPlaceholder')" />
+        <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/50" />
+        <Input
+          v-model="searchQuery"
+          class="h-8 pl-8 text-xs bg-background/60 border-border/40 focus:bg-background"
+          :placeholder="t('sqlSnippet.searchPlaceholder')"
+        />
       </div>
     </div>
 
-    <!-- Snippet list -->
+    <!-- 分割线 -->
+    <div class="h-px bg-border/40 mx-3" />
+
+    <!-- 片段列表 -->
     <ScrollArea class="flex-1 min-h-0">
-      <div v-if="snippets.length === 0" class="px-3 py-8 text-center">
-        <p class="text-xs text-muted-foreground">{{ t('sqlSnippet.noSnippets') }}</p>
+      <!-- 空状态 -->
+      <div v-if="snippets.length === 0" class="flex flex-col items-center justify-center px-6 py-16 text-center">
+        <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-muted/60 mb-4">
+          <CodeXml class="h-6 w-6 text-muted-foreground/40" />
+        </div>
+        <p class="text-xs font-medium text-muted-foreground/70 mb-1">{{ t('sqlSnippet.noSnippets') }}</p>
+        <p class="text-[11px] text-muted-foreground/40">点击右上角 + 创建您的第一个片段</p>
       </div>
-      <div v-else class="p-2 space-y-1.5">
+
+      <!-- 列表 -->
+      <div v-else class="p-2.5 space-y-2">
         <div
           v-for="s in snippets"
           :key="s.id"
-          class="group rounded-md border border-border p-2 hover:bg-muted/50 transition-colors"
+          class="group rounded-lg bg-background/60 border border-border/30 p-3 hover:bg-background hover:border-border/60 hover:shadow-sm transition-all duration-200 cursor-default"
         >
-          <div class="flex items-center justify-between mb-1">
-            <span class="text-xs font-medium truncate">{{ s.title }}</span>
-            <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-              <Button variant="ghost" size="icon" class="h-5 w-5" @click="handleInsert(s.sqlText)">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-semibold text-foreground/90 truncate max-w-[180px]">{{ s.title }}</span>
+            <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-primary/10 hover:text-primary transition-colors"
+                @click="handleInsert(s.sqlText)"
+                title="插入到编辑器"
+              >
                 <Copy class="h-3 w-3" />
-              </Button>
-              <Button variant="ghost" size="icon" class="h-5 w-5" @click="handleExecute(s.sqlText)">
+              </button>
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-green-500/10 hover:text-green-500 transition-colors"
+                @click="handleExecute(s.sqlText)"
+                title="执行"
+              >
                 <Play class="h-3 w-3" />
-              </Button>
-              <Button variant="ghost" size="icon" class="h-5 w-5" @click="openEdit(s)">
+              </button>
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-muted hover:text-foreground/70 transition-colors"
+                @click="openEdit(s)"
+                title="编辑"
+              >
                 <Pencil class="h-3 w-3" />
-              </Button>
-              <Button variant="ghost" size="icon" class="h-5 w-5 text-destructive" @click="handleDelete(s.id)">
+              </button>
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive transition-colors"
+                @click="handleDelete(s.id)"
+                title="删除"
+              >
                 <Trash2 class="h-3 w-3" />
-              </Button>
+              </button>
             </div>
           </div>
-          <pre class="text-[10px] text-muted-foreground leading-tight max-h-16 overflow-hidden whitespace-pre-wrap break-all">{{ s.sqlText }}</pre>
+          <pre class="text-[10px] text-muted-foreground/60 leading-relaxed max-h-14 overflow-hidden whitespace-pre-wrap break-all font-mono bg-muted/30 rounded-md px-2 py-1.5">{{ s.sqlText }}</pre>
         </div>
       </div>
     </ScrollArea>
 
-    <!-- Edit dialog -->
+    <!-- 编辑/新建片段弹窗 -->
     <Dialog v-model:open="editDialogOpen">
       <DialogContent class="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle class="text-sm">{{ isNew ? t('sqlSnippet.create') : t('sqlSnippet.edit') }}</DialogTitle>
+        <DialogHeader class="px-6 pt-6 pb-0">
+          <DialogTitle class="text-base font-semibold">{{ isNew ? t('sqlSnippet.create') : t('sqlSnippet.edit') }}</DialogTitle>
         </DialogHeader>
-        <div class="space-y-3 py-2">
-          <Input v-model="editingSnippet.title" :placeholder="t('sqlSnippet.titlePlaceholder')" class="text-xs" />
-          <textarea
-            v-model="editingSnippet.sqlText"
-            :placeholder="t('sqlSnippet.sqlPlaceholder')"
-            class="w-full h-32 rounded-md border border-input bg-background px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-ring"
-          />
-          <Input :model-value="editingSnippet.description ?? ''" @update:model-value="v => editingSnippet.description = String(v)" :placeholder="t('sqlSnippet.descriptionPlaceholder')" class="text-xs" />
+
+        <div class="flex flex-col gap-4 px-6 py-5">
+          <!-- 片段标题 -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-xs font-medium text-muted-foreground">{{ t('sqlSnippet.titlePlaceholder') }}</label>
+            <Input
+              v-model="editingSnippet.title"
+              :placeholder="t('sqlSnippet.titlePlaceholder')"
+              class="text-sm h-9"
+            />
+          </div>
+
+          <!-- SQL 语句 -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-xs font-medium text-muted-foreground">SQL</label>
+            <textarea
+              v-model="editingSnippet.sqlText"
+              :placeholder="t('sqlSnippet.sqlPlaceholder')"
+              rows="6"
+              :style="{
+                backgroundColor: 'var(--color-muted)',
+                color: 'var(--color-foreground)',
+              }"
+              class="w-full rounded-lg border border-input px-3 py-2.5 text-xs font-mono leading-relaxed resize-none transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+            />
+          </div>
+
+          <!-- 描述 -->
+          <div class="flex flex-col gap-1.5">
+            <label class="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              描述
+              <span class="text-[10px] text-muted-foreground/50 font-normal">可选</span>
+            </label>
+            <Input
+              :model-value="editingSnippet.description ?? ''"
+              @update:model-value="v => editingSnippet.description = String(v)"
+              placeholder="简要说明该片段的用途..."
+              class="text-sm h-9"
+            />
+          </div>
         </div>
-        <DialogFooter>
+
+        <DialogFooter class="px-6 pb-6 pt-0">
           <Button variant="outline" size="sm" @click="editDialogOpen = false">{{ t('common.cancel') }}</Button>
           <Button size="sm" @click="handleSave">{{ t('common.save') }}</Button>
         </DialogFooter>

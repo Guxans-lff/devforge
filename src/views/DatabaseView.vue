@@ -21,6 +21,7 @@ import RestoreDialog from '@/components/database/RestoreDialog.vue'
 import CreateDatabaseDialog from '@/components/database/CreateDatabaseDialog.vue'
 import EditDatabaseDialog from '@/components/database/EditDatabaseDialog.vue'
 import RoutineExecDialog from '@/components/database/RoutineExecDialog.vue'
+import ObjectEditorDialog from '@/components/database/ObjectEditorDialog.vue'
 import ConfirmDialog from '@/components/ui/confirm-dialog/ConfirmDialog.vue'
 import EnvironmentBanner from '@/components/database/EnvironmentBanner.vue'
 import BreadcrumbNav from '@/components/database/BreadcrumbNav.vue'
@@ -472,6 +473,56 @@ function handleImportData(database: string, table: string, columns: string[]) {
   dbWorkspaceStore.openImport(props.connectionId, database, table, columns)
 }
 
+// ===== 对象编辑器（视图/存储过程/函数/触发器） =====
+const objectEditorOpen = ref(false)
+const objectEditorState = ref({ database: '', objectType: '', objectName: '', tableName: '' })
+
+function handleCreateObject(database: string, objectType: string, tableName?: string) {
+  objectEditorState.value = { database, objectType, objectName: '', tableName: tableName ?? '' }
+  objectEditorOpen.value = true
+}
+
+function handleEditObject(database: string, objectName: string, objectType: string) {
+  objectEditorState.value = { database, objectType, objectName, tableName: '' }
+  objectEditorOpen.value = true
+}
+
+function handleObjectEditorSaved() {
+  if (objectTreeRef.value) {
+    (objectTreeRef.value as any).silentRefresh()
+  }
+}
+
+// ===== 对象删除确认 =====
+const dropObjectDialogOpen = ref(false)
+const dropObjectData = ref({ database: '', objectName: '', objectType: '' })
+
+function handleDropObject(database: string, objectName: string, objectType: string) {
+  dropObjectData.value = { database, objectName, objectType }
+  dropObjectDialogOpen.value = true
+}
+
+async function handleConfirmDropObject() {
+  const { database, objectName, objectType } = dropObjectData.value
+  if (!database || !objectName || !objectType) return
+  try {
+    const q = quoteIdentifier
+    const sql = `DROP ${objectType} IF EXISTS ${q(database)}.${q(objectName)};`
+    const result = await dbApi.dbExecuteQueryInDatabase(props.connectionId, database, sql)
+    if (result.isError) {
+      notification.error('删除失败', result.error ?? undefined, true)
+    } else {
+      const typeLabel: Record<string, string> = { VIEW: '视图', PROCEDURE: '存储过程', FUNCTION: '函数', TRIGGER: '触发器' }
+      notification.success('删除成功', `${typeLabel[objectType] ?? objectType} ${objectName} 已删除`, 3000)
+      if (objectTreeRef.value) {
+        (objectTreeRef.value as any).silentRefresh()
+      }
+    }
+  } catch (e) {
+    console.error('Failed to drop object:', e)
+  }
+}
+
 async function handleShowCreateSql(database: string, table: string) {
   try {
     const sql = await dbApi.dbGetCreateTable(props.connectionId, database, table)
@@ -719,6 +770,9 @@ function handleEditDatabaseSuccess() {
           @create-database="handleCreateDatabase"
           @edit-database="handleEditDatabase"
           @execute-routine="handleExecuteRoutine"
+          @create-object="handleCreateObject"
+          @edit-object="handleEditObject"
+          @drop-object="handleDropObject"
         />
       </Pane>
 
@@ -890,6 +944,27 @@ function handleEditDatabaseSuccess() {
       :routine-name="routineExecState.routineName"
       :routine-type="routineExecState.routineType"
       @execute="handleRoutineExecSql"
+    />
+
+    <!-- 对象编辑对话框 (视图/存储过程/函数/触发器) -->
+    <ObjectEditorDialog
+      v-model:open="objectEditorOpen"
+      :connection-id="connectionId"
+      :database="objectEditorState.database"
+      :object-type="objectEditorState.objectType"
+      :object-name="objectEditorState.objectName || undefined"
+      :table-name="objectEditorState.tableName || undefined"
+      @saved="handleObjectEditorSaved"
+    />
+
+    <!-- 删除对象二次确认对话框 -->
+    <ConfirmDialog
+      v-model:open="dropObjectDialogOpen"
+      :title="`删除 ${dropObjectData.objectName} ?`"
+      :description="`此操作将永久删除${({ VIEW: '视图', PROCEDURE: '存储过程', FUNCTION: '函数', TRIGGER: '触发器' } as Record<string, string>)[dropObjectData.objectType] ?? '对象'} ${dropObjectData.objectName}，且不可恢复。`"
+      variant="destructive"
+      confirm-label="坚决删除"
+      @confirm="handleConfirmDropObject"
     />
   </div>
 </template>

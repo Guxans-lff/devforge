@@ -1,3 +1,4 @@
+pub mod audit_log;
 pub mod credential;
 pub mod data_import;
 pub mod db_backup;

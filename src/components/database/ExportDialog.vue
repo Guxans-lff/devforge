@@ -47,6 +47,9 @@ const props = defineProps<{
     database: string
     table?: string
   }
+  /** 预览数据（可选，用于底部预览区） */
+  previewColumns?: string[]
+  previewRows?: unknown[][]
 }>()
 
 const emit = defineEmits<{
@@ -161,6 +164,69 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
+
+// ===== 导出预览 =====
+
+const PREVIEW_MAX_ROWS = 5
+
+/** 生成预览文本（基于当前格式和前 N 行数据） */
+const previewText = computed(() => {
+  const cols = props.previewColumns
+  const rows = props.previewRows
+  if (!cols?.length || !rows?.length) return ''
+
+  const previewRows = rows.slice(0, PREVIEW_MAX_ROWS)
+  const fmt = format.value
+
+  if (fmt === 'csv') {
+    const delim = csvDelimiter.value
+    const q = csvQuoteChar.value
+    const escape = (v: unknown) => {
+      const s = v == null ? '' : String(v)
+      return s.includes(delim) || s.includes(q) || s.includes('\n')
+        ? `${q}${s.replace(new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'), q + q)}${q}`
+        : s
+    }
+    const lines: string[] = []
+    if (csvIncludeHeader.value) lines.push(cols.map(escape).join(delim))
+    for (const row of previewRows) lines.push(row.map(escape).join(delim))
+    return lines.join('\n')
+  }
+
+  if (fmt === 'json') {
+    const arr = previewRows.map(row =>
+      Object.fromEntries(cols.map((c, i) => [c, row[i] ?? null]))
+    )
+    return JSON.stringify(arr, null, 2)
+  }
+
+  if (fmt === 'sql') {
+    const tbl = sqlTableName.value || props.source.table || 'exported_table'
+    const colList = cols.map(c => `\`${c}\``).join(', ')
+    return previewRows.map(row => {
+      const vals = row.map(v => v == null ? 'NULL' : typeof v === 'number' ? String(v) : `'${String(v).replace(/'/g, "''")}'`)
+      return `INSERT INTO \`${tbl}\` (${colList}) VALUES (${vals.join(', ')});`
+    }).join('\n')
+  }
+
+  if (fmt === 'markdown') {
+    const header = '| ' + cols.join(' | ') + ' |'
+    const sep = '| ' + cols.map(() => '---').join(' | ') + ' |'
+    const body = previewRows.map(row =>
+      '| ' + row.map(v => v == null ? '' : String(v)).join(' | ') + ' |'
+    )
+    return [header, sep, ...body].join('\n')
+  }
+
+  if (fmt === 'excel') {
+    // Excel 无法在纯文本中预览，用 CSV 替代
+    const lines: string[] = [cols.join('\t')]
+    for (const row of previewRows) lines.push(row.map(v => v == null ? '' : String(v)).join('\t'))
+    return lines.join('\n') + '\n\n(Excel 预览以制表符分隔展示)'
+  }
+
+  return ''
+})
 
 // ===== 执行导出 =====
 
@@ -406,6 +472,19 @@ watch(() => props.open, (open) => {
             <p class="text-xs text-muted-foreground">
               {{ exportProgress.current.toLocaleString() }} / {{ exportProgress.total.toLocaleString() }} 行
               ({{ exportProgress.percentage }}%)
+            </p>
+          </div>
+        </div>
+
+        <!-- 导出预览 -->
+        <div v-if="previewText && !isExporting" class="grid grid-cols-4 gap-4">
+          <Label class="text-right text-sm pt-2">预览</Label>
+          <div class="col-span-3">
+            <div class="max-h-[180px] overflow-auto rounded-lg border border-border/30 bg-muted/10 p-3">
+              <pre class="text-[10px] font-mono text-foreground/70 whitespace-pre-wrap break-all leading-relaxed">{{ previewText }}</pre>
+            </div>
+            <p class="mt-1 text-[10px] text-muted-foreground/40">
+              显示前 {{ PREVIEW_MAX_ROWS }} 行预览
             </p>
           </div>
         </div>

@@ -519,6 +519,58 @@ pub async fn get_columns(
     Ok(columns)
 }
 
+/// 批量获取指定 schema 中所有表的列信息（SQL 补全预加载用）
+pub async fn get_all_columns(
+    pool: &PgPool,
+    schema: &str,
+) -> Result<std::collections::HashMap<String, Vec<ColumnInfo>>, AppError> {
+    let rows: Vec<PgRow> = sqlx::query(
+        "SELECT c.table_name,
+                c.column_name as name,
+                c.data_type,
+                c.is_nullable as nullable,
+                c.column_default as default_value,
+                CASE WHEN pk.column_name IS NOT NULL THEN true ELSE false END as is_pk,
+                pgd.description as comment
+         FROM information_schema.columns c
+         LEFT JOIN (
+             SELECT kcu.table_name, kcu.column_name
+             FROM information_schema.table_constraints tc
+             JOIN information_schema.key_column_usage kcu
+               ON tc.constraint_name = kcu.constraint_name
+               AND tc.table_schema = kcu.table_schema
+             WHERE tc.constraint_type = 'PRIMARY KEY'
+               AND tc.table_schema = $1
+         ) pk ON pk.table_name = c.table_name AND pk.column_name = c.column_name
+         LEFT JOIN pg_catalog.pg_statio_all_tables st
+           ON st.schemaname = c.table_schema AND st.relname = c.table_name
+         LEFT JOIN pg_catalog.pg_description pgd
+           ON pgd.objoid = st.relid AND pgd.objsubid = c.ordinal_position
+         WHERE c.table_schema = $1
+         ORDER BY c.table_name, c.ordinal_position",
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to load all columns: {}", e)))?;
+
+    let mut map: std::collections::HashMap<String, Vec<ColumnInfo>> = std::collections::HashMap::new();
+    for row in &rows {
+        let table_name: String = row.try_get("table_name").unwrap_or_default();
+        let nullable_str: String = row.try_get("nullable").unwrap_or_default();
+        let col = ColumnInfo {
+            name: row.try_get::<String, _>("name").unwrap_or_default(),
+            data_type: row.try_get::<String, _>("data_type").unwrap_or_default(),
+            nullable: nullable_str == "YES",
+            default_value: row.try_get::<Option<String>, _>("default_value").unwrap_or(None),
+            is_primary_key: row.try_get::<Option<bool>, _>("is_pk").unwrap_or(None).unwrap_or(false),
+            comment: row.try_get::<Option<String>, _>("comment").unwrap_or(None),
+        };
+        map.entry(table_name).or_default().push(col);
+    }
+    Ok(map)
+}
+
 /// Reconstructs a CREATE TABLE DDL from information_schema.
 /// This is a best-effort approximation since PostgreSQL has no SHOW CREATE TABLE.
 pub async fn get_create_table(

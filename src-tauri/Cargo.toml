@@ -1,6 +1,6 @@
 [package]
 name = "devforge"
-version = "0.4.2"
+version = "0.4.3"
 description = "Unified developer tool: Database + SSH + SFTP"
 authors = ["DevForge Team"]
 license = "MIT"
@@ -29,7 +29,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "fs
 tokio-util = "0.7"
 
 # Database (SQLite for local storage, MySQL/PostgreSQL for user connections)
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "mysql", "postgres", "tls-rustls"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "mysql", "postgres", "tls-rustls", "chrono"] }
 
 # Unique IDs
 uuid = { version = "1", features = ["v4", "serde"] }

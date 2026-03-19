@@ -88,7 +88,7 @@ export interface SchemaCompareTabContext {
 export interface PerformanceTabContext {
   type: 'performance'
   /** 当前激活的子标签页 */
-  activeSubTab: 'dashboard' | 'processes' | 'variables'
+  activeSubTab: 'dashboard' | 'processes' | 'variables' | 'slow-queries' | 'innodb' | 'index-advisor' | 'explain-compare' | 'audit-log'
 }
 
 /** 用户管理标签页上下文 */

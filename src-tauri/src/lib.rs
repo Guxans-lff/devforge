@@ -17,6 +17,7 @@ use commands::sync;
 use commands::sql_snippet;
 use commands::command_snippet;
 use commands::app_state;
+use commands::audit_log;
 use commands::ssh::{self, SshEngineState};
 use commands::table_editor;
 use commands::terminal_recorder::{self, TerminalRecorderState};
@@ -156,7 +157,6 @@ pub fn run() {
             db::db_commit,
             db::db_rollback,
             db::db_explain,
-            db::db_apply_row_changes,
             db::db_get_server_status,
             db::db_get_process_list,
             db::db_kill_process,
@@ -166,10 +166,15 @@ pub fn run() {
             db::db_drop_user,
             db::db_get_user_grants,
             db::db_apply_grants,
+            db::db_analyze_indexes,
+            db::db_suggest_indexes_for_query,
+            db::db_get_slow_query_digest,
+            db::db_get_innodb_status,
             db::db_export_data,
             db::db_generate_script,
             db::db_export_database_ddl,
             db::db_get_foreign_keys,
+            db::db_get_all_columns,
             db::write_text_file,
             db::read_text_file,
             // Session 连接管理（企业级模式）
@@ -272,6 +277,10 @@ pub fn run() {
             app_state::set_app_state,
             app_state::delete_app_state,
             app_state::list_app_state,
+            // 审计日志
+            audit_log::query_audit_logs,
+            audit_log::get_audit_stats,
+            audit_log::cleanup_audit_logs,
             // Import/Export
             import_export::export_connections,
             import_export::preview_import,

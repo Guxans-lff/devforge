@@ -2,7 +2,7 @@ import { Channel } from '@tauri-apps/api/core'
 import { invokeCommand } from '@/api/base'
 import { useLogStore } from '@/stores/log'
 import { i18n } from '@/locales'
-import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo, RowChange, ApplyChangesResult, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy, ForeignKeyRelation } from '@/types/database'
+import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy, ForeignKeyRelation, IndexAnalysisResult, IndexSuggestion, SlowQueryDigest, InnoDbStatus, AuditLogEntry, AuditStats } from '@/types/database'
 import type { PoolStatus, ReconnectParams, ReconnectResult } from '@/types/connection'
 import type { ExportFormat } from '@/types/export'
 
@@ -101,6 +101,14 @@ export function dbGetColumns(
   table: string,
 ): Promise<ColumnInfo[]> {
   return invokeCommand('db_get_columns', { connectionId, database, table })
+}
+
+/** 批量获取指定数据库中所有表的列信息（SQL 补全预加载用） */
+export function dbGetAllColumns(
+  connectionId: string,
+  database: string,
+): Promise<Record<string, ColumnInfo[]>> {
+  return invokeCommand('db_get_all_columns', { connectionId, database })
 }
 
 export function dbGetTableData(
@@ -204,10 +212,6 @@ export function dbExplain(connectionId: string, sql: string, format: string): Pr
   return invokeCommand('db_explain', { connectionId, sql, format })
 }
 
-/** 批量应用行数据变更（在事务中执行，任一失败全部回滚） */
-export function dbApplyRowChanges(connectionId: string, changes: RowChange[]): Promise<ApplyChangesResult> {
-  return invokeCommand('db_apply_row_changes', { connectionId, changes })
-}
 
 
 // ===== 性能监控 API =====
@@ -518,4 +522,52 @@ export function dbExecuteQueryStreamOnSession(
 /** 获取指定数据库的所有外键关系（用于 SQL 补全 JOIN 推荐） */
 export function dbGetForeignKeys(connectionId: string, database: string): Promise<ForeignKeyRelation[]> {
   return invokeCommand('db_get_foreign_keys', { connectionId, database })
+}
+
+// ===== 索引分析 API =====
+
+/** 分析数据库索引（冗余索引 + 未使用索引） */
+export function dbAnalyzeIndexes(connectionId: string, database: string): Promise<IndexAnalysisResult> {
+  return invokeCommand('db_analyze_indexes', { connectionId, database })
+}
+
+/** 基于 EXPLAIN 为单条 SQL 生成索引建议 */
+export function dbSuggestIndexesForQuery(connectionId: string, database: string, sql: string): Promise<IndexSuggestion[]> {
+  return invokeCommand('db_suggest_indexes_for_query', { connectionId, database, sql })
+}
+
+// ===== 深度性能诊断 API =====
+
+/** 获取慢查询 Top N（基于 performance_schema） */
+export function dbGetSlowQueryDigest(connectionId: string, limit: number): Promise<SlowQueryDigest[]> {
+  return invokeCommand('db_get_slow_query_digest', { connectionId, limit })
+}
+
+/** 获取 InnoDB 引擎状态 */
+export function dbGetInnoDbStatus(connectionId: string): Promise<InnoDbStatus> {
+  return invokeCommand('db_get_innodb_status', { connectionId })
+}
+
+// ===== 审计日志 API =====
+
+/** 查询审计日志 */
+export function queryAuditLogs(params: {
+  connectionId?: string
+  operationType?: string
+  databaseName?: string
+  search?: string
+  limit?: number
+  offset?: number
+}): Promise<AuditLogEntry[]> {
+  return invokeCommand('query_audit_logs', params)
+}
+
+/** 获取审计统计 */
+export function getAuditStats(connectionId?: string): Promise<AuditStats> {
+  return invokeCommand('get_audit_stats', { connectionId })
+}
+
+/** 清理过期审计日志 */
+export function cleanupAuditLogs(retentionDays?: number): Promise<number> {
+  return invokeCommand('cleanup_audit_logs', { retentionDays })
 }

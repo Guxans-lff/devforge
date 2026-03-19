@@ -126,44 +126,51 @@ function reopenClosedTab() {
       class="h-0.5 shrink-0"
       :style="{ backgroundColor: ENV_PRESETS[environment]?.color ?? 'transparent' }"
     />
-    <div class="flex h-8 items-center border-b border-border bg-muted/30" role="tablist">
-    <div class="flex flex-1 items-center overflow-x-auto">
-      <button
-        v-for="tab in tabs"
-        :key="tab.id"
-        role="tab"
-        :aria-selected="tab.id === activeTabId"
-        class="group flex h-8 shrink-0 items-center gap-1.5 border-r border-border px-2.5 text-[11px] transition-colors"
-        :class="[
-          tab.id === activeTabId
-            ? 'bg-background text-foreground'
-            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-        ]"
-        @click="handleClick(tab.id)"
-        @mousedown="handleMiddleClick($event, tab.id)"
-        @contextmenu="handleContextMenu($event, tab.id)"
-      >
-        <component :is="iconMap[tab.type]" class="h-3 w-3 shrink-0" />
-        <span class="max-w-[120px] truncate">{{ tab.title }}</span>
-        <span v-if="tab.dirty" class="h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--df-warning)]" />
+    <div class="flex h-9 items-center border-b border-border/30 bg-muted/30 px-1.5 gap-1" role="tablist">
+      <div class="flex flex-1 items-center overflow-x-auto h-full scrollbar-none py-1 pr-1 gap-0.5 select-none">
         <button
-          v-if="tab.closable"
-          class="ml-0.5 hidden h-4 w-4 shrink-0 items-center justify-center rounded-sm hover:bg-muted group-hover:flex"
-          :class="{ '!flex': tab.id === activeTabId }"
-          @click="handleClose($event, tab.id)"
+          v-for="tab in tabs"
+          :key="tab.id"
+          role="tab"
+          :aria-selected="tab.id === activeTabId"
+          class="group relative flex h-7 shrink-0 items-center gap-1.5 rounded-md px-3 text-[11px] font-medium transition-all duration-200"
+          :class="[
+            tab.id === activeTabId
+              ? 'bg-background text-foreground shadow-sm ring-1 ring-border/30'
+              : 'text-muted-foreground/60 hover:bg-background/60 hover:text-foreground/80',
+          ]"
+          @click="handleClick(tab.id)"
+          @mousedown="handleMiddleClick($event, tab.id)"
+          @contextmenu="handleContextMenu($event, tab.id)"
         >
-          <X class="h-3 w-3" />
-        </button>
-      </button>
-    </div>
+          <component
+            :is="iconMap[tab.type]"
+            class="h-3.5 w-3.5 shrink-0 transition-colors"
+            :class="tab.id === activeTabId ? 'text-primary/80' : ''"
+          />
+          <span class="max-w-[120px] truncate tracking-tight">{{ tab.title }}</span>
 
-    <button
-      class="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted/50 hover:text-foreground"
-      title="New Query"
-      @click="handleAddQuery"
-    >
-      <Plus class="h-3.5 w-3.5" />
-    </button>
+          <!-- Unsaved dot -->
+          <span v-if="tab.dirty" class="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+
+          <button
+            v-if="tab.closable"
+            class="ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm transition-all duration-150 opacity-0 group-hover:opacity-50 hover:bg-muted hover:!opacity-100"
+            :class="{ '!opacity-40': tab.id === activeTabId }"
+            @click="handleClose($event, tab.id)"
+          >
+            <X class="h-2.5 w-2.5" />
+          </button>
+        </button>
+      </div>
+
+      <button
+        class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 transition-all hover:bg-muted/80 hover:text-foreground/70"
+        title="New Query"
+        @click="handleAddQuery"
+      >
+        <Plus class="h-3.5 w-3.5" />
+      </button>
 
     <!-- 右键菜单 -->
     <Teleport to="body">
@@ -225,3 +232,20 @@ function reopenClosedTab() {
   </div>
   </div>
 </template>
+
+<style scoped>
+@reference "tailwindcss";
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+:deep([role="tablist"]) {
+  @apply select-none;
+}
+</style>

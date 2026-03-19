@@ -113,16 +113,16 @@ const themeIcon = computed(() => {
 // 连接类型标签
 
 const typeBadgeColors: Record<string, string> = {
-  database: 'bg-muted/20 text-muted-foreground group-hover:text-blue-500 group-hover:bg-blue-500/10 group-hover:border-blue-500/30',
-  ssh: 'bg-muted/20 text-muted-foreground group-hover:text-emerald-500 group-hover:bg-emerald-500/10 group-hover:border-emerald-500/30',
-  sftp: 'bg-muted/20 text-muted-foreground group-hover:text-amber-500 group-hover:bg-amber-500/10 group-hover:border-amber-500/30',
+  database: 'text-blue-500',
+  ssh: 'text-emerald-500',
+  sftp: 'text-amber-500',
 }
 
 const statusColors: Record<string, string> = {
-  connected: 'bg-emerald-500 shadow-emerald-500/40 shadow-[0_0_4px]',
-  disconnected: 'bg-muted-foreground/30',
-  connecting: 'bg-amber-500 animate-pulse',
-  error: 'bg-destructive shadow-destructive/40 shadow-[0_0_4px] animate-shake',
+  connected: 'bg-[#10b981] shadow-[0_0_6px_rgba(16,185,129,0.5)]',
+  disconnected: 'bg-zinc-400/50 dark:bg-zinc-600/50',
+  connecting: 'bg-amber-500 animate-[pulse_1.5s_ease-in-out_infinite]',
+  error: 'bg-destructive shadow-[0_0_6px_rgba(239,68,68,0.5)]',
 }
 
 /** 根据连接状态返回图标附加动画 class */
@@ -352,40 +352,41 @@ const groupedNonFavorites = computed(() => {
     ]"
     :style="{ width: isCollapsed ? '48px' : `${workspace.panelState.sidebarWidth}px` }"
   >
-    <!-- Header: 搜索 + 新建 (Physical Inset Design) -->
-    <div v-if="!isCollapsed" class="flex flex-col gap-3 px-4 pt-5 pb-3">
-      <div class="flex items-center justify-between mb-1">
-        <span class="text-[10px] font-black uppercase tracking-[0.2em] text-foreground/30">{{ t('sidebar.workspace') || 'Workspace' }}</span>
-        <TooltipProvider :delay-duration="300">
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <button
-                class="flex h-5 w-5 items-center justify-center rounded-md border border-black/[0.05] dark:border-white/5 bg-black/[0.02] dark:bg-white/[0.02] transition-all hover:bg-primary hover:text-white active:scale-90"
-                @click="handleNewConnection"
-              >
-                <Plus class="h-3 w-3" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom" class="text-[10px]">{{ t('welcome.newConnection') }}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-      </div>
-
-      <div class="group relative flex items-center">
-        <!-- 物理槽体容器 (Physical Groove Container) -->
-        <div class="absolute inset-0 rounded-xl bg-black/[0.04] dark:bg-white/[0.02] shadow-[inset_0_2px_4px_rgba(0,0,0,0.06),inset_0_1px_1px_rgba(0,0,0,0.04),0_1px_0_rgba(255,255,255,0.8)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.4),0_1px_0_rgba(255,255,255,0.05)] transition-all duration-300 group-focus-within:bg-white dark:group-focus-within:bg-black/40 group-focus-within:shadow-[inset_0_1px_2px_rgba(0,0,0,0.1),0_0_0_1px_var(--primary)]" />
+    <!-- Header: Masterclass Floating Anchor (No Redundant Titles) -->
+    <div v-if="!isCollapsed" class="flex items-center gap-2 px-3 pt-5 pb-2 relative z-20 bg-background/95 backdrop-blur-xl">
+      <!-- 琉璃质感拟物搜索框 (Neu/Glass Search Pill) -->
+      <div class="group relative flex-1 flex items-center">
+        <!-- Pill Background Container -->
+        <div class="absolute inset-0 rounded-full bg-zinc-100/60 dark:bg-black/20 shadow-[inset_0_2px_4px_rgba(0,0,0,0.03),inset_0_0_0_1px_rgba(0,0,0,0.04),0_1px_0_rgba(255,255,255,0.7)] dark:shadow-[inset_0_2px_6px_rgba(0,0,0,0.4),inset_0_0_0_1px_rgba(255,255,255,0.06),0_1px_0_rgba(255,255,255,0.03)] transform-gpu transition-all duration-300 group-focus-within:bg-white dark:group-focus-within:bg-[#1C1C1E] group-focus-within:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.05),0_0_0_2px_rgba(var(--primary-rgb),0.15)] dark:group-focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.15),0_6px_20px_rgba(0,0,0,0.6),0_0_0_2px_rgba(var(--primary-rgb),0.2)]" />
         
-        <Search class="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground/20 transition-colors group-focus-within:text-primary z-10" />
+        <Search class="absolute left-3.5 top-1/2 h-[15px] w-[15px] -translate-y-1/2 text-zinc-400 dark:text-zinc-500 transition-colors group-focus-within:text-primary z-10" />
         <Input
-          class="h-9 w-full border-none bg-transparent pl-9 pr-10 text-[11px] font-medium placeholder:text-foreground/20 shadow-none focus-visible:ring-0 z-10"
+          class="h-[34px] w-full border-none bg-transparent pl-10 pr-3 text-[13px] font-medium text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 shadow-none focus-visible:ring-0 z-10"
           :placeholder="t('sidebar.searchConnections')"
           :model-value="connectionStore.searchQuery"
           @update:model-value="connectionStore.setSearchQuery($event as string)"
         />
-        <div class="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-focus-within:opacity-100 transition-opacity z-10">
-           <span class="text-[9px] font-bold text-foreground/20 bg-foreground/5 px-1 rounded uppercase">Esc</span>
-        </div>
       </div>
+
+      <!-- 琉璃质感浮雕按钮 (Embossed Glass Button) -->
+      <TooltipProvider :delay-duration="300">
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <button
+              class="group relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full transform-gpu will-change-transform transition-all duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] active:scale-90"
+              @click="handleNewConnection"
+            >
+              <!-- Light Mode Emboss -->
+              <div class="absolute inset-0 rounded-full bg-gradient-to-b from-white to-zinc-50 shadow-[0_2px_5px_rgba(0,0,0,0.06),inset_0_0_0_0.5px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] dark:hidden group-hover:shadow-[0_4px_10px_rgba(0,0,0,0.1),inset_0_0_0_0.5px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,1)] group-active:shadow-[inset_0_2px_4px_rgba(0,0,0,0.05)] transition-all"></div>
+              <!-- Dark Mode Emboss -->
+              <div class="absolute inset-0 rounded-full bg-gradient-to-b from-zinc-700/80 to-zinc-800/80 shadow-[0_2px_5px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(255,255,255,0.08),inset_0_1px_0_rgba(255,255,255,0.15)] hidden dark:block group-hover:shadow-[0_4px_12px_rgba(0,0,0,0.5),inset_0_0_0_1px_rgba(255,255,255,0.15),inset_0_1px_0_rgba(255,255,255,0.25)] group-active:shadow-[inset_0_2px_6px_rgba(0,0,0,0.4)] transition-all"></div>
+              
+              <Plus class="relative h-[18px] w-[18px] text-zinc-500 group-hover:text-zinc-800 dark:text-zinc-400 dark:group-hover:text-white stroke-[2.5] transition-colors" />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" class="text-[10px]">{{ t('welcome.newConnection') }}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
     </div>
 
     <!-- Collapsed: 新建按钮 -->
@@ -427,22 +428,31 @@ const groupedNonFavorites = computed(() => {
           </Button>
         </div>
 
-        <!-- 收藏区域 -->
-        <template v-if="connectionStore.filteredFavorites.length > 0">
-          <div class="flex items-center gap-1.5 px-2 pt-2 pb-1 opacity-50">
-            <Star class="h-3.5 w-3.5 text-amber-500" />
-            <span class="text-[10px] font-bold uppercase tracking-[0.15em] text-muted-foreground/60">{{ t('connection.favorites') }}</span>
-          </div>
+        <!-- 收藏栏 (Sticky Glass Header Integration) -->
+          <div v-if="connectionStore.filteredFavorites.length > 0" class="group/section relative mb-2">
+            <Collapsible v-model:open="openGroups['favorites']">
+              <div class="sticky top-0 z-10 backdrop-blur-md bg-background/70 dark:bg-background/80 py-1.5 mb-1 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.05),inset_0_-1px_0_0_rgba(150,150,150,0.05)] pointer-events-none">
+                <CollapsibleTrigger class="flex w-full items-center gap-2 px-4 text-foreground/50 hover:text-foreground/90 transition-colors pointer-events-auto">
+                  <ChevronRight class="h-[14px] w-[14px] shrink-0 transition-transform duration-200" :class="{ 'rotate-90': openGroups['favorites'] }" />
+                  <Star class="h-[14px] w-[14px] text-amber-500/70" />
+                  <span class="text-[11px] font-bold tracking-widest flex-1 text-left truncate">{{ t('sidebar.favorites') }}</span>
+                  <span class="text-[9px] font-mono tracking-widest opacity-0 group-hover/section:opacity-100 transition-opacity pr-1">{{ connectionStore.filteredFavorites.length }}</span>
+                </CollapsibleTrigger>
+              </div>
 
-          <!-- 收藏连接项 -->
+              <CollapsibleContent>
+                <div class="flex flex-col mb-2">
           <ContextMenu v-for="conn in connectionStore.filteredFavorites" :key="'fav-' + conn.record.id">
             <ContextMenuTrigger>
               <div
-                class="group relative flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-1.5 transition-all duration-300 hover:bg-white dark:hover:bg-white/5 active:bg-accent/80 border border-transparent hover:border-border/50 hover:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.05)]"
-                :class="{
-                  'opacity-50': draggedConnectionId === conn.record.id,
-                  'border-primary/50 bg-primary/5': dragOverConnectionId === conn.record.id,
-                }"
+                class="group relative flex cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2 mx-1.5 mb-[3px] transform-gpu will-change-transform transition-all duration-300 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] active:scale-[0.98]"
+                :class="[
+                  workspace.activeTab?.connectionId === conn.record.id
+                    ? 'bg-zinc-200/80 dark:bg-white/[0.12] shadow-[inset_0_0_0_1px_rgba(var(--primary-rgb),0.2)]'
+                    : '',
+                  draggedConnectionId === conn.record.id ? 'opacity-40 grayscale' : '',
+                  dragOverConnectionId === conn.record.id ? 'bg-zinc-200/80 dark:bg-white/[0.12]' : '',
+                ]"
                 draggable="true"
                 @dragstart="onDragStart($event, conn.record.id)"
                 @dragover="onDragOver($event, conn.record.id)"
@@ -451,42 +461,48 @@ const groupedNonFavorites = computed(() => {
                 @dragend="onDragEnd"
                 @dblclick="handleDoubleClick(conn)"
               >
+                <!-- 左侧激活指示条 (Apple Style Indicator) -->
+                <div 
+                  class="absolute left-[-2px] top-2 bottom-2 w-[3px] rounded-full bg-primary transition-all duration-500 transform-gpu origin-center"
+                  :class="workspace.activeTab?.connectionId === conn.record.id ? 'scale-y-100 opacity-100' : 'scale-y-0 opacity-0'"
+                />
+
                 <!-- 颜色标签指示条 -->
                 <div
                   v-if="conn.record.color"
-                  class="absolute left-0 top-1 bottom-1 w-[3px] rounded-full"
+                  class="absolute right-1 top-1.5 bottom-1.5 w-[3px] rounded-full opacity-60"
                   :style="{ backgroundColor: conn.record.color }"
                 />
 
-                <!-- 类型图标 + 状态 -->
-                <div class="relative flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border/10 transition-all duration-300"
-                     :class="[typeBadgeColors[conn.record.type] ?? 'bg-muted text-muted-foreground']"
-                     :style="conn.record.color ? { marginLeft: '4px' } : {}">
-                  <component :is="typeIcons[conn.record.type] ?? Database" class="h-3.5 w-3.5" :class="iconAnimClass(conn.status)" />
-                  <div class="absolute -bottom-0.5 -right-0.5 h-2 w-2.5 rounded-full border border-background flex items-center justify-center overflow-hidden bg-background shadow-xs">
-                    <div class="relative h-1.5 w-1.5 rounded-full" :class="statusColors[conn.status] ?? 'bg-muted-foreground/30'" />
+                <!-- 类型图标 + 状态 (Micro-Card Icon with Ambient Depth) -->
+                <div class="relative flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-b from-white to-zinc-100/80 dark:from-zinc-700/50 dark:to-zinc-800/50 shadow-[0_2px_5px_rgba(0,0,0,0.04),inset_0_0_0_1px_rgba(255,255,255,0.7),inset_0_-1px_0_rgba(0,0,0,0.06)] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_2px_8px_rgba(0,0,0,0.3)] transition-all duration-300 group-hover:scale-[1.02] group-hover:shadow-[0_4px_8px_rgba(0,0,0,0.08),inset_0_0_0_1px_rgba(255,255,255,1),inset_0_-1px_0_rgba(0,0,0,0.05)] dark:group-hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12),0_4px_12px_rgba(0,0,0,0.5)]"
+                     :class="[typeBadgeColors[conn.record.type] ?? 'text-muted-foreground']">
+                  <component :is="typeIcons[conn.record.type] ?? Database" class="h-[15px] w-[15px]" :class="iconAnimClass(conn.status)" />
+                  <!-- 镶嵌式 LED 状态灯 -->
+                  <div class="absolute -bottom-1 -right-1 flex h-[14px] w-[14px] items-center justify-center rounded-full border-[1.5px] border-white/90 dark:border-[#2C2C2E] bg-white/50 dark:bg-black/50 backdrop-blur-sm shadow-[0_1px_2px_rgba(0,0,0,0.1)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
+                    <div class="relative h-[8px] w-[8px] rounded-full overflow-hidden" :class="statusColors[conn.status] ?? statusColors.disconnected">
+                      <div v-if="conn.status === 'connected'" class="absolute inset-0 rounded-full bg-emerald-400 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite] opacity-75"></div>
+                    </div>
                   </div>
                 </div>
-
-                <!-- 信息 -->
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center gap-1">
-                    <p class="truncate text-[12px] font-semibold text-foreground/90 group-hover:text-primary transition-colors">{{ conn.record.name }}</p>
-                    <Star class="h-3 w-3 shrink-0 text-amber-500 fill-amber-500" />
-                    <!-- 环境标记 -->
+ 
+                <!-- 信息 (Typography Refinement) -->
+                <div class="min-w-0 flex-1 flex flex-col justify-center h-8 relative top-[-0.5px]">
+                  <div class="flex items-center gap-1.5 mb-[2px]">
+                    <p class="truncate text-[13px] font-semibold tracking-tight text-zinc-800/90 dark:text-zinc-100/90 group-hover:text-primary transition-colors leading-none">{{ conn.record.name }}</p>
+                    <Star class="h-[10px] w-[10px] shrink-0 text-amber-500 fill-amber-500" />
+                    <!-- 环境标记 (Apple Capsule Style) -->
                     <span
                       v-if="getEnvironment(conn.record)"
-                      class="shrink-0 rounded px-1 py-px text-[8px] font-bold uppercase leading-none"
+                      class="shrink-0 rounded-full px-1.5 h-3.5 text-[8px] font-extrabold uppercase tracking-widest inline-flex items-center justify-center ring-1 ring-inset ring-current/20 backdrop-blur-sm leading-none -translate-y-px"
                       :style="{
                         color: ENV_PRESETS[getEnvironment(conn.record)!].color,
                         backgroundColor: ENV_PRESETS[getEnvironment(conn.record)!].color + '18',
                       }"
                     >{{ ENV_SHORT_LABELS[getEnvironment(conn.record)!] }}</span>
                   </div>
-                  <p class="truncate text-[10px] text-muted-foreground/50 font-mono tracking-tight">{{ conn.record.host }}</p>
+                  <p class="truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500 font-mono tracking-[0.02em] leading-none">{{ conn.record.host }}</p>
                 </div>
-
-                <div class="h-1 w-1 rounded-full bg-primary opacity-0 group-hover:opacity-60 transition-opacity" />
               </div>
             </ContextMenuTrigger>
             <!-- 右键菜单 -->
@@ -523,34 +539,38 @@ const groupedNonFavorites = computed(() => {
               </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
 
           <Separator v-if="connectionStore.filteredNonFavorites.length > 0" class="my-1 opacity-30" />
-        </template>
 
-        <!-- 分组展示普通连接项 -->
-        <template v-for="group in groupedNonFavorites" :key="group.type">
-          <div 
-            class="flex items-center gap-2 px-2 pt-2.5 pb-1 cursor-pointer group/title select-none transition-colors hover:text-primary"
-            @click="toggleGroup(group.type)"
-          >
-            <ChevronDown 
-              class="h-3.5 w-3.5 text-muted-foreground/30 transition-transform duration-300"
-              :class="{ '-rotate-90': group.isCollapsed }"
-            />
-            <component :is="group.icon" class="h-3.5 w-3.5 text-muted-foreground/50" />
-            <span class="text-[10px] font-bold uppercase tracking-[0.15em] whitespace-nowrap text-muted-foreground/60 group-hover/title:text-primary/70 transition-colors">{{ group.label }}</span>
-            <div class="h-[1px] flex-1 bg-border/5 ml-1"></div>
-          </div>
-          
-          <div v-show="!group.isCollapsed" class="space-y-0.5">
+          <!-- 分组 (Sticky Header + Micro-Cards Transition) -->
+          <div v-for="group in groupedNonFavorites" :key="group.type" class="group/section relative mb-1">
+              <!-- 组标题 (Sticky Glass Header) -->
+              <div class="sticky top-0 z-10 backdrop-blur-md bg-background/70 dark:bg-background/80 py-1.5 my-1 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.05),inset_0_-1px_0_0_rgba(150,150,150,0.05)] cursor-pointer" @click="toggleGroup(group.type)">
+                <div class="flex w-full items-center gap-2 px-4 text-foreground/50 hover:text-foreground/90 transition-colors pointer-events-auto">
+                  <ChevronRight class="h-[14px] w-[14px] shrink-0 transition-transform duration-200" :class="{ 'rotate-90': !group.isCollapsed }" />
+                  <component :is="group.icon" class="h-[14px] w-[14px]" />
+                  <span class="text-[11px] font-bold tracking-widest flex-1 text-left truncate">{{ group.label }}</span>
+                  <span class="text-[9px] font-mono tracking-widest opacity-0 group-hover/section:opacity-100 transition-opacity pr-1">{{ group.items.length }}</span>
+                </div>
+              </div>
+
+              <div v-show="!group.isCollapsed">
+                <div class="flex flex-col mt-0.5">
             <ContextMenu v-for="conn in group.items" :key="conn.record.id">
               <ContextMenuTrigger>
               <div
-                class="group relative flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-1.5 transition-all duration-300 hover:bg-white dark:hover:bg-white/5 active:bg-accent/80 border border-transparent hover:border-border/50 hover:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.05)]"
-                :class="{
-                  'opacity-50': draggedConnectionId === conn.record.id,
-                  'border-primary/50 bg-primary/5': dragOverConnectionId === conn.record.id,
-                }"
+                class="group relative flex cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2 mx-1.5 mb-[3px] transform-gpu will-change-transform transition-all duration-300 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] active:scale-[0.98]"
+                :class="[
+                  workspace.activeTab?.connectionId === conn.record.id
+                    ? 'bg-zinc-200/80 dark:bg-white/[0.12] shadow-[inset_0_0_0_1px_rgba(var(--primary-rgb),0.2)]'
+                    : '',
+                  draggedConnectionId === conn.record.id ? 'opacity-40 grayscale' : '',
+                  dragOverConnectionId === conn.record.id ? 'bg-zinc-200/80 dark:bg-white/[0.12]' : '',
+                ]"
                 draggable="true"
                 @dragstart="onDragStart($event, conn.record.id)"
                 @dragover="onDragOver($event, conn.record.id)"
@@ -559,31 +579,39 @@ const groupedNonFavorites = computed(() => {
                 @dragend="onDragEnd"
                 @dblclick="handleDoubleClick(conn)"
               >
+                <!-- 左侧激活指示条 (Apple Style Indicator) -->
+                <div 
+                  class="absolute left-[-2px] top-2 bottom-2 w-[3px] rounded-full bg-primary transition-all duration-500 transform-gpu origin-center"
+                  :class="workspace.activeTab?.connectionId === conn.record.id ? 'scale-y-100 opacity-100' : 'scale-y-0 opacity-0'"
+                />
+
                 <!-- 颜色标签指示条 -->
                 <div
                   v-if="conn.record.color"
-                  class="absolute left-0 top-1 bottom-1 w-[3px] rounded-full"
+                  class="absolute right-1 top-1.5 bottom-1.5 w-[3px] rounded-full opacity-60"
                   :style="{ backgroundColor: conn.record.color }"
                 />
 
-                <!-- 类型图标 + 状态 -->
-                <div class="relative flex h-7 w-7 shrink-0 items-center justify-center rounded border border-border/10 transition-all duration-300"
-                     :class="[typeBadgeColors[conn.record.type] ?? 'bg-muted text-muted-foreground']"
-                     :style="conn.record.color ? { marginLeft: '4px' } : {}">
-                  <component :is="typeIcons[conn.record.type] ?? Database" class="h-3.5 w-3.5" :class="iconAnimClass(conn.status)" />
-                  <div class="absolute -bottom-0.5 -right-0.5 h-2 w-2.5 rounded-full border border-background flex items-center justify-center overflow-hidden bg-background shadow-xs">
-                    <div class="relative h-1.5 w-1.5 rounded-full" :class="statusColors[conn.status] ?? 'bg-muted-foreground/30'" />
+                <!-- 类型图标 + 状态 (Micro-Card Icon with Ambient Depth) -->
+                <div class="relative flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-b from-white to-zinc-100/80 dark:from-zinc-700/50 dark:to-zinc-800/50 shadow-[0_2px_5px_rgba(0,0,0,0.04),inset_0_0_0_1px_rgba(255,255,255,0.7),inset_0_-1px_0_rgba(0,0,0,0.06)] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_2px_8px_rgba(0,0,0,0.3)] transition-all duration-300 group-hover:scale-[1.02] group-hover:shadow-[0_4px_8px_rgba(0,0,0,0.08),inset_0_0_0_1px_rgba(255,255,255,1),inset_0_-1px_0_rgba(0,0,0,0.05)] dark:group-hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12),0_4px_12px_rgba(0,0,0,0.5)]"
+                     :class="[typeBadgeColors[conn.record.type] ?? 'text-muted-foreground']">
+                  <component :is="typeIcons[conn.record.type] ?? Database" class="h-[15px] w-[15px]" :class="iconAnimClass(conn.status)" />
+                  <!-- 镶嵌式 LED 状态灯 -->
+                  <div class="absolute -bottom-1 -right-1 flex h-[14px] w-[14px] items-center justify-center rounded-full border-[1.5px] border-white/90 dark:border-[#2C2C2E] bg-white/50 dark:bg-black/50 backdrop-blur-sm shadow-[0_1px_2px_rgba(0,0,0,0.1)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
+                    <div class="relative h-[8px] w-[8px] rounded-full overflow-hidden" :class="statusColors[conn.status] ?? statusColors.disconnected">
+                      <div v-if="conn.status === 'connected'" class="absolute inset-0 rounded-full bg-emerald-400 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite] opacity-75"></div>
+                    </div>
                   </div>
                 </div>
 
-                <!-- 信息 -->
-                <div class="min-w-0 flex-1">
-                  <div class="flex items-center gap-1">
-                    <p class="truncate text-[12px] font-semibold text-foreground/90 group-hover:text-primary transition-colors">{{ conn.record.name }}</p>
-                    <!-- 环境标记 -->
+                <!-- 信息 (Typography Refinement) -->
+                <div class="min-w-0 flex-1 flex flex-col justify-center h-8 relative top-[-0.5px]">
+                  <div class="flex items-center gap-1.5 mb-[2px]">
+                    <p class="truncate text-[13px] font-semibold tracking-tight text-zinc-800/90 dark:text-zinc-100/90 group-hover:text-primary transition-colors leading-none">{{ conn.record.name }}</p>
+                    <!-- 环境标记 (Apple Capsule Style) -->
                     <span
                       v-if="getEnvironment(conn.record)"
-                      class="shrink-0 rounded px-1 py-px text-[8px] font-bold uppercase leading-none"
+                      class="shrink-0 rounded-full px-1.5 h-3.5 text-[8px] font-extrabold uppercase tracking-widest inline-flex items-center justify-center ring-1 ring-inset ring-current/20 backdrop-blur-sm leading-none -translate-y-px"
                       :style="{
                         color: ENV_PRESETS[getEnvironment(conn.record)!].color,
                         backgroundColor: ENV_PRESETS[getEnvironment(conn.record)!].color + '18',
@@ -591,11 +619,9 @@ const groupedNonFavorites = computed(() => {
                     >{{ ENV_SHORT_LABELS[getEnvironment(conn.record)!] }}</span>
                   </div>
                   <div class="flex items-center gap-1.5 overflow-hidden">
-                    <p class="truncate text-[10px] text-muted-foreground/50 font-mono tracking-tight">{{ conn.record.host }}</p>
+                    <p class="truncate text-[10px] font-medium text-zinc-400 dark:text-zinc-500 font-mono tracking-[0.02em] leading-none">{{ conn.record.host }}</p>
                   </div>
                 </div>
-
-                <div class="h-1 w-1 rounded-full bg-primary opacity-0 group-hover:opacity-60 transition-opacity" />
               </div>
             </ContextMenuTrigger>
             <!-- 右键菜单 (省略部分重复逻辑，保持结构) -->
@@ -632,8 +658,9 @@ const groupedNonFavorites = computed(() => {
               </ContextMenuItem>
             </ContextMenuContent>
           </ContextMenu>
+                </div>
+              </div>
           </div>
-        </template>
       </div>
 
       <!-- Collapsed: 连接图标列表 -->

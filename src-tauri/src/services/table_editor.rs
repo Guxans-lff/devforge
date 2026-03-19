@@ -1091,3 +1091,504 @@ async fn pg_table_ddl(pool: &PgPool, database: &str, table: &str) -> Result<Stri
     }
     Ok(ddl)
 }
+
+// ===========================================================================
+// 单元测试
+// ===========================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::table_editor::*;
+
+    // -----------------------------------------------------------------------
+    // 辅助函数：构建测试数据
+    // -----------------------------------------------------------------------
+
+    fn col(name: &str, data_type: &str) -> ColumnDefinition {
+        ColumnDefinition {
+            name: name.to_string(),
+            data_type: data_type.to_string(),
+            length: None,
+            nullable: true,
+            is_primary_key: false,
+            default_value: None,
+            auto_increment: false,
+            on_update: None,
+            comment: None,
+        }
+    }
+
+    fn col_full(
+        name: &str, data_type: &str, length: Option<&str>,
+        nullable: bool, auto_inc: bool, default: Option<&str>,
+        on_update: Option<&str>, comment: Option<&str>,
+    ) -> ColumnDefinition {
+        ColumnDefinition {
+            name: name.to_string(),
+            data_type: data_type.to_string(),
+            length: length.map(|s| s.to_string()),
+            nullable,
+            is_primary_key: false,
+            default_value: default.map(|s| s.to_string()),
+            auto_increment: auto_inc,
+            on_update: on_update.map(|s| s.to_string()),
+            comment: comment.map(|s| s.to_string()),
+        }
+    }
+
+    fn idx(name: &str, cols: &[&str], idx_type: &str) -> IndexDefinition {
+        IndexDefinition {
+            name: name.to_string(),
+            columns: cols.iter().map(|s| s.to_string()).collect(),
+            index_type: idx_type.to_string(),
+        }
+    }
+
+    fn fk(name: &str, cols: &[&str], ref_table: &str, ref_cols: &[&str],
+           on_delete: Option<&str>, on_update: Option<&str>) -> ForeignKeyDefinition {
+        ForeignKeyDefinition {
+            name: name.to_string(),
+            columns: cols.iter().map(|s| s.to_string()).collect(),
+            ref_table: ref_table.to_string(),
+            ref_columns: ref_cols.iter().map(|s| s.to_string()).collect(),
+            on_delete: on_delete.map(|s| s.to_string()),
+            on_update: on_update.map(|s| s.to_string()),
+        }
+    }
+
+    fn base_table_def(name: &str, db: &str, columns: Vec<ColumnDefinition>) -> TableDefinition {
+        TableDefinition {
+            name: name.to_string(),
+            database: db.to_string(),
+            columns,
+            indexes: vec![],
+            foreign_keys: vec![],
+            engine: None,
+            charset: None,
+            collation: None,
+            comment: None,
+        }
+    }
+
+    fn base_alteration(db: &str, table: &str) -> TableAlteration {
+        TableAlteration {
+            database: db.to_string(),
+            table: table.to_string(),
+            column_changes: vec![],
+            index_changes: vec![],
+            new_name: None,
+            new_comment: None,
+            new_engine: None,
+            new_charset: None,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // 标识符校验
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_identifier_normal() {
+        assert!(validate_identifier("users").is_ok());
+        assert!(validate_identifier("_private").is_ok());
+        assert!(validate_identifier("col123").is_ok());
+    }
+
+    #[test]
+    fn test_validate_identifier_chinese() {
+        assert!(validate_identifier("用户表").is_ok());
+        assert!(validate_identifier("字段_name").is_ok());
+    }
+
+    #[test]
+    fn test_validate_identifier_empty() {
+        assert!(validate_identifier("").is_err());
+    }
+
+    #[test]
+    fn test_validate_identifier_too_long() {
+        let long = "a".repeat(129);
+        assert!(validate_identifier(&long).is_err());
+        // 128 个字符刚好通过
+        let ok = "a".repeat(128);
+        assert!(validate_identifier(&ok).is_ok());
+    }
+
+    #[test]
+    fn test_validate_identifier_special_chars() {
+        assert!(validate_identifier("drop;--").is_err());
+        assert!(validate_identifier("col name").is_err());
+        assert!(validate_identifier("123start").is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // MySQL CREATE TABLE
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_mysql_create_basic_table() {
+        let def = TableDefinition {
+            name: "users".to_string(),
+            database: "mydb".to_string(),
+            columns: vec![
+                col_full("id", "BIGINT", None, false, true, None, None, None),
+                col_full("name", "VARCHAR", Some("255"), false, false, None, None, Some("用户名")),
+                col("email", "VARCHAR"),
+            ],
+            indexes: vec![idx("PRIMARY", &["id"], "PRIMARY")],
+            foreign_keys: vec![],
+            engine: Some("InnoDB".to_string()),
+            charset: Some("utf8mb4".to_string()),
+            collation: None,
+            comment: Some("用户表".to_string()),
+        };
+        let result = generate_create_table(&def, "mysql").unwrap();
+        assert!(result.sql.contains("CREATE TABLE `mydb`.`users`"));
+        assert!(result.sql.contains("`id` BIGINT NOT NULL AUTO_INCREMENT"));
+        assert!(result.sql.contains("`name` VARCHAR(255) NOT NULL COMMENT '用户名'"));
+        assert!(result.sql.contains("PRIMARY KEY (`id`)"));
+        assert!(result.sql.contains("ENGINE=InnoDB"));
+        assert!(result.sql.contains("DEFAULT CHARSET=utf8mb4"));
+        assert!(result.sql.contains("COMMENT='用户表'"));
+        assert_eq!(result.statements.len(), 1);
+    }
+
+    #[test]
+    fn test_mysql_create_with_indexes_and_fk() {
+        let def = TableDefinition {
+            name: "orders".to_string(),
+            database: "shop".to_string(),
+            columns: vec![
+                col_full("id", "INT", None, false, true, None, None, None),
+                col("user_id", "INT"),
+                col("status", "VARCHAR"),
+            ],
+            indexes: vec![
+                idx("PRIMARY", &["id"], "PRIMARY"),
+                idx("idx_user", &["user_id"], "INDEX"),
+                idx("uk_status", &["user_id", "status"], "UNIQUE"),
+                idx("ft_status", &["status"], "FULLTEXT"),
+            ],
+            foreign_keys: vec![
+                fk("fk_user", &["user_id"], "users", &["id"], Some("CASCADE"), Some("CASCADE")),
+            ],
+            engine: None,
+            charset: None,
+            collation: None,
+            comment: None,
+        };
+        let result = generate_create_table(&def, "mysql").unwrap();
+        assert!(result.sql.contains("PRIMARY KEY (`id`)"));
+        assert!(result.sql.contains("INDEX `idx_user` (`user_id`)"));
+        assert!(result.sql.contains("UNIQUE INDEX `uk_status` (`user_id`, `status`)"));
+        assert!(result.sql.contains("FULLTEXT INDEX `ft_status` (`status`)"));
+        assert!(result.sql.contains("CONSTRAINT `fk_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`)"));
+        assert!(result.sql.contains("ON DELETE CASCADE"));
+        assert!(result.sql.contains("ON UPDATE CASCADE"));
+    }
+
+    #[test]
+    fn test_mysql_column_def_default_and_on_update() {
+        let c = col_full(
+            "updated_at", "TIMESTAMP", None,
+            false, false, Some("CURRENT_TIMESTAMP"),
+            Some("CURRENT_TIMESTAMP"), None,
+        );
+        let def_str = mysql_column_def(&c);
+        assert!(def_str.contains("DEFAULT CURRENT_TIMESTAMP"));
+        assert!(def_str.contains("ON UPDATE CURRENT_TIMESTAMP"));
+        // CURRENT_TIMESTAMP 不应该被引号包裹
+        assert!(!def_str.contains("DEFAULT 'CURRENT_TIMESTAMP'"));
+    }
+
+    #[test]
+    fn test_mysql_column_def_string_default() {
+        let c = col_full("status", "VARCHAR", Some("20"), true, false, Some("active"), None, None);
+        let def_str = mysql_column_def(&c);
+        assert!(def_str.contains("DEFAULT 'active'"));
+    }
+
+    #[test]
+    fn test_mysql_column_def_null_default() {
+        let c = col_full("deleted_at", "TIMESTAMP", None, true, false, Some("NULL"), None, None);
+        let def_str = mysql_column_def(&c);
+        // NULL 不应被引号包裹
+        assert!(def_str.contains("DEFAULT NULL"));
+        assert!(!def_str.contains("DEFAULT 'NULL'"));
+    }
+
+    // -----------------------------------------------------------------------
+    // MySQL ALTER TABLE
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_mysql_alter_rename_table() {
+        let mut alt = base_alteration("mydb", "old_name");
+        alt.new_name = Some("new_name".to_string());
+        let result = generate_alter_table(&alt, "mysql").unwrap();
+        assert!(result.sql.contains("ALTER TABLE `mydb`.`old_name` RENAME TO `mydb`.`new_name`"));
+    }
+
+    #[test]
+    fn test_mysql_alter_add_column() {
+        let mut alt = base_alteration("mydb", "users");
+        alt.column_changes = vec![ColumnChange {
+            change_type: "add".to_string(),
+            column: col_full("age", "INT", None, true, false, Some("0"), None, None),
+            old_name: None,
+            after_column: Some("name".to_string()),
+        }];
+        let result = generate_alter_table(&alt, "mysql").unwrap();
+        assert!(result.sql.contains("ADD COLUMN `age` INT DEFAULT '0' AFTER `name`"));
+    }
+
+    #[test]
+    fn test_mysql_alter_modify_column() {
+        let mut alt = base_alteration("mydb", "users");
+        alt.column_changes = vec![ColumnChange {
+            change_type: "modify".to_string(),
+            column: col_full("name", "VARCHAR", Some("500"), false, false, None, None, None),
+            old_name: None,
+            after_column: None,
+        }];
+        let result = generate_alter_table(&alt, "mysql").unwrap();
+        assert!(result.sql.contains("MODIFY COLUMN `name` VARCHAR(500) NOT NULL"));
+    }
+
+    #[test]
+    fn test_mysql_alter_drop_column() {
+        let mut alt = base_alteration("mydb", "users");
+        alt.column_changes = vec![ColumnChange {
+            change_type: "drop".to_string(),
+            column: col("age", "INT"),
+            old_name: None,
+            after_column: None,
+        }];
+        let result = generate_alter_table(&alt, "mysql").unwrap();
+        assert!(result.sql.contains("DROP COLUMN `age`"));
+    }
+
+    #[test]
+    fn test_mysql_alter_rename_column() {
+        let mut alt = base_alteration("mydb", "users");
+        alt.column_changes = vec![ColumnChange {
+            change_type: "rename".to_string(),
+            column: col_full("username", "VARCHAR", Some("255"), false, false, None, None, None),
+            old_name: Some("name".to_string()),
+            after_column: None,
+        }];
+        let result = generate_alter_table(&alt, "mysql").unwrap();
+        assert!(result.sql.contains("CHANGE COLUMN `name` `username` VARCHAR(255) NOT NULL"));
+    }
+
+    #[test]
+    fn test_mysql_alter_add_drop_index() {
+        let mut alt = base_alteration("mydb", "users");
+        alt.index_changes = vec![
+            IndexChange {
+                change_type: "add".to_string(),
+                index: idx("idx_email", &["email"], "INDEX"),
+            },
+            IndexChange {
+                change_type: "drop".to_string(),
+                index: idx("idx_old", &["old_col"], "INDEX"),
+            },
+            IndexChange {
+                change_type: "drop".to_string(),
+                index: idx("PRIMARY", &["id"], "PRIMARY"),
+            },
+        ];
+        let result = generate_alter_table(&alt, "mysql").unwrap();
+        assert!(result.sql.contains("ADD INDEX `idx_email` (`email`)"));
+        assert!(result.sql.contains("DROP INDEX `idx_old`"));
+        assert!(result.sql.contains("DROP PRIMARY KEY"));
+    }
+
+    #[test]
+    fn test_mysql_alter_table_options() {
+        let mut alt = base_alteration("mydb", "users");
+        alt.new_engine = Some("MyISAM".to_string());
+        alt.new_charset = Some("utf8mb4".to_string());
+        alt.new_comment = Some("新注释".to_string());
+        let result = generate_alter_table(&alt, "mysql").unwrap();
+        assert!(result.sql.contains("ENGINE=MyISAM"));
+        assert!(result.sql.contains("DEFAULT CHARSET=utf8mb4"));
+        assert!(result.sql.contains("COMMENT='新注释'"));
+    }
+
+    // -----------------------------------------------------------------------
+    // PostgreSQL CREATE TABLE
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_pg_create_basic_table() {
+        let def = TableDefinition {
+            name: "users".to_string(),
+            database: "public".to_string(),
+            columns: vec![
+                col_full("id", "BIGINT", None, false, true, None, None, None),
+                col_full("name", "VARCHAR", Some("255"), false, false, None, None, Some("用户名")),
+                col("email", "TEXT"),
+            ],
+            indexes: vec![idx("PRIMARY", &["id"], "PRIMARY")],
+            foreign_keys: vec![],
+            engine: None,
+            charset: None,
+            collation: None,
+            comment: Some("用户表".to_string()),
+        };
+        let result = generate_create_table(&def, "postgresql").unwrap();
+        // 自增列映射为 BIGSERIAL
+        assert!(result.sql.contains("\"id\" BIGSERIAL NOT NULL"));
+        assert!(result.sql.contains("\"name\" VARCHAR(255) NOT NULL"));
+        assert!(result.sql.contains("PRIMARY KEY (\"id\")"));
+        // 表注释是独立语句
+        assert!(result.sql.contains("COMMENT ON TABLE \"public\".\"users\" IS '用户表'"));
+        // 列注释是独立语句
+        assert!(result.sql.contains("COMMENT ON COLUMN \"public\".\"users\".\"name\" IS '用户名'"));
+        // 至少 3 条语句：CREATE TABLE + 表注释 + 列注释
+        assert!(result.statements.len() >= 3);
+    }
+
+    #[test]
+    fn test_pg_serial_mapping() {
+        // SMALLINT -> SMALLSERIAL
+        let def = base_table_def("t", "public", vec![
+            col_full("a", "SMALLINT", None, false, true, None, None, None),
+            col_full("b", "INT", None, false, true, None, None, None),
+            col_full("c", "BIGINT", None, false, true, None, None, None),
+        ]);
+        let result = generate_create_table(&def, "postgresql").unwrap();
+        assert!(result.sql.contains("SMALLSERIAL"));
+        assert!(result.sql.contains("SERIAL"));
+        assert!(result.sql.contains("BIGSERIAL"));
+    }
+
+    #[test]
+    fn test_pg_create_separate_indexes() {
+        let def = TableDefinition {
+            name: "posts".to_string(),
+            database: "public".to_string(),
+            columns: vec![col("id", "INT"), col("title", "TEXT")],
+            indexes: vec![
+                idx("PRIMARY", &["id"], "PRIMARY"),
+                idx("idx_title", &["title"], "INDEX"),
+            ],
+            foreign_keys: vec![],
+            engine: None, charset: None, collation: None, comment: None,
+        };
+        let result = generate_create_table(&def, "postgresql").unwrap();
+        // 普通索引是独立的 CREATE INDEX 语句
+        assert!(result.sql.contains("CREATE INDEX \"idx_title\" ON \"public\".\"posts\" (\"title\")"));
+        assert!(result.statements.len() == 2); // CREATE TABLE + CREATE INDEX
+    }
+
+    // -----------------------------------------------------------------------
+    // PostgreSQL ALTER TABLE
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_pg_alter_type_and_nullable() {
+        let mut alt = base_alteration("public", "users");
+        alt.column_changes = vec![ColumnChange {
+            change_type: "modify".to_string(),
+            column: col_full("name", "TEXT", None, false, false, None, None, None),
+            old_name: None,
+            after_column: None,
+        }];
+        let result = generate_alter_table(&alt, "postgresql").unwrap();
+        assert!(result.sql.contains("ALTER COLUMN \"name\" TYPE TEXT"));
+        assert!(result.sql.contains("ALTER COLUMN \"name\" SET NOT NULL"));
+        assert!(result.sql.contains("ALTER COLUMN \"name\" DROP DEFAULT"));
+    }
+
+    #[test]
+    fn test_pg_alter_rename_column() {
+        let mut alt = base_alteration("public", "users");
+        alt.column_changes = vec![ColumnChange {
+            change_type: "rename".to_string(),
+            column: col("username", "VARCHAR"),
+            old_name: Some("name".to_string()),
+            after_column: None,
+        }];
+        let result = generate_alter_table(&alt, "postgresql").unwrap();
+        assert!(result.sql.contains("RENAME COLUMN \"name\" TO \"username\""));
+    }
+
+    #[test]
+    fn test_pg_alter_add_drop_index() {
+        let mut alt = base_alteration("public", "users");
+        alt.index_changes = vec![
+            IndexChange {
+                change_type: "add".to_string(),
+                index: idx("idx_email", &["email"], "INDEX"),
+            },
+            IndexChange {
+                change_type: "drop".to_string(),
+                index: idx("PRIMARY", &["id"], "PRIMARY"),
+            },
+        ];
+        let result = generate_alter_table(&alt, "postgresql").unwrap();
+        assert!(result.sql.contains("CREATE INDEX \"idx_email\" ON \"public\".\"users\" (\"email\")"));
+        // PG 删主键用 DROP CONSTRAINT tablename_pkey
+        assert!(result.sql.contains("DROP CONSTRAINT \"users_pkey\""));
+    }
+
+    #[test]
+    fn test_pg_alter_table_comment() {
+        let mut alt = base_alteration("public", "users");
+        alt.new_comment = Some("更新后的注释".to_string());
+        let result = generate_alter_table(&alt, "postgresql").unwrap();
+        assert!(result.sql.contains("COMMENT ON TABLE \"public\".\"users\" IS '更新后的注释'"));
+    }
+
+    // -----------------------------------------------------------------------
+    // 公共 API 校验
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_generate_create_invalid_table_name() {
+        let def = base_table_def("drop;--", "mydb", vec![col("id", "INT")]);
+        assert!(generate_create_table(&def, "mysql").is_err());
+    }
+
+    #[test]
+    fn test_generate_create_invalid_column_name() {
+        let def = base_table_def("t", "mydb", vec![col("col name", "INT")]);
+        assert!(generate_create_table(&def, "mysql").is_err());
+    }
+
+    #[test]
+    fn test_generate_alter_invalid_new_name() {
+        let mut alt = base_alteration("mydb", "users");
+        alt.new_name = Some("123bad".to_string());
+        assert!(generate_alter_table(&alt, "mysql").is_err());
+    }
+
+    #[test]
+    fn test_mysql_escape_single_quote() {
+        let def = TableDefinition {
+            name: "t".to_string(),
+            database: "db".to_string(),
+            columns: vec![col("id", "INT")],
+            indexes: vec![],
+            foreign_keys: vec![],
+            engine: None, charset: None, collation: None,
+            comment: Some("it's a table".to_string()),
+        };
+        let result = generate_create_table(&def, "mysql").unwrap();
+        assert!(result.sql.contains("COMMENT='it\\'s a table'"));
+    }
+
+    #[test]
+    fn test_driver_dispatch() {
+        let def = base_table_def("t", "db", vec![col("id", "INT")]);
+        // 默认走 MySQL
+        let mysql_result = generate_create_table(&def, "mysql").unwrap();
+        assert!(mysql_result.sql.contains('`'));
+        // PG 用双引号
+        let pg_result = generate_create_table(&def, "postgresql").unwrap();
+        assert!(pg_result.sql.contains('"'));
+    }
+}

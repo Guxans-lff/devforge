@@ -1,18 +1,23 @@
 use crate::models::query::{SqlFileProgress, SqlImportOptions};
-use crate::services::db_engine::{DbEngine, get_import_states};
+use crate::services::db_engine::{DbEngine, ImportCommand, get_import_states};
 use crate::utils::error::AppError;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use tauri::ipc::Channel;
 use crate::services::sql_splitter;
 
-/// 在执行 SQL 期间轮询取消状态，一旦检测到取消立即返回 true
-async fn wait_for_cancel(import_state: &std::sync::atomic::AtomicU8) {
+/// 等待取消信号（通过 watch channel 订阅）
+async fn wait_for_cancel(rx: &mut tokio::sync::watch::Receiver<ImportCommand>) {
     loop {
-        if import_state.load(Ordering::Relaxed) == 2 {
+        if *rx.borrow() == ImportCommand::Cancelled {
             return;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if rx.changed().await.is_err() {
+            // sender 已关闭，视为取消
+            return;
+        }
+        if *rx.borrow() == ImportCommand::Cancelled {
+            return;
+        }
     }
 }
 
@@ -54,11 +59,11 @@ impl DbEngine {
         let stmt = initial_statements.join("\n");
         let _ = self.clone().execute_query_on_session(connection_id.clone(), session_id.clone(), database.clone(), stmt, None).await;
 
-        // 注册导入状态（0=运行中，1=暂停，2=取消）
-        let import_state = Arc::new(std::sync::atomic::AtomicU8::new(0));
+        // 注册导入状态（watch channel）
+        let (tx, mut rx) = tokio::sync::watch::channel(ImportCommand::Running);
         {
             let mut states = get_import_states().write().await;
-            states.insert(import_id.clone(), import_state.clone());
+            states.insert(import_id.clone(), tx);
         }
 
         // 分割 SQL 语句
@@ -92,26 +97,29 @@ impl DbEngine {
         }
 
         let mut cancelled = false;
-        // 进度推送频率控制：最多每 100ms 推送一次，避免高频 IPC 阻塞前端主线程
+        // 进度推送频率控制：最多每 100ms 推送一次
         let mut last_progress_time = std::time::Instant::now();
         const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 
         for (idx, stmt_str) in statements.into_iter().enumerate() {
-            // ===== 每条语句入口处检查暂停/取消状态 =====
+            // ===== 检查暂停/取消状态 =====
             loop {
-                let state = import_state.load(Ordering::Relaxed);
-                if state == 2 {
-                    if !query_buffer.is_empty() {
-                        executed += query_buffer.len();
-                        fail += query_buffer.len();
-                        query_buffer.clear();
+                let cmd = *rx.borrow();
+                match cmd {
+                    ImportCommand::Cancelled => {
+                        if !query_buffer.is_empty() {
+                            executed += query_buffer.len();
+                            fail += query_buffer.len();
+                            query_buffer.clear();
+                        }
+                        cancelled = true;
+                        break;
                     }
-                    cancelled = true;
-                    break;
-                } else if state == 1 {
-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                } else {
-                    break;
+                    ImportCommand::Paused => {
+                        // 等待状态变化（暂停 → 恢复或取消）
+                        let _ = rx.changed().await;
+                    }
+                    ImportCommand::Running => break,
                 }
             }
             if cancelled { break; }
@@ -124,7 +132,7 @@ impl DbEngine {
                 continue;
             }
 
-            // 进度上报：按时间间隔节流，首条、末条、以及每次真正执行批次时必定推送
+            // 进度上报：按时间间隔节流
             let now = std::time::Instant::now();
             let should_report = idx == 0 || is_last || now.duration_since(last_progress_time) >= PROGRESS_INTERVAL;
             if should_report {
@@ -157,8 +165,6 @@ impl DbEngine {
                     let batch_sql = query_buffer.join(";\n");
                     let batch_count = query_buffer.len();
 
-                    // 用 tokio::select! 同时等待 SQL 执行和取消信号
-                    // 取消时不等待当前批次完成，立即通知前端
                     let exec_future = self.clone().execute_query_on_session(
                         connection_id.clone(),
                         session_id.clone(),
@@ -166,12 +172,11 @@ impl DbEngine {
                         batch_sql,
                         None,
                     );
-                    let cancel_future = wait_for_cancel(&import_state);
+                    let cancel_future = wait_for_cancel(&mut rx);
 
                     tokio::select! {
                         result = exec_future => {
-                            // SQL 执行完成，检查是否期间被取消
-                            if import_state.load(Ordering::Relaxed) == 2 {
+                            if *rx.borrow() == ImportCommand::Cancelled {
                                 executed += batch_count;
                                 fail += batch_count;
                                 cancelled = true;
@@ -190,8 +195,6 @@ impl DbEngine {
                             }
                         }
                         _ = cancel_future => {
-                            // 取消信号到达，立即中断，不等待 SQL 执行完成
-                            // SQL 仍在后台执行（tokio::spawn 中），但我们不再等待
                             executed += batch_count;
                             fail += batch_count;
                             cancelled = true;
@@ -204,11 +207,10 @@ impl DbEngine {
                     query_buffer.clear();
                     buffer_size = 0;
                 } else {
-                    // buffer 未满，继续累积
                     continue;
                 }
             } else {
-                // 非批量模式：同样用 select! 监听取消
+                // 非批量模式
                 let exec_future = self.clone().execute_query_on_session(
                     connection_id.clone(),
                     session_id.clone(),
@@ -216,11 +218,11 @@ impl DbEngine {
                     trimmed.to_string(),
                     None,
                 );
-                let cancel_future = wait_for_cancel(&import_state);
+                let cancel_future = wait_for_cancel(&mut rx);
 
                 tokio::select! {
                     result = exec_future => {
-                        if import_state.load(Ordering::Relaxed) == 2 {
+                        if *rx.borrow() == ImportCommand::Cancelled {
                             executed += 1;
                             fail += 1;
                             cancelled = true;
@@ -253,7 +255,6 @@ impl DbEngine {
                     success += executed_count_in_this_step;
                     uncommitted_count += executed_count_in_this_step;
 
-                    // 批次执行完毕后立即推送最新进度，确保前端数据及时更新
                     let _ = on_progress.send(SqlFileProgress {
                         total_statements,
                         executed,
@@ -272,7 +273,6 @@ impl DbEngine {
                 }
                 Some(e) => {
                     fail += executed_count_in_this_step;
-                    // 批量模式下一批可能包含多条语句，附加受影响数量信息
                     let err_msg = if executed_count_in_this_step > 1 {
                         format!("{} (batch: {} statements affected)", e, executed_count_in_this_step)
                     } else {
@@ -296,7 +296,6 @@ impl DbEngine {
         }
 
         if cancelled {
-            // 取消：先立即发送完成通知给前端，再后台清理 session
             let _ = on_progress.send(SqlFileProgress {
                 total_statements,
                 executed,
@@ -308,7 +307,6 @@ impl DbEngine {
             });
             get_import_states().write().await.remove(&import_id);
 
-            // 后台异步清理 session，不阻塞前端
             let engine = self.clone();
             let conn_id = connection_id.clone();
             let sess_id = session_id.clone();
@@ -316,7 +314,6 @@ impl DbEngine {
                 let _ = engine.release_session(conn_id, sess_id).await;
             });
         } else {
-            // 正常完成：清理事务和 session，然后通知前端
             if options.disable_auto_commit {
                 let _ = self.clone().execute_query_on_session(connection_id.clone(), session_id.clone(), database.clone(), "COMMIT; SET autocommit=1;".to_string(), None).await;
             }

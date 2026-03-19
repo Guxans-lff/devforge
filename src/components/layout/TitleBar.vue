@@ -67,28 +67,24 @@ async function handleDoubleClick() {
     @dblclick="handleDoubleClick"
   >
     <!-- 左侧：应用图标 + 名称 -->
-    <div class="flex items-center gap-2 px-3 w-[200px] shrink-0" @mousedown.stop>
+    <div class="flex-1 flex items-center gap-2 px-3" @mousedown.stop>
       <Zap class="h-4 w-4 text-primary" />
       <span class="text-[11px] font-semibold text-foreground/60">DevForge</span>
     </div>
 
     <!-- 中间：搜索/命令面板入口 -->
-    <div class="flex-1 flex justify-center" @mousedown.stop>
+    <div class="flex-none flex justify-center" @mousedown.stop>
       <button
-        class="flex h-6 w-[340px] max-w-[50vw] items-center gap-2 rounded-md border border-border/40 bg-muted/20 px-3 text-muted-foreground/50 transition-all hover:bg-muted/40 hover:text-muted-foreground/70 hover:border-border/60 active:scale-[0.98]"
+        class="flex h-6 w-[340px] max-w-[40vw] items-center justify-center gap-2 rounded-md border border-border/80 bg-muted/40 px-3 text-muted-foreground/80 transition-all hover:bg-muted/60 hover:text-muted-foreground hover:border-border active:scale-[0.98]"
         @click="commandPalette.toggle()"
       >
         <Search class="h-3 w-3 shrink-0" />
-        <span class="text-[11px] flex-1 text-left truncate">{{ t('command.palette') }}</span>
-        <div class="flex items-center gap-0.5 text-[10px] font-bold opacity-50 shrink-0">
-          <Command class="h-2.5 w-2.5" />
-          <span>K</span>
-        </div>
+        <span class="text-[11px] truncate">{{ t('command.palette') }}</span>
       </button>
     </div>
 
     <!-- 右侧：窗口控制按钮 -->
-    <div class="flex items-center shrink-0" @mousedown.stop>
+    <div class="flex-1 flex items-center justify-end" @mousedown.stop>
       <!-- 最小化 -->
       <button
         class="flex h-9 w-12 items-center justify-center text-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground/80"

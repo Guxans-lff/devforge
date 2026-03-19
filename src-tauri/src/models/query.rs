@@ -173,67 +173,6 @@ pub struct TriggerInfo {
     pub statement: Option<String>,
 }
 
-
-/// 行变更类型
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ChangeType {
-    /// 更新已有行
-    Update,
-    /// 插入新行
-    Insert,
-    /// 删除已有行
-    Delete,
-}
-
-/// 单行数据变更
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RowChange {
-    /// 变更类型
-    pub change_type: ChangeType,
-    /// 目标数据库
-    pub database: String,
-    /// 目标表名
-    pub table: String,
-    /// 主键列名和对应的原始值（用于 WHERE 条件定位行）
-    /// Update 和 Delete 时必须提供
-    pub primary_keys: Vec<KeyValue>,
-    /// 变更的列名和新值
-    /// Update 和 Insert 时使用
-    pub values: Vec<ColumnValue>,
-}
-
-/// 主键列名-值对
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct KeyValue {
-    pub column: String,
-    pub value: serde_json::Value,
-}
-
-/// 列名-新值对
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ColumnValue {
-    pub column: String,
-    pub value: serde_json::Value,
-}
-
-/// 批量变更执行结果
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ApplyChangesResult {
-    /// 是否全部成功
-    pub success: bool,
-    /// 受影响的总行数
-    pub affected_rows: u64,
-    /// 生成的 SQL 语句列表（用于审计）
-    pub generated_sql: Vec<String>,
-    /// 错误信息（失败时）
-    pub error: Option<String>,
-}
-
 // ===== 性能监控相关结构体 =====
 
 /// 服务器状态指标
@@ -402,4 +341,126 @@ pub struct ForeignKeyRelation {
     pub column_name: String,
     pub referenced_table_name: String,
     pub referenced_column_name: String,
+}
+
+// ===== 索引分析模型 =====
+
+/// 索引分析综合结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexAnalysisResult {
+    /// 冗余索引列表
+    pub redundant_indexes: Vec<RedundantIndex>,
+    /// 未使用索引列表
+    pub unused_indexes: Vec<UnusedIndex>,
+    /// 索引建议列表
+    pub suggestions: Vec<IndexSuggestion>,
+}
+
+/// 冗余索引：被其他索引的前缀完全覆盖
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedundantIndex {
+    /// 表名
+    pub table_name: String,
+    /// 冗余索引名
+    pub index_name: String,
+    /// 冗余索引的列
+    pub index_columns: Vec<String>,
+    /// 覆盖此索引的索引名
+    pub covered_by: String,
+    /// 覆盖索引的列
+    pub covered_by_columns: Vec<String>,
+    /// 建议的 DROP 语句
+    pub drop_sql: String,
+}
+
+/// 未使用索引：存在但从未被查询使用过
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnusedIndex {
+    /// 表名
+    pub table_name: String,
+    /// 索引名
+    pub index_name: String,
+    /// 索引列
+    pub index_columns: Vec<String>,
+    /// 索引大小（估算）
+    pub size_estimate: String,
+    /// 建议的 DROP 语句
+    pub drop_sql: String,
+}
+
+/// 索引创建建议
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexSuggestion {
+    /// 表名
+    pub table_name: String,
+    /// 建议的列
+    pub columns: Vec<String>,
+    /// 建议原因
+    pub reason: String,
+    /// 预估改善程度描述
+    pub estimated_improvement: String,
+    /// 建议的 CREATE INDEX 语句
+    pub create_sql: String,
+}
+
+// ===== 性能诊断模型 =====
+
+/// 慢查询摘要（来自 performance_schema）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlowQueryDigest {
+    /// SQL 摘要文本
+    pub digest_text: String,
+    /// 执行次数
+    pub exec_count: u64,
+    /// 平均执行时间（毫秒）
+    pub avg_time_ms: f64,
+    /// 最大执行时间（毫秒）
+    pub max_time_ms: f64,
+    /// 总执行时间（毫秒）
+    pub total_time_ms: f64,
+    /// 扫描行数总计
+    pub rows_examined: u64,
+    /// 返回行数总计
+    pub rows_sent: u64,
+    /// 首次出现时间
+    pub first_seen: Option<String>,
+    /// 最后出现时间
+    pub last_seen: Option<String>,
+}
+
+/// InnoDB 引擎状态
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InnoDbStatus {
+    /// Buffer Pool 总页数
+    pub buffer_pool_pages_total: u64,
+    /// Buffer Pool 空闲页数
+    pub buffer_pool_pages_free: u64,
+    /// Buffer Pool 脏页数
+    pub buffer_pool_pages_dirty: u64,
+    /// Buffer Pool 命中率
+    pub buffer_pool_hit_rate: f64,
+    /// 当前行锁等待数
+    pub row_lock_current_waits: u64,
+    /// 行锁等待平均时间（毫秒）
+    pub row_lock_time_avg_ms: f64,
+    /// 死锁次数
+    pub deadlocks: u64,
+    /// Redo Log 写入量（字节）
+    pub log_bytes_written: u64,
+    /// 待刷新日志量（字节）
+    pub log_pending_fsyncs: u64,
+    /// 读取行数
+    pub rows_read: u64,
+    /// 插入行数
+    pub rows_inserted: u64,
+    /// 更新行数
+    pub rows_updated: u64,
+    /// 删除行数
+    pub rows_deleted: u64,
 }

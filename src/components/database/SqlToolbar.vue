@@ -252,32 +252,38 @@ const timeoutModel = computed({
     </Button>
 
     <!-- 代码片段 -->
-    <div class="w-px h-4 bg-border" />
-    <Button
-      variant="ghost"
-      size="sm"
-      class="h-6 gap-1 text-[11px]"
-      :class="{ 'bg-muted': snippetPanelOpen }"
-      @click="emit('toggleSnippet')"
-    >
-      <Bookmark class="h-3 w-3" />
-      {{ t('sqlSnippet.title') }}
-    </Button>
-    <span class="text-[10px] text-muted-foreground">Ctrl+Enter</span>
+    <div class="w-px h-3.5 bg-border/40 mx-1" />
+    <div class="flex items-center gap-1.5 px-1">
+      <Button
+        variant="ghost"
+        size="sm"
+        class="h-7 px-2 gap-1.5 text-[11px] font-medium transition-all"
+        :class="snippetPanelOpen ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+        @click="emit('toggleSnippet')"
+      >
+        <Bookmark class="h-3.5 w-3.5" />
+        {{ t('sqlSnippet.title') }}
+      </Button>
+      <kbd class="hidden sm:inline-flex h-4 items-center gap-1 rounded border border-border/40 bg-muted/50 px-1.5 font-mono text-[9px] font-bold text-muted-foreground/50 opacity-100">
+        <span class="text-[8px]">CTRL</span> ENTER
+      </kbd>
+    </div>
 
     <!-- 查询超时 -->
-    <div class="flex items-center gap-1 ml-auto">
-      <Clock class="h-3 w-3 text-muted-foreground" />
-      <input
-        v-model.number="timeoutModel"
-        type="number"
-        min="0"
-        max="3600"
-        class="w-14 h-5 rounded border border-border bg-background px-1 text-[10px] text-center tabular-nums"
-        placeholder="30"
-        title="查询超时（秒），0 表示不限制"
-      />
-      <span class="text-[10px] text-muted-foreground">秒</span>
+    <div class="flex items-center gap-2 ml-auto pr-2">
+      <div class="flex items-center gap-1 bg-muted/30 hover:bg-muted/50 border border-border/30 rounded-md px-2 py-0.5 transition-colors group">
+        <Clock class="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground/70" />
+        <input
+          v-model.number="timeoutModel"
+          type="number"
+          min="0"
+          max="3600"
+          class="w-8 bg-transparent border-none focus:ring-0 text-[11px] text-center tabular-nums p-0 text-foreground font-medium appearance-none"
+          placeholder="30"
+          title="查询超时（秒），0 表示不限制"
+        />
+        <span class="text-[10px] text-muted-foreground/30 font-semibold tracking-tighter">SEC</span>
+      </div>
     </div>
 
     <!-- 事务进行中标识 -->
