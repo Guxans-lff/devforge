@@ -5,7 +5,7 @@
  */
 import { ref } from 'vue'
 import { useCommandPaletteStore } from '@/stores/command-palette'
-import { Search, Command, Minus, Square, X, Copy, Zap } from 'lucide-vue-next'
+import { Search, Minus, Square, X, Copy, Zap } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()

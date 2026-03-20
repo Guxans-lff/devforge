@@ -21,6 +21,11 @@ export function sftpMkdir(connectionId: string, path: string): Promise<boolean> 
   return invokeCommand('sftp_mkdir', { connectionId, path })
 }
 
+/** 在远程创建空文件 */
+export function sftpTouch(connectionId: string, path: string): Promise<boolean> {
+  return invokeCommand('sftp_touch', { connectionId, path })
+}
+
 export function sftpDelete(
   connectionId: string,
   path: string,
@@ -94,6 +99,11 @@ export function localListDir(path: string): Promise<FileEntry[]> {
 
 export function localMkdir(path: string): Promise<void> {
   return invokeCommand('local_mkdir', { path })
+}
+
+/** 在本地创建空文件 */
+export function localTouch(path: string): Promise<void> {
+  return invokeCommand('local_touch', { path })
 }
 
 export function localDelete(path: string): Promise<void> {

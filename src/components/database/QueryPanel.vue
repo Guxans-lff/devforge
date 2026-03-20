@@ -15,6 +15,7 @@ import * as dbApi from '@/api/database'
 import type { SchemaCache } from '@/types/database'
 import type { QueryTabContext } from '@/types/database-workspace'
 import type { EnvironmentType } from '@/types/environment'
+import type { SqlEditorExposed } from '@/types/component-exposed'
 
 const props = defineProps<{
   connectionId: string
@@ -39,6 +40,11 @@ const emit = defineEmits<{
 const store = useDatabaseWorkspaceStore()
 const { t } = useI18n()
 const editorRef = ref<InstanceType<typeof SqlEditor>>()
+
+/** 获取编辑器的类型安全引用 */
+function getEditor(): SqlEditorExposed | undefined {
+  return editorRef.value as unknown as SqlEditorExposed | undefined
+}
 
 // ===== Tab Context =====
 const tabContext = computed(() => {
@@ -106,7 +112,7 @@ function isDatabaseIndependentSql(sql: string): boolean {
 }
 
 function executeCurrentSql() {
-  const selected = (editorRef.value as any)?.getSelectedText()
+  const selected = getEditor()?.getSelectedText()
   if (selected && selected.trim()) {
     handleExecuteWithEmit(selected)
   } else {
@@ -150,12 +156,12 @@ function handleExecuteAll(sql: string) {
 }
 
 function handleFormat() {
-  (editorRef.value as any)?.formatDocument()
+  getEditor()?.formatDocument()
 }
 
 function handleExplain() {
   execution.handleExplain(() => {
-    const selected = (editorRef.value as any)?.getSelectedText()
+    const selected = getEditor()?.getSelectedText()
     return (selected && selected.trim()) ? selected.trim() : sqlContent.value.trim()
   })
 }

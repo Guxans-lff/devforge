@@ -147,7 +147,9 @@ impl TransferManager {
         });
 
         // 发送初始信号
-        let _ = self.scheduler_tx.as_ref().unwrap().send(());
+        if let Some(tx) = self.scheduler_tx.as_ref() {
+            let _ = tx.send(());
+        }
     }
 
     /// 处理队列中的待处理任务

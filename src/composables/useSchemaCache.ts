@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import type { SchemaCache, DatabaseSchema, TableSchema, DatabaseTreeNode, ColumnInfo } from '@/types/database'
+import type { SchemaCache, DatabaseSchema, TableSchema, DatabaseTreeNode } from '@/types/database'
 import { dbGetForeignKeys, dbGetAllColumns } from '@/api/database'
 import { setCache } from '@/composables/useMetadataCache'
 

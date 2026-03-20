@@ -202,8 +202,6 @@ async function handleStart() {
 }
 
 async function handlePause() {
-  console.trace('[DEBUG] handlePause called - 调用栈追踪')
-  console.log('[DEBUG] handlePause - isPaused:', isPaused.value, 'isExecuting:', isExecuting.value, 'isCancelling:', isCancelling.value)
   isPaused.value = true
   await dbApi.dbPauseSqlImport(importId.value)
 }
@@ -228,7 +226,6 @@ function formatNumber(num: number) {
 }
 
 function handleCopyLog(id: string, event: MouseEvent, text?: string) {
-  console.log('[DEBUG] handleCopyLog called, id:', id, 'event type:', event.type, 'target:', (event.target as HTMLElement)?.tagName)
   event.stopPropagation()
   event.preventDefault()
 

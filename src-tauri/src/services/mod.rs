@@ -1,13 +1,18 @@
 pub mod audit_log;
 pub mod credential;
+pub mod crash_reporter;
+pub mod cron_parser;
 pub mod data_import;
+pub mod data_sync;
 pub mod db_backup;
 pub mod db_drivers;
 pub mod db_engine;
 pub mod file_chunker;
 pub mod import_export;
+pub mod known_hosts;
 pub mod local_shell_engine;
 pub mod progress_tracker;
+pub mod scheduler;
 pub mod schema_compare;
 pub mod sftp_engine;
 pub mod sql_splitter;
@@ -19,7 +24,3 @@ pub mod storage;
 pub mod table_editor;
 pub mod terminal_recorder;
 pub mod transfer_manager;
-
-
-
-

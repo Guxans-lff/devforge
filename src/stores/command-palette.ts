@@ -175,11 +175,11 @@ export const useCommandPaletteStore = defineStore('command-palette', () => {
 
   function openConnection(id: string, name: string, type: string) {
     const tabId = `${type}-${id}`
-    const tabType = type === 'database' ? 'database' : type === 'ssh' ? 'terminal' : 'file-manager'
+    const tabType = type === 'database' ? 'database' : type === 'ssh' ? 'terminal' : 'file-manager' as const
 
     workspaceStore.addTab({
       id: tabId,
-      type: tabType as any,
+      type: tabType,
       title: name,
       icon: type === 'database' ? 'Database' : type === 'ssh' ? 'Terminal' : 'FolderOpen',
       connectionId: id,

@@ -231,6 +231,21 @@ impl SftpEngine {
         Ok(())
     }
 
+    /// 在远程创建空文件（touch）
+    pub async fn touch(
+        &self,
+        connection_id: &str,
+        path: &str,
+    ) -> Result<(), AppError> {
+        let sftp = self.get_sftp(connection_id).await?;
+        // 创建文件后自动 drop 关闭
+        let _file = sftp
+            .create(path)
+            .await
+            .map_err(|e| AppError::Other(format!("SFTP touch failed: {}", e)))?;
+        Ok(())
+    }
+
     /// Delete a remote file.
     pub async fn delete_file(
         &self,

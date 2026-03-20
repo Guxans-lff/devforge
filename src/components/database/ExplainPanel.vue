@@ -9,6 +9,8 @@ import {
 } from 'lucide-vue-next'
 import { setAppStateJson } from '@/api/app-state'
 import { useMessage } from '@/stores/message-center'
+import { isMysqlExplain, isExplainError, isExplainRaw, isPgExplain } from '@/types/explain'
+import type { MysqlQueryBlock, PgPlanNode } from '@/types/explain'
 
 const props = defineProps<{
   result: Record<string, unknown> | null
@@ -47,18 +49,17 @@ let nodeCounter = 0
 // ---- MySQL 解析 ----
 function parseMysqlExplain(data: Record<string, unknown>): ExplainNode[] {
   nodeCounter = 0
-  const queryBlock = (data as any)?.query_block
-  if (!queryBlock) return []
-  return [parseMysqlNode(queryBlock)]
+  if (!isMysqlExplain(data)) return []
+  return [parseMysqlNode(data.query_block)]
 }
 
-function parseMysqlNode(block: any): ExplainNode {
+function parseMysqlNode(block: MysqlQueryBlock): ExplainNode {
   const id = `node-${nodeCounter++}`
   const tbl = block?.table ?? {}
   const table = tbl?.table_name ?? block?.table_name ?? null
   const accessType = tbl?.access_type ?? block?.access_type ?? ''
   const rows = tbl?.rows_examined_per_scan ?? block?.rows_examined_per_scan ?? null
-  const filteredPct = tbl?.filtered != null ? parseFloat(tbl.filtered) : null
+  const filteredPct = tbl?.filtered != null ? parseFloat(String(tbl.filtered)) : null
   const costStr = tbl?.cost_info?.read_cost ?? tbl?.cost_info?.eval_cost ?? block?.cost_info?.query_cost
   const cost = costStr ? parseFloat(String(costStr)) : null
   const key = tbl?.key ?? block?.key ?? null
@@ -66,7 +67,7 @@ function parseMysqlNode(block: any): ExplainNode {
   const possibleKeys = possibleKeysRaw ? (Array.isArray(possibleKeysRaw) ? possibleKeysRaw : [possibleKeysRaw]) : null
   const keyLen = tbl?.key_length != null ? String(tbl.key_length) : null
   const extra = block?.message ?? null
-  const refVal = tbl?.ref ?? null
+  const refVal = tbl?.ref != null ? (Array.isArray(tbl.ref) ? tbl.ref.join(',') : tbl.ref) : null
   const selectType = block?.select_type ?? null
 
   // 判断性能等级
@@ -111,7 +112,7 @@ function parseMysqlNode(block: any): ExplainNode {
 }
 
 // ---- PostgreSQL 解析 ----
-function parsePgNode(plan: any, idx: number): ExplainNode {
+function parsePgNode(plan: PgPlanNode, idx: number): ExplainNode {
   const id = `pg-${nodeCounter++}-${idx}`
   const nodeType = plan?.['Node Type'] ?? 'Unknown'
   const table = plan?.['Relation Name'] ?? null
@@ -131,7 +132,7 @@ function parsePgNode(plan: any, idx: number): ExplainNode {
   if (nodeType.includes('Seq Scan')) warnings.push(t('explain.warnFullScan'))
   if (rows != null && rows > 10000) warnings.push(t('explain.warnHighRows', { rows: rows.toLocaleString() }))
 
-  const children = (plan?.Plans ?? []).map((p: any, i: number) => parsePgNode(p, i))
+  const children = (plan?.Plans ?? []).map((p: PgPlanNode, i: number) => parsePgNode(p, i))
 
   return {
     id, type: nodeType, table, rows, filteredPct, cost, key,
@@ -143,23 +144,26 @@ function parsePgNode(plan: any, idx: number): ExplainNode {
 // ---- 计算属性 ----
 const nodes = computed<ExplainNode[]>(() => {
   if (!props.result) return []
-  if ((props.result as any).error) return []
-  if ((props.result as any).raw) return []
+  if (isExplainError(props.result)) return []
+  if (isExplainRaw(props.result)) return []
 
-  if ((props.result as any).query_block) {
+  if (isMysqlExplain(props.result)) {
     return parseMysqlExplain(props.result)
   }
-  if (Array.isArray(props.result)) {
+  if (isPgExplain(props.result)) {
     nodeCounter = 0
-    return (props.result as any[]).map((plan: any, i: number) => parsePgNode(plan?.Plan ?? plan, i))
+    return props.result.map((plan, i: number) => {
+      const pgPlan = plan.Plan ?? (plan as unknown as PgPlanNode)
+      return parsePgNode(pgPlan, i)
+    })
   }
   return []
 })
 
 const fallbackJson = computed(() => {
   if (!props.result) return null
-  if ((props.result as any).error) return null
-  if ((props.result as any).raw) return null
+  if (isExplainError(props.result)) return null
+  if (isExplainRaw(props.result)) return null
   if (nodes.value.length > 0) return null
   try {
     return JSON.stringify(props.result, null, 2)
@@ -170,12 +174,12 @@ const fallbackJson = computed(() => {
 
 const errorMessage = computed(() => {
   if (!props.result) return null
-  return (props.result as any).error ?? null
+  return isExplainError(props.result) ? props.result.error : null
 })
 
 const rawText = computed(() => {
   if (!props.result) return null
-  return (props.result as any).raw ?? null
+  return isExplainRaw(props.result) ? props.result.raw : null
 })
 
 // ---- 汇总统计 ----
@@ -208,8 +212,8 @@ function collectStats(nodeList: ExplainNode[]): ExplainSummary {
   nodeList.forEach(walk)
 
   // 总成本取根节点
-  const rootCost = (props.result as any)?.query_block?.cost_info?.query_cost
-    ? parseFloat((props.result as any).query_block.cost_info.query_cost)
+  const rootCost = isMysqlExplain(props.result) && props.result.query_block.cost_info?.query_cost
+    ? parseFloat(props.result.query_block.cost_info.query_cost)
     : nodeList[0]?.cost ?? null
 
   return { totalCost: rootCost, totalRows, tableCount, fullScanCount, indexUsedCount, warnings: allWarnings }

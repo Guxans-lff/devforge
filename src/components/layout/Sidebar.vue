@@ -43,7 +43,7 @@ import {
   StarOff,
   Copy,
   X,
-  ChevronDown,
+  ChevronRight,
 } from 'lucide-vue-next'
 import type { ConnectionRecord } from '@/api/connection'
 import type { TabType } from '@/types/workspace'
@@ -75,6 +75,9 @@ const colorPickerPosition = ref({ x: 0, y: 0 })
 
 // 分组展开/折叠状态
 const collapsedGroups = ref<Set<string>>(new Set())
+
+// Collapsible 分组展开状态（用于收藏等可折叠区域）
+const openGroups = ref<Record<string, boolean>>({ favorites: true })
 
 function toggleGroup(type: string) {
   if (collapsedGroups.value.has(type)) {

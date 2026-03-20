@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, defineAsyncComponent } from 'vue'
+import type { TerminalPanelExposed, TerminalSearchOptions } from '@/types/component-exposed'
 
 const props = defineProps<{
   connectionId: string
@@ -15,6 +16,11 @@ const emit = defineEmits<{
 const TerminalPanel = defineAsyncComponent(() => import('./TerminalPanel.vue'))
 const innerRef = ref<InstanceType<typeof TerminalPanel> | null>(null)
 
+/** 获取内部组件的类型安全引用 */
+function getInner(): TerminalPanelExposed | undefined {
+  return innerRef.value as unknown as TerminalPanelExposed | undefined
+}
+
 function handleStatusChange(status: string) {
   emit('statusChange', status)
 }
@@ -25,46 +31,45 @@ function handleCwdChange(path: string) {
 
 // 透传内部 TerminalPanel 的方法
 function sendData(data: string) {
-  ;(innerRef.value as any)?.sendData(data)
+  getInner()?.sendData(data)
 }
 
 function getSessionInfo() {
-  return (innerRef.value as any)?.getSessionInfo() ?? { sessionId: '', cols: 120, rows: 40 }
+  return getInner()?.getSessionInfo() ?? { sessionId: '', cols: 120, rows: 40 }
 }
 
 function reconnect() {
-  ;(innerRef.value as any)?.reconnect()
+  getInner()?.reconnect()
 }
 
 function handleResize() {
-  ;(innerRef.value as any)?.handleResize()
+  getInner()?.handleResize()
 }
 
 // 搜索功能透传
-function searchFind(query: string, options?: any) {
-  return (innerRef.value as any)?.searchFind(query, options)
+function searchFind(query: string, options?: TerminalSearchOptions) {
+  return getInner()?.searchFind(query, options) ?? false
 }
 
-function searchFindNext(query: string, options?: any) {
-  return (innerRef.value as any)?.searchFindNext(query, options)
+function searchFindNext(query: string, options?: TerminalSearchOptions) {
+  return getInner()?.searchFindNext(query, options) ?? false
 }
 
-function searchFindPrevious(query: string, options?: any) {
-  return (innerRef.value as any)?.searchFindPrevious(query, options)
+function searchFindPrevious(query: string, options?: TerminalSearchOptions) {
+  return getInner()?.searchFindPrevious(query, options) ?? false
 }
 
 function searchClear() {
-  ;(innerRef.value as any)?.searchClear()
+  getInner()?.searchClear()
 }
 
 // cwd 相关方法透传
 function getCwd(): string {
-  return (innerRef.value as any)?.getCwd() ?? ''
+  return getInner()?.getCwd() ?? ''
 }
 
 function requestCwd(): Promise<string> {
-  console.log('[TerminalPanelLazy.requestCwd] innerRef:', !!innerRef.value)
-  return (innerRef.value as any)?.requestCwd() ?? Promise.resolve('')
+  return getInner()?.requestCwd() ?? Promise.resolve('')
 }
 
 defineExpose({ sendData, getSessionInfo, reconnect, handleResize, getCwd, requestCwd, searchFind, searchFindNext, searchFindPrevious, searchClear })

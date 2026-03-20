@@ -123,7 +123,7 @@ const groupedRecords = computed(() => {
     groupMap.get(key)!.push(record)
   })
 
-  if (groupMap.has('today')) groups.push({ title: t('messageCenter.today' as any) || '今天', records: groupMap.get('today')! })
+  if (groupMap.has('today')) groups.push({ title: '今天', records: groupMap.get('today')! })
   if (groupMap.has('yesterday')) groups.push({ title: '昨天', records: groupMap.get('yesterday')! })
   if (groupMap.has('older')) groups.push({ title: '更早', records: groupMap.get('older')! })
 

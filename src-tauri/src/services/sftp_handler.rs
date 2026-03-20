@@ -396,6 +396,17 @@ impl SftpHandler {
         progress_tracker.emit_progress_force(app_handle)
             .map_err(TransferError::IoError)?;
 
+        // 确保本地父目录存在
+        if let Some(parent) = local_path.parent() {
+            if !parent.exists() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| TransferError::IoError(
+                        format!("创建本地目录失败 '{}': {}", parent.display(), e)
+                    ))?;
+            }
+        }
+
         let mut remote_file = self.sftp
             .open(&remote_path)
             .await
@@ -403,7 +414,17 @@ impl SftpHandler {
 
         let mut local_file = tokio::fs::File::create(&local_path)
             .await
-            .map_err(|e| TransferError::IoError(e.to_string()))?;
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    TransferError::IoError(
+                        format!("无法写入 '{}'：目标目录没有写入权限，请选择其他目录", local_path.display())
+                    )
+                } else {
+                    TransferError::IoError(
+                        format!("创建本地文件失败 '{}': {}", local_path.display(), e)
+                    )
+                }
+            })?;
 
         let mut buffer = vec![0u8; chunk_size];
         loop {

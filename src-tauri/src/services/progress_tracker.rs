@@ -75,7 +75,7 @@ impl ProgressTracker {
         let current = self.transferred_bytes.fetch_add(bytes, Ordering::Relaxed) + bytes;
         
         // 添加速度样本
-        let mut window = self.speed_window.lock().unwrap();
+        let mut window = self.speed_window.lock().unwrap_or_else(|e| e.into_inner());
         window.push_back(SpeedSample {
             timestamp: Instant::now(),
             bytes: current,
@@ -90,7 +90,7 @@ impl ProgressTracker {
     
     /// 计算当前速度（字节/秒）
     pub fn calculate_speed(&self) -> u64 {
-        let window = self.speed_window.lock().unwrap();
+        let window = self.speed_window.lock().unwrap_or_else(|e| e.into_inner());
         
         // 如果没有样本,返回 0
         if window.is_empty() {
@@ -99,7 +99,10 @@ impl ProgressTracker {
         
         // 如果只有一个样本，使用从该样本到现在的时间跨度计算
         if window.len() == 1 {
-            let sample = window.front().unwrap();
+            let sample = match window.front() {
+                Some(s) => s,
+                None => return 0,
+            };
             let duration = Instant::now().duration_since(sample.timestamp).as_secs_f64();
             // 在前 500ms 内，如果只有一个样本，可能还在预热，
             // 我们可以尝试根据当前已传输量和基准时间做一个估算，或者保持 0
@@ -109,8 +112,10 @@ impl ProgressTracker {
             return 0;
         }
         
-        let oldest = window.front().unwrap();
-        let newest = window.back().unwrap();
+        let (oldest, newest) = match (window.front(), window.back()) {
+            (Some(o), Some(n)) => (o, n),
+            _ => return 0,
+        };
         
         let duration = newest.timestamp.duration_since(oldest.timestamp).as_secs_f64();
         let bytes = newest.bytes.saturating_sub(oldest.bytes);
@@ -126,7 +131,7 @@ impl ProgressTracker {
     /// 检查是否应该发送进度事件（节流）
     fn should_emit(&self) -> bool {
         let now = Instant::now();
-        let last_emit = self.last_emit_time.lock().unwrap();
+        let last_emit = self.last_emit_time.lock().unwrap_or_else(|e| e.into_inner());
         now.duration_since(*last_emit) >= self.emit_interval
     }
     
@@ -165,7 +170,7 @@ impl ProgressTracker {
             .emit("transfer://progress", event)
             .map_err(|e| format!("Failed to emit progress event: {}", e))?;
         
-        *self.last_emit_time.lock().unwrap() = Instant::now();
+        *self.last_emit_time.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
         
         Ok(())
     }

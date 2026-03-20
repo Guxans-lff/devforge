@@ -139,6 +139,6 @@ export function setupMonacoLocale(): void {
     messages[Number(idx)] = text
   }
 
-  ;(globalThis as any)._VSCODE_NLS_MESSAGES = messages
-  ;(globalThis as any)._VSCODE_NLS_LANGUAGE = 'zh-cn'
+  globalThis._VSCODE_NLS_MESSAGES = messages as string[]
+  globalThis._VSCODE_NLS_LANGUAGE = 'zh-cn'
 }

@@ -310,8 +310,10 @@ async fn export_mysql_data<W: AsyncWriteExt + Unpin>(
         batch.push(row);
 
         if batch.len() >= BATCH_SIZE {
-            write_mysql_insert_batch(writer, table, col_names.as_deref().unwrap(), col_count, &batch).await?;
-            total_rows += batch.len() as u64;
+            if let Some(ref cn) = col_names {
+                write_mysql_insert_batch(writer, table, cn, col_count, &batch).await?;
+                total_rows += batch.len() as u64;
+            }
             batch.clear();
         }
     }
@@ -486,8 +488,10 @@ async fn export_postgres_data<W: AsyncWriteExt + Unpin>(
         batch.push(row);
 
         if batch.len() >= BATCH_SIZE {
-            write_pg_insert_batch(writer, table, col_names.as_deref().unwrap(), col_count, &batch).await?;
-            total_rows += batch.len() as u64;
+            if let Some(ref cn) = col_names {
+                write_pg_insert_batch(writer, table, cn, col_count, &batch).await?;
+                total_rows += batch.len() as u64;
+            }
             batch.clear();
         }
     }

@@ -349,20 +349,16 @@ function getCwd(): string {
  */
 async function requestCwd(): Promise<string> {
   if (!sessionId || status.value !== 'connected') {
-    console.log('[requestCwd] 未连接, sessionId:', sessionId, 'status:', status.value)
     return lastDetectedCwd
   }
   try {
-    console.log('[requestCwd] 调用后端 sshGetCwd, sessionId:', sessionId)
     const cwd = await sshApi.sshGetCwd(sessionId)
-    console.log('[requestCwd] 后端返回:', JSON.stringify(cwd))
     if (cwd) {
       lastDetectedCwd = cwd
       emit('cwdChange', cwd)
     }
     return cwd || lastDetectedCwd
   } catch (err) {
-    console.warn('[requestCwd] 获取终端 cwd 失败:', err)
     return lastDetectedCwd
   }
 }
@@ -450,22 +446,22 @@ defineExpose({ reconnect, handleResize, sendData, getSessionInfo, getCwd, reques
              <div class="flex items-start gap-2.5 rounded-lg bg-muted/30 p-2.5 ring-1 ring-border/5 transition-colors hover:bg-muted/50">
                 <WifiOff class="mt-0.5 h-3.5 w-3.5 text-muted-foreground/60" />
                 <div>
-                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('connection.checkNetwork' as any) || '网络检查' }}</p>
-                   <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('connection.checkNetworkDesc' as any) || '确保本地网络通畅，检查代理或 VPN 设置' }}</p>
+                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">网络检查</p>
+                   <p class="text-[9px] font-medium text-muted-foreground/50">确保本地网络通畅，检查代理或 VPN 设置</p>
                 </div>
              </div>
              <div class="flex items-start gap-2.5 rounded-lg bg-muted/30 p-2.5 ring-1 ring-border/5 transition-colors hover:bg-muted/50">
                 <KeyRound class="mt-0.5 h-3.5 w-3.5 text-muted-foreground/60" />
                 <div>
-                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('connection.checkAuth' as any) || '身份验证' }}</p>
-                   <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('connection.checkAuthDesc' as any) || '检查连接配置中的用户名、密码 or 私钥' }}</p>
+                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">身份验证</p>
+                   <p class="text-[9px] font-medium text-muted-foreground/50">检查连接配置中的用户名、密码 or 私钥</p>
                 </div>
              </div>
              <div class="flex items-start gap-2.5 rounded-lg bg-muted/30 p-2.5 ring-1 ring-border/5 transition-colors hover:bg-muted/50">
                 <Activity class="mt-0.5 h-3.5 w-3.5 text-muted-foreground/60" />
                 <div>
-                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('connection.checkServer' as any) || '服务器状态' }}</p>
-                   <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('connection.checkServerDesc' as any) || '确认远程主机在线且 22 端口已开放' }}</p>
+                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">服务器状态</p>
+                   <p class="text-[9px] font-medium text-muted-foreground/50">确认远程主机在线且 22 端口已开放</p>
                 </div>
              </div>
           </div>
@@ -484,7 +480,7 @@ defineExpose({ reconnect, handleResize, sendData, getSessionInfo, getCwd, reques
               class="h-9 px-4 text-[12px] font-medium border-border/40 hover:bg-muted/30 transition-all active:scale-95"
               @click="status = 'connecting'; connect()"
             >
-              {{ t('common.retry' as any) || '重试' }}
+              {{ t('common.retry') }}
             </Button>
           </div>
         </div>

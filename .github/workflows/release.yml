@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: 构建发布
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust 缓存
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: 安装前端依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: 构建 Tauri 应用
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: 'DevForge ${{ github.ref_name }}'
+          releaseBody: '详见 CHANGELOG'
+          releaseDraft: true
+          prerelease: false
+
+      # 将安装包上传到自建服务器（可选，需配置 SSH 密钥）
+      # - name: 上传到更新服务器
+      #   if: env.UPDATE_SERVER_HOST != ''
+      #   env:
+      #     UPDATE_SERVER_HOST: ${{ secrets.UPDATE_SERVER_HOST }}
+      #     UPDATE_SERVER_PATH: ${{ secrets.UPDATE_SERVER_PATH }}
+      #   run: |
+      #     # 查找构建产物
+      #     $nsis = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1
+      #     $sig = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis/*.exe.sig" | Select-Object -First 1
+      #     # 生成 update.json
+      #     $version = "${{ github.ref_name }}".TrimStart("v")
+      #     $sigContent = Get-Content $sig.FullName -Raw
+      #     $updateJson = @{
+      #       version = $version
+      #       notes = "DevForge ${{ github.ref_name }}"
+      #       pub_date = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+      #       platforms = @{
+      #         "windows-x86_64" = @{
+      #           signature = $sigContent
+      #           url = "https://$env:UPDATE_SERVER_HOST$env:UPDATE_SERVER_PATH/$($nsis.Name)"
+      #         }
+      #       }
+      #     } | ConvertTo-Json -Depth 5
+      #     $updateJson | Out-File -FilePath "update.json" -Encoding utf8
+      #     # TODO: 通过 scp 或 rsync 上传到服务器

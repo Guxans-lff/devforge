@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "devforge",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "identifier": "com.devforge.app",
   "build": {
     "frontendDist": "../dist",
@@ -26,6 +26,14 @@
       }
     ],
     "security": {}
+  },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "http://8.135.60.82:9527/devforge/update.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI0N0Q2RUQ1N0EyMzAwNEQKUldSTkFDTjYxVzU5dFBnWituMGZpTDZSZlJhOW1XNjIrT1RPYjdiL1lrV2VnWFpFQ1U3blVyVU0K"
+    }
   },
   "bundle": {
     "active": true,

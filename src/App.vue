@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { onMounted, watch } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import { useTheme } from '@/composables/useTheme'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connections'
 import { useSettingsStore } from '@/stores/settings'
 import { startPerformanceMonitoring } from '@/composables/usePerformance'
+import { useUpdater } from '@/composables/useUpdater'
+import UpdateNotification from '@/components/layout/UpdateNotification.vue'
 
 // 初始化主题
 const { initScheduler } = useTheme()
+
+// 初始化更新器
+const { initUpdater, destroyUpdater } = useUpdater()
 
 // 全局 UI 字体大小响应：监听设置变化，实时应用到 document 根元素
 const settingsStore = useSettingsStore()
@@ -65,9 +70,17 @@ onMounted(async () => {
   } catch (e) {
     console.error('Failed to show window:', e)
   }
+
+  // 6. 初始化自动更新检查
+  initUpdater()
+})
+
+onUnmounted(() => {
+  destroyUpdater()
 })
 </script>
 
 <template>
   <RouterView />
+  <UpdateNotification />
 </template>

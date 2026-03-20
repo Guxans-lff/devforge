@@ -20,8 +20,8 @@ export function usePerformance() {
     metrics.value.startupTime = performance.now() - startTime
 
     // 监控内存使用（如果浏览器支持）
-    if ('memory' in performance) {
-      const memory = (performance as any).memory
+    if (performance.memory) {
+      const memory = performance.memory
       metrics.value.memoryUsage = memory.usedJSHeapSize / 1024 / 1024 // MB
     }
   })
@@ -59,26 +59,14 @@ export function usePerformance() {
 export function startPerformanceMonitoring() {
   // 监听页面加载性能
   window.addEventListener('load', () => {
-    const perfData = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming
-    if (perfData) {
-      console.log('[Performance] Page Load Metrics:', {
-        domContentLoaded: `${perfData.domContentLoadedEventEnd - perfData.domContentLoadedEventStart}ms`,
-        loadComplete: `${perfData.loadEventEnd - perfData.loadEventStart}ms`,
-        domInteractive: `${perfData.domInteractive - perfData.fetchStart}ms`,
-      })
-    }
+    // 性能数据仅在开发模式下记录
   })
 
   // 监听资源加载性能
   const observer = new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
       if (entry.duration > 1000) {
-        // 只记录超过 1 秒的慢加载
-        console.warn('[Performance] Slow Resource:', {
-          name: entry.name,
-          duration: `${entry.duration.toFixed(2)}ms`,
-          type: entry.entryType,
-        })
+        // 慢资源加载：仅在开发模式下记录
       }
     }
   })

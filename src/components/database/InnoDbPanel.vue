@@ -7,7 +7,6 @@ import { ref, computed, onMounted } from 'vue'
 import { dbGetInnoDbStatus } from '@/api/database'
 import type { InnoDbStatus } from '@/types/database'
 import { Button } from '@/components/ui/button'
-import { useMessage } from '@/stores/message-center'
 import { RefreshCw, Database, Lock, FileText, AlertTriangle, HardDrive } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -15,7 +14,6 @@ const props = defineProps<{
   isConnected: boolean
 }>()
 
-const message = useMessage()
 const isLoading = ref(false)
 const status = ref<InnoDbStatus | null>(null)
 const errorMsg = ref<string | null>(null)

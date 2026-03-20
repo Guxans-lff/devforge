@@ -1,6 +1,6 @@
 [package]
 name = "devforge"
-version = "0.4.3"
+version = "0.5.0"
 description = "Unified developer tool: Database + SSH + SFTP"
 authors = ["DevForge Team"]
 license = "MIT"
@@ -80,6 +80,8 @@ ssh-key = "0.6"
 russh-sftp = "2.1"
 urlencoding = "2.1"
 tauri-plugin-dialog = "2.6.0"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
 base64 = "0.22.1"
 
 # Local terminal PTY (ConPTY on Windows)
@@ -89,6 +91,9 @@ portable-pty = "0.8"
 flate2 = "1"
 tar = "0.4"
 walkdir = "2"
+
+# Shell 参数转义（防命令注入）
+shell-escape = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["fileapi"] }

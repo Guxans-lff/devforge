@@ -1,6 +1,6 @@
 import type { QueryResult } from './database'
 
-export type InnerTabType = 'query' | 'table-editor' | 'import' | 'table-data' | 'schema-compare' | 'performance' | 'user-management' | 'er-diagram'
+export type InnerTabType = 'query' | 'table-editor' | 'import' | 'table-data' | 'schema-compare' | 'performance' | 'user-management' | 'er-diagram' | 'data-sync' | 'scheduler'
 
 /** 查询结果标签页 */
 export interface ResultTab {
@@ -33,7 +33,7 @@ export interface InnerTab {
   title: string
   closable: boolean
   dirty?: boolean
-  context: QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext | UserManagementTabContext | ErDiagramTabContext
+  context: QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext | UserManagementTabContext | ErDiagramTabContext | DataSyncTabContext | SchedulerTabContext
 }
 
 export interface QueryTabContext {
@@ -101,6 +101,16 @@ export interface ErDiagramTabContext {
   type: 'er-diagram'
   /** 数据库名 */
   database: string
+}
+
+/** 数据同步标签页上下文 */
+export interface DataSyncTabContext {
+  type: 'data-sync'
+}
+
+/** 调度管理标签页上下文 */
+export interface SchedulerTabContext {
+  type: 'scheduler'
 }
 
 export interface ConnectionWorkspace {

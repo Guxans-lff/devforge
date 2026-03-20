@@ -12,6 +12,7 @@ import RecordingIndicator from '@/components/terminal/RecordingIndicator.vue'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { FolderOpen, PanelRightClose, PanelRightOpen, Bookmark, Columns2, Rows2, Search, X, ChevronUp, ChevronDown } from 'lucide-vue-next'
+import type { TerminalPanelExposed } from '@/types/component-exposed'
 
 const props = defineProps<{
   connectionId: string
@@ -33,6 +34,12 @@ const activePanel = ref<1 | 2>(1)
 const searchVisible = ref(false)
 const searchQuery = ref('')
 const searchInputRef = ref<HTMLInputElement>()
+
+/** 获取当前活跃面板的类型安全引用 */
+function getActivePanel(): TerminalPanelExposed | undefined {
+  const target = activePanel.value === 2 ? terminalRef2.value : terminalRef.value
+  return target as unknown as TerminalPanelExposed | undefined
+}
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'connecting' | 'error'
 
@@ -83,24 +90,19 @@ onActivated(() => {
 
 async function openFileTransfer() {
   // 通过后端 exec channel 获取终端当前目录，然后打开文件管理器
-  const target = activePanel.value === 2 ? terminalRef2.value : terminalRef.value
-  console.log('[openFileTransfer] target ref:', !!target, 'activePanel:', activePanel.value)
-  
+  const panel = getActivePanel()
+
   let cwd = ''
   try {
-    cwd = await (target as any)?.requestCwd?.() || ''
-    console.log('[openFileTransfer] requestCwd 返回:', JSON.stringify(cwd))
+    cwd = await panel?.requestCwd?.() || ''
   } catch (err) {
-    console.error('[openFileTransfer] requestCwd 异常:', err)
-  }
-  
-  if (!cwd) {
-    cwd = currentCwd.value || ''
-    console.log('[openFileTransfer] 使用缓存 cwd:', JSON.stringify(cwd))
+    // requestCwd 失败时静默降级
   }
 
-  console.log('[openFileTransfer] 最终 cwd:', JSON.stringify(cwd), '将传递 meta:', cwd ? { initialRemotePath: cwd } : 'undefined')
-  
+  if (!cwd) {
+    cwd = currentCwd.value || ''
+  }
+
   workspace.addTab({
     id: `file-manager-${props.connectionId}`,
     type: 'file-manager',
@@ -115,8 +117,8 @@ async function toggleSftp() {
   sftpVisible.value = !sftpVisible.value
   // 打开 SFTP 时，主动获取终端当前目录并同步
   if (sftpVisible.value) {
-    const target = activePanel.value === 2 ? terminalRef2.value : terminalRef.value
-    const cwd = await (target as any)?.requestCwd?.()
+    const panel = getActivePanel()
+    const cwd = await panel?.requestCwd?.()
     if (cwd) {
       currentCwd.value = cwd
       // 等 SftpSidebar 挂载后再同步路径
@@ -147,28 +149,24 @@ function toggleSearch() {
     setTimeout(() => searchInputRef.value?.focus(), 50)
   } else {
     // 关闭时清除高亮
-    const target = activePanel.value === 2 ? terminalRef2.value : terminalRef.value
-    ;(target as any)?.searchClear()
+    getActivePanel()?.searchClear()
     searchQuery.value = ''
   }
 }
 
 function doSearch() {
   if (!searchQuery.value) return
-  const target = activePanel.value === 2 ? terminalRef2.value : terminalRef.value
-  ;(target as any)?.searchFind(searchQuery.value)
+  getActivePanel()?.searchFind(searchQuery.value)
 }
 
 function doSearchNext() {
   if (!searchQuery.value) return
-  const target = activePanel.value === 2 ? terminalRef2.value : terminalRef.value
-  ;(target as any)?.searchFindNext(searchQuery.value)
+  getActivePanel()?.searchFindNext(searchQuery.value)
 }
 
 function doSearchPrev() {
   if (!searchQuery.value) return
-  const target = activePanel.value === 2 ? terminalRef2.value : terminalRef.value
-  ;(target as any)?.searchFindPrevious(searchQuery.value)
+  getActivePanel()?.searchFindPrevious(searchQuery.value)
 }
 
 function handleSearchKeydown(e: KeyboardEvent) {
@@ -199,14 +197,12 @@ onMounted(() => {
 
 /** 向当前活跃终端发送命令（自动加换行） */
 function sendCommandToTerminal(command: string) {
-  const target = activePanel.value === 2 ? terminalRef2.value : terminalRef.value
-  ;(target as any)?.sendData(command + '\n')
+  getActivePanel()?.sendData(command + '\n')
 }
 
 /** SFTP 侧栏插入文本到终端（不加换行） */
 function handleSftpInsert(text: string) {
-  const target = activePanel.value === 2 ? terminalRef2.value : terminalRef.value
-  ;(target as any)?.sendData(text)
+  getActivePanel()?.sendData(text)
 }
 
 // 持久化终端当前工作目录，用于打开文件管理器时传递初始路径
@@ -221,11 +217,11 @@ function handleCwdChange(path: string) {
 }
 
 const activeSessionInfo = computed(() => {
-  const target = activePanel.value === 2 ? terminalRef2.value : terminalRef.value
-  if (!target || typeof (target as any).getSessionInfo !== 'function') {
+  const panel = getActivePanel()
+  if (!panel || typeof panel.getSessionInfo !== 'function') {
     return { sessionId: '', cols: 120, rows: 40 }
   }
-  return (target as any).getSessionInfo() ?? { sessionId: '', cols: 120, rows: 40 }
+  return panel.getSessionInfo() ?? { sessionId: '', cols: 120, rows: 40 }
 })
 </script>
 
@@ -372,7 +368,7 @@ const activeSessionInfo = computed(() => {
           v-model="searchQuery"
           type="text"
           class="w-48 h-7 bg-transparent border-none text-xs text-foreground placeholder:text-muted-foreground/50 outline-none"
-          :placeholder="t('terminal.searchPlaceholder' as any) || '搜索...'"
+          :placeholder="'搜索...'"
           @keydown="handleSearchKeydown"
           @input="doSearch"
         />

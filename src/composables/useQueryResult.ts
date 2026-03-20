@@ -450,25 +450,6 @@ export function useQueryResult(options: UseQueryResultOptions) {
   function cancelEdit() { editingCell.value = null; editingValue.value = '' }
 
   /**
-   * 根据主键构建精准的 WHERE 子句
-   * 超越 Navicat 的关键：只用已验证的主键列，绝不使用时间戳/NULL/二进制等不安全类型
-   */
-  function buildWhereClause(row: unknown[]): string {
-    if (!result.value || primaryKeys.value.length === 0) return '1=0'
-
-    const columns = result.value.columns
-    const conditions = primaryKeys.value.map(pkName => {
-      const colIdx = columns.findIndex(c => c.name === pkName)
-      if (colIdx < 0) return null
-      const val = row[colIdx]
-      if (val === null || val === undefined) return `${quoteId(pkName)} IS NULL`
-      return `${quoteId(pkName)} = '${String(val).replace(/'/g, "''")}'`
-    }).filter(Boolean)
-
-    return conditions.length > 0 ? conditions.join(' AND ') : '1=0'
-  }
-
-  /**
    * 根据列类型生成类型感知的 SQL 比较条件
    * 解决前端值序列化格式与数据库存储格式不一致的问题：
    * - 数字类型：无引号直接比较，避免隐式转换
@@ -586,7 +567,6 @@ export function useQueryResult(options: UseQueryResultOptions) {
       }
     }
 
-    console.log('[OptimisticLock] 条件明细:\n' + debugInfo.join('\n'))
     return conditions.length > 0 ? conditions.join(' AND ') : '1=0'
   }
 
@@ -622,10 +602,8 @@ export function useQueryResult(options: UseQueryResultOptions) {
     // 直接使用表名，数据库上下文由 API 层处理
     const tbl = tableName.value!
     const sql = `UPDATE ${quoteId(tbl)} SET ${quoteId(colName)} = ${newVal} WHERE ${buildOptimisticWhereClause(row)} LIMIT 1`
-    console.log('[saveEdit] 数据库:', db, '表:', tbl, '\nSQL:', sql)
     try {
       const res = await dbExecuteQueryInDatabase(connectionId.value!, db, sql)
-      console.log('[saveEdit] 执行结果:', JSON.stringify({ isError: res.isError, error: res.error, affectedRows: res.affectedRows }))
       if (res.isError) {
         toast.error(t('database.queryError'), res.error ?? '')
       } else if (res.affectedRows === 0) {
@@ -650,7 +628,6 @@ export function useQueryResult(options: UseQueryResultOptions) {
         })
       }
     } catch (e: any) {
-      console.error('[saveEdit] 异常:', e)
       const errorMsg = e?.message || e?.msg || (typeof e === 'string' ? e : JSON.stringify(e))
       toast.error(t('database.queryError'), errorMsg as string)
     }

@@ -12,7 +12,9 @@ import TerminalSettings from '@/components/settings/TerminalSettings.vue'
 import ShortcutSettings from '@/components/settings/ShortcutSettings.vue'
 import ImportExportSettings from '@/components/settings/ImportExportSettings.vue'
 import DeveloperSettings from '@/components/settings/DeveloperSettings.vue'
-import { RotateCcw, Settings, Code, Terminal, Keyboard, ArrowLeftRight, Bug } from 'lucide-vue-next'
+import DiagnosticsSection from '@/components/settings/DiagnosticsSection.vue'
+import UpdateSection from '@/components/settings/UpdateSection.vue'
+import { RotateCcw, Settings } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -58,32 +60,32 @@ function confirmReset() {
     <ScrollArea class="min-h-0 flex-1">
       <div class="mx-auto max-w-3xl px-8 py-10">
         <Tabs default-value="general" class="w-full">
-          <!-- High-Fidelity Segmented Control (Simplified version of ConnectionDialog) -->
-          <div class="mb-12 flex justify-center">
-            <TabsList class="relative h-11 w-full max-w-2xl bg-muted/30 p-1 rounded-2xl border border-border/10 backdrop-blur-sm">
-              <TabsTrigger value="general" class="relative z-10 flex-1 gap-2 rounded-xl text-[13px] font-bold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-lg">
-                <Settings class="h-3.5 w-3.5" />
+          <!-- Tab 导航 -->
+          <div class="mb-10 flex justify-center">
+            <TabsList class="h-10 bg-muted/30 p-1 rounded-xl border border-border/10 backdrop-blur-sm inline-flex gap-0.5">
+              <TabsTrigger value="general" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
                 {{ t('settings.general') }}
               </TabsTrigger>
-              <TabsTrigger value="editor" class="relative z-10 flex-1 gap-2 rounded-xl text-[13px] font-bold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-lg">
-                <Code class="h-3.5 w-3.5" />
+              <TabsTrigger value="editor" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
                 {{ t('settings.editor') }}
               </TabsTrigger>
-              <TabsTrigger value="terminal" class="relative z-10 flex-1 gap-2 rounded-xl text-[13px] font-bold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-lg">
-                <Terminal class="h-3.5 w-3.5" />
+              <TabsTrigger value="terminal" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
                 {{ t('settings.terminalSettings') }}
               </TabsTrigger>
-              <TabsTrigger value="shortcuts" class="relative z-10 flex-1 gap-2 rounded-xl text-[13px] font-bold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-lg">
-                <Keyboard class="h-3.5 w-3.5" />
+              <TabsTrigger value="shortcuts" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
                 {{ t('settings.shortcuts') }}
               </TabsTrigger>
-              <TabsTrigger value="import-export" class="relative z-10 flex-1 gap-2 rounded-xl text-[13px] font-bold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-lg">
-                <ArrowLeftRight class="h-3.5 w-3.5" />
+              <TabsTrigger value="import-export" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
                 {{ t('settings.importExport') }}
               </TabsTrigger>
-              <TabsTrigger value="developer" class="relative z-10 flex-1 gap-2 rounded-xl text-[13px] font-bold transition-all data-[state=active]:bg-background data-[state=active]:text-orange-500 data-[state=active]:shadow-lg">
-                <Bug class="h-3.5 w-3.5" />
+              <TabsTrigger value="developer" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
                 {{ t('settings.developer') }}
+              </TabsTrigger>
+              <TabsTrigger value="diagnostics" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
+                {{ t('settings.diagnostics') }}
+              </TabsTrigger>
+              <TabsTrigger value="update" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
+                {{ t('updater.tabTitle') }}
               </TabsTrigger>
             </TabsList>
           </div>
@@ -112,6 +114,14 @@ function confirmReset() {
 
             <TabsContent value="developer">
               <DeveloperSettings />
+            </TabsContent>
+
+            <TabsContent value="diagnostics">
+              <DiagnosticsSection />
+            </TabsContent>
+
+            <TabsContent value="update">
+              <UpdateSection />
             </TabsContent>
           </div>
         </Tabs>

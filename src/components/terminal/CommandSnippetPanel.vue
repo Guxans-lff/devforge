@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import {
   Sheet,
@@ -18,12 +17,8 @@ import {
   Play,
   Pencil,
   Trash2,
-  Bookmark,
-  Terminal,
   CodeXml,
   TerminalSquare,
-  Copy,
-  X,
 } from 'lucide-vue-next'
 import * as api from '@/api/command-snippet'
 import type { CommandSnippet } from '@/api/command-snippet'

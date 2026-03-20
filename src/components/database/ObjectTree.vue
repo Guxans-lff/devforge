@@ -17,6 +17,7 @@ import {
   FileUp, Code, Plus, Search, X, FolderOpen, Folder,
   HardDrive, Upload, Users, Activity, FileCode, FileDown,
   Trash2, Eraser, Network, GitCompareArrows, Play,
+  ArrowLeftRight, CalendarClock,
 } from 'lucide-vue-next'
 import { useObjectTree } from '@/composables/useObjectTree'
 
@@ -42,6 +43,8 @@ const emit = defineEmits<{
   restoreDatabase: [database: string]
   openUserManagement: []
   openPerformance: []
+  openDataSync: []
+  openScheduler: []
   openErDiagram: [database: string]
   generateScript: [database: string, table: string, scriptType: string]
   exportDatabaseDdl: [database: string]
@@ -85,7 +88,7 @@ const parentRef = ref<HTMLElement | null>(null)
 
 const tree = useObjectTree({
   connectionId: toRef(props, 'connectionId'),
-  connecting: toRef(props, 'connecting') as any,
+  connecting: toRef(props, 'connecting'),
   parentRef,
   onSelectTable: (db, tbl) => emit('selectTable', db, tbl),
   onSelectDatabase: (db) => emit('selectDatabase', db),
@@ -417,6 +420,12 @@ defineExpose({
                     </ContextMenuItem>
                     <ContextMenuItem class="gap-2 text-xs" @click="emit('openErDiagram', item.node.meta?.database ?? item.node.label)">
                       <Network class="h-3.5 w-3.5" /> ER 关系图
+                    </ContextMenuItem>
+                    <ContextMenuItem class="gap-2 text-xs" @click="emit('openDataSync')">
+                      <ArrowLeftRight class="h-3.5 w-3.5" /> {{ t('dataSync.title') }}
+                    </ContextMenuItem>
+                    <ContextMenuItem class="gap-2 text-xs" @click="emit('openScheduler')">
+                      <CalendarClock class="h-3.5 w-3.5" /> {{ t('scheduler.title') }}
                     </ContextMenuItem>
                     <ContextMenuSeparator />
                     <ContextMenuItem

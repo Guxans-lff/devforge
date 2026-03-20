@@ -505,7 +505,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
         : await generateCreateTableSql(buildTableDefinition(), driver.value)
       if (!result.sql?.trim()) { toast.info('没有需要执行的变更'); return }
       generatedSql.value = result.sql; showSqlPreview.value = true
-    } catch (e) { toast.error(String(e)); console.error('[previewSql]', e) }
+    } catch (e) { toast.error(String(e)) }
     finally { loading.value = false }
   }
   async function handleExecuteSql() {

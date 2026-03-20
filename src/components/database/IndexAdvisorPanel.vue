@@ -4,12 +4,11 @@
  * 冗余索引检测 + 未使用索引检测 + EXPLAIN 索引建议
  */
 import { ref, onMounted } from 'vue'
-import { dbAnalyzeIndexes } from '@/api/database'
-import type { IndexAnalysisResult, RedundantIndex, UnusedIndex } from '@/types/database'
+import { dbAnalyzeIndexes, dbExecuteQuery } from '@/api/database'
+import type { IndexAnalysisResult } from '@/types/database'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { useMessage } from '@/stores/message-center'
-import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { RefreshCw, AlertTriangle, Copy, Search, Trash2, FileWarning } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -18,7 +17,6 @@ const props = defineProps<{
 }>()
 
 const message = useMessage()
-const dbWorkspaceStore = useDatabaseWorkspaceStore()
 const isLoading = ref(false)
 const result = ref<IndexAnalysisResult | null>(null)
 const errorMsg = ref<string | null>(null)
@@ -28,12 +26,14 @@ const selectedDb = ref('')
 const databases = ref<string[]>([])
 
 async function loadDatabases() {
-  const ws = dbWorkspaceStore.getWorkspace(props.connectionId)
-  if (ws) {
-    databases.value = ws.databases.map(d => d.name)
+  try {
+    const queryResult = await dbExecuteQuery(props.connectionId, 'SHOW DATABASES')
+    databases.value = queryResult.rows.map(row => String(row[0]))
     if (!selectedDb.value && databases.value.length > 0) {
       selectedDb.value = databases.value[0]!
     }
+  } catch {
+    // 获取数据库列表失败时忽略，用户可手动输入
   }
 }
 

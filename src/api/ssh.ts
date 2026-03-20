@@ -1,6 +1,6 @@
 import { invokeCommand } from '@/api/base'
 import { useLogStore } from '@/stores/log'
-import { i18n } from '@/locales'
+import { t } from '@/utils/i18n-helper'
 import type { SessionInfo } from '@/types/terminal'
 import type { TestResult } from '@/api/connection'
 
@@ -10,9 +10,9 @@ export async function sshConnect(
   rows: number,
 ): Promise<SessionInfo> {
   const logStore = useLogStore()
-  logStore.info('SSH', (i18n.global as any).t('log.ssh.connecting', { id: connectionId }))
+  logStore.info('SSH', t('log.ssh.connecting', { id: connectionId }))
   const session = await invokeCommand<SessionInfo>('ssh_connect', { connectionId, cols, rows }, { source: 'SSH' })
-  logStore.info('SSH', (i18n.global as any).t('log.ssh.connected', { id: session.sessionId }))
+  logStore.info('SSH', t('log.ssh.connected', { id: session.sessionId }))
   return session
 }
 
@@ -60,8 +60,8 @@ export function sshTestConnectionParams(params: {
 
 export async function sshExecCommand(connectionId: string, command: string): Promise<string> {
   const logStore = useLogStore()
-  logStore.debug('SSH', (i18n.global as any).t('log.ssh.executing', { cmd: command.slice(0, 50) + (command.length > 50 ? '...' : '') }))
+  logStore.debug('SSH', t('log.ssh.executing', { cmd: command.slice(0, 50) + (command.length > 50 ? '...' : '') }))
   const output = await invokeCommand<string>('ssh_exec_command', { connectionId, command }, { source: 'SSH' })
-  logStore.debug('SSH', (i18n.global as any).t('log.ssh.executed', { len: output.length }))
+  logStore.debug('SSH', t('log.ssh.executed', { len: output.length }))
   return output
 }

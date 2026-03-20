@@ -3,7 +3,7 @@
  * 查询结果面板 — 薄编排层
  * 业务逻辑全部委托给 useQueryResult composable
  */
-import { ref, toRef, defineAsyncComponent } from 'vue'
+import { ref, toRef, computed, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FlexRender } from '@tanstack/vue-table'
 import {
@@ -86,15 +86,15 @@ function closeCtxMenu() {
 
 const qr = useQueryResult({
   result: toRef(props, 'result'),
-  loading: toRef(props, 'loading') as any,
-  loadingMore: toRef(props, 'loadingMore') as any,
-  hasMoreServerRows: toRef(props, 'hasMoreServerRows') as any,
-  showReconnect: toRef(props, 'showReconnect') as any,
+  loading: computed(() => props.loading ?? false),
+  loadingMore: computed(() => props.loadingMore ?? false),
+  hasMoreServerRows: computed(() => props.hasMoreServerRows ?? false),
+  showReconnect: computed(() => props.showReconnect ?? false),
   connectionId: toRef(props, 'connectionId'),
   database: toRef(props, 'database'),
   tableName: toRef(props, 'tableName'),
   driver: toRef(props, 'driver'),
-  isTableBrowse: toRef(props, 'isTableBrowse') as any,
+  isTableBrowse: computed(() => props.isTableBrowse ?? false),
   tableScrollRef,
   onReconnect: () => emit('reconnect'),
   onLoadMore: () => emit('loadMore'),
@@ -421,12 +421,12 @@ const chartConfigOpen = ref(false)
               {{ t('database.reconnect') }}
             </Button>
             <Button variant="outline" size="sm" class="h-6 text-[10px]" @click="emit('refresh')">
-              {{ t('common.retry' as any) || '重试' }}
+              {{ t('common.retry', '重试') }}
             </Button>
           </div>
         </div>
         <div class="flex-1 px-4 py-3 overflow-auto">
-          <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/80 select-text">{{ typeof result.error === 'string' ? result.error : (result.error?.message || result.error?.msg || JSON.stringify(result.error, null, 2)) }}</pre>
+          <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/80 select-text">{{ typeof result.error === 'string' ? result.error : JSON.stringify(result.error, null, 2) }}</pre>
           <div class="mt-4 space-y-1.5">
             <p class="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">排查建议</p>
             <template v-if="qr.isConnectionError.value">

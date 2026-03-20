@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, defineAsyncComponent } from 'vue'
 import type { SchemaCache } from '@/types/database'
+import type { SqlEditorExposed } from '@/types/component-exposed'
 
 const props = withDefaults(
   defineProps<{
@@ -60,21 +61,26 @@ function handleSave() {
   emit('save')
 }
 
+/** 获取内部编辑器的类型安全引用 */
+function getInner(): SqlEditorExposed | undefined {
+  return editorRef.value as unknown as SqlEditorExposed | undefined
+}
+
 // 透传 SqlEditor 暴露的方法
 function getSelectedText(): string {
-  return (editorRef.value as any)?.getSelectedText() ?? ''
+  return getInner()?.getSelectedText() ?? ''
 }
 
 function focus() {
-  (editorRef.value as any)?.focus()
+  getInner()?.focus()
 }
 
 function insertText(text: string) {
-  (editorRef.value as any)?.insertText(text)
+  getInner()?.insertText(text)
 }
 
 function formatDocument() {
-  (editorRef.value as any)?.formatDocument()
+  getInner()?.formatDocument()
 }
 
 defineExpose({ getSelectedText, focus, insertText, formatDocument })

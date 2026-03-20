@@ -171,7 +171,7 @@ pub async fn sftp_search_files(
 
     let cancel = Arc::new(AtomicBool::new(false));
     {
-        let mut flags = get_cancel_flags().lock().unwrap();
+        let mut flags = get_cancel_flags().lock().unwrap_or_else(|e| e.into_inner());
         flags.insert(connection_id.clone(), cancel.clone());
     }
 
@@ -183,7 +183,7 @@ pub async fn sftp_search_files(
 
     let cancelled = cancel.load(Ordering::Relaxed);
     {
-        let mut flags = get_cancel_flags().lock().unwrap();
+        let mut flags = get_cancel_flags().lock().unwrap_or_else(|e| e.into_inner());
         flags.remove(&connection_id);
     }
 
@@ -196,7 +196,7 @@ pub async fn sftp_search_files(
 /// 取消正在进行的搜索
 #[tauri::command]
 pub async fn sftp_cancel_search(connection_id: String) -> Result<(), String> {
-    let flags = get_cancel_flags().lock().unwrap();
+    let flags = get_cancel_flags().lock().unwrap_or_else(|e| e.into_inner());
     if let Some(cancel) = flags.get(&connection_id) {
         cancel.store(true, Ordering::Relaxed);
     }

@@ -1,16 +1,16 @@
 import { Channel } from '@tauri-apps/api/core'
 import { invokeCommand } from '@/api/base'
 import { useLogStore } from '@/stores/log'
-import { i18n } from '@/locales'
+import { t } from '@/utils/i18n-helper'
 import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy, ForeignKeyRelation, IndexAnalysisResult, IndexSuggestion, SlowQueryDigest, InnoDbStatus, AuditLogEntry, AuditStats } from '@/types/database'
 import type { PoolStatus, ReconnectParams, ReconnectResult } from '@/types/connection'
 import type { ExportFormat } from '@/types/export'
 
 export async function dbConnect(connectionId: string): Promise<ConnectResult> {
   const logStore = useLogStore()
-  logStore.info('DATABASE', (i18n.global as any).t('log.database.connecting', { id: connectionId }))
+  logStore.info('DATABASE', t('log.database.connecting', { id: connectionId }))
   const result = await invokeCommand<ConnectResult>('db_connect', { connectionId }, { source: 'DATABASE' })
-  logStore.info('DATABASE', (i18n.global as any).t('log.database.connected', { count: result.databases.length }))
+  logStore.info('DATABASE', t('log.database.connected', { count: result.databases.length }))
   return result
 }
 
@@ -25,9 +25,9 @@ export function dbIsConnected(connectionId: string): Promise<boolean> {
 /** 执行 SQL 查询，支持可选的超时时间（秒） */
 export async function dbExecuteQuery(connectionId: string, sql: string, timeoutSecs?: number): Promise<QueryResult> {
   const logStore = useLogStore()
-  logStore.debug('DATABASE', (i18n.global as any).t('log.database.executing', { sql: sql.slice(0, 100) + (sql.length > 100 ? '...' : '') }), { sql })
+  logStore.debug('DATABASE', t('log.database.executing', { sql: sql.slice(0, 100) + (sql.length > 100 ? '...' : '') }), { sql })
   const result = await invokeCommand<QueryResult>('db_execute_query', { connectionId, sql, timeoutSecs: timeoutSecs ?? null }, { source: 'DATABASE' })
-  logStore.debug('DATABASE', (i18n.global as any).t('log.database.success', { rows: result.rows.length, time: result.executionTimeMs }))
+  logStore.debug('DATABASE', t('log.database.success', { rows: result.rows.length, time: result.executionTimeMs }))
   return result
 }
 

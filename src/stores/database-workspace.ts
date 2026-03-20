@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { i18n } from '@/locales'
+import { t } from '@/utils/i18n-helper'
 import { usePersistence } from '@/plugins/persistence'
 import type {
   InnerTab,
@@ -11,6 +11,8 @@ import type {
   TableDataTabContext,
   SchemaCompareTabContext,
   PerformanceTabContext,
+  DataSyncTabContext,
+  SchedulerTabContext,
 } from '@/types/database-workspace'
 
 /** 持久化快照中的标签页（只保存可恢复的最小信息） */
@@ -190,7 +192,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
   function updateTabContext(
     connectionId: string,
     tabId: string,
-    context: Partial<QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext>,
+    context: Partial<QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext | DataSyncTabContext | SchedulerTabContext>,
   ): void {
     const ws = workspaces.value.get(connectionId)
     if (!ws) return
@@ -233,8 +235,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
       id: tabId,
       type: 'table-editor',
       title: table
-        ? `${(i18n.global as any).t('tableEditor.alterTable')}: ${table}`
-        : (i18n.global as any).t('tableEditor.createTable'),
+        ? `${t('tableEditor.alterTable')}: ${table}`
+        : t('tableEditor.createTable'),
       closable: true,
       context: { type: 'table-editor', database, table },
     }
@@ -246,7 +248,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     const tab: InnerTab = {
       id: tabId,
       type: 'import',
-      title: `${(i18n.global as any).t('dataImport.title')}: ${table}`,
+      title: `${t('dataImport.title')}: ${table}`,
       closable: true,
       context: { type: 'import', database, table, columns },
     }
@@ -270,7 +272,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     const tab: InnerTab = {
       id: tabId,
       type: 'schema-compare',
-      title: (i18n.global as any).t('schemaCompare.title'),
+      title: t('schemaCompare.title'),
       closable: true,
       context: { type: 'schema-compare' },
     }
@@ -312,6 +314,32 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
       title: `ER: ${database}`,
       closable: true,
       context: { type: 'er-diagram', database },
+    }
+    addInnerTab(connectionId, tab)
+  }
+
+  /** 打开数据同步标签页 */
+  function openDataSync(connectionId: string): void {
+    const tabId = `${connectionId}-data-sync`
+    const tab: InnerTab = {
+      id: tabId,
+      type: 'data-sync',
+      title: t('dataSync.title'),
+      closable: true,
+      context: { type: 'data-sync' },
+    }
+    addInnerTab(connectionId, tab)
+  }
+
+  /** 打开调度管理标签页 */
+  function openScheduler(connectionId: string): void {
+    const tabId = `${connectionId}-scheduler`
+    const tab: InnerTab = {
+      id: tabId,
+      type: 'scheduler',
+      title: t('scheduler.title'),
+      closable: true,
+      context: { type: 'scheduler' },
     }
     addInnerTab(connectionId, tab)
   }
@@ -447,6 +475,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     openPerformance,
     openUserManagement,
     openErDiagram,
+    openDataSync,
+    openScheduler,
     reopenLastClosedTab,
     getClosedTabCount,
     restoreState,

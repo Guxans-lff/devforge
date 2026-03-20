@@ -25,6 +25,8 @@ import ObjectEditorDialog from '@/components/database/ObjectEditorDialog.vue'
 import ConfirmDialog from '@/components/ui/confirm-dialog/ConfirmDialog.vue'
 import EnvironmentBanner from '@/components/database/EnvironmentBanner.vue'
 import BreadcrumbNav from '@/components/database/BreadcrumbNav.vue'
+import DataSyncPanel from '@/components/database/DataSyncPanel.vue'
+import SchedulerPanel from '@/components/database/SchedulerPanel.vue'
 import { useConnectionStore } from '@/stores/connections'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useSchemaRegistryStore } from '@/stores/schema-registry'
@@ -32,7 +34,8 @@ import * as dbApi from '@/api/database'
 import { dbGetPoolStatus, dbGenerateScript, dbExportDatabaseDdl } from '@/api/database'
 import type { ScriptOptions } from '@/api/database'
 import type { PoolStatus } from '@/types/connection'
-import type { TableEditorTabContext, ImportTabContext } from '@/types/database-workspace'
+import type { TableEditorTabContext, ImportTabContext, ErDiagramTabContext, QueryTabContext } from '@/types/database-workspace'
+import type { ObjectTreeExposed } from '@/types/component-exposed'
 import { useToast } from '@/composables/useToast'
 import { useSchemaCache } from '@/composables/useSchemaCache'
 import { useNotification } from '@/composables/useNotification'
@@ -97,6 +100,11 @@ const notification = useNotification()
 const toast = useToast()
 const objectTreeRef = ref<InstanceType<typeof ObjectTree>>()
 
+/** 获取 ObjectTree 的类型安全引用 */
+function getObjectTree(): ObjectTreeExposed | undefined {
+  return objectTreeRef.value as unknown as ObjectTreeExposed | undefined
+}
+
 const isConnected = ref(false)
 const isConnecting = ref(false)
 
@@ -120,15 +128,21 @@ schemaRegistry.registerSchema(props.connectionId, props.connectionName, schemaCa
 const breadcrumbDatabase = computed(() => {
   const tab = activeTab.value
   if (!tab) return undefined
-  const ctx = tab.context as any
-  return ctx?.currentDatabase ?? ctx?.database ?? undefined
+  const ctx = tab.context
+  if ('currentDatabase' in ctx) return (ctx as QueryTabContext).currentDatabase ?? undefined
+  if ('database' in ctx) return (ctx as { database: string }).database
+  return undefined
 })
 
 const breadcrumbTable = computed(() => {
   const tab = activeTab.value
   if (!tab) return undefined
-  const ctx = tab.context as any
-  return ctx?.tableBrowse?.table ?? ctx?.table ?? undefined
+  const ctx = tab.context
+  if ('tableBrowse' in ctx && (ctx as QueryTabContext).tableBrowse) {
+    return (ctx as QueryTabContext).tableBrowse?.table ?? undefined
+  }
+  if ('table' in ctx) return (ctx as { table?: string }).table ?? undefined
+  return undefined
 })
 
 // 错误边界
@@ -201,14 +215,14 @@ function handleSchemaUpdated() {
 const databaseNames = computed(() => {
   const nodes = objectTreeRef.value?.treeNodes
   if (!nodes || nodes.length === 0) return []
-  return nodes.map((n: any) => n.label)
+  return nodes.map((n) => n.label)
 })
 
 // 捕获 QueryPanel 执行成功事件，若是 DDL 则触发对象树无感刷新
 function handleExecuteSuccess(sql: string) {
   const isDDL = /\b(CREATE|DROP|ALTER|RENAME|TRUNCATE)\b/i.test(sql)
-  if (isDDL && objectTreeRef.value) {
-    (objectTreeRef.value as any).silentRefresh()
+  if (isDDL) {
+    getObjectTree()?.silentRefresh()
   }
 }
 
@@ -435,12 +449,10 @@ async function handleConfirmDeleteTable() {
       notification.error(t('database.queryFailed'), result.error ?? undefined, true)
     } else {
       notification.success(t('database.querySuccess'), `表 ${table} 已成功删除`, 3000)
-      if (objectTreeRef.value) {
-        (objectTreeRef.value as any).silentRefresh()
-      }
+      getObjectTree()?.silentRefresh()
     }
-  } catch (e) {
-    console.error('Failed to delete table:', e)
+  } catch (e: any) {
+    notification.error('删除表失败', String(e), true)
   }
 }
 
@@ -464,8 +476,8 @@ async function handleConfirmTruncateTable() {
     } else {
       notification.success(t('database.querySuccess'), `表 ${table} 已成功清空`, 3000)
     }
-  } catch (e) {
-    console.error('Failed to truncate table:', e)
+  } catch (e: any) {
+    notification.error('清空表失败', String(e), true)
   }
 }
 
@@ -488,9 +500,7 @@ function handleEditObject(database: string, objectName: string, objectType: stri
 }
 
 function handleObjectEditorSaved() {
-  if (objectTreeRef.value) {
-    (objectTreeRef.value as any).silentRefresh()
-  }
+  getObjectTree()?.silentRefresh()
 }
 
 // ===== 对象删除确认 =====
@@ -514,12 +524,10 @@ async function handleConfirmDropObject() {
     } else {
       const typeLabel: Record<string, string> = { VIEW: '视图', PROCEDURE: '存储过程', FUNCTION: '函数', TRIGGER: '触发器' }
       notification.success('删除成功', `${typeLabel[objectType] ?? objectType} ${objectName} 已删除`, 3000)
-      if (objectTreeRef.value) {
-        (objectTreeRef.value as any).silentRefresh()
-      }
+      getObjectTree()?.silentRefresh()
     }
-  } catch (e) {
-    console.error('Failed to drop object:', e)
+  } catch (e: any) {
+    notification.error('删除对象失败', String(e), true)
   }
 }
 
@@ -531,8 +539,8 @@ async function handleShowCreateSql(database: string, table: string) {
     if (activeQueryTab) {
       dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, { sql })
     }
-  } catch (e) {
-    console.error('Failed to get CREATE SQL:', e)
+  } catch (e: any) {
+    notification.error('获取建表语句失败', String(e), true)
   }
 }
 
@@ -544,8 +552,8 @@ async function handleShowObjectDefinition(database: string, name: string, object
     if (activeQueryTab) {
       dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, { sql })
     }
-  } catch (e) {
-    console.error('Failed to get object definition:', e)
+  } catch (e: any) {
+    notification.error('获取对象定义失败', String(e), true)
   }
 }
 
@@ -571,11 +579,11 @@ function handleRoutineExecSql(sql: string) {
 }
 
 function handleTableEditorSuccess() {
-  (objectTreeRef.value as any)?.silentRefresh()
+  getObjectTree()?.silentRefresh()
 }
 
 function handleImportSuccess() {
-  (objectTreeRef.value as any)?.silentRefresh()
+  getObjectTree()?.silentRefresh()
 }
 
 function handleOpenSchemaCompare() {
@@ -602,7 +610,7 @@ function handleRestoreDatabase(database: string) {
 }
 
 function handleRestoreSuccess() {
-  (objectTreeRef.value as any)?.silentRefresh()
+  getObjectTree()?.silentRefresh()
 }
 
 /** 打开用户管理面板 */
@@ -613,6 +621,22 @@ function handleOpenUserManagement() {
 /** 打开性能监控面板 */
 function handleOpenPerformance() {
   dbWorkspaceStore.openPerformance(props.connectionId)
+}
+
+/** 打开数据同步面板 */
+function handleOpenDataSync() {
+  dbWorkspaceStore.openDataSync(props.connectionId)
+}
+
+/** 打开调度管理面板 */
+function handleOpenScheduler() {
+  dbWorkspaceStore.openScheduler(props.connectionId)
+}
+
+/** 数据同步面板中「保存为定时任务」的处理 */
+function handleSaveAsScheduledTask(_config: import('@/types/data-sync').SyncConfig) {
+  // 打开调度管理面板并预填配置
+  dbWorkspaceStore.openScheduler(props.connectionId)
 }
 
 function handleOpenErDiagram(database: string) {
@@ -631,8 +655,8 @@ async function handleGenerateScript(database: string, table: string, scriptType:
     // 创建新的查询标签页并填入生成的脚本
     const tab = dbWorkspaceStore.addQueryTab(props.connectionId)
     dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, { sql })
-  } catch (e) {
-    console.error('生成脚本失败:', e)
+  } catch (e: any) {
+    notification.error('生成脚本失败', String(e), true)
   }
 }
 
@@ -650,7 +674,6 @@ async function handleExportDatabaseDdl(database: string) {
     toast.success(t('database.exportStructureSuccess', { db: database }))
   } catch (e) {
     toast.error(t('database.exportStructureFailed'), String(e))
-    console.error('导出数据库结构失败:', e)
   } finally {
     exportingDb.value = ''
   }
@@ -671,7 +694,7 @@ function handleRunSqlFile(database: string) {
 }
 
 function handleRunSqlSuccess() {
-  (objectTreeRef.value as any)?.silentRefresh()
+  getObjectTree()?.silentRefresh()
 }
 
 const createDatabaseDialogOpen = ref(false)
@@ -763,6 +786,8 @@ function handleEditDatabaseSuccess() {
           @restore-database="handleRestoreDatabase"
           @open-user-management="handleOpenUserManagement"
           @open-performance="handleOpenPerformance"
+          @open-data-sync="handleOpenDataSync"
+          @open-scheduler="handleOpenScheduler"
           @open-er-diagram="handleOpenErDiagram"
           @generate-script="handleGenerateScript"
           @export-database-ddl="handleExportDatabaseDdl"
@@ -869,8 +894,21 @@ function handleEditDatabaseSuccess() {
                 v-else-if="activeTab?.type === 'er-diagram'"
                 :key="activeTab.id"
                 :connection-id="connectionId"
-                :database="(activeTab.context as any).database"
+                :database="(activeTab.context as ErDiagramTabContext).database"
                 @open-table-editor="(db: string, table: string) => dbWorkspaceStore.openTableEditor(connectionId, db, table)"
+              />
+              <DataSyncPanel
+                v-else-if="activeTab?.type === 'data-sync'"
+                :key="activeTab.id"
+                :connection-id="connectionId"
+                :is-connected="isConnected"
+                @save-as-scheduled-task="handleSaveAsScheduledTask"
+              />
+              <SchedulerPanel
+                v-else-if="activeTab?.type === 'scheduler'"
+                :key="activeTab.id"
+                :connection-id="connectionId"
+                :is-connected="isConnected"
               />
             </KeepAlive>
           </div>

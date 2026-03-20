@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { useLogStore } from './log'
-import { i18n } from '@/locales'
+import { t } from '@/utils/i18n-helper'
 
 export interface TransferTask {
   id: string
@@ -126,7 +126,7 @@ export const useTransferStore = defineStore('transfer', () => {
           const completed = { ...task, status: 'completed' as const, endTime: Date.now() }
           tasks.value.set(event.payload.id, completed)
 
-          logStore.info('SFTP', (i18n.global as any).t('log.sftp.completed', { file: task.fileName }), {
+          logStore.info('SFTP', t('log.sftp.completed', { file: task.fileName }), {
             type: task.type,
             size: task.totalBytes,
             duration: Date.now() - (task.startTime || 0)
@@ -163,7 +163,7 @@ export const useTransferStore = defineStore('transfer', () => {
             endTime: Date.now(),
           })
 
-          logStore.error('SFTP', (i18n.global as any).t('log.sftp.failed', { file: task.fileName, error: event.payload.error }), {
+          logStore.error('SFTP', t('log.sftp.failed', { file: task.fileName, error: event.payload.error }), {
             error: event.payload.error,
             remotePath: task.remotePath
           })
@@ -247,7 +247,7 @@ export const useTransferStore = defineStore('transfer', () => {
     }
     tasks.value.set(task.id, fullTask)
 
-    logStore.info('SFTP', (i18n.global as any).t('log.sftp.queueing', { type: task.type, file: task.fileName }), {
+    logStore.info('SFTP', t('log.sftp.queueing', { type: task.type, file: task.fileName }), {
       local: task.localPath,
       remote: task.remotePath
     })
@@ -271,6 +271,15 @@ export const useTransferStore = defineStore('transfer', () => {
     tasks.value = new Map(tasks.value)
   }
 
+  /** 将任务标记为失败 */
+  function failTask(id: string, error: string) {
+    const task = tasks.value.get(id)
+    if (task) {
+      tasks.value.set(id, { ...task, status: 'error', error })
+      tasks.value = new Map(tasks.value)
+    }
+  }
+
   function clearHistory() {
     history.value = []
   }
@@ -281,6 +290,7 @@ export const useTransferStore = defineStore('transfer', () => {
     setupListeners,
     addTask,
     removeTask,
+    failTask,
     clearCompleted,
     clearHistory,
   }

@@ -72,9 +72,10 @@ pub async fn sync_compare(
                 false
             } else {
                 local_info.size != remote_info.size
-                    || (local_info.modified.is_some()
-                        && remote_info.modified.is_some()
-                        && (local_info.modified.unwrap() - remote_info.modified.unwrap()).abs() > 1)
+                    || match (local_info.modified, remote_info.modified) {
+                        (Some(l), Some(r)) => (l - r).abs() > 1,
+                        _ => false,
+                    }
             };
 
             let status = if is_modified { "modified" } else { "unchanged" };

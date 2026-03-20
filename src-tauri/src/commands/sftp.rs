@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use tauri::{Emitter, Manager};
@@ -89,6 +90,20 @@ pub async fn sftp_mkdir(
     Ok(true)
 }
 
+/// 在远程创建空文件
+#[tauri::command]
+pub async fn sftp_touch(
+    app: tauri::AppHandle,
+    connection_id: String,
+    path: String,
+) -> Result<bool, AppError> {
+    let sftp_engine = app.state::<SftpEngineState>().inner().clone();
+    sftp_engine
+        .touch(&connection_id, &path)
+        .await?;
+    Ok(true)
+}
+
 #[tauri::command]
 pub async fn sftp_delete(
     app: tauri::AppHandle,
@@ -105,9 +120,10 @@ pub async fn sftp_delete(
         // 快速统计：SSH find | wc -l，只需要知道是否超过阈值
         // 比 sftp_list_recursive 快几个数量级（不需要完整遍历）
         let file_count = {
+            let escaped_path = shell_escape::escape(Cow::Borrowed(&path));
             let count_cmd = format!(
-                "find '{}' -type f 2>/dev/null | head -{} | wc -l",
-                path.replace('\'', "'\\''"),
+                "find {} -type f 2>/dev/null | head -{} | wc -l",
+                escaped_path,
                 BULK_DELETE_THRESHOLD + 1
             );
             match sftp_engine.exec_command(&connection_id, &count_cmd, 15).await {
@@ -136,7 +152,7 @@ pub async fn sftp_delete(
                 "phase": "deleting",
             }));
 
-            let rm_cmd = format!("rm -rf '{}'", path.replace('\'', "'\\''"));
+            let rm_cmd = format!("rm -rf {}", shell_escape::escape(Cow::Borrowed(&path)));
             let (exit_code, output) = sftp_engine
                 .exec_command(&connection_id, &rm_cmd, 60)
                 .await
@@ -273,8 +289,18 @@ pub async fn local_list_dir(path: String) -> Result<Vec<FileEntry>, AppError> {
 
 #[tauri::command]
 pub async fn local_mkdir(path: String) -> Result<(), AppError> {
-    // std::io::Error 已有 From，直接 ?
     tokio::fs::create_dir_all(&path).await?;
+    Ok(())
+}
+
+/// 在本地创建空文件
+#[tauri::command]
+pub async fn local_touch(path: String) -> Result<(), AppError> {
+    // 确保父目录存在
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    tokio::fs::File::create(&path).await?;
     Ok(())
 }
 

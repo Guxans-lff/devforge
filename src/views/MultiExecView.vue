@@ -5,10 +5,10 @@ import { useConnectionStore } from '@/stores/connections'
 import { useToast } from '@/composables/useToast'
 import TerminalPanel from '@/components/terminal/TerminalPanelLazy.vue'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Send, Eraser, LayoutGrid, Rows2, Columns2, Check, Monitor, ChevronsUpDown, TerminalSquare, Search } from 'lucide-vue-next'
+import type { TerminalPanelExposed } from '@/types/component-exposed'
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
@@ -75,8 +75,8 @@ function sendCommand() {
   const cmd = commandInput.value.trim()
   if (!cmd || selectedConnections.value.length === 0) return
   for (const conn of selectedConnections.value) {
-    const panel = terminalRefs.value.get(conn.record.id)
-    ;(panel as any)?.sendData(cmd + '\n')
+    const panel = terminalRefs.value.get(conn.record.id) as unknown as TerminalPanelExposed | undefined
+    panel?.sendData(cmd + '\n')
   }
   // 追加到历史（去重，最新在前）
   commandHistory.value = [cmd, ...commandHistory.value.filter(h => h !== cmd)].slice(0, MAX_HISTORY)
@@ -94,9 +94,9 @@ function onStatusChange(connId: string, status: string) {
   sessionStatuses.value = new Map(sessionStatuses.value).set(connId, status)
 }
 
-function setTerminalRef(connId: string, el: any) {
+function setTerminalRef(connId: string, el: unknown) {
   if (el) {
-    terminalRefs.value.set(connId, el)
+    terminalRefs.value.set(connId, el as InstanceType<typeof TerminalPanel>)
   } else {
     terminalRefs.value.delete(connId)
   }
@@ -334,7 +334,7 @@ onBeforeUnmount(() => {
         <!-- 终端面板 -->
         <div class="flex-1 overflow-hidden">
           <TerminalPanel
-            :ref="(el: any) => setTerminalRef(conn.record.id, el)"
+            :ref="(el: unknown) => setTerminalRef(conn.record.id, el)"
             :connection-id="conn.record.id"
             :connection-name="conn.record.name"
             @status-change="(s: string) => onStatusChange(conn.record.id, s)"

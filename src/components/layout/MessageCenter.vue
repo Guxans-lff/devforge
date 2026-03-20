@@ -206,7 +206,7 @@ const groupedMessages = computed(() => {
                       <Button
                         v-for="(action, index) in msg.actions"
                         :key="index"
-                        :variant="(action.variant || 'default') as any"
+                        :variant="action.variant === 'primary' ? 'default' : (action.variant || 'default')"
                         size="sm"
                         class="h-7 text-[10px] font-bold uppercase tracking-wider px-3"
                         @click="action.action()"

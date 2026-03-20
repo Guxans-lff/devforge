@@ -55,12 +55,16 @@ pub fn split_sql_statements(content: &str) -> Vec<String> {
             current.push(ch);
             if ch == '\\' && next.is_some() {
                 // 转义字符，跳过下一个字符
-                current.push(chars.next().unwrap());
+                if let Some(escaped) = chars.next() {
+                    current.push(escaped);
+                }
                 continue;
             }
             if ch == '\'' && next == Some('\'') {
                 // 转义引号 ''
-                current.push(chars.next().unwrap());
+                if let Some(quote) = chars.next() {
+                    current.push(quote);
+                }
                 continue;
             }
             if ch == '\'' {
@@ -106,7 +110,9 @@ pub fn split_sql_statements(content: &str) -> Vec<String> {
         if ch == '/' && next == Some('*') {
             in_block_comment = true;
             current.push(ch);
-            current.push(chars.next().unwrap()); // consume '*'
+            if let Some(star) = chars.next() {
+                current.push(star); // consume '*'
+            }
             continue;
         }
 
@@ -140,7 +146,9 @@ pub fn split_sql_statements(content: &str) -> Vec<String> {
             for p_ch in pattern.chars() {
                 if let Some(&next_ch) = chars.peek() {
                     if next_ch.to_uppercase().next() == p_ch.to_uppercase().next() {
-                        peeked.push(chars.next().unwrap());
+                        if let Some(consumed) = chars.next() {
+                            peeked.push(consumed);
+                        }
                     } else {
                         matched = false;
                         break;
@@ -165,7 +173,9 @@ pub fn split_sql_statements(content: &str) -> Vec<String> {
                 let mut new_delim = String::new();
                 while let Some(&c) = chars.peek() {
                     if !c.is_whitespace() {
-                        new_delim.push(chars.next().unwrap());
+                        if let Some(consumed) = chars.next() {
+                            new_delim.push(consumed);
+                        }
                     } else {
                         break;
                     }
@@ -200,13 +210,15 @@ pub fn split_sql_statements(content: &str) -> Vec<String> {
             }
         } else {
             // 自定义分隔符处理
-            if ch == delimiter.chars().next().unwrap() {
+            if Some(ch) == delimiter.chars().next() {
                 let mut matched = true;
                 let mut peeked = Vec::new();
                 for d_ch in delimiter.chars().skip(1) {
                     if let Some(&next_ch) = chars.peek() {
                         if next_ch == d_ch {
-                            peeked.push(chars.next().unwrap());
+                            if let Some(consumed) = chars.next() {
+                                peeked.push(consumed);
+                            }
                         } else {
                             matched = false;
                             break;

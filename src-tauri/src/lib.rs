@@ -5,11 +5,14 @@ mod utils;
 
 use commands::connection::{self, StorageState};
 use commands::db::{self, DbEngineState};
+use commands::data_sync;
 use commands::db_backup;
+use commands::diagnostics;
 use commands::import;
 use commands::import_export;
 use commands::local_shell::{self, LocalShellEngineState};
 use commands::query_history;
+use commands::scheduler;
 use commands::schema_compare;
 use commands::sftp::{self, SftpEngineState};
 use commands::file_editor;
@@ -38,9 +41,14 @@ use tokio::sync::Mutex;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 初始化崩溃日志收集（必须在最前面）
+    services::crash_reporter::init_panic_hook();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let handle = app.handle().clone();
 
@@ -91,6 +99,13 @@ pub fn run() {
                     let state: StorageState = Arc::new(storage);
                     handle.manage(state);
                     log::info!("Storage initialized successfully");
+
+                    // 启动定时调度器（需在 Tokio 运行时上下文中 spawn）
+                    let scheduler_handle = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        services::scheduler::start(scheduler_handle);
+                    });
+                    log::info!("Scheduler started successfully");
                 }
                 Err(e) => {
                     log::error!("Failed to initialize storage: {}", e);
@@ -199,12 +214,14 @@ pub fn run() {
             sftp::sftp_list_dir,
             sftp::sftp_stat,
             sftp::sftp_mkdir,
+            sftp::sftp_touch,
             sftp::sftp_delete,
             sftp::sftp_rename,
             sftp::sftp_download,
             sftp::sftp_upload,
             sftp::local_list_dir,
             sftp::local_mkdir,
+            sftp::local_touch,
             sftp::local_delete,
             sftp::local_rename,
             sftp::local_list_recursive,
@@ -292,6 +309,22 @@ pub fn run() {
             local_shell::local_shell_write,
             local_shell::local_shell_resize,
             local_shell::local_shell_close,
+            // Diagnostics
+            diagnostics::list_crash_logs,
+            diagnostics::read_crash_log,
+            diagnostics::clear_crash_logs,
+            diagnostics::write_error_log,
+            // Data sync
+            data_sync::sync_data_preview,
+            data_sync::sync_data_execute,
+            // Scheduler
+            scheduler::list_scheduled_tasks,
+            scheduler::create_scheduled_task,
+            scheduler::update_scheduled_task,
+            scheduler::delete_scheduled_task,
+            scheduler::toggle_scheduled_task,
+            scheduler::list_task_executions,
+            scheduler::run_task_now,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

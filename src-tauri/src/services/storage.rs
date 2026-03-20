@@ -6,6 +6,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
 use sqlx::Row;
 
 use crate::models::connection::{Connection, ConnectionGroup};
+use crate::models::scheduler::{ScheduledTask, TaskExecution};
 use crate::utils::error::AppError;
 
 use tokio::sync::RwLock;
@@ -221,6 +222,46 @@ impl Storage {
             .execute(&*pool)
             .await?;
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_audit_type ON audit_logs(operation_type)")
+            .execute(&*pool)
+            .await?;
+
+        // 调度任务表
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                task_type TEXT NOT NULL,
+                cron_expr TEXT NOT NULL,
+                config_json TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                last_run INTEGER,
+                next_run INTEGER,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&*pool)
+        .await?;
+
+        // 任务执行记录表
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS task_executions (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER,
+                result_summary TEXT,
+                error TEXT,
+                FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE
+            )",
+        )
+        .execute(&*pool)
+        .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_exec_task ON task_executions(task_id)")
+            .execute(&*pool)
+            .await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_exec_time ON task_executions(started_at DESC)")
             .execute(&*pool)
             .await?;
 
@@ -950,9 +991,207 @@ impl Storage {
             })
             .collect())
     }
-}
 
-// --- Data models for query history and snippets ---
+    // --- Scheduled Tasks ---
+
+    /// 列出所有调度任务
+    pub async fn list_scheduled_tasks(&self) -> Result<Vec<ScheduledTask>, AppError> {
+        let rows = sqlx::query(
+            "SELECT id, name, task_type, cron_expr, config_json, enabled, last_run, next_run, created_at, updated_at
+             FROM scheduled_tasks ORDER BY created_at DESC",
+        )
+        .fetch_all(&*self.pool().await)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| ScheduledTask {
+                id: r.get("id"),
+                name: r.get("name"),
+                task_type: r.get("task_type"),
+                cron_expr: r.get("cron_expr"),
+                config_json: r.get("config_json"),
+                enabled: r.get::<i32, _>("enabled") != 0,
+                last_run: r.get("last_run"),
+                next_run: r.get("next_run"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+            })
+            .collect())
+    }
+
+    /// 获取单个调度任务
+    pub async fn get_scheduled_task(&self, id: &str) -> Result<ScheduledTask, AppError> {
+        let row = sqlx::query(
+            "SELECT id, name, task_type, cron_expr, config_json, enabled, last_run, next_run, created_at, updated_at
+             FROM scheduled_tasks WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_optional(&*self.pool().await)
+        .await?
+        .ok_or_else(|| AppError::Other(format!("调度任务不存在: {}", id)))?;
+
+        Ok(ScheduledTask {
+            id: row.get("id"),
+            name: row.get("name"),
+            task_type: row.get("task_type"),
+            cron_expr: row.get("cron_expr"),
+            config_json: row.get("config_json"),
+            enabled: row.get::<i32, _>("enabled") != 0,
+            last_run: row.get("last_run"),
+            next_run: row.get("next_run"),
+            created_at: row.get("created_at"),
+            updated_at: row.get("updated_at"),
+        })
+    }
+
+    /// 创建调度任务
+    pub async fn create_scheduled_task(&self, task: &ScheduledTask) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO scheduled_tasks (id, name, task_type, cron_expr, config_json, enabled, last_run, next_run, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&task.id)
+        .bind(&task.name)
+        .bind(&task.task_type)
+        .bind(&task.cron_expr)
+        .bind(&task.config_json)
+        .bind(task.enabled as i32)
+        .bind(task.last_run)
+        .bind(task.next_run)
+        .bind(task.created_at)
+        .bind(task.updated_at)
+        .execute(&*self.pool().await)
+        .await?;
+        Ok(())
+    }
+
+    /// 更新调度任务
+    pub async fn update_scheduled_task(&self, task: &ScheduledTask) -> Result<(), AppError> {
+        let result = sqlx::query(
+            "UPDATE scheduled_tasks SET name = ?, cron_expr = ?, config_json = ?, enabled = ?, last_run = ?, next_run = ?, updated_at = ?
+             WHERE id = ?",
+        )
+        .bind(&task.name)
+        .bind(&task.cron_expr)
+        .bind(&task.config_json)
+        .bind(task.enabled as i32)
+        .bind(task.last_run)
+        .bind(task.next_run)
+        .bind(task.updated_at)
+        .bind(&task.id)
+        .execute(&*self.pool().await)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::Other(format!("调度任务不存在: {}", task.id)));
+        }
+        Ok(())
+    }
+
+    /// 删除调度任务
+    pub async fn delete_scheduled_task(&self, id: &str) -> Result<(), AppError> {
+        let result = sqlx::query("DELETE FROM scheduled_tasks WHERE id = ?")
+            .bind(id)
+            .execute(&*self.pool().await)
+            .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::Other(format!("调度任务不存在: {}", id)));
+        }
+        Ok(())
+    }
+
+    /// 列出已启用且到期的任务
+    pub async fn list_due_tasks(&self, now_ms: i64) -> Result<Vec<ScheduledTask>, AppError> {
+        let rows = sqlx::query(
+            "SELECT id, name, task_type, cron_expr, config_json, enabled, last_run, next_run, created_at, updated_at
+             FROM scheduled_tasks
+             WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= ?
+             ORDER BY next_run ASC",
+        )
+        .bind(now_ms)
+        .fetch_all(&*self.pool().await)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| ScheduledTask {
+                id: r.get("id"),
+                name: r.get("name"),
+                task_type: r.get("task_type"),
+                cron_expr: r.get("cron_expr"),
+                config_json: r.get("config_json"),
+                enabled: r.get::<i32, _>("enabled") != 0,
+                last_run: r.get("last_run"),
+                next_run: r.get("next_run"),
+                created_at: r.get("created_at"),
+                updated_at: r.get("updated_at"),
+            })
+            .collect())
+    }
+
+    // --- Task Executions ---
+
+    /// 创建执行记录
+    pub async fn create_task_execution(&self, exec: &TaskExecution) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO task_executions (id, task_id, status, started_at, finished_at, result_summary, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&exec.id)
+        .bind(&exec.task_id)
+        .bind(&exec.status)
+        .bind(exec.started_at)
+        .bind(exec.finished_at)
+        .bind(&exec.result_summary)
+        .bind(&exec.error)
+        .execute(&*self.pool().await)
+        .await?;
+        Ok(())
+    }
+
+    /// 更新执行记录（完成/失败时更新状态）
+    pub async fn update_task_execution(&self, exec: &TaskExecution) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE task_executions SET status = ?, finished_at = ?, result_summary = ?, error = ?
+             WHERE id = ?",
+        )
+        .bind(&exec.status)
+        .bind(exec.finished_at)
+        .bind(&exec.result_summary)
+        .bind(&exec.error)
+        .bind(&exec.id)
+        .execute(&*self.pool().await)
+        .await?;
+        Ok(())
+    }
+
+    /// 列出指定任务的执行记录（最近 50 条）
+    pub async fn list_task_executions(&self, task_id: &str) -> Result<Vec<TaskExecution>, AppError> {
+        let rows = sqlx::query(
+            "SELECT id, task_id, status, started_at, finished_at, result_summary, error
+             FROM task_executions WHERE task_id = ?
+             ORDER BY started_at DESC LIMIT 50",
+        )
+        .bind(task_id)
+        .fetch_all(&*self.pool().await)
+        .await?;
+
+        Ok(rows
+            .iter()
+            .map(|r| TaskExecution {
+                id: r.get("id"),
+                task_id: r.get("task_id"),
+                status: r.get("status"),
+                started_at: r.get("started_at"),
+                finished_at: r.get("finished_at"),
+                result_summary: r.get("result_summary"),
+                error: r.get("error"),
+            })
+            .collect())
+    }
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

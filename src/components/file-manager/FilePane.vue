@@ -33,6 +33,7 @@ import {
   Upload,
   Loader2,
   FileEdit,
+  FilePlus,
   Shield,
   ArrowLeftRight,
   ArrowUp,
@@ -53,6 +54,7 @@ const emit = defineEmits<{
   navigate: [path: string]
   refresh: []
   mkdir: [name: string]
+  newFile: [name: string]
   delete: [entry: FileEntry]
   rename: [entry: FileEntry, newName: string]
   transfer: [entry: FileEntry]
@@ -73,6 +75,8 @@ const selectedEntries = ref<Set<string>>(new Set())
 
 const showMkdirDialog = ref(false)
 const mkdirName = ref('')
+const showNewFileDialog = ref(false)
+const newFileName = ref('')
 const showRenameDialog = ref(false)
 const renameName = ref('')
 const renameTarget = ref<FileEntry | null>(null)
@@ -264,6 +268,14 @@ function handleMkdir() {
   }
 }
 
+function handleNewFile() {
+  if (newFileName.value.trim()) {
+    emit('newFile', newFileName.value.trim())
+    newFileName.value = ''
+    showNewFileDialog.value = false
+  }
+}
+
 function handleRename() {
   if (renameTarget.value && renameName.value.trim()) {
     emit('rename', renameTarget.value, renameName.value.trim())
@@ -336,7 +348,7 @@ function handleKeyDown(e: KeyboardEvent) {
       entry => entry.name.toLowerCase().startsWith(typeAheadBuffer.toLowerCase())
     )
     if (idx !== -1) {
-      selectedEntries.value = new Set([sortedEntries.value[idx].path])
+      selectedEntries.value = new Set([sortedEntries.value[idx]!.path])
       nextTick(() => {
         virtualizer.value.scrollToIndex(idx, { align: 'center' })
       })
@@ -738,12 +750,28 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- Empty -->
-      <div
-        v-else-if="entries.length === 0"
-        class="flex items-center justify-center py-12 text-xs text-muted-foreground"
-      >
-        {{ t('fileManager.emptyDir') }}
-      </div>
+      <ContextMenu v-else-if="entries.length === 0">
+        <ContextMenuTrigger as-child>
+          <div
+            class="flex items-center justify-center py-12 text-xs text-muted-foreground h-full min-h-[200px]"
+            @dragover.prevent="handleDragOver($event)"
+            @dragleave="handleDragLeave"
+            @drop="handleDrop($event)"
+          >
+            {{ t('fileManager.emptyDir') }}
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent class="w-48">
+          <ContextMenuItem @click="showMkdirDialog = true">
+            <FolderPlus class="mr-2 h-4 w-4" />
+            {{ t('fileManager.newFolder') }}
+          </ContextMenuItem>
+          <ContextMenuItem @click="showNewFileDialog = true">
+            <FilePlus class="mr-2 h-4 w-4" />
+            {{ t('fileManager.newFile') }}
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
 
       <!-- Virtualized Entries -->
       <div
@@ -788,14 +816,19 @@ onBeforeUnmount(() => {
             </ContextMenuTrigger>
             <!-- __CONTINUE_HERE__ -->
             <ContextMenuContent class="w-48">
-              <template v-if="selectedCount === 0">
-                <ContextMenuItem @click="showMkdirDialog = true">
-                  <FolderPlus class="mr-2 h-4 w-4" />
-                  {{ t('fileManager.newFolder') }}
-                </ContextMenuItem>
-              </template>
+              <!-- 新建操作（所有场景可用） -->
+              <ContextMenuItem @click="showMkdirDialog = true">
+                <FolderPlus class="mr-2 h-4 w-4" />
+                {{ t('fileManager.newFolder') }}
+              </ContextMenuItem>
+              <ContextMenuItem @click="showNewFileDialog = true">
+                <FilePlus class="mr-2 h-4 w-4" />
+                {{ t('fileManager.newFile') }}
+              </ContextMenuItem>
 
-              <template v-else-if="selectedCount === 1">
+              <!-- 单选文件操作 -->
+              <template v-if="selectedCount === 1">
+                <ContextMenuSeparator />
                 <ContextMenuItem
                   v-if="panelId === 'remote' && selectedItems[0] && !selectedItems[0].isDir"
                   @click="selectedItems[0] && emit('editFile', selectedItems[0])"
@@ -846,7 +879,9 @@ onBeforeUnmount(() => {
                 </ContextMenuItem>
               </template>
 
-              <template v-else>
+              <!-- 多选操作 -->
+              <template v-else-if="selectedCount > 1">
+                <ContextMenuSeparator />
                 <ContextMenuItem @click="handleBatchTransfer">
                   <Upload v-if="showTransferAction === 'upload'" class="mr-2 h-4 w-4" />
                   <Download v-else class="mr-2 h-4 w-4" />
@@ -932,6 +967,63 @@ onBeforeUnmount(() => {
                 type="submit" 
                 class="flex-1 h-11 rounded-xl text-[12px] font-extrabold shadow-lg shadow-primary/20 transition-all active:scale-[0.96]" 
                 :disabled="!mkdirName.trim()"
+              >
+                {{ t('common.confirm') }}
+              </Button>
+            </DialogFooter>
+          </form>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- New File Dialog -->
+    <Dialog v-model:open="showNewFileDialog">
+      <DialogContent class="max-w-[350px] p-0 overflow-hidden border border-border/40 shadow-2xl rounded-2xl bg-background/98 backdrop-blur-3xl">
+        <div class="px-6 py-4 border-b border-white/[0.02] bg-muted/20 flex items-center gap-3">
+          <div class="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center text-primary shadow-sm border border-primary/20">
+            <FilePlus class="h-4 w-4" />
+          </div>
+          <div class="flex flex-col">
+            <DialogTitle class="text-[14px] font-bold tracking-tight text-foreground/90">
+              {{ t('fileManager.newFile') }}
+            </DialogTitle>
+            <span class="text-[10px] font-medium text-muted-foreground/40 uppercase tracking-[0.1em]">
+              Create New File
+            </span>
+          </div>
+        </div>
+
+        <div class="p-6">
+          <form @submit.prevent="handleNewFile">
+            <div class="mb-6">
+              <div class="flex items-center justify-between px-1 mb-2">
+                <label class="text-[11px] font-bold text-muted-foreground/60 uppercase tracking-widest">
+                  {{ t('fileManager.newFileName') }}
+                </label>
+              </div>
+              <div class="relative group">
+                <Input
+                  v-model="newFileName"
+                  class="h-11 rounded-xl border-border/80 bg-background/50 px-4 text-[13px] tracking-wide transition-all focus:border-primary focus:ring-4 focus:ring-primary/5 shadow-sm"
+                  :placeholder="t('fileManager.newFileName')"
+                  autofocus
+                />
+                <div class="absolute inset-0 rounded-xl bg-primary/5 opacity-0 group-focus-within:opacity-100 pointer-events-none transition-opacity duration-300"></div>
+              </div>
+            </div>
+            <DialogFooter class="gap-3 p-0">
+              <Button
+                variant="outline"
+                type="button"
+                class="flex-1 h-11 rounded-xl text-[12px] font-bold text-foreground/60 hover:text-foreground hover:bg-muted transition-all"
+                @click="showNewFileDialog = false"
+              >
+                {{ t('common.cancel') }}
+              </Button>
+              <Button
+                type="submit"
+                class="flex-1 h-11 rounded-xl text-[12px] font-extrabold shadow-lg shadow-primary/20 transition-all active:scale-[0.96]"
+                :disabled="!newFileName.trim()"
               >
                 {{ t('common.confirm') }}
               </Button>

@@ -79,7 +79,7 @@ function handleKeydown(e: KeyboardEvent, index: number) {
               <span class="text-primary/60">:</span>{{ name }}
             </Label>
             <Input
-              :ref="(el) => { if (idx === 0) firstInput = (el as any)?.$el ?? el }"
+              :ref="(el: unknown) => { if (idx === 0) { const comp = el as { $el?: HTMLElement } | null; firstInput = (comp?.$el ?? el) as HTMLInputElement | null } }"
               v-model="localValues[name]"
               class="h-9 text-sm font-mono bg-muted/20 border-border/50 focus:border-primary/40"
               :placeholder="`输入 ${name} 的值...`"

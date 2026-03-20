@@ -197,6 +197,31 @@ async function handleRemoteMkdir(name: string) {
   }
 }
 
+async function handleLocalNewFile(name: string) {
+  try {
+    const sep = localPath.value.includes('\\') ? '\\' : '/'
+    const newPath = localPath.value.endsWith(sep)
+      ? `${localPath.value}${name}`
+      : `${localPath.value}${sep}${name}`
+    await sftpApi.localTouch(newPath)
+    await loadLocal()
+  } catch (e) {
+    toast.error(t('toast.operationFailed'), String(e))
+  }
+}
+
+async function handleRemoteNewFile(name: string) {
+  try {
+    const newPath = remotePath.value.endsWith('/')
+      ? `${remotePath.value}${name}`
+      : `${remotePath.value}/${name}`
+    await sftpApi.sftpTouch(props.connectionId, newPath)
+    await loadRemote()
+  } catch (e) {
+    toast.error(t('toast.operationFailed'), String(e))
+  }
+}
+
 function handleLocalDelete(entry: FileEntry) {
   requestDeleteConfirm(
     t('fileManager.confirmDelete', { name: entry.name }),
@@ -463,7 +488,12 @@ async function handleDropToLocal(entries: FileEntry[], targetPath: string) {
         totalBytes: entry.size ?? 0,
       })
       workspace.setBottomPanelTab('transfer')
-      await sftpApi.startDownloadChunked(transferId, props.connectionId, entry.path, localTarget)
+      try {
+        await sftpApi.startDownloadChunked(transferId, props.connectionId, entry.path, localTarget)
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e)
+        transferStore.failTask(transferId, msg)
+      }
     }
   }
 }
@@ -574,10 +604,8 @@ watch(
     const tab = workspace.tabs.find(t => t.id === `file-manager-${props.connectionId}`)
     return tab?.meta?.initialRemotePath
   },
-  (newPath, oldPath) => {
-    console.log('[FileManagerView] watch initialRemotePath 变化:', JSON.stringify(oldPath), '->', JSON.stringify(newPath), 'status:', status.value, 'remotePath:', remotePath.value)
+  (newPath, _oldPath) => {
     if (newPath && newPath !== remotePath.value && status.value === 'connected') {
-      console.log('[FileManagerView] 执行 loadRemote:', newPath)
       loadRemote(newPath)
     }
   },
@@ -731,6 +759,7 @@ onBeforeUnmount(async () => {
             @navigate="handleLocalNavigate"
             @refresh="loadLocal()"
             @mkdir="handleLocalMkdir"
+            @new-file="handleLocalNewFile"
             @delete="handleLocalDelete"
             @rename="handleLocalRename"
             @transfer="handleUpload"
@@ -753,6 +782,7 @@ onBeforeUnmount(async () => {
             @navigate="handleRemoteNavigate"
             @refresh="loadRemote()"
             @mkdir="handleRemoteMkdir"
+            @new-file="handleRemoteNewFile"
             @delete="handleRemoteDelete"
             @rename="handleRemoteRename"
             @transfer="handleDownload"
