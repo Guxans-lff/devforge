@@ -10,7 +10,7 @@ import {
 import type { ColumnDef as TanstackColumnDef, SortingState, ColumnResizeMode, ColumnPinningState } from '@tanstack/vue-table'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { save } from '@tauri-apps/plugin-dialog'
-import { writeTextFile, dbExecuteQueryInDatabase } from '@/api/database'
+import { writeTextFile, dbExecuteQueryInDatabase, dbGenerateScript } from '@/api/database'
 import { formatData, getFilters, type ExportFormat } from '@/utils/exportData'
 import { useToast } from '@/composables/useToast'
 import { useAdaptiveOverscan } from '@/composables/useAdaptiveOverscan'
@@ -280,7 +280,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     result.value.columns.forEach((col, i) => { obj[col.name] = row[i] })
     navigator.clipboard.writeText(JSON.stringify(obj, null, 2)).then(() => {
       toast.success(t('toast.copySuccess'))
-    }).catch(() => {})
+    }).catch((e: unknown) => console.warn('[useQueryResult]', e))
   }
 
   /** 复制行数据为 INSERT SQL 语句 */
@@ -301,7 +301,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     const sql = `INSERT INTO ${quoteId(tbl)} (${cols}) VALUES (${vals});`
     navigator.clipboard.writeText(sql).then(() => {
       toast.success(t('toast.copySuccess'))
-    }).catch(() => {})
+    }).catch((e: unknown) => console.warn('[useQueryResult]', e))
   }
 
   async function triggerColumnStats(columnName: string) {
@@ -700,7 +700,18 @@ export function useQueryResult(options: UseQueryResultOptions) {
     
     if (!path) return
     try {
-      const content = formatData(result.value, format, tablePart)
+      // SQL 格式导出时，尝试获取表结构 DDL
+      let ddl: string | undefined
+      const effectiveDb = database.value || dbName
+      const effectiveTable = tableName.value || result.value?.tableName || tablePart
+      if (format === 'sql' && connectionId.value && effectiveDb && effectiveTable && effectiveTable !== 'query_result') {
+        try {
+          ddl = await dbGenerateScript(connectionId.value, effectiveDb, effectiveTable, 'create', { includeIfNotExists: false, includeIfExists: false })
+        } catch {
+          // 获取 DDL 失败时静默跳过，不影响数据导出
+        }
+      }
+      const content = formatData(result.value, format, tablePart, ddl)
       await writeTextFile(path, content)
       toast.success(t('toast.exportSuccess'))
     } catch (e: any) {

@@ -69,7 +69,7 @@ hex = "0.4"
 rust_xlsxwriter = "0.79"
 
 # HTTP client for LLM API calls
-reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "stream"] }
 
 # SSH client
 russh = "0.48"
@@ -94,6 +94,9 @@ walkdir = "2"
 
 # Shell 参数转义（防命令注入）
 shell-escape = "0.1"
+
+# SHA-256 校验（更新包完整性）
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["fileapi"] }

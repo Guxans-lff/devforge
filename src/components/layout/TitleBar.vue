@@ -25,7 +25,7 @@ async function minimize() {
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window')
     await getCurrentWindow().minimize()
-  } catch {}
+  } catch { /* 非 Tauri 环境忽略 */ }
 }
 
 /** 切换最大化 */
@@ -35,7 +35,7 @@ async function toggleMaximize() {
     const win = getCurrentWindow()
     await win.toggleMaximize()
     isMaximized.value = await win.isMaximized()
-  } catch {}
+  } catch { /* 非 Tauri 环境忽略 */ }
 }
 
 /** 关闭窗口 */
@@ -43,7 +43,7 @@ async function closeWindow() {
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window')
     await getCurrentWindow().close()
-  } catch {}
+  } catch { /* 非 Tauri 环境忽略 */ }
 }
 
 /** 双击标题栏切换最大化 */
@@ -56,7 +56,7 @@ async function handleDoubleClick() {
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window')
     isMaximized.value = await getCurrentWindow().isMaximized()
-  } catch {}
+  } catch { /* 非 Tauri 环境忽略 */ }
 })()
 </script>
 

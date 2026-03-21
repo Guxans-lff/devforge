@@ -137,7 +137,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     // 如果关闭的是查询 Tab，释放其 Session 连接
     if (tab.type === 'query') {
       import('@/api/database').then(({ dbReleaseSession }) => {
-        dbReleaseSession(connectionId, tabId).catch(() => {})
+        dbReleaseSession(connectionId, tabId).catch((e: unknown) => console.warn('[dbWorkspace]', e))
       })
     }
 

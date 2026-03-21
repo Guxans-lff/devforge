@@ -39,7 +39,7 @@ function openUrl() {
 function copyUrl() {
   navigator.clipboard.writeText(props.value).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch(() => {})
+  }).catch((e: unknown) => console.warn('[UrlPreview]', e))
 }
 </script>
 

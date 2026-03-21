@@ -26,16 +26,17 @@ pub async fn create_connection(
     let now = Utc::now().timestamp_millis();
     let id = Uuid::new_v4().to_string();
 
+    let password = req.password;
     let conn = Connection {
         id: id.clone(),
-        name: req.name.clone(),
-        connection_type: req.connection_type.clone(),
-        group_id: req.group_id.clone(),
-        host: req.host.clone(),
+        name: req.name,
+        connection_type: req.connection_type,
+        group_id: req.group_id,
+        host: req.host,
         port: req.port,
-        username: req.username.clone(),
-        config_json: req.config_json.clone(),
-        color: req.color.clone(),
+        username: req.username,
+        config_json: req.config_json,
+        color: req.color,
         sort_order: 0,
         created_at: now,
         updated_at: now,
@@ -43,7 +44,7 @@ pub async fn create_connection(
 
     storage.create_connection(&conn).await?;
 
-    if let Some(password) = req.password {
+    if let Some(password) = password {
         if !password.is_empty() {
             CredentialManager::save(&id, &password)?;
             // Verify credential was stored correctly

@@ -783,7 +783,7 @@ onBeforeUnmount(() => {
             <ContextMenuTrigger>
               <div
                 :data-row-index="vRow.index"
-                class="group flex cursor-pointer items-center gap-3 px-3 text-[13px] transition-all duration-200 hover:bg-muted/40 absolute left-1 right-1 rounded-md"
+                class="group flex cursor-pointer items-center gap-3 px-3 text-[13px] transition-all duration-200 hover:bg-primary/10 absolute left-1 right-1 rounded-md"
                 :style="{ height: `${ROW_HEIGHT}px`, transform: `translateY(${vRow.start}px)` }"
                 :class="{
                   'bg-primary/10 text-primary': isSelected(sortedEntries[vRow.index]!),

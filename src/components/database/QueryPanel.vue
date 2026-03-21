@@ -206,7 +206,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', resultTabsManager.closeContextMenu)
-  dbApi.dbReleaseSession(props.connectionId, props.tabId).catch(() => {})
+  dbApi.dbReleaseSession(props.connectionId, props.tabId).catch((e: unknown) => console.warn('[QueryPanel]', e))
   execution.clearLongRunningNotify()
 })
 

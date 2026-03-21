@@ -26,6 +26,7 @@ use commands::table_editor;
 use commands::terminal_recorder::{self, TerminalRecorderState};
 use commands::tunnel::{self, SshTunnelEngineState};
 use commands::transfer;
+use commands::updater;
 use services::db_engine::DbEngine;
 use services::local_shell_engine::LocalShellEngine;
 use services::sftp_engine::SftpEngine;
@@ -47,10 +48,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        // .plugin(tauri_plugin_updater::Builder::new().build()) // 暂时禁用：当前 endpoint 为 HTTP，Tauri updater 要求 HTTPS，启动时会 panic
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let handle = app.handle().clone();
+            log::info!("App setup started");
 
             // Initialize DbEngine — 不再需要 Mutex，内部使用 RwLock
             let db_engine_state: DbEngineState = Arc::new(DbEngine::new());
@@ -94,6 +96,7 @@ pub fn run() {
 
             // Initialize SQLite storage (同步初始化，确保 setup 完成时 Storage 已就绪)
             // Storage 内部使用 SqlitePool（线程安全），无需外层 Mutex
+            log::info!("Storage initialization started");
             match tauri::async_runtime::block_on(Storage::new()) {
                 Ok(storage) => {
                     let state: StorageState = Arc::new(storage);
@@ -111,6 +114,8 @@ pub fn run() {
                     log::error!("Failed to initialize storage: {}", e);
                 }
             }
+
+            log::info!("App setup completed");
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -325,6 +330,10 @@ pub fn run() {
             scheduler::toggle_scheduled_task,
             scheduler::list_task_executions,
             scheduler::run_task_now,
+            // HTTP 简化更新
+            updater::download_update,
+            updater::launch_installer,
+            updater::reveal_in_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

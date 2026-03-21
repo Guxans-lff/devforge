@@ -123,7 +123,7 @@ async function loadLogs(append = false) {
 async function loadStats() {
   try {
     stats.value = await getAuditStats(props.connectionId)
-  } catch { /* 忽略 */ }
+  } catch (e) { console.warn('[AuditLog] loadStats', e) }
 }
 
 async function handleCleanup() {

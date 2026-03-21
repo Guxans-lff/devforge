@@ -491,15 +491,21 @@ impl Storage {
     /// 计算指定分组的嵌套深度（从该分组向上追溯到根级）
     /// 返回值：根级分组深度为 1，子分组深度递增
     pub async fn get_group_depth(&self, group_id: &str) -> Result<u32, AppError> {
+        const MAX_DEPTH: u32 = 50;
         let mut depth = 1u32;
         let mut current_id = group_id.to_string();
+        let pool = self.pool().await;
 
         loop {
+            if depth > MAX_DEPTH {
+                return Err(AppError::Other("分组嵌套深度超过上限，可能存在循环引用".into()));
+            }
+
             let row = sqlx::query(
                 "SELECT parent_id FROM connection_groups WHERE id = ?",
             )
             .bind(&current_id)
-            .fetch_optional(&*self.pool().await)
+            .fetch_optional(&*pool)
             .await?;
 
             match row {
@@ -527,7 +533,19 @@ impl Storage {
         &'a self,
         group_id: &'a str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32, AppError>> + Send + 'a>> {
+        self.get_max_children_depth_inner(group_id, 0)
+    }
+
+    fn get_max_children_depth_inner<'a>(
+        &'a self,
+        group_id: &'a str,
+        current_depth: u32,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<u32, AppError>> + Send + 'a>> {
         Box::pin(async move {
+            if current_depth > 50 {
+                return Err(AppError::Other("分组子树深度超过上限，可能存在循环引用".into()));
+            }
+
             let rows = sqlx::query(
                 "SELECT id FROM connection_groups WHERE parent_id = ?",
             )
@@ -542,7 +560,7 @@ impl Storage {
             let mut max_depth = 0u32;
             for row in &rows {
                 let child_id: String = row.get("id");
-                let child_depth = self.get_max_children_depth(&child_id).await?;
+                let child_depth = self.get_max_children_depth_inner(&child_id, current_depth + 1).await?;
                 max_depth = max_depth.max(child_depth + 1);
             }
 
@@ -557,7 +575,20 @@ impl Storage {
         group_id: &'a str,
         target_id: &'a str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, AppError>> + Send + 'a>> {
+        self.is_descendant_of_inner(group_id, target_id, 0)
+    }
+
+    fn is_descendant_of_inner<'a>(
+        &'a self,
+        group_id: &'a str,
+        target_id: &'a str,
+        current_depth: u32,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<bool, AppError>> + Send + 'a>> {
         Box::pin(async move {
+            if current_depth > 50 {
+                return Err(AppError::Other("分组后代检查深度超过上限，可能存在循环引用".into()));
+            }
+
             let rows = sqlx::query(
                 "SELECT id FROM connection_groups WHERE parent_id = ?",
             )
@@ -570,7 +601,7 @@ impl Storage {
                 if child_id == target_id {
                     return Ok(true);
                 }
-                if self.is_descendant_of(&child_id, target_id).await? {
+                if self.is_descendant_of_inner(&child_id, target_id, current_depth + 1).await? {
                     return Ok(true);
                 }
             }
@@ -638,18 +669,18 @@ impl Storage {
         .await?;
 
         // 高效清理：找到第 1000 条记录的时间戳，删除更早的记录（利用 idx_qh_time 索引）
-        let cutoff_row = sqlx::query(
+        // 清理失败不影响主逻辑
+        if let Ok(Some(row)) = sqlx::query(
             "SELECT executed_at FROM query_history ORDER BY executed_at DESC LIMIT 1 OFFSET 1000",
         )
-        .fetch_optional(&*self.pool().await)
-        .await?;
-
-        if let Some(row) = cutoff_row {
+        .fetch_optional(&*pool)
+        .await
+        {
             let cutoff_time: i64 = row.get("executed_at");
-            sqlx::query("DELETE FROM query_history WHERE executed_at < ?")
+            let _ = sqlx::query("DELETE FROM query_history WHERE executed_at < ?")
                 .bind(cutoff_time)
-                .execute(&*self.pool().await)
-                .await?;
+                .execute(&*pool)
+                .await;
         }
 
         Ok(())

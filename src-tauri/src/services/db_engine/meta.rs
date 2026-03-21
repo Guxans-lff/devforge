@@ -9,6 +9,11 @@ use crate::services::db_drivers::{mysql, postgres, DriverPool};
 use crate::utils::error::AppError;
 use super::{DbEngine, MonitoringState};
 
+/// MySQL 字符串字面量转义：处理反斜杠和单引号
+fn escape_mysql_str(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
 impl DbEngine {
     pub async fn get_databases(self: Arc<Self>, connection_id: String) -> Result<Vec<DatabaseInfo>, AppError> {
         let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
@@ -226,7 +231,10 @@ impl DbEngine {
             DriverPool::MySql(p) => {
                 let pc = req.plugin.as_ref().map(|pl| format!(" WITH '{}'", pl)).unwrap_or_default();
                 let ec = req.password_expire_days.map(|d| format!(" PASSWORD EXPIRE INTERVAL {} DAY", d)).unwrap_or_default();
-                let sql = format!("CREATE USER '{}'@'{}' IDENTIFIED{} BY '{}'{}", req.username.replace('\'', "\\'"), req.host.replace('\'', "\\'"), pc, req.password.replace('\'', "\\'"), ec);
+                let sql = format!(
+                    "CREATE USER '{}'@'{}' IDENTIFIED{} BY '{}'{}",
+                    escape_mysql_str(&req.username), escape_mysql_str(&req.host), pc, escape_mysql_str(&req.password), ec
+                );
                 sqlx::query(&sql).execute(p).await.map_err(AppError::Database)?;
                 Ok(true)
             }
@@ -237,7 +245,7 @@ impl DbEngine {
     pub async fn drop_user(self: Arc<Self>, connection_id: String, user: String, host: String) -> Result<bool, AppError> {
         let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {
-            DriverPool::MySql(p) => { let sql = format!("DROP USER '{}'@'{}'", user.replace('\'', "\\'"), host.replace('\'', "\\'")); sqlx::query(&sql).execute(p).await.map_err(AppError::Database)?; Ok(true) }
+            DriverPool::MySql(p) => { let sql = format!("DROP USER '{}'@'{}'", escape_mysql_str(&user), escape_mysql_str(&host)); sqlx::query(&sql).execute(p).await.map_err(AppError::Database)?; Ok(true) }
             _ => Err(AppError::Other("Only MySQL supported".into())),
         }
     }

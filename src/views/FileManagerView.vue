@@ -439,7 +439,7 @@ async function handleDropToRemote(entries: FileEntry[], targetPath: string) {
       const dirRemotePath = targetPath.endsWith('/')
         ? `${targetPath}${entry.name}`
         : `${targetPath}/${entry.name}`
-      await sftpApi.sftpMkdir(props.connectionId, dirRemotePath).catch(() => {})
+      await sftpApi.sftpMkdir(props.connectionId, dirRemotePath).catch((e: unknown) => console.warn('[FileManager]', e))
       // 递归上传子文件需要以 dirRemotePath 为目标
       await handleBatchUpload([entry])
     } else {

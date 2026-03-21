@@ -65,7 +65,7 @@ function sendFlowAck() {
   if (!sessionId || pendingAckBytes === 0) return
   totalAcked = totalProcessed
   pendingAckBytes = 0
-  sshApi.sshFlowAck(sessionId, totalAcked).catch(() => {})
+  sshApi.sshFlowAck(sessionId, totalAcked).catch((e: unknown) => console.warn('[Terminal]', e))
 }
 
 /** 将数据写入 xterm.js 并注册处理完成回调用于流控 */
@@ -246,7 +246,7 @@ async function cleanup() {
   pendingAckBytes = 0
 
   if (sessionId) {
-    await sshApi.sshDisconnect(sessionId).catch(() => {})
+    await sshApi.sshDisconnect(sessionId).catch((e: unknown) => console.warn('[Terminal]', e))
     sessionId = ''
   }
 
@@ -267,8 +267,8 @@ onMounted(() => {
   connect()
 })
 
-onBeforeUnmount(() => {
-  cleanup()
+onBeforeUnmount(async () => {
+  await cleanup()
 })
 
 // 响应主题变化

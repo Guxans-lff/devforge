@@ -31,7 +31,6 @@ import { useConnectionStore } from '@/stores/connections'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useSchemaRegistryStore } from '@/stores/schema-registry'
 import * as dbApi from '@/api/database'
-import { dbGetPoolStatus, dbGenerateScript, dbExportDatabaseDdl } from '@/api/database'
 import type { ScriptOptions } from '@/api/database'
 import type { PoolStatus } from '@/types/connection'
 import type { TableEditorTabContext, ImportTabContext, ErDiagramTabContext, QueryTabContext } from '@/types/database-workspace'
@@ -160,7 +159,7 @@ let poolStatusTimer: ReturnType<typeof setInterval> | null = null
 async function fetchPoolStatus() {
   if (!isConnected.value) return
   try {
-    poolStatus.value = await dbGetPoolStatus(props.connectionId)
+    poolStatus.value = await dbApi.dbGetPoolStatus(props.connectionId)
   } catch {
     // 静默处理，不影响主流程
   }
@@ -266,10 +265,8 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 }
 
 onMounted(async () => {
-  // 注册全局快捷键监听
-  window.addEventListener('keydown', handleGlobalKeydown)
   // 从 SQLite 恢复上次的标签页状态（首次调用，幂等）
-  await dbWorkspaceStore.restoreState().catch(() => {})
+  await dbWorkspaceStore.restoreState().catch((e: unknown) => console.warn('[DatabaseView]', e))
   // 确保该连接的 workspace 已初始化（副作用仅在此处执行一次）
   dbWorkspaceStore.getOrCreate(props.connectionId)
   // 启用自动保存（标签页变更 → debounce 1s → 写入 SQLite）
@@ -324,7 +321,7 @@ onBeforeUnmount(async () => {
   stopPoolStatusPolling()
   window.removeEventListener('keydown', handleGlobalKeydown)
   if (isConnected.value) {
-    await dbApi.dbDisconnect(props.connectionId).catch(() => {})
+    await dbApi.dbDisconnect(props.connectionId).catch((e: unknown) => console.warn('[DatabaseView]', e))
     connectionStore.updateConnectionStatus(props.connectionId, 'disconnected')
   }
 })
@@ -651,7 +648,7 @@ async function handleGenerateScript(database: string, table: string, scriptType:
       includeIfNotExists: true,
       includeIfExists: true,
     }
-    const sql = await dbGenerateScript(props.connectionId, database, table, scriptType, options)
+    const sql = await dbApi.dbGenerateScript(props.connectionId, database, table, scriptType, options)
     // 创建新的查询标签页并填入生成的脚本
     const tab = dbWorkspaceStore.addQueryTab(props.connectionId)
     dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, { sql })
@@ -668,7 +665,7 @@ async function handleExportDatabaseDdl(database: string) {
       includeIfNotExists: true,
       includeIfExists: true,
     }
-    const sql = await dbExportDatabaseDdl(props.connectionId, database, options)
+    const sql = await dbApi.dbExportDatabaseDdl(props.connectionId, database, options)
     const tab = dbWorkspaceStore.addQueryTab(props.connectionId)
     dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, { sql })
     toast.success(t('database.exportStructureSuccess', { db: database }))

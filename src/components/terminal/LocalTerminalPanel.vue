@@ -33,6 +33,7 @@ const errorMessage = ref('')
 
 let terminal: Terminal | null = null
 let fitAddon: FitAddon | null = null
+let webglAddon: WebglAddon | null = null
 let unlistenOutput: (() => void) | null = null
 let unlistenExit: (() => void) | null = null
 let resizeObserver: ResizeObserver | null = null
@@ -93,8 +94,10 @@ async function connect() {
 
   // 尝试加载 WebGL 渲染器
   try {
-    terminal.loadAddon(new WebglAddon())
+    webglAddon = new WebglAddon()
+    terminal.loadAddon(webglAddon)
   } catch {
+    webglAddon = null
     // WebGL 不可用则使用 canvas 渲染
   }
 
@@ -120,7 +123,7 @@ async function connect() {
   // 用户输入 → 发送到后端
   terminal.onData((data) => {
     if (status.value === 'connected') {
-      localShellApi.localShellWrite(props.sessionId, data).catch(() => {})
+      localShellApi.localShellWrite(props.sessionId, data).catch((e: unknown) => console.warn('[LocalTerminal]', e))
     }
   })
 
@@ -143,7 +146,7 @@ async function connect() {
     resizeTimer = setTimeout(() => {
       fitAddon?.fit()
       if (terminal && status.value === 'connected') {
-        localShellApi.localShellResize(props.sessionId, terminal.cols, terminal.rows).catch(() => {})
+        localShellApi.localShellResize(props.sessionId, terminal.cols, terminal.rows).catch((e: unknown) => console.warn('[LocalTerminal]', e))
       }
     }, 100)
   })
@@ -206,10 +209,16 @@ onBeforeUnmount(async () => {
 // KeepAlive 场景：切回时重新 fit 终端并恢复 WebGL 渲染
 onActivated(() => {
   if (terminal && terminalRef.value) {
-    // WebGL 上下文可能在后台丢失，尝试重新加载
+    // WebGL 上下文可能在后台丢失，先 dispose 旧实例再重新加载
     try {
-      terminal.loadAddon(new WebglAddon())
+      if (webglAddon) {
+        webglAddon.dispose()
+        webglAddon = null
+      }
+      webglAddon = new WebglAddon()
+      terminal.loadAddon(webglAddon)
     } catch {
+      webglAddon = null
       // WebGL 不可用则保持 canvas 渲染
     }
     fitAddon?.fit()

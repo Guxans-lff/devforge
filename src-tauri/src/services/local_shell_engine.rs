@@ -73,13 +73,18 @@ impl LocalShellEngine {
             cmd.cwd(home);
         }
 
-        let child = pty_pair
+        let mut child = pty_pair
             .slave
             .spawn_command(cmd)
             .map_err(|e| AppError::Other(format!("启动 Shell 进程失败: {}", e)))?;
 
         // 获取 ChildKiller（Send + Sync），用于关闭时终止子进程
         let killer = child.clone_killer();
+
+        // 后台线程 wait child，避免僵尸进程
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
 
         // 获取 master 端读写器
         let writer = pty_pair

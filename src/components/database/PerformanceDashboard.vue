@@ -50,6 +50,11 @@ const timeLabels = ref<string[]>([])
 const processes = ref<ProcessInfo[]>([])
 const variables = ref<ServerVariable[]>([])
 const variableSearch = ref('')
+const filteredVariables = computed(() => {
+  const keyword = variableSearch.value.toLowerCase()
+  if (!keyword) return variables.value
+  return variables.value.filter(item => item.name.toLowerCase().includes(keyword))
+})
 const message = useMessage()
 
 // 确认对话框状态
@@ -653,7 +658,7 @@ watch(activeSubTab, () => {
               </tr>
             </thead>
             <tbody class="divide-y divide-border/5">
-              <tr v-for="v in variables.filter(item => !variableSearch || item.name.toLowerCase().includes(variableSearch.toLowerCase()))" :key="v.name" class="group hover:bg-primary/[0.03] transition-colors h-12">
+              <tr v-for="v in filteredVariables" :key="v.name" class="group hover:bg-primary/[0.03] transition-colors h-12">
                 <td class="px-6 text-xs font-mono font-bold text-foreground/80">{{ v.name }}</td>
                 <td class="px-6 text-xs font-mono text-primary/80 group-hover:text-primary transition-colors">{{ v.value }}</td>
               </tr>

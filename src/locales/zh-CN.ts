@@ -457,8 +457,8 @@ export default {
     conflictsFound: '发现 {count} 个冲突',
     noConflicts: '无冲突',
     // 诊断
-    diagnostics: '诊断',
-    diagnosticsDesc: '查看崩溃日志和应用运行信息。',
+    diagnostics: '开发者',
+    diagnosticsDesc: '开发者模式、崩溃日志和应用运行信息。',
     appVersion: '应用版本',
     crashLogs: '崩溃日志',
     crashLogsEmpty: '暂无崩溃日志',

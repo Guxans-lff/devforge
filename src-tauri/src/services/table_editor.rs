@@ -664,7 +664,8 @@ async fn mysql_table_detail(
         // "bigint unsigned" -> ("BIGINT UNSIGNED", None)
         // "int(11) unsigned" -> ("INT UNSIGNED", Some("11"))
         let (data_type, length) = {
-            let re = Regex::new(r"^(\w+)(?:\((.+?)\))?(.*)$").unwrap();
+            static RE: OnceLock<Regex> = OnceLock::new();
+            let re = RE.get_or_init(|| Regex::new(r"^(\w+)(?:\((.+?)\))?(.*)$").expect("正则表达式编译失败"));
             if let Some(caps) = re.captures(&column_type) {
                 let base = caps[1].to_uppercase();
                 let len = caps.get(2).map(|m| m.as_str().to_string());

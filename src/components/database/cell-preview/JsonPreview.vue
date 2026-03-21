@@ -82,14 +82,14 @@ function collapseAll() {
 function copyPath(path: string) {
   navigator.clipboard.writeText(path).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch(() => {})
+  }).catch((e: unknown) => console.warn('[JsonPreview]', e))
 }
 
 /** 复制整个格式化 JSON */
 function copyFormatted() {
   navigator.clipboard.writeText(formattedJson.value).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch(() => {})
+  }).catch((e: unknown) => console.warn('[JsonPreview]', e))
 }
 
 /** 递归渲染节点所需的类型 */

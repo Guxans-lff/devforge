@@ -129,7 +129,7 @@ impl TransferManager {
     /// 启动队列调度器（在初始化时调用一次）
     pub fn start_scheduler(&mut self, app_handle: AppHandle) {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        self.scheduler_tx = Some(tx);
+        self.scheduler_tx = Some(tx.clone());
 
         let active_tasks = self.active_tasks.clone();
         let pending_queue = self.pending_queue.clone();
@@ -142,6 +142,7 @@ impl TransferManager {
                     pending_queue.clone(),
                     &config,
                     &app_handle,
+                    tx.clone(),
                 ).await;
             }
         });
@@ -158,6 +159,7 @@ impl TransferManager {
         pending_queue: Arc<Mutex<VecDeque<PendingTransfer>>>,
         config: &TransferConfig,
         app_handle: &AppHandle,
+        scheduler_tx: mpsc::UnboundedSender<()>,
     ) {
         loop {
             // 检查是否可以启动更多任务（短暂持锁，立即释放）
@@ -185,7 +187,7 @@ impl TransferManager {
                         active_tasks.clone(),
                         config.clone(),
                         app_handle.clone(),
-                        None,
+                        Some(scheduler_tx.clone()),
                     ).await;
                 }
                 TransferType::Download { remote_path, local_path } => {
@@ -198,7 +200,7 @@ impl TransferManager {
                         active_tasks.clone(),
                         config.clone(),
                         app_handle.clone(),
-                        None,
+                        Some(scheduler_tx.clone()),
                     ).await;
                 }
             }
@@ -532,6 +534,7 @@ impl TransferManager {
         let task_id = id.to_string();
         let active_tasks = self.active_tasks.clone();
         let chunk_size = self.config.chunk_size;
+        let scheduler_tx = self.scheduler_tx.clone();
 
         // 在后台任务中执行恢复
         let bg_task = new_task.clone();
@@ -594,13 +597,19 @@ impl TransferManager {
 
             // 非暂停任务：延迟后移除
             tokio::time::sleep(Duration::from_secs(3)).await;
-            
+
             let mut tasks = lock_or_recover(&active_tasks);
             if let Some(current_task) = tasks.get(&task_id) {
                 // 关键修复：只有当活动列表中的任务依然是当前这个 Arc 实例时，才执行移除
                 if Arc::ptr_eq(current_task, &bg_task) {
                     tasks.remove(&task_id);
                 }
+            }
+            drop(tasks);
+
+            // 通知调度器检查队列，触发等待中的任务
+            if let Some(tx) = scheduler_tx {
+                let _ = tx.send(());
             }
         });
 

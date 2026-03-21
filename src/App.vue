@@ -21,6 +21,62 @@ function applyUiFontSize(size: number) {
   document.documentElement.style.fontSize = `${size}px`
 }
 
+async function showMainWindow() {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    console.info('[Startup] 准备显示主窗口')
+    setTimeout(() => {
+      void invoke('show_main_window').catch((e) => {
+        console.error('[Startup] 显示主窗口失败:', e)
+      })
+    }, 100)
+  } catch (e) {
+    console.error('[Startup] 显示主窗口失败:', e)
+  }
+}
+
+async function restoreStartupState() {
+  const settingsStore = useSettingsStore()
+  const workspaceStore = useWorkspaceStore()
+  const connectionStore = useConnectionStore()
+
+  try {
+    console.info('[Startup] 开始恢复设置')
+    await settingsStore.restoreState()
+    settingsStore.enableAutoSave()
+    applyUiFontSize(settingsStore.settings.uiFontSize)
+    initScheduler()
+    console.info('[Startup] 设置恢复完成')
+  } catch (e) {
+    console.error('[Startup] 恢复设置失败:', e)
+  }
+
+  try {
+    console.info('[Startup] 开始初始化数据路径')
+    await settingsStore.initializeDataPath()
+    console.info('[Startup] 数据路径初始化完成')
+  } catch (e) {
+    console.error('[Startup] 初始化数据路径失败:', e)
+  }
+
+  try {
+    console.info('[Startup] 开始加载连接列表')
+    await connectionStore.loadConnections()
+    console.info('[Startup] 连接列表加载完成')
+  } catch (e) {
+    console.error('[Startup] 加载连接列表失败:', e)
+  }
+
+  try {
+    console.info('[Startup] 开始恢复工作区')
+    await workspaceStore.restoreState()
+    workspaceStore.enableAutoSave()
+    console.info('[Startup] 工作区恢复完成')
+  } catch (e) {
+    console.error('[Startup] 恢复工作区失败:', e)
+  }
+}
+
 // 立即应用当前值
 applyUiFontSize(settingsStore.settings.uiFontSize)
 
@@ -36,42 +92,10 @@ if (import.meta.env.DEV) {
 }
 
 // 应用启动时恢复工作区状态
-onMounted(async () => {
-  const settingsStore = useSettingsStore()
-  const workspaceStore = useWorkspaceStore()
-  const connectionStore = useConnectionStore()
-
-  // 1. 从 SQLite 恢复设置（首次自动迁移 localStorage）
-  await settingsStore.restoreState()
-  settingsStore.enableAutoSave()
-  // 恢复后立即应用字体大小
-  applyUiFontSize(settingsStore.settings.uiFontSize)
-
-  // 1.5 设置加载完成后启动主题调度器
-  initScheduler()
-
-  // 2. 初始化智能数据路径（如果是随行搬迁模式）
-  await settingsStore.initializeDataPath()
-
-  // 3. 加载连接列表
-  await connectionStore.loadConnections()
-
-  // 4. 恢复工作区状态（SQLite，首次自动迁移 localStorage）
-  await workspaceStore.restoreState()
-  workspaceStore.enableAutoSave()
-
-  // 5. 全部就绪后显示窗口，彻底解决白屏闪烁
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    // 给 Vue 渲染渲染最后一帧留一点缓冲时间
-    setTimeout(() => {
-      invoke('show_main_window')
-    }, 100)
-  } catch (e) {
-    console.error('Failed to show window:', e)
-  }
-
-  // 6. 初始化自动更新检查
+onMounted(() => {
+  console.info('[Startup] App mounted')
+  void showMainWindow()
+  void restoreStartupState()
   initUpdater()
 })
 

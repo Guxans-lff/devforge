@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connections'
 import { useTheme } from '@/composables/useTheme'
-import { useLocale } from '@/composables/useLocale'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,7 +32,6 @@ import {
   Sun,
   Moon,
   Monitor,
-  Languages,
   Pencil,
   Trash2,
   Plug,
@@ -52,7 +50,6 @@ const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const connectionStore = useConnectionStore()
 const { themeMode, toggleTheme } = useTheme()
-const { currentLocale, toggleLocale } = useLocale()
 
 const isCollapsed = computed(() => workspace.panelState.sidebarCollapsed)
 const showConnectionDialog = ref(false)
@@ -105,6 +102,11 @@ onMounted(() => {
   window.addEventListener('devforge:new-connection', handleNewConnection)
   // 点击其他区域关闭颜色选择器
   document.addEventListener('click', closeColorPicker)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('devforge:new-connection', handleNewConnection)
+  document.removeEventListener('click', closeColorPicker)
 })
 
 const themeIcon = computed(() => {
@@ -718,14 +720,6 @@ const groupedNonFavorites = computed(() => {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as-child>
-              <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10" @click="toggleLocale()">
-                <Languages class="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent :side="isCollapsed ? 'right' : 'top'" class="text-[11px] font-medium"><p>{{ currentLocale === 'zh-CN' ? 'English' : '中文' }}</p></TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
               <Button
                 variant="ghost"
                 size="icon"
@@ -744,9 +738,9 @@ const groupedNonFavorites = computed(() => {
                 size="icon"
                 class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10"
                 @click="() => {
-                  const existing = workspace.tabs.find(t => t.type === 'terminal' && t.meta?.isLocal)
-                  if (existing) { workspace.activeTabId = existing.id; return }
-                  workspace.addTab({ id: `local-terminal-${Date.now()}`, type: 'terminal', title: '本地终端', closable: true, meta: { isLocal: 'true' } })
+                  const localCount = workspace.tabs.filter(t => t.type === 'terminal' && t.meta?.isLocal).length
+                  const title = `本地终端${localCount > 0 ? ` ${localCount + 1}` : ''}`
+                  workspace.addTab({ id: `local-terminal-${Date.now()}`, type: 'terminal', title, closable: true, meta: { isLocal: 'true' } })
                 }"
               >
                 <Terminal class="h-4 w-4" />

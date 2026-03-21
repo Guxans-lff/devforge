@@ -1,16 +1,20 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useSettingsStore } from '@/stores/settings'
 import { useToast } from '@/composables/useToast'
 import { getAppVersion } from '@/api/connection'
 import { listCrashLogs, readCrashLog, clearCrashLogs } from '@/api/diagnostics'
 import type { CrashLogEntry } from '@/api/diagnostics'
 import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { Activity, FileText, Trash2, ChevronDown, ChevronRight, Loader2 } from 'lucide-vue-next'
+import { Activity, Bug, FileText, Trash2, ChevronDown, ChevronRight, Loader2 } from 'lucide-vue-next'
 
 const { t } = useI18n()
+const settingsStore = useSettingsStore()
 const toast = useToast()
 
 // 应用版本
@@ -81,6 +85,11 @@ async function handleClearLogs() {
   }
 }
 
+/** 切换开发者模式 */
+function handleDevModeToggle(value: boolean) {
+  settingsStore.update({ devMode: value })
+}
+
 onMounted(async () => {
   // 并行加载版本号和崩溃日志
   const [version] = await Promise.allSettled([
@@ -95,6 +104,23 @@ onMounted(async () => {
 
 <template>
   <div class="grid gap-4">
+    <!-- 开发者模式开关 -->
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+      <div class="flex items-start gap-4">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/5 text-orange-500/60 transition-colors group-hover:bg-orange-500/10 group-hover:text-orange-500">
+          <Bug class="h-5 w-5" />
+        </div>
+        <div class="space-y-0.5">
+          <Label class="text-[15px] font-bold tracking-tight">{{ t('settings.devMode') }}</Label>
+          <p class="text-xs text-muted-foreground/60 font-medium">{{ t('settings.devModeDesc') }}</p>
+        </div>
+      </div>
+      <Switch
+        :checked="settingsStore.settings.devMode"
+        @update:checked="handleDevModeToggle"
+      />
+    </div>
+
     <!-- 应用版本 -->
     <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
@@ -180,9 +206,12 @@ onMounted(async () => {
                   <Loader2 class="h-3 w-3 animate-spin" />
                   {{ t('settings.loadingLogs') }}
                 </div>
-                <ScrollArea v-else class="max-h-[240px]">
-                  <pre class="whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-muted-foreground/70">{{ logContents[log.filename] }}</pre>
-                </ScrollArea>
+                <div
+                  v-else
+                  class="max-h-[240px] overflow-auto rounded-md bg-muted/20 p-3 custom-scrollbar"
+                >
+                  <pre class="whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-muted-foreground/70 select-text">{{ logContents[log.filename] }}</pre>
+                </div>
               </div>
             </div>
           </div>

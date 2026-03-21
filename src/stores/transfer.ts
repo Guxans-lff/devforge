@@ -35,6 +35,7 @@ export const useTransferStore = defineStore('transfer', () => {
   let listenersSetup = false
   let progressThrottleTimer: ReturnType<typeof setTimeout> | null = null
   let pendingProgressUpdates = false
+  const unlistenFns: Array<() => void> = []
 
   function flushProgressUpdates() {
     if (pendingProgressUpdates) {
@@ -49,7 +50,7 @@ export const useTransferStore = defineStore('transfer', () => {
     listenersSetup = true
 
     // 后端批量入队时自动注册任务（文件夹递归上传场景）
-    await listen<{
+    unlistenFns.push(await listen<{
       id: string
       type: 'upload' | 'download'
       fileName: string
@@ -78,10 +79,10 @@ export const useTransferStore = defineStore('transfer', () => {
           tasks.value = new Map(tasks.value)
         }
       },
-    )
+    ))
 
     // 传输进度
-    await listen<{ id: string; transferred: number; total: number; speed: number }>(
+    unlistenFns.push(await listen<{ id: string; transferred: number; total: number; speed: number }>(
       'transfer://progress',
       (event) => {
         const { id, transferred, total, speed } = event.payload
@@ -103,10 +104,10 @@ export const useTransferStore = defineStore('transfer', () => {
           }
         }
       },
-    )
+    ))
 
     // 传输完成
-    await listen<{ id: string }>(
+    unlistenFns.push(await listen<{ id: string }>(
       'transfer://complete',
       (event) => {
         const task = tasks.value.get(event.payload.id)
@@ -148,10 +149,10 @@ export const useTransferStore = defineStore('transfer', () => {
           }, 3000)
         }
       },
-    )
+    ))
 
     // 传输错误
-    await listen<{ id: string; error: string }>(
+    unlistenFns.push(await listen<{ id: string; error: string }>(
       'transfer://error',
       (event) => {
         const task = tasks.value.get(event.payload.id)
@@ -172,10 +173,10 @@ export const useTransferStore = defineStore('transfer', () => {
           tasks.value = new Map(tasks.value)
         }
       },
-    )
+    ))
 
     // 打包传输阶段进度
-    await listen<{
+    unlistenFns.push(await listen<{
       id: string
       phase: string
       totalBytes?: number
@@ -234,7 +235,7 @@ export const useTransferStore = defineStore('transfer', () => {
 
         tasks.value = new Map(tasks.value)
       },
-    )
+    ))
   }
 
   function addTask(task: Omit<TransferTask, 'transferredBytes' | 'speed' | 'status'>) {

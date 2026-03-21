@@ -79,7 +79,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
 
   // ===== 状态 =====
   const pendingExecuteSql = ref<string | null>(null)
-  const errorStrategy = ref<ErrorStrategy>('stopOnError')
+  const errorStrategy = ref<ErrorStrategy>('continueOnError')
 
   const queryTimeout = computed({
     get: () => tabContext.value?.queryTimeout ?? 30,
@@ -208,7 +208,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         },
         isExecuting: false,
       })
-      dbApi.dbSwitchDatabase(connectionId.value, tabId.value, dbName).catch(() => {})
+      dbApi.dbSwitchDatabase(connectionId.value, tabId.value, dbName).catch((e: unknown) => console.warn('[useQueryExecution]', e))
       notification.success(t('database.databaseSwitched', { name: dbName }) || `已切换到数据库 ${dbName}`)
       return dbName
     }
@@ -443,7 +443,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       affectedRows: result.affectedRows,
       rowCount: result.totalCount ?? (result.isError ? null : result.rows.length),
       executedAt: Date.now(),
-    }).catch(() => {})
+    }).catch((e: unknown) => console.warn('[useQueryExecution]', e))
   }
 
   // ===== 取消查询 =====

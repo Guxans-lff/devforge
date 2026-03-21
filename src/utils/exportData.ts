@@ -58,9 +58,9 @@ function escapeSQLValue(value: unknown): string {
 }
 
 /** 将查询结果转换为专业的 SQL 脚本格式 */
-export function toSQL(result: QueryResult, tableName: string = 'exported_table'): string {
+export function toSQL(result: QueryResult, tableName: string = 'exported_table', ddl?: string): string {
   if (result.rows.length === 0) return '-- No data to export'
-  
+
   const header = [
     '--',
     ` -- DevForge 数据导出脚本`,
@@ -73,6 +73,11 @@ export function toSQL(result: QueryResult, tableName: string = 'exported_table')
     '',
   ].join('\n')
 
+  // 如果有表结构 DDL，插入到 INSERT 语句前
+  const ddlSection = ddl
+    ? `-- ----------------------------\n-- 表结构 ${tableName}\n-- ----------------------------\nDROP TABLE IF EXISTS \`${tableName}\`;\n${ddl.trim().replace(/;$/, '')};\n\n-- ----------------------------\n-- 数据 ${tableName}\n-- ----------------------------\n`
+    : ''
+
   const colNames = result.columns.map((c) => `\`${c.name}\``).join(', ')
   const inserts = result.rows.map((row) => {
     const values = row.map((v) => escapeSQLValue(v)).join(', ')
@@ -81,7 +86,7 @@ export function toSQL(result: QueryResult, tableName: string = 'exported_table')
   
   const footer = '\n\nSET FOREIGN_KEY_CHECKS = 1;'
   
-  return header + inserts.join('\n') + footer
+  return header + ddlSection + inserts.join('\n') + footer
 }
 
 /** 将查询结果转换为 Markdown 表格格式，包含统计摘要 */
@@ -154,11 +159,11 @@ export function getFilters(format: ExportFormat): { name: string; extensions: st
 }
 
 /** 将查询结果格式化为指定格式的字符串（客户端导出） */
-export function formatData(result: QueryResult, format: ExportFormat, name: string = 'exported_data'): string {
+export function formatData(result: QueryResult, format: ExportFormat, name: string = 'exported_data', ddl?: string): string {
   switch (format) {
     case 'csv': return toCSV(result)
     case 'json': return toJSON(result, name)
-    case 'sql': return toSQL(result, name)
+    case 'sql': return toSQL(result, name, ddl)
     case 'markdown': return toMarkdown(result, name)
   }
 }

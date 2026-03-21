@@ -1,0 +1,11 @@
+{
+  "version": "0.5.0",
+  "notes": "v0.5.0 安全加固 + 自动更新 + 多模块功能新增",
+  "pub_date": "2026-03-20T12:00:00Z",
+  "platforms": {
+    "windows-x86_64": {
+      "url": "http://8.135.60.82:9527/devforge/devforge_0.5.0_x64-setup.exe",
+      "sha256": ""
+    }
+  }
+}

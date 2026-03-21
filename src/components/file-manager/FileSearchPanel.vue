@@ -117,7 +117,7 @@ function formatSize(bytes: number): string {
 onUnmounted(() => {
   cleanupListener()
   if (searching.value) {
-    sftpCancelSearch(props.connectionId).catch(() => {})
+    sftpCancelSearch(props.connectionId).catch((e: unknown) => console.warn('[FileSearch]', e))
   }
 })
 </script>

@@ -11,7 +11,6 @@ import EditorSettings from '@/components/settings/EditorSettings.vue'
 import TerminalSettings from '@/components/settings/TerminalSettings.vue'
 import ShortcutSettings from '@/components/settings/ShortcutSettings.vue'
 import ImportExportSettings from '@/components/settings/ImportExportSettings.vue'
-import DeveloperSettings from '@/components/settings/DeveloperSettings.vue'
 import DiagnosticsSection from '@/components/settings/DiagnosticsSection.vue'
 import UpdateSection from '@/components/settings/UpdateSection.vue'
 import { RotateCcw, Settings } from 'lucide-vue-next'
@@ -78,9 +77,6 @@ function confirmReset() {
               <TabsTrigger value="import-export" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
                 {{ t('settings.importExport') }}
               </TabsTrigger>
-              <TabsTrigger value="developer" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
-                {{ t('settings.developer') }}
-              </TabsTrigger>
               <TabsTrigger value="diagnostics" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
                 {{ t('settings.diagnostics') }}
               </TabsTrigger>
@@ -110,10 +106,6 @@ function confirmReset() {
 
             <TabsContent value="import-export">
               <ImportExportSettings />
-            </TabsContent>
-
-            <TabsContent value="developer">
-              <DeveloperSettings />
             </TabsContent>
 
             <TabsContent value="diagnostics">

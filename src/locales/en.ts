@@ -431,8 +431,8 @@ export default {
     conflictsFound: '{count} conflicts found',
     noConflicts: 'No conflicts',
     // Diagnostics
-    diagnostics: 'Diagnostics',
-    diagnosticsDesc: 'View crash logs and app runtime information.',
+    diagnostics: 'Developer',
+    diagnosticsDesc: 'Developer mode, crash logs and app runtime information.',
     appVersion: 'App Version',
     crashLogs: 'Crash Logs',
     crashLogsEmpty: 'No crash logs',

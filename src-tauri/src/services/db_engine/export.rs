@@ -18,13 +18,13 @@ impl DbEngine {
         let (query_sql, table_name) = match &request.source {
             ExportSource::Query { sql, database } => {
                 if let DriverPool::MySql(p) = pool.as_ref() {
-                    let use_sql = format!("USE `{}`", database);
+                    let use_sql = format!("USE `{}`", database.replace('`', "``"));
                     sqlx::query(&use_sql).execute(p).await.map_err(AppError::Database)?;
                 }
                 (sql.clone(), String::from("query_result"))
             }
             ExportSource::Table { database, table } => {
-                (format!("SELECT * FROM `{}`.`{}`", database, table), table.clone())
+                (format!("SELECT * FROM `{}`.`{}`", database.replace('`', "``"), table.replace('`', "``")), table.clone())
             }
         };
 

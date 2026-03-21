@@ -94,7 +94,7 @@ function copyValue(val: unknown) {
   const text = formatValue(val)
   navigator.clipboard.writeText(text).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch(() => {})
+  }).catch((e: unknown) => console.warn('[RowDetail]', e))
 }
 
 /** 构建引号标识符 */
@@ -111,7 +111,7 @@ function copyAsJson() {
   })
   navigator.clipboard.writeText(JSON.stringify(obj, null, 2)).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch(() => {})
+  }).catch((e: unknown) => console.warn('[RowDetail]', e))
 }
 
 /** 复制为 SQL INSERT */
@@ -127,7 +127,7 @@ function copyAsSqlInsert() {
   const sql = `INSERT INTO (${cols}) VALUES (${vals});`
   navigator.clipboard.writeText(sql).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch(() => {})
+  }).catch((e: unknown) => console.warn('[RowDetail]', e))
 }
 
 /** 导航：上一行 */

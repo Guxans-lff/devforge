@@ -100,6 +100,11 @@ impl DbEngine {
     pub async fn disconnect(self: Arc<Self>, connection_id: String) {
         self.mysql_pools.write().await.remove(&connection_id);
         self.pg_pools.write().await.remove(&connection_id);
+        // 清理该连接关联的所有 sessions、事务、监控状态和活跃查询
+        self.sessions.write().await.remove(&connection_id);
+        self.transactions.write().await.retain(|k, _| !k.starts_with(&format!("{}:", &connection_id)) && k != &connection_id);
+        self.monitoring_states.write().await.remove(&connection_id);
+        self.running_queries.write().await.retain(|_, v| v.connection_id != connection_id);
     }
 
     pub async fn is_connected(self: Arc<Self>, connection_id: String) -> bool {
@@ -145,7 +150,7 @@ impl DbEngine {
                 let mut conn = conn_mutex.lock().await;
                 use sqlx::Executor as _;
                 // 使用 raw_sql 走文本协议执行 USE，避免 prepared statement 协议下的 error 1295
-                let use_sql = format!("USE `{}`", database);
+                let use_sql = format!("USE `{}`", database.replace('`', "``"));
                 (&mut **conn).execute(sqlx::raw_sql(&use_sql)).await.map_err(AppError::Database)?;
             }
             DbSession::Postgres(conn_mutex) => {
