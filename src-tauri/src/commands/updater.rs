@@ -238,13 +238,24 @@ pub async fn launch_installer(app: AppHandle, path: String) -> Result<(), AppErr
 
     log::info!("启动安装器: {:?}", path);
 
-    // Windows：直接启动安装包，不经过 cmd shell
+    // Windows：启动安装包
+    // NSIS 安装包支持 /S（静默安装）和 /D=<dir>（指定安装目录）
+    // MSI 使用 msiexec /i 并带 /qn 实现静默安装
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
-        Command::new(&path)
-            .spawn()
-            .map_err(|e| AppError::Other(format!("启动安装器失败: {}", e)))?;
+        if ext == "msi" {
+            Command::new("msiexec")
+                .args(["/i", &path.to_string_lossy(), "/qn"])
+                .spawn()
+                .map_err(|e| AppError::Other(format!("启动安装器失败: {}", e)))?;
+        } else {
+            // NSIS .exe 安装包：/S 静默安装
+            Command::new(&path)
+                .arg("/S")
+                .spawn()
+                .map_err(|e| AppError::Other(format!("启动安装器失败: {}", e)))?;
+        }
     }
 
     #[cfg(not(target_os = "windows"))]

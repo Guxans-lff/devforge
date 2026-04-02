@@ -13,6 +13,7 @@
 
 import { ref, readonly } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { parseBackendError } from '@/types/error'
 import { getVersion } from '@tauri-apps/api/app'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
@@ -170,7 +171,7 @@ async function checkForUpdate(options?: { silent?: boolean }): Promise<boolean> 
     checking.value = false
     return true
   } catch (e) {
-    const msg = String(e)
+    const msg = e instanceof Error ? e.message : parseBackendError(e).message
     if (msg.includes('fetch') || msg.includes('network') || msg.includes('abort')) {
       // 网络问题静默处理
       if (options?.silent) {
@@ -240,7 +241,7 @@ async function downloadAndInstall(): Promise<void> {
       }
     }
   } catch (e) {
-    error.value = String(e)
+    error.value = e instanceof Error ? e.message : parseBackendError(e).message
     downloading.value = false
 
     // 清理进度监听
