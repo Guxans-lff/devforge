@@ -1,10 +1,19 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Switch } from '@/components/ui/switch'
+import { Separator } from '@/components/ui/separator'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Dialog,
   DialogContent,
@@ -15,6 +24,8 @@ import {
 } from '@/components/ui/dialog'
 import ConfirmDialog from '@/components/ui/confirm-dialog/ConfirmDialog.vue'
 import CronInput from '@/components/database/CronInput.vue'
+import DataSyncConfigForm from '@/components/database/scheduler/DataSyncConfigForm.vue'
+import BackupConfigForm from '@/components/database/scheduler/BackupConfigForm.vue'
 import {
   CalendarClock,
   Plus,
@@ -29,18 +40,24 @@ import {
   Clock,
   AlertCircle,
   History,
+  ArrowLeftRight,
+  HardDrive,
 } from 'lucide-vue-next'
 import { useScheduler } from '@/composables/useScheduler'
 import { useNotification } from '@/composables/useNotification'
-import type { ScheduledTask } from '@/types/scheduler'
+import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
+import type { ScheduledTask, TaskType, BackupConfig } from '@/types/scheduler'
+import type { SyncConfig } from '@/types/data-sync'
+import type { SchedulerTabContext } from '@/types/database-workspace'
 
-defineProps<{
+const props = defineProps<{
   connectionId: string
   isConnected: boolean
 }>()
 
 const { t } = useI18n()
 const notification = useNotification()
+const dbWorkspaceStore = useDatabaseWorkspaceStore()
 const {
   tasks,
   loading,
@@ -56,16 +73,26 @@ const {
   loadingExecutions,
 } = useScheduler()
 
+// ===== 任务类型配置 =====
+const taskTypeOptions: { value: TaskType; labelKey: string; icon: typeof ArrowLeftRight }[] = [
+  { value: 'data_sync', labelKey: 'scheduler.typeDataSync', icon: ArrowLeftRight },
+  { value: 'db_backup', labelKey: 'scheduler.typeDbBackup', icon: HardDrive },
+]
+
 // ===== 任务编辑对话框 =====
 const editDialogOpen = ref(false)
 const editingTask = ref<ScheduledTask | null>(null)
 const editForm = ref({
   name: '',
-  taskType: 'data_sync',
+  taskType: 'data_sync' as TaskType,
   cronExpr: '0 2 * * *',
   configJson: '',
   enabled: true,
 })
+
+// 结构化配置对象
+const syncConfig = ref<Partial<SyncConfig>>({})
+const backupConfig = ref<Partial<BackupConfig>>({})
 
 /** 展开的任务（查看执行历史） */
 const expandedTaskIds = ref<Set<string>>(new Set())
@@ -78,8 +105,23 @@ const deletingTaskName = ref('')
 /** 正在执行的任务 ID 集合 */
 const runningTasks = ref<Set<string>>(new Set())
 
+/** 高级配置展开 */
+const advancedOpen = ref(false)
+
 /** 是否为编辑模式 */
 const isEditing = computed(() => editingTask.value !== null)
+
+/** 表单是否可保存 */
+const canSave = computed(() => {
+  if (!editForm.value.name || !editForm.value.cronExpr) return false
+  if (!editForm.value.configJson) return false
+  try {
+    JSON.parse(editForm.value.configJson)
+    return true
+  } catch {
+    return false
+  }
+})
 
 /** 格式化时间戳为本地时间字符串 */
 function formatTime(ms: number | null): string {
@@ -123,6 +165,9 @@ function handleCreate() {
     configJson: '',
     enabled: true,
   }
+  syncConfig.value = {}
+  backupConfig.value = {}
+  advancedOpen.value = false
   editDialogOpen.value = true
 }
 
@@ -131,12 +176,46 @@ function handleEdit(task: ScheduledTask) {
   editingTask.value = task
   editForm.value = {
     name: task.name,
-    taskType: task.taskType,
+    taskType: task.taskType as TaskType,
     cronExpr: task.cronExpr,
     configJson: task.configJson,
     enabled: task.enabled,
   }
+  // 解析 configJson 到结构化对象
+  try {
+    const parsed = JSON.parse(task.configJson || '{}')
+    if (task.taskType === 'data_sync') {
+      syncConfig.value = parsed
+      backupConfig.value = {}
+    } else if (task.taskType === 'db_backup') {
+      backupConfig.value = parsed
+      syncConfig.value = {}
+    }
+  } catch {
+    syncConfig.value = {}
+    backupConfig.value = {}
+  }
+  advancedOpen.value = false
   editDialogOpen.value = true
+}
+
+/** 任务类型切换时重置配置 */
+function handleTaskTypeChange(val: string | number | bigint | Record<string, unknown> | null) {
+  const type = String(val ?? 'data_sync') as TaskType
+  editForm.value = { ...editForm.value, taskType: type, configJson: '' }
+  syncConfig.value = {}
+  backupConfig.value = {}
+}
+
+/** 结构化配置更新 → 同步到 configJson */
+function handleSyncConfigUpdate(config: Partial<SyncConfig>) {
+  syncConfig.value = config
+  editForm.value = { ...editForm.value, configJson: JSON.stringify(config, null, 2) }
+}
+
+function handleBackupConfigUpdate(config: Partial<BackupConfig>) {
+  backupConfig.value = config
+  editForm.value = { ...editForm.value, configJson: JSON.stringify(config, null, 2) }
 }
 
 /** 保存任务 */
@@ -233,7 +312,7 @@ function getStatusDisplay(status: string) {
     case 'running':
       return { icon: Loader2, color: 'text-primary', animate: true }
     case 'success':
-      return { icon: CheckCircle2, color: 'text-emerald-500', animate: false }
+      return { icon: CheckCircle2, color: 'text-df-success', animate: false }
     case 'failed':
       return { icon: XCircle, color: 'text-destructive', animate: false }
     case 'cancelled':
@@ -243,10 +322,58 @@ function getStatusDisplay(status: string) {
   }
 }
 
-/** 用于编辑 configJson 的文本输入处理 */
-function handleConfigJsonInput(e: Event) {
-  editForm.value = { ...editForm.value, configJson: (e.target as HTMLTextAreaElement).value }
+/** 获取任务类型的显示标签 */
+function getTaskTypeLabel(taskType: string): string {
+  const opt = taskTypeOptions.find((o) => o.value === taskType)
+  return opt ? t(opt.labelKey) : taskType
 }
+
+// ===== 预填消费（从 DataSyncPanel 传递的配置） =====
+const activeTab = computed(() => {
+  const ws = dbWorkspaceStore.getWorkspace(props.connectionId)
+  if (!ws) return null
+  return ws.tabs.find((tab) => tab.id === ws.activeTabId)
+})
+
+watch(
+  () => (activeTab.value?.context as SchedulerTabContext | undefined)?.prefill,
+  (prefill) => {
+    if (!prefill) return
+    editingTask.value = null
+    const taskType = (prefill.taskType || 'data_sync') as TaskType
+    editForm.value = {
+      name: prefill.name ?? '',
+      taskType,
+      cronExpr: '0 2 * * *',
+      configJson: prefill.configJson || '',
+      enabled: true,
+    }
+    // 解析预填的 configJson
+    try {
+      const parsed = JSON.parse(prefill.configJson || '{}')
+      if (taskType === 'data_sync') {
+        syncConfig.value = parsed
+        backupConfig.value = {}
+      } else if (taskType === 'db_backup') {
+        backupConfig.value = parsed
+        syncConfig.value = {}
+      }
+    } catch {
+      syncConfig.value = {}
+      backupConfig.value = {}
+    }
+    advancedOpen.value = false
+    editDialogOpen.value = true
+    // 消费后清除 prefill
+    if (activeTab.value) {
+      dbWorkspaceStore.updateTabContext(props.connectionId, activeTab.value.id, {
+        prefill: undefined,
+      } as Partial<SchedulerTabContext>)
+    }
+  },
+  { immediate: true },
+)
+
 </script>
 
 <template>
@@ -326,8 +453,12 @@ function handleConfigJsonInput(e: Event) {
 
             <!-- 任务信息 -->
             <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2">
+      <!-- 任务列表中的任务类型标签 -->
+            <div class="flex items-center gap-2">
                 <span class="text-xs font-medium truncate">{{ task.name }}</span>
+                <Badge variant="outline" class="text-[10px] h-4 px-1 shrink-0">
+                  {{ getTaskTypeLabel(task.taskType) }}
+                </Badge>
                 <Badge variant="outline" class="text-[10px] h-4 px-1 font-mono shrink-0">
                   {{ task.cronExpr }}
                 </Badge>
@@ -443,61 +574,117 @@ function handleConfigJsonInput(e: Event) {
 
     <!-- 新建/编辑任务对话框 -->
     <Dialog v-model:open="editDialogOpen">
-      <DialogContent class="max-w-md">
-        <DialogHeader>
-          <DialogTitle class="text-sm">
+      <DialogContent class="flex flex-col gap-0 p-0 max-w-lg">
+        <DialogHeader class="px-5 pt-4 pb-3 shrink-0">
+          <DialogTitle class="flex items-center gap-2 text-sm">
+            <CalendarClock class="size-4" />
             {{ isEditing ? t('scheduler.editTask') : t('scheduler.createTask') }}
           </DialogTitle>
-          <DialogDescription class="text-xs text-muted-foreground">
+          <DialogDescription class="text-xs">
             {{ t('scheduler.taskFormDesc') }}
           </DialogDescription>
         </DialogHeader>
 
-        <div class="space-y-4 py-2">
+        <Separator class="shrink-0" />
+
+        <div class="px-5 py-4 space-y-4 max-h-[60vh] overflow-y-auto">
           <!-- 任务名称 -->
           <div class="space-y-1.5">
-            <label class="text-xs font-medium">{{ t('scheduler.taskName') }}</label>
-            <input
-              :value="editForm.name"
-              type="text"
-              class="w-full h-8 rounded-md border border-input bg-background px-3 text-xs placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            <span class="text-xs font-medium">{{ t('scheduler.taskName') }}</span>
+            <Input
+              :model-value="editForm.name"
+              class="h-7 text-xs"
               :placeholder="t('scheduler.taskNamePlaceholder')"
-              @input="editForm = { ...editForm, name: ($event.target as HTMLInputElement).value }"
+              @update:model-value="editForm = { ...editForm, name: $event as string }"
             />
+          </div>
+
+          <!-- 任务类型选择器（仅新建时可选，编辑时只读） -->
+          <div class="space-y-1.5">
+            <span class="text-xs font-medium">{{ t('scheduler.taskType') }}</span>
+            <Select
+              v-if="!isEditing"
+              :model-value="editForm.taskType"
+              @update:model-value="handleTaskTypeChange"
+            >
+              <SelectTrigger class="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="opt in taskTypeOptions" :key="opt.value" :value="opt.value">
+                  <div class="flex items-center gap-2">
+                    <component :is="opt.icon" class="h-3.5 w-3.5" />
+                    {{ t(opt.labelKey) }}
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <Badge v-else variant="outline" class="text-xs">
+              {{ getTaskTypeLabel(editForm.taskType) }}
+            </Badge>
           </div>
 
           <!-- Cron 表达式 -->
           <div class="space-y-1.5">
-            <label class="text-xs font-medium">{{ t('scheduler.cronExpr') }}</label>
+            <span class="text-xs font-medium">{{ t('scheduler.cronExpr') }}</span>
             <CronInput v-model="editForm.cronExpr" />
-          </div>
-
-          <!-- 任务配置 JSON -->
-          <div class="space-y-1.5">
-            <label class="text-xs font-medium">{{ t('scheduler.configJson') }}</label>
-            <textarea
-              :value="editForm.configJson"
-              class="w-full h-32 rounded-md border border-input bg-background px-3 py-2 text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
-              :placeholder="t('scheduler.configJsonPlaceholder')"
-              @input="handleConfigJsonInput"
-            />
           </div>
 
           <!-- 启用开关 -->
           <div class="flex items-center justify-between">
-            <label class="text-xs font-medium">{{ t('scheduler.enableTask') }}</label>
+            <span class="text-xs font-medium">{{ t('scheduler.enableTask') }}</span>
             <Switch
               :checked="editForm.enabled"
               @update:checked="(v: boolean) => editForm = { ...editForm, enabled: v }"
             />
           </div>
+
+          <Separator />
+
+          <!-- 动态任务配置表单 -->
+          <div class="space-y-1.5">
+            <span class="text-xs font-medium">{{ t('scheduler.taskConfig') }}</span>
+            <DataSyncConfigForm
+              v-if="editForm.taskType === 'data_sync'"
+              :model-value="syncConfig"
+              @update:model-value="handleSyncConfigUpdate"
+            />
+            <BackupConfigForm
+              v-else-if="editForm.taskType === 'db_backup'"
+              :model-value="backupConfig"
+              :connection-id="connectionId"
+              @update:model-value="handleBackupConfigUpdate"
+            />
+          </div>
+
+          <!-- 高级 JSON 编辑（可折叠） -->
+          <div class="border border-border/50 rounded-md">
+            <button
+              class="w-full flex items-center gap-1.5 px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              @click="advancedOpen = !advancedOpen"
+            >
+              <ChevronRight class="size-3 transition-transform" :class="advancedOpen ? 'rotate-90' : ''" />
+              {{ t('scheduler.rawJsonOverride') }}
+            </button>
+            <div v-if="advancedOpen" class="px-3 pb-3 space-y-1">
+              <p class="text-[10px] text-muted-foreground">{{ t('scheduler.rawJsonHint') }}</p>
+              <textarea
+                :value="editForm.configJson"
+                class="flex w-full h-24 rounded-md border border-input bg-background px-3 py-2 text-xs font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-none"
+                :placeholder="t('scheduler.configJsonPlaceholder')"
+                @input="editForm = { ...editForm, configJson: ($event.target as HTMLTextAreaElement).value }"
+              />
+            </div>
+          </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" size="sm" @click="editDialogOpen = false">
+        <Separator class="shrink-0" />
+
+        <DialogFooter class="px-5 py-3">
+          <Button variant="outline" size="sm" class="text-xs" @click="editDialogOpen = false">
             {{ t('common.cancel') }}
           </Button>
-          <Button size="sm" :disabled="!editForm.name || !editForm.cronExpr" @click="handleSave">
+          <Button size="sm" class="text-xs" :disabled="!canSave" @click="handleSave">
             {{ isEditing ? t('common.save') : t('scheduler.create') }}
           </Button>
         </DialogFooter>

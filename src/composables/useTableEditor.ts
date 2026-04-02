@@ -21,6 +21,7 @@ import {
   TRIGGER_TIMINGS, TRIGGER_EVENTS, FIELD_TEMPLATES, MAX_HISTORY,
   highlightSql,
 } from '@/types/table-editor-constants'
+import { parseBackendError } from '@/types/error'
 
 /** composable 输入参数 */
 export interface UseTableEditorOptions {
@@ -39,6 +40,23 @@ export function useTableEditor(options: UseTableEditorOptions) {
   const { t } = useI18n()
   const toast = useToast()
   const connectionStore = useConnectionStore()
+
+  // — 浅对比辅助函数（替代 JSON.stringify 对比，性能更好）—
+  function columnsEqual(a: ColumnDefinition, b: ColumnDefinition): boolean {
+    return a.name === b.name && a.dataType === b.dataType && a.length === b.length
+      && a.nullable === b.nullable && a.isPrimaryKey === b.isPrimaryKey
+      && a.autoIncrement === b.autoIncrement && a.defaultValue === b.defaultValue
+      && a.onUpdate === b.onUpdate && a.comment === b.comment
+  }
+  function indexesEqual(a: IndexDefinition, b: IndexDefinition): boolean {
+    return a.name === b.name && a.indexType === b.indexType
+      && a.columns.length === b.columns.length && a.columns.every((c, i) => c === b.columns[i])
+  }
+
+  /** 提取错误信息（兼容 Error 和 BackendError） */
+  function extractErrorMessage(e: unknown): string {
+    return e instanceof Error ? e.message : parseBackendError(e).message
+  }
 
   // — 连接信息 —
   const connectionHost = computed(() => {
@@ -182,7 +200,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
     for (const col of columns.value) {
       const orig = originalColumns.value.find(c => c.name === col.name)
       if (!orig) added++
-      else if (JSON.stringify(orig) !== JSON.stringify(col)) modified++
+      else if (!columnsEqual(orig, col)) modified++
     }
     for (const orig of originalColumns.value) {
       if (!columns.value.find(c => c.name === orig.name)) deleted++
@@ -194,7 +212,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
     const { added, modified, deleted } = changeStats.value
     return added > 0 || modified > 0 || deleted > 0
       || indexes.value.length !== originalIndexes.value.length
-      || JSON.stringify(indexes.value) !== JSON.stringify(originalIndexes.value)
+      || indexes.value.some((ix, i) => !indexesEqual(ix, originalIndexes.value[i]!))
       || tableName.value !== table.value
       || tableEngine.value !== originalTableEngine.value
       || tableCharset.value !== originalTableCharset.value
@@ -206,10 +224,10 @@ export function useTableEditor(options: UseTableEditorOptions) {
     const errors: { row: number; field: string; message: string }[] = []
     const names = new Set<string>()
     columns.value.forEach((col, idx) => {
-      if (!col.name.trim()) errors.push({ row: idx, field: 'name', message: '字段名不能为空' })
-      else if (names.has(col.name.toLowerCase())) errors.push({ row: idx, field: 'name', message: '字段名重复' })
+      if (!col.name.trim()) errors.push({ row: idx, field: 'name', message: t('tableEditor.validationNameRequired') })
+      else if (names.has(col.name.toLowerCase())) errors.push({ row: idx, field: 'name', message: t('tableEditor.validationNameDuplicate') })
       names.add(col.name.toLowerCase())
-      if (!col.dataType) errors.push({ row: idx, field: 'dataType', message: '类型不能为空' })
+      if (!col.dataType) errors.push({ row: idx, field: 'dataType', message: t('tableEditor.validationTypeRequired') })
     })
     return errors
   })
@@ -282,7 +300,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
     const col = columns.value[idx]
     if (!col) return
     if (isAlterMode.value && originalColumns.value.find(c => c.name === col.name)) {
-      if (!confirm(`确定删除字段「${col.name}」？此操作将在保存时执行 DROP COLUMN`)) return
+      if (!confirm(t('tableEditor.confirmDropColumn', { name: col.name }))) return
     }
     removeColumn(idx)
     selectedRowIdx.value = Math.min(idx, columns.value.length - 1)
@@ -301,7 +319,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
     if (selectedRows.value.size === 0) return
     const names = [...selectedRows.value].map(i => columns.value[i]?.name).filter(Boolean)
     if (isAlterMode.value && names.length > 0) {
-      if (!confirm(`确定批量删除 ${selectedRows.value.size} 个字段？`)) return
+      if (!confirm(t('tableEditor.confirmBatchDelete', { count: selectedRows.value.size }))) return
     }
     pushHistory()
     columns.value = columns.value.filter((_, i) => !selectedRows.value.has(i))
@@ -378,7 +396,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
   /** 插入预置字段模板，返回 true 表示成功（调用方负责滚动） */
   function insertTemplate(tpl: FieldTemplate): boolean {
     const col = { ...tpl.col } as ColumnDefinition
-    if (columns.value.find(c => c.name === col.name)) { toast.warning(`字段「${col.name}」已存在`); return false }
+    if (columns.value.find(c => c.name === col.name)) { toast.warning(t('tableEditor.fieldAlreadyExists', { name: col.name })); return false }
     pushHistory()
     columns.value = [...columns.value, col]
     if (col.isPrimaryKey) syncPrimaryKeyIndex()
@@ -446,10 +464,10 @@ export function useTableEditor(options: UseTableEditorOptions) {
 
   // — DDL & SQL —
   async function showDdlInfo() {
-    if (!table.value) { toast.info('当前为新建表模式，暂无 DDL 信息'); return }
+    if (!table.value) { toast.info(t('tableEditor.newTableNoDdl')); return }
     activeTab.value = 'ddl'; ddlLoading.value = true
     try { ddlContent.value = await getTableDdl(connectionId.value, database.value, table.value) }
-    catch (e) { toast.error(String(e)); activeTab.value = 'columns' }
+    catch (e) { toast.error(extractErrorMessage(e)); activeTab.value = 'columns' }
     finally { ddlLoading.value = false }
   }
   async function copyToClipboard(text: string, flag: 'ddl' | 'sql') {
@@ -457,7 +475,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
       await navigator.clipboard.writeText(text)
       if (flag === 'ddl') { ddlCopied.value = true; setTimeout(() => ddlCopied.value = false, 2000) }
       else { sqlCopied.value = true; setTimeout(() => sqlCopied.value = false, 2000) }
-    } catch { toast.error('复制失败') }
+    } catch { toast.error(t('tableEditor.copyFailed')) }
   }
   function buildTableDefinition(): TableDefinition {
     return {
@@ -472,7 +490,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
     for (const col of columns.value) {
       const orig = originalColumns.value.find(c => c.name === col.name)
       if (!orig) columnChanges.push({ changeType: 'add', column: col, oldName: null, afterColumn: null })
-      else if (JSON.stringify(orig) !== JSON.stringify(col))
+      else if (!columnsEqual(orig, col))
         columnChanges.push({ changeType: 'modify', column: col, oldName: col.name, afterColumn: null })
     }
     for (const orig of originalColumns.value) {
@@ -496,16 +514,17 @@ export function useTableEditor(options: UseTableEditorOptions) {
   }
   async function previewSql() {
     if (columns.value.length === 0) { toast.warning(t('tableEditor.noColumns')); return }
-    if (!tableName.value.trim()) { toast.warning('请输入表名'); return }
-    if (isAlterMode.value && !hasChanges.value) { toast.info('没有变更'); return }
+    if (!tableName.value.trim()) { toast.warning(t('tableEditor.enterTableName')); return }
+    // alter 模式无变更：直接跳转 DDL tab 查看当前表结构
+    if (isAlterMode.value && !hasChanges.value) { showDdlInfo(); return }
     loading.value = true
     try {
       const result = isAlterMode.value
         ? await generateAlterTableSql(buildTableAlteration(), driver.value)
         : await generateCreateTableSql(buildTableDefinition(), driver.value)
-      if (!result.sql?.trim()) { toast.info('没有需要执行的变更'); return }
+      if (!result.sql?.trim()) { toast.info(t('tableEditor.noExecutableChanges')); return }
       generatedSql.value = result.sql; showSqlPreview.value = true
-    } catch (e) { toast.error(String(e)) }
+    } catch (e) { toast.error(extractErrorMessage(e)) }
     finally { loading.value = false }
   }
   async function handleExecuteSql() {
@@ -515,7 +534,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
       await executeDdl(connectionId.value, generatedSql.value)
       toast.success(isAlterMode.value ? t('tableEditor.alterTable') : t('tableEditor.createTable'))
       onSuccess()
-    } catch (e) { toast.error(String(e)) }
+    } catch (e) { toast.error(extractErrorMessage(e)) }
     finally { executing.value = false }
   }
   function openTypeDropdown(idx: number) {
@@ -579,7 +598,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
       originalIndexes.value = detail.indexes.map(i => ({ ...i }))
       foreignKeys.value = (detail.foreignKeys ?? []).map(fk => ({ ...fk, columns: [...fk.columns], refColumns: [...fk.refColumns] }))
       originalForeignKeys.value = foreignKeys.value.map(fk => ({ ...fk, columns: [...fk.columns], refColumns: [...fk.refColumns] }))
-    } catch (e) { toast.error(String(e)) }
+    } catch (e) { toast.error(extractErrorMessage(e)) }
     finally { loading.value = false }
   }
   function initCreateMode() {

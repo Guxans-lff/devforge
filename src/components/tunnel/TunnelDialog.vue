@@ -220,7 +220,7 @@ onMounted(() => {
                 <Badge
                   :variant="tunnel.status === 'active' ? 'default' : 'secondary'"
                   class="shrink-0 text-[10px] px-1.5 py-0"
-                  :class="tunnel.status === 'active' ? 'bg-emerald-600/20 text-emerald-400 border-emerald-600/30' : 'bg-zinc-700 text-zinc-400'"
+                  :class="tunnel.status === 'active' ? 'bg-df-success/20 text-df-success border-df-success/30' : 'bg-zinc-700 text-zinc-400'"
                 >
                   {{ t(`tunnel.${tunnel.status}`) }}
                 </Badge>
@@ -238,7 +238,7 @@ onMounted(() => {
                   :title="t('tunnel.copyAddress')"
                   @click="copyLocalAddress(tunnel)"
                 >
-                  <Check v-if="copiedId === tunnel.tunnelId" class="h-3 w-3 text-emerald-400" />
+                  <Check v-if="copiedId === tunnel.tunnelId" class="h-3 w-3 text-df-success" />
                   <Copy v-else class="h-3 w-3" />
                 </Button>
                 <Button

@@ -61,7 +61,8 @@ async function handleDoubleClick() {
 </script>
 
 <template>
-  <div
+  <header
+    role="banner"
     class="title-bar flex h-9 items-center bg-background/80 backdrop-blur-md border-b border-border/20 select-none shrink-0"
     @mousedown="startDrag"
     @dblclick="handleDoubleClick"
@@ -75,7 +76,7 @@ async function handleDoubleClick() {
     <!-- 中间：搜索/命令面板入口 -->
     <div class="flex-none flex justify-center" @mousedown.stop>
       <button
-        class="flex h-6 w-[340px] max-w-[40vw] items-center justify-center gap-2 rounded-md border border-border/80 bg-muted/40 px-3 text-muted-foreground/80 transition-all hover:bg-muted/60 hover:text-muted-foreground hover:border-border active:scale-[0.98]"
+        class="flex h-6 w-[340px] max-w-[40vw] items-center justify-center gap-2 rounded-md border border-border/80 bg-muted/40 px-3 text-muted-foreground/80 transition-[background-color,color,border-color] hover:bg-muted/60 hover:text-muted-foreground hover:border-border active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
         @click="commandPalette.toggle()"
       >
         <Search class="h-3 w-3 shrink-0" />
@@ -87,14 +88,16 @@ async function handleDoubleClick() {
     <div class="flex-1 flex items-center justify-end" @mousedown.stop>
       <!-- 最小化 -->
       <button
-        class="flex h-9 w-12 items-center justify-center text-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground/80"
+        :aria-label="t('titleBar.minimize')"
+        class="flex h-9 w-12 items-center justify-center text-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground/80 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
         @click="minimize"
       >
         <Minus class="h-4 w-4" />
       </button>
       <!-- 最大化/还原 -->
       <button
-        class="flex h-9 w-12 items-center justify-center text-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground/80"
+        :aria-label="isMaximized ? t('titleBar.restore') : t('titleBar.maximize')"
+        class="flex h-9 w-12 items-center justify-center text-foreground/50 transition-colors hover:bg-muted/40 hover:text-foreground/80 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
         @click="toggleMaximize"
       >
         <Copy v-if="isMaximized" class="h-3 w-3" />
@@ -102,21 +105,22 @@ async function handleDoubleClick() {
       </button>
       <!-- 关闭 -->
       <button
-        class="flex h-9 w-12 items-center justify-center text-foreground/50 transition-colors hover:bg-red-500 hover:text-white"
+        :aria-label="t('titleBar.close')"
+        class="flex h-9 w-12 items-center justify-center text-foreground/50 transition-colors hover:bg-destructive hover:text-white focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
         @click="closeWindow"
       >
         <X class="h-4 w-4" />
       </button>
     </div>
-  </div>
+  </header>
 </template>
 
 <style scoped>
-.title-bar {
+header.title-bar {
   -webkit-app-region: drag;
 }
-.title-bar button,
-.title-bar [mousedown-stop] {
+header.title-bar button,
+header.title-bar [mousedown-stop] {
   -webkit-app-region: no-drag;
 }
 </style>

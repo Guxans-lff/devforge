@@ -200,7 +200,7 @@ function clearPreview() {
       <!-- 预览信息 -->
       <div v-if="importPreview" class="space-y-4 rounded-lg border border-border bg-muted/30 p-4">
         <div class="flex items-start gap-3">
-          <CheckCircle2 class="h-5 w-5 shrink-0 text-green-500" />
+          <CheckCircle2 class="h-5 w-5 shrink-0 text-df-success" />
           <div class="flex-1 space-y-2">
             <p class="text-sm font-medium">{{ t('importExport.previewTitle') }}</p>
             <div class="space-y-1 text-sm text-muted-foreground">

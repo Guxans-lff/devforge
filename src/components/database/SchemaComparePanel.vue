@@ -423,8 +423,8 @@ loadDatabases(props.connectionId, 'source')
             v-if="summary.added > 0"
             class="inline-flex items-center gap-1 rounded-md px-1.5 h-5 text-[10px] font-medium transition-colors"
             :class="activeFilter === 'added'
-              ? 'bg-emerald-600 text-white ring-1 ring-emerald-400'
-              : 'bg-emerald-600/20 text-emerald-600 hover:bg-emerald-600/30'"
+              ? 'bg-df-success text-white ring-1 ring-df-success/80'
+              : 'bg-df-success/20 text-df-success hover:bg-df-success/30'"
             @click="toggleFilter('added')"
           >
             <Plus class="h-2.5 w-2.5" />
@@ -445,8 +445,8 @@ loadDatabases(props.connectionId, 'source')
             v-if="summary.modified > 0"
             class="inline-flex items-center gap-1 rounded-md px-1.5 h-5 text-[10px] font-medium transition-colors"
             :class="activeFilter === 'modified'
-              ? 'bg-amber-500 text-white ring-1 ring-amber-400'
-              : 'bg-amber-500/20 text-amber-600 hover:bg-amber-500/30'"
+              ? 'bg-df-warning text-white ring-1 ring-df-warning/80'
+              : 'bg-df-warning/20 text-df-warning hover:bg-df-warning/30'"
             @click="toggleFilter('modified')"
           >
             <PenLine class="h-2.5 w-2.5" />
@@ -472,9 +472,9 @@ loadDatabases(props.connectionId, 'source')
             <div class="p-2">
               <!-- 仅在源端的表（目标端需新增） -->
               <div v-for="table in filteredDiff?.tablesOnlyInSource" :key="`add-${table}`" class="flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-muted/50">
-                <Plus class="h-3 w-3 text-emerald-500 shrink-0" />
+                <Plus class="h-3 w-3 text-df-success shrink-0" />
                 <span class="font-mono">{{ table }}</span>
-                <Badge variant="default" class="ml-auto bg-emerald-600 text-[10px] h-4">{{ t('schemaCompare.onlyInSource') }}</Badge>
+                <Badge variant="default" class="ml-auto bg-df-success text-[10px] h-4">{{ t('schemaCompare.onlyInSource') }}</Badge>
               </div>
 
               <!-- 仅在目标端的表（目标端多余） -->
@@ -494,7 +494,7 @@ loadDatabases(props.connectionId, 'source')
                     class="h-3 w-3 shrink-0 transition-transform"
                     :class="{ 'rotate-90': expandedTables.has(td.tableName) }"
                   />
-                  <PenLine class="h-3 w-3 text-amber-500 shrink-0" />
+                  <PenLine class="h-3 w-3 text-df-warning shrink-0" />
                   <span class="font-mono">{{ td.tableName }}</span>
                   <span class="ml-auto text-[10px] text-muted-foreground">
                     {{ td.columnsAdded.length + td.columnsRemoved.length + td.columnsModified.length }} {{ t('schemaCompare.changes') }}
@@ -505,8 +505,8 @@ loadDatabases(props.connectionId, 'source')
                 <div v-if="expandedTables.has(td.tableName)" class="ml-6 mb-1 border-l border-border pl-3">
                   <!-- 新增列 -->
                   <div v-for="col in td.columnsAdded" :key="`col-add-${col.name}`" class="flex items-center gap-2 py-1 text-[11px]">
-                    <Plus class="h-2.5 w-2.5 text-emerald-500 shrink-0" />
-                    <span class="font-mono text-emerald-600">{{ col.name }}</span>
+                    <Plus class="h-2.5 w-2.5 text-df-success shrink-0" />
+                    <span class="font-mono text-df-success">{{ col.name }}</span>
                     <span class="text-muted-foreground">{{ col.dataType }}</span>
                   </div>
                   <!-- 删除列 -->
@@ -518,8 +518,8 @@ loadDatabases(props.connectionId, 'source')
                   <!-- 修改列 -->
                   <div v-for="mod in td.columnsModified" :key="`col-mod-${mod.columnName}`" class="py-1 text-[11px]">
                     <div class="flex items-center gap-2">
-                      <PenLine class="h-2.5 w-2.5 text-amber-500 shrink-0" />
-                      <span class="font-mono text-amber-600">{{ mod.columnName }}</span>
+                      <PenLine class="h-2.5 w-2.5 text-df-warning shrink-0" />
+                      <span class="font-mono text-df-warning">{{ mod.columnName }}</span>
                     </div>
                     <div v-for="(change, i) in mod.changes" :key="i" class="ml-5 text-[10px] text-muted-foreground">
                       {{ change }}
@@ -536,7 +536,7 @@ loadDatabases(props.connectionId, 'source')
               <span class="text-xs font-medium">{{ t('schemaCompare.migrationSql') }}</span>
               <div class="flex-1" />
               <Button variant="ghost" size="sm" class="h-5 gap-1 text-[10px]" @click="handleCopySql">
-                <Check v-if="copied" class="h-3 w-3 text-emerald-500" />
+                <Check v-if="copied" class="h-3 w-3 text-df-success" />
                 <Copy v-else class="h-3 w-3" />
                 {{ copied ? t('common.copied') : t('common.copy') }}
               </Button>

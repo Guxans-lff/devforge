@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Eye, EyeOff, FolderOpen, Globe, Hash, User, Lock, Key, Shield, FolderSearch } from 'lucide-vue-next'
+import { Eye, EyeOff, FolderOpen, Globe, Hash, User, Lock, Key, Shield, FolderSearch, ShieldCheck } from 'lucide-vue-next'
 
 interface SftpFormData {
   host: string
@@ -67,12 +67,12 @@ async function browsePrivateKey() {
 </script>
 
 <template>
-  <div class="space-y-8">
+  <div class="space-y-10">
     <!-- Section 1: Network Configuration -->
-    <section class="space-y-4">
+    <section class="space-y-5">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.networkLayer') || t('connection.protocol') }}</h3>
+        <h3 class="text-xs font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.networkLayer') || t('connection.protocol') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
@@ -80,38 +80,39 @@ async function browsePrivateKey() {
         <!-- Host -->
         <div class="col-span-9 space-y-2">
           <div class="flex items-center justify-between px-1">
-            <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70 flex items-center gap-1">
+            <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 flex items-center gap-1">
               {{ t('connection.host') }}
               <span class="text-destructive font-black">*</span>
             </Label>
             <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.remoteNode') }}</span>
           </div>
           <div class="relative group">
-            <Globe class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/20 group-focus-within:text-primary transition-colors" />
+            <Globe class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
             <Input
               :model-value="localValue.host"
               @update:model-value="updateField('host', $event as string)"
               placeholder="127.0.0.1"
               autocomplete="off"
-              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs font-mono tracking-tight text-foreground placeholder:text-muted-foreground/30"
+              aria-required="true"
+              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 text-xs font-mono tracking-tight text-foreground placeholder:text-muted-foreground/30"
             />
           </div>
         </div>
         <!-- Port -->
         <div class="col-span-3 space-y-2">
           <div class="flex items-center justify-between px-1">
-            <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('connection.port') }}</Label>
+            <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70">{{ t('connection.port') }}</Label>
             <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">SFTP</span>
           </div>
           <div class="relative group">
-            <Hash class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/20 group-focus-within:text-primary transition-colors" />
+            <Hash class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
             <Input
               :model-value="localValue.port"
               @update:model-value="updateField('port', Number($event))"
               type="number"
               placeholder="22"
               autocomplete="off"
-              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs font-mono text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-foreground font-bold placeholder:text-muted-foreground/30"
+              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 text-xs font-mono text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none text-foreground font-bold placeholder:text-muted-foreground/30"
             />
           </div>
         </div>
@@ -119,10 +120,10 @@ async function browsePrivateKey() {
     </section>
 
     <!-- Section 2: Access Control -->
-    <section class="space-y-4">
+    <section class="space-y-5">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.authLayer') || t('connection.accessCredentials') }}</h3>
+        <h3 class="text-xs font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.authLayer') || t('connection.accessCredentials') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
@@ -130,29 +131,30 @@ async function browsePrivateKey() {
         <!-- Username -->
         <div class="space-y-2">
           <div class="flex items-center justify-between px-1">
-            <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70 flex items-center gap-1">
+            <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 flex items-center gap-1">
               {{ t('connection.username') }}
               <span class="text-destructive font-black">*</span>
             </Label>
             <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.identifier') }}</span>
           </div>
           <div class="relative group">
-            <User class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/20 group-focus-within:text-primary transition-colors" />
+            <User class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
             <Input
               :model-value="localValue.username"
               @update:model-value="updateField('username', $event as string)"
               placeholder="root"
               autocomplete="off"
-              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs font-semibold text-foreground placeholder:text-muted-foreground/30"
+              aria-required="true"
+              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 text-xs font-semibold text-foreground placeholder:text-muted-foreground/30"
             />
           </div>
         </div>
 
         <!-- Auth Method Selection -->
         <div class="space-y-2">
-          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/60 px-1">{{ t('connection.authMethod') }}</Label>
+          <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 px-1">{{ t('connection.authMethod') }}</Label>
           <Select :model-value="localValue.authMethod" @update:model-value="updateField('authMethod', $event as 'password' | 'key')">
-            <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs shadow-none">
+            <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-primary/5 text-xs shadow-none">
               <template #default>
                 <div class="flex items-center gap-2 font-bold">
                   <Shield class="h-4 w-4 text-primary/70" />
@@ -171,7 +173,7 @@ async function browsePrivateKey() {
         <TransitionGroup name="form-fade">
           <!-- Password -->
           <div v-if="localValue.authMethod === 'password'" key="password" class="space-y-2 animate-in fade-in zoom-in-95 duration-300">
-            <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/60 px-1">{{ t('connection.password') }}</Label>
+            <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 px-1">{{ t('connection.password') }}</Label>
             <div class="relative group">
               <Lock class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
               <Input
@@ -179,24 +181,29 @@ async function browsePrivateKey() {
                 @update:model-value="updateField('password', $event as string)"
                 :type="showPassword ? 'text' : 'password'"
                 :placeholder="isEditing ? t('connection.passwordUnchanged') : ''"
-                class="pl-10 pr-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-mono"
+                class="pl-10 pr-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-primary/5 text-xs font-mono"
               />
               <button
                 type="button"
-                class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground/30 hover:text-primary transition-all"
+                :aria-label="showPassword ? t('connection.hidePassword') : t('connection.showPassword')"
+                :aria-pressed="showPassword"
+                class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground/30 hover:text-primary transition-colors rounded focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
                 @click="togglePasswordVisibility"
-                tabindex="-1"
               >
                 <EyeOff v-if="showPassword" class="h-4 w-4" />
                 <Eye v-else class="h-4 w-4" />
               </button>
             </div>
+            <p v-if="isEditing" class="text-[10px] text-muted-foreground/50 px-1 flex items-center gap-1">
+              <ShieldCheck class="h-3 w-3 text-df-success/60" />
+              {{ t('connection.passwordSavedHint') }}
+            </p>
           </div>
 
           <!-- Key Pair Group -->
           <template v-if="localValue.authMethod === 'key'">
             <div key="key-path" class="space-y-2 animate-in fade-in zoom-in-95 duration-300">
-              <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/60 px-1">{{ t('connection.privateKey') }}</Label>
+              <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 px-1">{{ t('connection.privateKey') }}</Label>
               <div class="flex gap-2">
                 <div class="relative group flex-1">
                   <Key class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
@@ -204,17 +211,17 @@ async function browsePrivateKey() {
                     :model-value="localValue.privateKeyPath"
                     @update:model-value="updateField('privateKeyPath', $event as string)"
                     :placeholder="t('connection.privateKeyPlaceholder')"
-                    class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-mono"
+                    class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-primary/5 text-xs font-mono"
                   />
                 </div>
-                <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-all shadow-none px-0 rounded-lg" @click="browsePrivateKey">
+                <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-[background-color,border-color] shadow-none px-0 rounded-lg" @click="browsePrivateKey">
                   <FolderOpen class="h-4 w-4" />
                 </Button>
               </div>
             </div>
 
             <div key="passphrase" class="space-y-2 animate-in fade-in zoom-in-95 duration-300">
-              <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/60 px-1">{{ t('connection.passphrase') }}</Label>
+              <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 px-1">{{ t('connection.passphrase') }}</Label>
               <div class="relative group">
                 <Lock class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
                 <Input
@@ -222,11 +229,11 @@ async function browsePrivateKey() {
                   @update:model-value="updateField('passphrase', $event as string)"
                   :type="showPassword ? 'text' : 'password'"
                   :placeholder="t('connection.passphrasePlaceholder')"
-                  class="pl-10 pr-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-mono"
+                  class="pl-10 pr-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-primary/5 text-xs font-mono"
                 />
                 <button
                   type="button"
-                  class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground/30 hover:text-primary transition-all"
+                  class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground/30 hover:text-primary transition-colors"
                   @click="togglePasswordVisibility"
                   tabindex="-1"
                 >
@@ -241,22 +248,22 @@ async function browsePrivateKey() {
     </section>
 
     <!-- Section 3: Targeted Resources (Remote Path) -->
-    <section class="space-y-4">
+    <section class="space-y-5">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.targetLayer') || t('connection.targetEnvironment') }}</h3>
+        <h3 class="text-xs font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.targetLayer') || t('connection.targetEnvironment') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
       <div class="space-y-2">
-        <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/60 px-1">{{ t('connection.remotePath') }}</Label>
+        <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 px-1">{{ t('connection.remotePath') }}</Label>
         <div class="relative group">
           <FolderSearch class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
           <Input
             :model-value="localValue.remotePath"
             @update:model-value="updateField('remotePath', $event as string)"
             placeholder="/"
-            class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-semibold"
+            class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-primary/5 text-xs font-semibold"
           />
         </div>
       </div>

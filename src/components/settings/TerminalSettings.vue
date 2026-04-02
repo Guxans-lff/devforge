@@ -50,9 +50,9 @@ function handleCursorStyle(value: string) {
 <template>
   <div class="grid gap-4">
     <!-- Font Size Card -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/5 text-orange-500/60 transition-colors group-hover:bg-orange-500/10 group-hover:text-orange-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <Type class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">
@@ -61,10 +61,10 @@ function handleCursorStyle(value: string) {
         </div>
       </div>
       <Select :model-value="String(settingsStore.settings.terminalFontSize)" @update:model-value="handleFontSize($event as string)">
-        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs transition-all focus:ring-primary/20">
+        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-border/50 font-bold text-xs transition-[border-color,box-shadow] focus:ring-primary/20">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+        <SelectContent class="bg-popover border-border/20 rounded-xl">
           <SelectItem v-for="size in [12, 13, 14, 15, 16, 18, 20, 22, 24]" :key="size" :value="String(size)" class="rounded-lg font-bold">
             {{ size }}px
           </SelectItem>
@@ -73,10 +73,10 @@ function handleCursorStyle(value: string) {
     </div>
 
     <!-- Font Family Card -->
-    <div class="group flex flex-col gap-4 p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex flex-col gap-4 p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-center justify-between">
         <div class="flex items-start gap-4 flex-1 min-w-0">
-          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/5 text-blue-500/60 transition-colors group-hover:bg-blue-500/10 group-hover:text-blue-500 shrink-0">
+          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80 shrink-0">
             <Keyboard class="h-5 w-5" />
           </div>
           <div class="space-y-0.5 min-w-0">
@@ -85,10 +85,10 @@ function handleCursorStyle(value: string) {
           </div>
         </div>
         <Select :model-value="selectedFontValue" @update:model-value="handleFontFamilyChange($event as string)">
-          <SelectTrigger class="w-48 h-10 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs transition-all focus:ring-primary/20">
+          <SelectTrigger class="w-48 h-10 rounded-xl bg-background shadow-sm border-border/50 font-bold text-xs transition-[border-color,box-shadow] focus:ring-primary/20">
             <SelectValue />
           </SelectTrigger>
-          <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+          <SelectContent class="bg-popover border-border/20 rounded-xl">
             <SelectItem v-for="font in MONO_FONTS" :key="font.value" :value="font.value" class="rounded-lg">
               <span :style="{ fontFamily: font.value }" class="font-medium">{{ font.name }}</span>
             </SelectItem>
@@ -101,7 +101,7 @@ function handleCursorStyle(value: string) {
       <div v-if="isCustomFont || selectedFontValue === 'custom'" class="animate-in fade-in slide-in-from-top-2 duration-300">
         <Input
           :model-value="settingsStore.settings.terminalFontFamily"
-          class="w-full h-10 rounded-xl bg-background/50 shadow-inner border-white/5 font-mono text-[11px] font-bold transition-all focus:ring-primary/20"
+          class="w-full h-10 rounded-xl bg-background/50 shadow-inner border-border/50 font-mono text-[11px] font-bold transition-[border-color,box-shadow] focus:ring-primary/20"
           :placeholder="'Enter font family string...'"
           @update:model-value="settingsStore.update({ terminalFontFamily: String($event) })"
         />
@@ -109,9 +109,9 @@ function handleCursorStyle(value: string) {
     </div>
 
     <!-- Cursor Style Card -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/5 text-cyan-500/60 transition-colors group-hover:bg-cyan-500/10 group-hover:text-cyan-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <MousePointer2 class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">
@@ -120,10 +120,10 @@ function handleCursorStyle(value: string) {
         </div>
       </div>
       <Select :model-value="settingsStore.settings.terminalCursorStyle" @update:model-value="handleCursorStyle($event as string)">
-        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs transition-all focus:ring-primary/20">
+        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-border/50 font-bold text-xs transition-[border-color,box-shadow] focus:ring-primary/20">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+        <SelectContent class="bg-popover border-border/20 rounded-xl">
           <SelectItem value="block" class="rounded-lg font-medium">{{ t('settings.cursorBlock') }}</SelectItem>
           <SelectItem value="underline" class="rounded-lg font-medium">{{ t('settings.cursorUnderline') }}</SelectItem>
           <SelectItem value="bar" class="rounded-lg font-medium">{{ t('settings.cursorBar') }}</SelectItem>
@@ -132,9 +132,9 @@ function handleCursorStyle(value: string) {
     </div>
 
     <!-- Cursor Blink Card -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/5 text-red-500/60 transition-colors group-hover:bg-red-500/10 group-hover:text-red-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <Activity class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">
@@ -150,9 +150,9 @@ function handleCursorStyle(value: string) {
     </div>
 
     <!-- Scrollback Lines Card -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/5 text-emerald-500/60 transition-colors group-hover:bg-emerald-500/10 group-hover:text-emerald-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <ScrollText class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">
@@ -161,10 +161,10 @@ function handleCursorStyle(value: string) {
         </div>
       </div>
       <Select :model-value="String(settingsStore.settings.terminalScrollback ?? 5000)" @update:model-value="settingsStore.update({ terminalScrollback: Number($event) })">
-        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs transition-all focus:ring-primary/20">
+        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-border/50 font-bold text-xs transition-[border-color,box-shadow] focus:ring-primary/20">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+        <SelectContent class="bg-popover border-border/20 rounded-xl">
           <SelectItem v-for="lines in [1000, 3000, 5000, 10000, 50000]" :key="lines" :value="String(lines)" class="rounded-lg font-bold">
             {{ lines.toLocaleString() }} 行
           </SelectItem>

@@ -19,6 +19,8 @@ const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const showResetConfirm = ref(false)
 
+const tabTriggerClass = 'rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-[background-color,color,box-shadow] data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md'
+
 function handleReset() {
   showResetConfirm.value = true
 }
@@ -31,29 +33,30 @@ function confirmReset() {
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-background">
     <!-- Premium Header -->
-    <div class="relative z-10 flex items-center justify-between border-b border-border/50 bg-background/50 px-8 py-5 backdrop-blur-md">
+    <header role="banner" class="relative z-10 flex items-center justify-between border-b border-border/50 bg-background/50 px-8 py-5 backdrop-blur-md">
       <div class="flex items-center gap-3">
         <div class="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/10 text-primary ring-1 ring-primary/20">
           <Settings class="h-5 w-5" />
         </div>
         <div>
-          <h1 class="text-xl font-black tracking-tight bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent">
+          <h1 class="text-xl font-black tracking-tight text-foreground">
             {{ t('settings.title') }}
           </h1>
           <p class="text-[11px] font-medium text-muted-foreground/60 uppercase tracking-widest">{{ t('common.preferences') || 'Preferences' }}</p>
         </div>
       </div>
       
-      <Button 
-        variant="outline" 
-        size="sm" 
-        class="h-9 gap-2 rounded-xl border-border/50 bg-background/50 px-4 text-xs font-bold transition-all hover:bg-destructive hover:text-destructive-foreground hover:border-destructive" 
+      <Button
+        variant="outline"
+        size="sm"
+        :aria-label="t('settings.resetAll')"
+        class="h-9 gap-2 rounded-xl border-border/50 bg-background/50 px-4 text-xs font-bold transition-[background-color,color,border-color] hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
         @click="handleReset"
       >
         <RotateCcw class="h-3.5 w-3.5" />
         {{ t('settings.resetAll') }}
       </Button>
-    </div>
+    </header>
 
     <!-- Content -->
     <ScrollArea class="min-h-0 flex-1">
@@ -61,26 +64,26 @@ function confirmReset() {
         <Tabs default-value="general" class="w-full">
           <!-- Tab 导航 -->
           <div class="mb-10 flex justify-center">
-            <TabsList class="h-10 bg-muted/30 p-1 rounded-xl border border-border/10 backdrop-blur-sm inline-flex gap-0.5">
-              <TabsTrigger value="general" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
+            <TabsList :aria-label="t('settings.settingsCategories')" class="h-10 bg-muted/30 p-1 rounded-xl border border-border/10 backdrop-blur-sm inline-flex gap-0.5">
+              <TabsTrigger value="general" :class="tabTriggerClass">
                 {{ t('settings.general') }}
               </TabsTrigger>
-              <TabsTrigger value="editor" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
+              <TabsTrigger value="editor" :class="tabTriggerClass">
                 {{ t('settings.editor') }}
               </TabsTrigger>
-              <TabsTrigger value="terminal" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
+              <TabsTrigger value="terminal" :class="tabTriggerClass">
                 {{ t('settings.terminalSettings') }}
               </TabsTrigger>
-              <TabsTrigger value="shortcuts" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
+              <TabsTrigger value="shortcuts" :class="tabTriggerClass">
                 {{ t('settings.shortcuts') }}
               </TabsTrigger>
-              <TabsTrigger value="import-export" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
+              <TabsTrigger value="import-export" :class="tabTriggerClass">
                 {{ t('settings.importExport') }}
               </TabsTrigger>
-              <TabsTrigger value="diagnostics" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
+              <TabsTrigger value="diagnostics" :class="tabTriggerClass">
                 {{ t('settings.diagnostics') }}
               </TabsTrigger>
-              <TabsTrigger value="update" class="rounded-lg px-3 py-1.5 text-[12px] font-semibold transition-all data-[state=active]:bg-background data-[state=active]:text-primary data-[state=active]:shadow-md">
+              <TabsTrigger value="update" :class="tabTriggerClass">
                 {{ t('updater.tabTitle') }}
               </TabsTrigger>
             </TabsList>

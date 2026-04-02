@@ -54,7 +54,7 @@ const { t } = useI18n()
             v-for="(stmt, idx) in statements"
             :key="idx"
             class="flex items-start gap-2 rounded-lg px-3 py-2 text-xs"
-            :class="stmt.severity === 'critical' ? 'bg-red-500/10 text-red-600 dark:text-red-400' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'"
+            :class="stmt.severity === 'critical' ? 'bg-destructive/10 text-destructive' : 'bg-df-warning/10 text-df-warning'"
           >
             <ShieldAlert v-if="stmt.severity === 'critical'" class="h-3.5 w-3.5 shrink-0 mt-0.5" />
             <ShieldCheck v-else class="h-3.5 w-3.5 shrink-0 mt-0.5" />

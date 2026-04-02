@@ -275,7 +275,7 @@ onBeforeUnmount(() => {
     <div class="shrink-0 border-t border-border px-4 py-2 space-y-1.5">
       <!-- 进度条 -->
       <div
-        class="group flex-1 h-2 bg-muted rounded-full cursor-pointer relative hover:h-2.5 transition-all"
+        class="group flex-1 h-2 bg-muted rounded-full cursor-pointer relative hover:h-2.5 transition-[height]"
         @click="handleProgressClick"
       >
         <div

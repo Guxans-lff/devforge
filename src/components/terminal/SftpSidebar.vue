@@ -432,7 +432,7 @@ defineExpose({ syncToPath })
         <div class="relative group">
           <Input
             v-model="renameValue"
-            class="h-10 rounded-xl border-border/80 bg-muted/20 px-3 text-[13px] tracking-wide transition-all focus:border-primary focus:bg-background focus:ring-4 focus:ring-primary/5 shadow-sm"
+            class="h-10 rounded-xl border-border/80 bg-muted/20 px-3 text-[13px] tracking-wide transition-[border-color,background-color,box-shadow] focus:border-primary focus:bg-background focus:ring-4 focus:ring-primary/5 shadow-sm"
             :placeholder="t('fileManager.renameTo')"
             autofocus
             @keydown.enter="confirmRename"

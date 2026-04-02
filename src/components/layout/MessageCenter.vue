@@ -19,21 +19,21 @@ const iconMap = {
 }
 
 const colorMap = {
-  success: 'text-green-500',
+  success: 'text-df-success',
   error: 'text-destructive',
-  warning: 'text-yellow-500',
-  info: 'text-blue-500',
+  warning: 'text-df-warning',
+  info: 'text-primary',
   loading: 'text-muted-foreground',
-  progress: 'text-blue-500',
+  progress: 'text-primary',
 }
 
 const glowMap = {
-  success: 'bg-green-500',
+  success: 'bg-df-success',
   error: 'bg-destructive',
-  warning: 'bg-yellow-500',
-  info: 'bg-blue-500',
+  warning: 'bg-df-warning',
+  info: 'bg-primary',
   loading: 'bg-muted-foreground',
-  progress: 'bg-blue-500',
+  progress: 'bg-primary',
 }
 
 function formatTime(timestamp: number) {
@@ -111,14 +111,14 @@ const groupedMessages = computed(() => {
         <div class="flex items-center gap-1.5">
           <button
             v-if="hasMessages"
-            class="rounded-md p-1.5 text-muted-foreground transition-all hover:bg-destructive/10 hover:text-destructive active:scale-95"
+            class="rounded-md p-1.5 text-muted-foreground transition-[background-color,color,scale] hover:bg-destructive/10 hover:text-destructive active:scale-95"
             :title="t('messageCenter.clearAll')"
             @click="messageCenter.clearAll()"
           >
             <Trash2 class="h-4 w-4" />
           </button>
           <button
-            class="rounded-md p-1.5 text-muted-foreground transition-all hover:bg-muted hover:text-foreground active:scale-95"
+            class="rounded-md p-1.5 text-muted-foreground transition-[background-color,color,scale] hover:bg-muted hover:text-foreground active:scale-95"
             :title="t('messageCenter.close')"
             @click="messageCenter.togglePanel()"
           >
@@ -139,7 +139,7 @@ const groupedMessages = computed(() => {
         <div v-else>
           <div v-for="group in groupedMessages" :key="group.title" class="pt-4 first:pt-2">
             <!-- Group Sticky Label: More pronounced blur for clarity -->
-            <div class="sticky top-0 z-20 -mx-3 -mt-4 mb-2 bg-background/60 px-4 py-2 backdrop-blur-md border-b border-border/10 transition-all">
+            <div class="sticky top-0 z-20 -mx-3 -mt-4 mb-2 bg-background/60 px-4 py-2 backdrop-blur-md border-b border-border/10 transition-opacity">
               <span class="text-[10px] font-bold uppercase tracking-widest text-primary/70">{{ group.title }}</span>
             </div>
             
@@ -156,11 +156,11 @@ const groupedMessages = computed(() => {
                 <div
                   v-for="msg in group.items"
                   :key="msg.id"
-                  class="group relative flex gap-3 rounded-lg border border-border/20 bg-muted/15 p-3.5 transition-all hover:translate-y-[-1px] hover:border-border/60 hover:bg-muted/30 hover:shadow-md"
+                  class="group relative flex gap-3 rounded-lg border border-border/20 bg-muted/15 p-3.5 transition-[translate,border-color,background-color,box-shadow] hover:translate-y-[-1px] hover:border-border/60 hover:bg-muted/30 hover:shadow-md"
                 >
                   <!-- Status Glow Indicator -->
                   <div 
-                    class="absolute left-0 top-3 bottom-3 w-1 rounded-full opacity-60 transition-all group-hover:opacity-100"
+                    class="absolute left-0 top-3 bottom-3 w-1 rounded-full opacity-60 transition-opacity group-hover:opacity-100"
                     :class="glowMap[msg.type]"
                   />
 
@@ -195,7 +195,7 @@ const groupedMessages = computed(() => {
                       </div>
                       <div class="h-1.5 w-full overflow-hidden rounded-full bg-muted/50 ring-1 ring-border/10">
                         <div
-                          class="h-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)] transition-all duration-300"
+                          class="h-full bg-primary shadow-[0_0_8px_var(--color-primary)] transition-[width] duration-300"
                           :style="{ width: `${msg.progress}%` }"
                         />
                       </div>

@@ -81,7 +81,7 @@ const tabItems = [
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
-            <div class="h-2 w-2 shrink-0 rounded-full shadow-sm blink" :class="grantUser.accountLocked === 'Y' ? 'bg-destructive' : 'bg-emerald-500'" />
+            <div class="h-2 w-2 shrink-0 rounded-full shadow-sm blink" :class="grantUser.accountLocked === 'Y' ? 'bg-destructive' : 'bg-df-success'" />
             <span v-if="grantUser.user.startsWith('mysql.')" class="shrink-0 text-[8px] font-black tracking-widest text-primary/40 bg-primary/5 px-1.5 py-0.5 rounded-lg border border-primary/20 uppercase">
               System
             </span>
@@ -107,9 +107,9 @@ const tabItems = [
             v-if="hasGrantOption"
             :variant="isApplySuccess ? 'outline' : (hasGrantChanges ? 'default' : 'outline')"
             size="sm"
-            class="h-9 px-4 gap-1.5 text-xs shadow-lg transition-all active:scale-95 shrink-0"
+            class="h-9 px-4 gap-1.5 text-xs shadow-lg transition-[background-color,color,box-shadow,scale] active:scale-95 shrink-0"
             :class="[
-              isApplySuccess ? 'text-emerald-600 border-emerald-500/30' : '',
+              isApplySuccess ? 'text-df-success border-df-success/30' : '',
               hasGrantChanges && !isApplySuccess ? 'shadow-primary/20' : 'shadow-none'
             ]"
             :disabled="(!hasGrantChanges && !isApplySuccess) || isApplyingGrants"
@@ -132,12 +132,12 @@ const tabItems = [
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" class="w-48 rounded-xl border-border/20 shadow-xl p-1.5">
             <DropdownMenuItem class="rounded-lg gap-2 cursor-pointer" @click="emit('changePassword')">
-              <KeyRound class="h-4 w-4 text-amber-500/70" />
+              <KeyRound class="h-4 w-4 text-df-warning/70" />
               <span class="text-xs font-medium">重置登录密码</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               class="rounded-lg gap-2 cursor-pointer"
-              :class="grantUser.accountLocked === 'Y' ? 'text-emerald-600' : 'text-destructive/80'"
+              :class="grantUser.accountLocked === 'Y' ? 'text-df-success' : 'text-destructive/80'"
               @click="emit('toggleLock', grantUser)"
             >
               <component :is="grantUser.accountLocked === 'Y' ? Unlock : Lock" class="h-4 w-4" />
@@ -152,7 +152,7 @@ const tabItems = [
     <div class="flex border-b border-border/20 bg-muted/5 px-6">
       <button
         v-for="tab in tabItems" :key="tab.id"
-        class="flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-medium transition-all"
+        class="flex items-center gap-2 border-b-2 px-4 py-2.5 text-xs font-medium transition-[background-color,color,border-color]"
         :class="activeTab === tab.id ? 'border-primary text-primary bg-primary/5' : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/50'"
         @click="emit('update:activeTab', tab.id)"
       >
@@ -189,7 +189,7 @@ const tabItems = [
               <Button
                 v-if="currentGrants.length"
                 variant="ghost" size="sm"
-                class="h-7 gap-1.5 text-[10px] hover:bg-primary/5 transition-all opacity-60 hover:opacity-100"
+                class="h-7 gap-1.5 text-[10px] hover:bg-primary/5 transition-[background-color,opacity] opacity-60 hover:opacity-100"
                 @click="emit('exportToSql')"
               >
                 <Download class="h-3 w-3" /> 导出 SQL
@@ -203,7 +203,7 @@ const tabItems = [
           </div>
 
           <div class="grid grid-cols-2 gap-4">
-            <div class="p-4 rounded-xl border border-border/30 bg-card/50 shadow-sm relative overflow-hidden group hover:border-primary/30 transition-all">
+            <div class="p-4 rounded-xl border border-border/30 bg-card/50 shadow-sm relative overflow-hidden group hover:border-primary/30 transition-[background-color,border-color]">
               <div class="absolute -right-2 -bottom-2 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity">
                 <Shield class="h-16 w-16 text-primary" />
               </div>
@@ -212,14 +212,14 @@ const tabItems = [
               </div>
               <div class="text-3xl font-black text-primary tracking-tight">{{ checkedGlobalPrivileges.size }}</div>
             </div>
-            <div class="p-4 rounded-xl border border-border/30 bg-card/50 shadow-sm relative overflow-hidden group hover:border-amber-500/30 transition-all">
+            <div class="p-4 rounded-xl border border-border/30 bg-card/50 shadow-sm relative overflow-hidden group hover:border-df-warning/30 transition-[background-color,border-color]">
               <div class="absolute -right-2 -bottom-2 opacity-[0.03] group-hover:opacity-[0.08] transition-opacity">
-                <DatabaseIcon class="h-16 w-16 text-amber-500" />
+                <DatabaseIcon class="h-16 w-16 text-df-warning" />
               </div>
               <div class="text-[10px] text-muted-foreground font-bold uppercase mb-1 flex items-center gap-1.5">
-                <DatabaseIcon class="h-3 w-3 text-amber-500/60" /> 已授权数据库
+                <DatabaseIcon class="h-3 w-3 text-df-warning/60" /> 已授权数据库
               </div>
-              <div class="text-3xl font-black text-amber-500 tracking-tight">{{ dbPrivileges.size }}</div>
+              <div class="text-3xl font-black text-df-warning tracking-tight">{{ dbPrivileges.size }}</div>
             </div>
           </div>
         </div>
@@ -234,7 +234,7 @@ const tabItems = [
             <div class="grid grid-cols-3 gap-2 ml-4">
               <div
                 v-for="priv in privs" :key="priv"
-                class="group flex items-center justify-between gap-2 p-2 rounded-lg border transition-all"
+                class="group flex items-center justify-between gap-2 p-2 rounded-lg border transition-[background-color,border-color,box-shadow]"
                 :class="[
                   checkedGlobalPrivileges.has(priv)
                     ? 'border-primary/30 bg-primary/5 ring-1 ring-primary/10'
@@ -275,12 +275,12 @@ const tabItems = [
                 <div
                   v-for="db in filteredDatabases" :key="db"
                   class="group flex items-center gap-2 rounded-md px-2 py-1.5 text-[11px] cursor-pointer"
-                  :class="activeDb === db ? 'bg-amber-500/10 text-amber-700 font-bold' : 'hover:bg-accent/50 text-muted-foreground'"
+                  :class="activeDb === db ? 'bg-df-warning/10 text-df-warning font-bold' : 'hover:bg-accent/50 text-muted-foreground'"
                   @click="emit('update:activeDb', db)"
                 >
-                  <DatabaseIcon class="h-3.5 w-3.5 shrink-0 opacity-50" :class="{ 'text-amber-500 opacity-100': activeDb === db }" />
+                  <DatabaseIcon class="h-3.5 w-3.5 shrink-0 opacity-50" :class="{ 'text-df-warning opacity-100': activeDb === db }" />
                   <span class="flex-1 truncate">{{ db }}</span>
-                  <div v-if="dbPrivileges.has(db)" class="h-4 w-4 rounded-full bg-amber-500/20 text-amber-600 flex items-center justify-center text-[9px] font-black">
+                  <div v-if="dbPrivileges.has(db)" class="h-4 w-4 rounded-full bg-df-warning/20 text-df-warning flex items-center justify-center text-[9px] font-black">
                     {{ dbPrivileges.get(db)?.size }}
                   </div>
                 </div>
@@ -293,7 +293,7 @@ const tabItems = [
             <template v-if="activeDb">
               <div class="flex items-center justify-between border-b border-border/20 bg-muted/20 px-4 py-2.5">
                 <div class="flex items-center gap-2">
-                  <DatabaseIcon class="h-4 w-4 text-amber-500" />
+                  <DatabaseIcon class="h-4 w-4 text-df-warning" />
                   <span class="text-xs font-bold">{{ activeDb }} 权限</span>
                 </div>
                 <Button
@@ -310,14 +310,14 @@ const tabItems = [
                 <div
                   v-for="priv in DB_LEVEL_PRIVS" :key="priv"
                   class="flex items-center justify-between gap-3 group p-2 rounded-lg hover:bg-muted/50 transition-colors border border-transparent hover:border-border/30"
-                  :class="{ 'bg-amber-50/30 font-bold': dbPrivileges.get(activeDb!)?.has(priv) }"
+                  :class="{ 'bg-df-warning/10 font-bold': dbPrivileges.get(activeDb!)?.has(priv) }"
                   @click="emit('toggleDbPrivilege', activeDb!, priv)"
                 >
                   <div class="flex flex-col">
-                    <span class="text-[11px] font-mono group-hover:text-amber-600 transition-colors" :class="{ 'text-amber-600': dbPrivileges.get(activeDb!)?.has(priv) }">{{ priv }}</span>
+                    <span class="text-[11px] font-mono group-hover:text-df-warning transition-colors" :class="{ 'text-df-warning': dbPrivileges.get(activeDb!)?.has(priv) }">{{ priv }}</span>
                     <span class="text-[9px] text-muted-foreground/50 font-normal">{{ PRIV_LABELS[priv] || '操作权限' }}</span>
                   </div>
-                  <div class="h-4 w-4 rounded-md border border-border/60 flex items-center justify-center transition-all bg-background shadow-inner" :class="{ 'bg-amber-500 border-amber-500 text-white rotate-6 scale-110 shadow-lg': dbPrivileges.get(activeDb!)?.has(priv) }">
+                  <div class="h-4 w-4 rounded-md border border-border/60 flex items-center justify-center transition-[background-color,border-color,box-shadow,scale,rotate] bg-background shadow-inner" :class="{ 'bg-df-warning border-df-warning text-white rotate-6 scale-110 shadow-lg': dbPrivileges.get(activeDb!)?.has(priv) }">
                     <Check v-if="dbPrivileges.get(activeDb)?.has(priv)" class="h-3 w-3 stroke-[3px]" />
                   </div>
                 </div>

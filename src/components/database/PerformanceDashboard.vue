@@ -122,30 +122,30 @@ const metricCards = computed(() => {
       value: formatNumber(s.qps), 
       subtitle: 'Queries Per Second', 
       icon: Activity, 
-      color: 'text-blue-500', 
-      gradient: 'from-blue-500/10 via-blue-500/5 to-transparent',
-      border: 'border-blue-500/20',
-      glow: 'shadow-blue-500/10'
+      color: 'text-primary',
+      gradient: 'from-primary/10 via-primary/5 to-transparent',
+      border: 'border-primary/20',
+      glow: 'shadow-primary/10'
     },
     { 
       label: '每秒事务 (TPS)', 
       value: formatNumber(s.tps), 
       subtitle: 'Transactions Per Second', 
       icon: Gauge, 
-      color: 'text-emerald-500', 
-      gradient: 'from-emerald-500/10 via-emerald-500/5 to-transparent',
-      border: 'border-emerald-500/20',
-      glow: 'shadow-emerald-500/10'
+      color: 'text-df-success',
+      gradient: 'from-df-success/10 via-df-success/5 to-transparent',
+      border: 'border-df-success/20',
+      glow: 'shadow-df-success/10'
     },
     { 
       label: '当前活跃连接', 
       value: String(s.activeConnections), 
       subtitle: `总计 ${s.totalConnections} 个连接`, 
       icon: Database, 
-      color: 'text-amber-500', 
-      gradient: 'from-amber-500/10 via-amber-500/5 to-transparent',
-      border: 'border-amber-500/20',
-      glow: 'shadow-amber-500/10'
+      color: 'text-df-warning',
+      gradient: 'from-df-warning/10 via-df-warning/5 to-transparent',
+      border: 'border-df-warning/20',
+      glow: 'shadow-df-warning/10'
     },
     { 
       label: '缓冲池利用率', 
@@ -162,10 +162,10 @@ const metricCards = computed(() => {
       value: formatNumber(s.slowQueries, 0), 
       subtitle: '已运行 ' + formatUptime(s.uptime), 
       icon: AlertTriangle, 
-      color: 'text-rose-500', 
-      gradient: 'from-rose-500/10 via-rose-500/5 to-transparent',
-      border: 'border-rose-500/20',
-      glow: 'shadow-rose-500/10',
+      color: 'text-destructive',
+      gradient: 'from-destructive/10 via-destructive/5 to-transparent',
+      border: 'border-destructive/20',
+      glow: 'shadow-destructive/10',
       isCritical: s.slowQueries > 0
     },
   ]
@@ -423,7 +423,7 @@ watch(activeSubTab, () => {
         <button
           v-for="tab in subTabs"
           :key="tab.key"
-          class="flex items-center gap-2 rounded-xl px-5 py-2 text-xs font-black transition-all duration-300 select-none"
+          class="flex items-center gap-2 rounded-xl px-5 py-2 text-xs font-black transition-[background-color,color,box-shadow,scale] duration-300 select-none"
           :class="activeSubTab === tab.key
             ? 'bg-primary text-primary-foreground shadow-lg shadow-primary/20 scale-105'
             : 'text-muted-foreground/60 hover:bg-muted/80 hover:text-foreground'"
@@ -442,13 +442,13 @@ watch(activeSubTab, () => {
               <span class="text-[10px] font-bold text-primary/80">采集数据中</span>
             </template>
             <template v-else>
-              <div class="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,1)]" />
+              <div class="h-1.5 w-1.5 rounded-full bg-df-success shadow-[0_0_8px_var(--df-success)]" />
               <span class="text-[10px] font-black text-muted-foreground/40 uppercase">Auto Sync On</span>
             </template>
           </div>
         </div>
         <div class="h-8 w-[1px] bg-border/20 mx-2" />
-        <Button size="icon" variant="ghost" class="h-8 w-8 rounded-full hover:bg-primary/10 hover:text-primary transition-all" @click="startAutoRefresh">
+        <Button size="icon" variant="ghost" class="h-8 w-8 rounded-full hover:bg-primary/10 hover:text-primary transition-colors" @click="startAutoRefresh">
           <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': isLoading }" />
         </Button>
       </div>
@@ -473,7 +473,7 @@ watch(activeSubTab, () => {
           <div
             v-for="card in metricCards"
             :key="card.label"
-            class="relative overflow-hidden group rounded-2xl border p-4 transition-all duration-500 hover:-translate-y-1 hover:shadow-2xl bg-card/40 backdrop-blur-xl"
+            class="relative overflow-hidden group rounded-2xl border p-4 transition-[border-color,box-shadow,translate] duration-500 hover:-translate-y-1 hover:shadow-2xl bg-card/40 backdrop-blur-xl"
             :class="[card.border, card.glow, { 'animate-pulse': card.isCritical }]"
           >
             <!-- 动态渐变背景 -->
@@ -514,13 +514,13 @@ watch(activeSubTab, () => {
               <p class="text-[10px] text-muted-foreground/50 font-medium">最近 5 分钟流量吞吐数据采样</p>
             </div>
             <div class="flex items-center gap-6">
-              <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-500/5 border border-blue-500/10 transition-colors hover:bg-blue-500/10">
-                <div class="h-1.5 w-3 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,1)]"></div>
-                <span class="text-[10px] font-bold text-blue-400/80">查询 (QPS)</span>
+              <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/5 border border-primary/10 transition-colors hover:bg-primary/10">
+                <div class="h-1.5 w-3 rounded-full bg-primary shadow-[0_0_8px_var(--primary)]"></div>
+                <span class="text-[10px] font-bold text-primary/80">查询 (QPS)</span>
               </div>
-              <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/5 border border-emerald-500/10 transition-colors hover:bg-emerald-500/10">
-                <div class="h-1.5 w-3 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,1)]"></div>
-                <span class="text-[10px] font-bold text-emerald-400/80">事务 (TPS)</span>
+              <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-df-success/5 border border-df-success/10 transition-colors hover:bg-df-success/10">
+                <div class="h-1.5 w-3 rounded-full bg-df-success shadow-[0_0_8px_var(--df-success)]"></div>
+                <span class="text-[10px] font-bold text-df-success/80">事务 (TPS)</span>
               </div>
             </div>
           </div>
@@ -574,8 +574,8 @@ watch(activeSubTab, () => {
                   <span v-if="p.db" class="px-2 py-0.5 rounded bg-muted text-[10px] font-bold border border-border/10">{{ p.db }}</span>
                   <span v-else class="text-muted-foreground/30 italic">none</span>
                 </td>
-                <td class="px-4 capitalize text-amber-500 font-bold opacity-80">{{ p.command }}</td>
-                <td class="px-4 font-mono font-bold" :class="p.time > 10 ? 'text-rose-500' : 'text-emerald-500'">{{ p.time }}</td>
+                <td class="px-4 capitalize text-df-warning font-bold opacity-80">{{ p.command }}</td>
+                <td class="px-4 font-mono font-bold" :class="p.time > 10 ? 'text-destructive' : 'text-df-success'">{{ p.time }}</td>
                 <td class="px-4">
                   <div class="flex flex-col gap-0.5 max-w-sm">
                     <span class="text-[10px] font-bold text-muted-foreground/80">{{ p.state || 'idle' }}</span>
@@ -583,7 +583,7 @@ watch(activeSubTab, () => {
                   </div>
                 </td>
                 <td class="px-4 text-center">
-                  <Button variant="ghost" size="icon" class="h-8 w-8 rounded-xl text-muted-foreground/30 hover:bg-rose-500/10 hover:text-rose-500" @click="confirmKillProcess(p.id)">
+                  <Button variant="ghost" size="icon" class="h-8 w-8 rounded-xl text-muted-foreground/30 hover:bg-destructive/10 hover:text-destructive" @click="confirmKillProcess(p.id)">
                     <Trash2 class="h-3.5 w-3.5" />
                   </Button>
                 </td>

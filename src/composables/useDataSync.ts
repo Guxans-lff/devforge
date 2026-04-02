@@ -1,5 +1,6 @@
 import { ref, readonly } from 'vue'
 import { syncDataPreview, syncDataExecute } from '@/api/data-sync'
+import { parseBackendError } from '@/types/error'
 import type { SyncConfig, SyncProgress, SyncPreview } from '@/types/data-sync'
 
 /**
@@ -39,7 +40,7 @@ export function useDataSync() {
       preview.value = result
       return result
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = e instanceof Error ? e.message : parseBackendError(e).message
       previewError.value = msg
       throw e
     } finally {
@@ -65,7 +66,7 @@ export function useDataSync() {
       syncResult.value = result
       return result
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e)
+      const msg = e instanceof Error ? e.message : parseBackendError(e).message
       syncError.value = msg
       throw e
     } finally {

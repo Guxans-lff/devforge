@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Clock, CalendarDays, CalendarClock, Timer } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -80,11 +81,6 @@ const humanReadable = computed(() => {
   return `${t('dataSync.cron.custom')}: ${expr}`
 })
 
-function handleInput(e: Event) {
-  const target = e.target as HTMLInputElement
-  emit('update:modelValue', target.value)
-}
-
 function selectPreset(value: string) {
   emit('update:modelValue', value)
 }
@@ -93,18 +89,15 @@ function selectPreset(value: string) {
 <template>
   <div class="space-y-2">
     <!-- 输入框 -->
-    <div class="flex items-center gap-2">
-      <input
-        :value="modelValue"
-        type="text"
-        class="flex-1 h-8 rounded-md border border-input bg-background px-3 text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-        placeholder="* * * * * (分 时 日 月 周)"
-        @input="handleInput"
-      />
-    </div>
+    <Input
+      :model-value="modelValue"
+      class="h-7 text-xs font-mono"
+      placeholder="* * * * * (分 时 日 月 周)"
+      @update:model-value="emit('update:modelValue', $event as string)"
+    />
 
     <!-- 人类可读描述 -->
-    <div v-if="humanReadable" class="text-xs text-muted-foreground px-1">
+    <div v-if="humanReadable" class="text-[11px] text-muted-foreground">
       {{ humanReadable }}
     </div>
 
@@ -115,10 +108,10 @@ function selectPreset(value: string) {
         :key="preset.value"
         size="sm"
         :variant="modelValue === preset.value ? 'default' : 'outline'"
-        class="h-6 text-[10px] px-2 gap-1"
+        class="h-5 text-[10px] px-1.5 gap-0.5"
         @click="selectPreset(preset.value)"
       >
-        <component :is="preset.icon" class="h-3 w-3" />
+        <component :is="preset.icon" class="h-2.5 w-2.5" />
         {{ preset.label() }}
       </Button>
     </div>

@@ -310,7 +310,7 @@ async function handleCreate() {
             id="databaseName"
             v-model="databaseName"
             placeholder="请输入数据库名称，例如: my_db"
-            class="w-full bg-muted/20 border-border/40 focus-visible:ring-1 focus-visible:ring-primary/50 transition-all h-10"
+            class="w-full bg-muted/20 border-border/40 focus-visible:ring-1 focus-visible:ring-primary/50 transition-[border-color,box-shadow] h-10"
             @keyup.enter="handleCreate"
             :disabled="isCreating"
             autofocus
@@ -326,7 +326,7 @@ async function handleCreate() {
               字符集 (Charset)
             </Label>
             <Select v-model="charset" :disabled="isCreating">
-              <SelectTrigger class="w-full bg-muted/20 border-border/40 focus:ring-1 focus:ring-primary/50 transition-all h-10">
+              <SelectTrigger class="w-full bg-muted/20 border-border/40 focus:ring-1 focus:ring-primary/50 transition-[border-color,box-shadow] h-10">
                 <SelectValue placeholder="选择字符集" />
               </SelectTrigger>
               <SelectContent position="popper" align="start" side="bottom" class="max-h-[250px] w-[200px]">
@@ -343,7 +343,7 @@ async function handleCreate() {
               排序规则 (Collation)
             </Label>
             <Select v-model="collation" :disabled="isCreating">
-              <SelectTrigger class="w-full bg-muted/20 border-border/40 focus:ring-1 focus:ring-primary/50 transition-all h-10">
+              <SelectTrigger class="w-full bg-muted/20 border-border/40 focus:ring-1 focus:ring-primary/50 transition-[border-color,box-shadow] h-10">
                 <SelectValue placeholder="选择排序规则" />
               </SelectTrigger>
               <SelectContent position="popper" align="start" side="bottom" class="max-h-[250px] w-[220px]">

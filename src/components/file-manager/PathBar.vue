@@ -260,6 +260,7 @@ function updateBookmarks(updated: Bookmark[]) {
             size="icon"
             class="h-7 w-7 shrink-0"
             :disabled="!canGoBack"
+            :aria-label="t('fileManager.back')"
             @click="goBack"
           >
             <ChevronLeft class="h-3.5 w-3.5" />
@@ -276,6 +277,7 @@ function updateBookmarks(updated: Bookmark[]) {
             size="icon"
             class="h-7 w-7 shrink-0"
             :disabled="!canGoForward"
+            :aria-label="t('fileManager.forward')"
             @click="goForward"
           >
             <ChevronRight class="h-3.5 w-3.5" />
@@ -385,7 +387,7 @@ function updateBookmarks(updated: Bookmark[]) {
             variant="ghost"
             size="icon"
             class="h-7 w-7 shrink-0"
-            :class="{ 'text-yellow-500': isBookmarked }"
+            :class="{ 'text-[var(--df-warning)]': isBookmarked }"
             @click="toggleBookmark"
           >
             <Star v-if="isBookmarked" class="h-3.5 w-3.5 fill-current" />

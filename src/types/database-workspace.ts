@@ -111,6 +111,12 @@ export interface DataSyncTabContext {
 /** 调度管理标签页上下文 */
 export interface SchedulerTabContext {
   type: 'scheduler'
+  /** 从 DataSyncPanel 等模块传递的预填数据 */
+  prefill?: {
+    taskType: string
+    configJson: string
+    name?: string
+  }
 }
 
 export interface ConnectionWorkspace {

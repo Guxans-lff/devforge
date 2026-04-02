@@ -153,9 +153,10 @@ onMounted(loadSnippets)
       </div>
       <div class="flex items-center gap-0.5">
         <button
-          class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/60 transition-all hover:bg-primary/10 hover:text-primary"
+          class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-primary/10 hover:text-primary"
           @click="openCreate"
-          title="新建片段"
+          :aria-label="t('terminal.newSnippet')"
+          :title="t('terminal.newSnippet')"
         >
           <Plus class="h-4 w-4" />
         </button>
@@ -185,7 +186,7 @@ onMounted(loadSnippets)
           <CodeXml class="h-6 w-6 text-muted-foreground/40" />
         </div>
         <p class="text-xs font-medium text-muted-foreground/70 mb-1">{{ t('terminal.noSnippets') }}</p>
-        <p class="text-[11px] text-muted-foreground/40">点击右上角 + 创建您的第一个命令片段</p>
+        <p class="text-[11px] text-muted-foreground/40">{{ t('terminal.noSnippetsHint') }}</p>
       </div>
 
       <!-- 列表 -->
@@ -193,7 +194,7 @@ onMounted(loadSnippets)
         <div
           v-for="snippet in filteredSnippets"
           :key="snippet.id"
-          class="group rounded-lg bg-background/60 border border-border/30 p-3 hover:bg-background hover:border-border/60 hover:shadow-sm transition-all duration-200 cursor-default"
+          class="group rounded-lg bg-background/60 border border-border/30 p-3 hover:bg-background hover:border-border/60 hover:shadow-sm transition-[background-color,border-color,box-shadow] duration-200 cursor-default"
           @click="sendCommand(snippet.command)"
         >
           <div class="flex items-center justify-between mb-2">
@@ -209,14 +210,16 @@ onMounted(loadSnippets)
               <button
                 class="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-muted hover:text-foreground/70 transition-colors"
                 @click.stop="openEdit(snippet)"
-                title="编辑"
+                :aria-label="t('common.edit')"
+                :title="t('common.edit')"
               >
                 <Pencil class="h-3 w-3" />
               </button>
               <button
                 class="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-destructive/10 hover:text-destructive transition-colors"
                 @click.stop="requestDelete(snippet)"
-                title="删除"
+                :aria-label="t('common.delete')"
+                :title="t('common.delete')"
               >
                 <Trash2 class="h-3 w-3" />
               </button>
@@ -242,7 +245,7 @@ onMounted(loadSnippets)
       <div class="grid gap-4 py-4">
         <div class="grid gap-2 px-6">
           <label class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{{ t('terminal.snippetTitle') }}</label>
-          <Input v-model="formTitle" class="h-9 text-sm" placeholder="例如：Docker 清理..." />
+          <Input v-model="formTitle" class="h-9 text-sm" :placeholder="t('terminal.snippetTitlePlaceholder')" />
         </div>
         <div class="grid gap-2 px-6">
           <label class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{{ t('terminal.snippetCommand') }}</label>
@@ -254,20 +257,20 @@ onMounted(loadSnippets)
               color: 'var(--color-foreground)',
             }"
             class="w-full rounded-lg border border-input px-3 py-2.5 text-xs font-mono leading-relaxed resize-none transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
-            placeholder="输入 shell 命令..."
+            :placeholder="t('terminal.snippetCommandPlaceholder')"
           />
         </div>
         <div class="grid gap-2 px-6">
           <div class="flex items-center justify-between">
             <label class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{{ t('terminal.snippetDescription') }}</label>
-            <span class="text-[10px] text-muted-foreground/50">可选</span>
+            <span class="text-[10px] text-muted-foreground/50">{{ t('common.optional') }}</span>
           </div>
-          <Input v-model="formDescription" class="h-9 text-sm" placeholder="简要说明该命令的用途..." />
+          <Input v-model="formDescription" class="h-9 text-sm" :placeholder="t('terminal.snippetDescPlaceholder')" />
         </div>
         <div class="grid gap-2 px-6">
           <div class="flex items-center justify-between">
             <label class="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">{{ t('terminal.snippetCategory') }}</label>
-            <span class="text-[10px] text-muted-foreground/50">默认: default</span>
+            <span class="text-[10px] text-muted-foreground/50">{{ t('terminal.snippetCategoryDefault') }}</span>
           </div>
           <Input v-model="formCategory" class="h-9 text-sm" placeholder="default" />
         </div>

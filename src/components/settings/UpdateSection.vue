@@ -41,10 +41,10 @@ function handleDownload() {
 <template>
   <div class="grid gap-4">
     <!-- 当前版本 + 手动检查 -->
-    <div class="group p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-center justify-between">
         <div class="flex items-start gap-4">
-          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/60 transition-colors group-hover:bg-primary/10 group-hover:text-primary">
+          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
             <Download class="h-5 w-5" />
           </div>
           <div class="space-y-0.5">
@@ -59,7 +59,7 @@ function handleDownload() {
           variant="outline"
           size="sm"
           :disabled="checking || downloading"
-          class="h-9 gap-2 rounded-xl border-border/50 bg-background/50 px-4 text-xs font-bold transition-all hover:border-primary/30 hover:bg-primary/5"
+          class="h-9 gap-2 rounded-xl border-border/50 bg-background/50 px-4 text-xs font-bold transition-[background-color,border-color] hover:border-primary/30 hover:bg-primary/5"
           @click="handleCheck"
         >
           <Loader2 v-if="checking" class="h-3.5 w-3.5 animate-spin" />
@@ -75,18 +75,18 @@ function handleDownload() {
       </div>
 
       <!-- 已是最新版本 -->
-      <div v-if="upToDate && !updateAvailable && !error" class="mt-3 pl-14 flex items-center gap-2 text-xs text-emerald-600 dark:text-emerald-400">
+      <div v-if="upToDate && !updateAvailable && !error" class="mt-3 pl-14 flex items-center gap-2 text-xs text-df-success">
         <CheckCircle class="h-3.5 w-3.5 shrink-0" />
         <span>{{ t('updater.noUpdate') }}</span>
       </div>
 
       <!-- 有可用更新 -->
       <div v-if="updateAvailable && !downloading" class="mt-4 pl-14">
-        <div class="p-4 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
+        <div class="p-4 rounded-xl bg-df-success/5 border border-df-success/20">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
-              <CheckCircle class="h-4 w-4 text-emerald-500" />
-              <span class="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+              <CheckCircle class="h-4 w-4 text-df-success" />
+              <span class="text-sm font-bold text-df-success">
                 {{ t('updater.newVersion') }} v{{ updateVersion }}
               </span>
             </div>
@@ -115,7 +115,7 @@ function handleDownload() {
           </div>
           <div class="h-2 rounded-full bg-muted/30 overflow-hidden">
             <div
-              class="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+              class="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
               :style="{ width: `${downloadProgress}%` }"
             />
           </div>
@@ -124,9 +124,9 @@ function handleDownload() {
     </div>
 
     <!-- 自动检查开关 -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500/5 text-amber-500/60 transition-colors group-hover:bg-amber-500/10 group-hover:text-amber-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <RefreshCw class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">

@@ -85,7 +85,7 @@ onMounted(() => mgmt.init())
       <div v-else class="flex-1 flex h-full flex-col items-center justify-center overflow-hidden relative">
         <div class="absolute inset-0 opacity-10 pointer-events-none">
           <div class="absolute top-1/4 left-1/4 h-64 w-64 rounded-full bg-primary/20 blur-3xl animate-pulse" />
-          <div class="absolute bottom-1/4 right-1/4 h-80 w-80 rounded-full bg-amber-500/20 blur-3xl" />
+          <div class="absolute bottom-1/4 right-1/4 h-80 w-80 rounded-full bg-df-warning/20 blur-3xl" />
         </div>
         <div class="relative flex flex-col items-center text-center max-w-[280px]">
           <div class="relative mb-8">
@@ -122,7 +122,7 @@ onMounted(() => mgmt.init())
           <div class="grid grid-cols-2 gap-4">
             <div class="space-y-1.5">
               <Label class="text-[11px] font-bold text-muted-foreground ml-1 uppercase">用户名</Label>
-              <Input v-model="mgmt.createForm.value.username" class="h-9 text-sm bg-muted/20 border-border/50 focus:border-primary/40 focus:bg-background transition-all" placeholder="例如: web_app" />
+              <Input v-model="mgmt.createForm.value.username" class="h-9 text-sm bg-muted/20 border-border/50 focus:border-primary/40 focus:bg-background transition-[border-color,background-color]" placeholder="例如: web_app" />
             </div>
             <div class="space-y-1.5">
               <Label class="text-[11px] font-bold text-muted-foreground ml-1 uppercase">登录主机</Label>
@@ -175,8 +175,8 @@ onMounted(() => mgmt.init())
     <Dialog v-model:open="mgmt.showChangePassword.value">
       <DialogContent class="max-w-sm rounded-2xl p-0 overflow-hidden shadow-2xl border-border/20">
         <div class="p-6">
-          <div class="h-12 w-12 rounded-2xl bg-amber-500/10 flex items-center justify-center mb-4 border border-amber-500/20">
-            <KeyRound class="h-6 w-6 text-amber-600" />
+          <div class="h-12 w-12 rounded-2xl bg-df-warning/10 flex items-center justify-center mb-4 border border-df-warning/20">
+            <KeyRound class="h-6 w-6 text-df-warning" />
           </div>
           <DialogTitle class="text-base font-bold mb-1">重置密码</DialogTitle>
           <p class="text-xs text-muted-foreground mb-6">正在为 <b>{{ mgmt.selectedUser.value?.user }}</b> 设置新的访问凭据</p>
@@ -189,7 +189,7 @@ onMounted(() => mgmt.init())
         </div>
         <div class="p-4 bg-muted/20 border-t border-border/10 flex gap-2">
           <Button variant="ghost" class="flex-1 h-9 text-xs" @click="mgmt.showChangePassword.value = false">取消</Button>
-          <Button class="flex-1 h-9 bg-amber-600 hover:bg-amber-700 text-xs shadow-lg shadow-amber-600/20" :disabled="mgmt.isChangingPassword.value || !mgmt.newPassword.value" @click="mgmt.handleChangePassword">
+          <Button class="flex-1 h-9 bg-df-warning hover:bg-df-warning/90 text-xs shadow-lg shadow-df-warning/20" :disabled="mgmt.isChangingPassword.value || !mgmt.newPassword.value" @click="mgmt.handleChangePassword">
             <Loader2 v-if="mgmt.isChangingPassword.value" class="h-3 w-3 animate-spin mr-2" />
             提交重置
           </Button>

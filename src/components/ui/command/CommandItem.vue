@@ -66,10 +66,10 @@ onUnmounted(() => {
     :id="id"
     ref="itemRef"
     data-slot="command-item"
-    :class="cn('group/item relative flex cursor-pointer items-center gap-4 rounded-md px-4 py-3 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4.5 transition-all duration-200 [&_svg:not([class*=\'text-\'])]:text-muted-foreground',
+    :class="cn('group/item relative flex cursor-pointer items-center gap-4 rounded-md px-4 py-3 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*=\'size-\'])]:size-4.5 transition-[background-color,color,translate] duration-200 [&_svg:not([class*=\'text-\'])]:text-muted-foreground',
           'data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground hover:bg-accent hover:text-accent-foreground',
           'data-[highlighted]:translate-x-1 hover:translate-x-1',
-          'before:absolute before:left-0 before:top-1/2 before:h-6 before:w-1 before:-translate-y-1/2 before:rounded-full before:bg-primary before:opacity-0 transition-all duration-200 before:transition-opacity',
+          'before:absolute before:left-0 before:top-1/2 before:h-6 before:w-1 before:-translate-y-1/2 before:rounded-full before:bg-primary before:opacity-0 transition-[background-color,color,translate] duration-200 before:transition-opacity',
           'data-[highlighted]:before:opacity-100 hover:before:opacity-100',
           props.class)"
     @select="(e) => {

@@ -3,7 +3,7 @@
  * 表编辑器面板（编排层）
  * 使用 useTableEditor composable 管理业务逻辑，委托子组件渲染各 Tab 内容
  */
-import { ref, computed, onMounted, onUnmounted, nextTick, toRef } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Plus, X, Loader2, Code, Play, ChevronRight, Table2, Key, FileCode,
@@ -30,6 +30,7 @@ const emit = defineEmits<{ success: [] }>()
 
 const { t } = useI18n()
 const columnsScrollRef = ref<HTMLElement>()
+const contextMenuRef = ref<HTMLElement>()
 
 // — 核心 composable —
 const editor = useTableEditor({
@@ -43,15 +44,59 @@ const editor = useTableEditor({
 
 // ===== Tab 定义 =====
 const tabs = computed(() => [
-  { key: 'columns', label: '字段', icon: Columns3, count: editor.columns.value.length },
-  { key: 'indexes', label: '索引', icon: Key, count: editor.indexes.value.length },
-  { key: 'foreignKeys', label: '外键', icon: Link2, count: editor.foreignKeys.value.length },
-  { key: 'triggers', label: '触发器', icon: Zap, count: editor.triggers.value.length },
+  { key: 'columns', label: t('tableEditor.tabFields'), icon: Columns3, count: editor.columns.value.length },
+  { key: 'indexes', label: t('tableEditor.tabIndexes'), icon: Key, count: editor.indexes.value.length },
+  { key: 'foreignKeys', label: t('tableEditor.tabForeignKeys'), icon: Link2, count: editor.foreignKeys.value.length },
+  { key: 'triggers', label: t('tableEditor.tabTriggers'), icon: Zap, count: editor.triggers.value.length },
   ...(editor.isAlterMode.value ? [{ key: 'ddl', label: 'DDL', icon: FileCode, count: 0 }] : []),
 ])
 
 // ===== 字段模板下拉 =====
 const showFieldTemplates = ref(false)
+
+// ===== 右键菜单键盘导航 =====
+function handleContextMenuKeydown(e: KeyboardEvent) {
+  const menu = contextMenuRef.value
+  if (!menu) return
+  const items = menu.querySelectorAll<HTMLElement>('[role="menuitem"]')
+  if (items.length === 0) return
+  const active = menu.querySelector<HTMLElement>('[role="menuitem"]:focus')
+  const idx = active ? Array.from(items).indexOf(active) : -1
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    const next = idx < items.length - 1 ? idx + 1 : 0
+    items[next]?.focus()
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    const prev = idx > 0 ? idx - 1 : items.length - 1
+    items[prev]?.focus()
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    editor.closeContextMenu()
+  } else if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    active?.click()
+  }
+}
+
+// 右键菜单打开时自动聚焦第一项
+watch(() => editor.showContextMenu.value, async (show) => {
+  if (show) {
+    await nextTick()
+    contextMenuRef.value?.querySelector<HTMLElement>('[role="menuitem"]')?.focus()
+  }
+})
+
+// ===== 字符集选项（动态：包含 API 返回的当前值 + 预设列表）=====
+const CHARSET_PRESETS = ['utf8mb4', 'utf8', 'utf8mb3', 'latin1', 'gbk', 'gb2312']
+const charsetOptions = computed(() => {
+  const current = editor.tableCharset.value
+  if (current && !CHARSET_PRESETS.includes(current)) {
+    return [current, ...CHARSET_PRESETS]
+  }
+  return CHARSET_PRESETS
+})
 
 // ===== 添加字段并滚动到底部 =====
 async function handleAddColumn() {
@@ -134,19 +179,8 @@ onUnmounted(() => {
 <template>
   <div class="flex flex-col h-full bg-background text-foreground">
     <!-- ===== 顶部工具栏 ===== -->
-    <div class="flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-muted/30 shrink-0">
-      <!-- 面包屑 -->
-      <div class="flex items-center gap-1 text-xs text-muted-foreground mr-2 min-w-0 shrink">
-        <span class="truncate max-w-[100px]">{{ editor.connectionHost.value }}</span>
-        <ChevronRight class="size-3 shrink-0 opacity-40" />
-        <span class="truncate max-w-[100px]">{{ database }}</span>
-        <ChevronRight class="size-3 shrink-0 opacity-40" />
-        <span class="font-medium text-foreground truncate max-w-[120px]">{{ editor.tableName.value || '新建表' }}</span>
-      </div>
-
-      <div class="flex-1" />
-
-      <!-- 添加按钮 -->
+    <div class="flex items-center gap-1.5 px-3 py-1.5 border-b border-border bg-background shrink-0">
+      <!-- 左侧：添加、快速字段、过滤、批量删除 -->
       <Button
         v-if="editor.activeTab.value !== 'ddl'"
         variant="ghost" size="sm"
@@ -154,33 +188,24 @@ onUnmounted(() => {
         @click="handleAdd"
       >
         <Plus class="size-3" />
-        添加
+        {{ t('tableEditor.add') }}
       </Button>
 
       <!-- 字段模板（仅在 columns tab 显示） -->
       <div v-if="editor.activeTab.value === 'columns'" class="relative" data-field-templates>
         <Button variant="ghost" size="sm" class="h-6 px-2 text-xs" @click.stop="showFieldTemplates = !showFieldTemplates">
-          快速字段
+          {{ t('tableEditor.quickField') }}
         </Button>
-        <div v-if="showFieldTemplates" class="absolute right-0 top-7 z-30 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[140px]">
+        <div v-if="showFieldTemplates" role="menu" class="absolute left-0 top-7 z-30 bg-popover border border-border rounded-md shadow-lg py-1 min-w-[140px]">
           <button
             v-for="tpl in FIELD_TEMPLATES" :key="tpl.label"
-            class="w-full px-3 py-1.5 text-left text-xs hover:bg-accent"
+            role="menuitem"
+            class="w-full px-3 py-1.5 text-left text-xs hover:bg-accent focus:bg-accent focus:outline-none"
             @click="handleInsertTemplate(tpl)"
           >
             {{ tpl.label }}
           </button>
         </div>
-      </div>
-
-      <!-- 字段过滤（仅在 columns tab 显示） -->
-      <div v-if="editor.activeTab.value === 'columns'" class="relative">
-        <Search class="absolute left-1.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/50" />
-        <Input
-          v-model="editor.columnFilter.value"
-          class="h-6 w-32 pl-6 text-xs"
-          placeholder="过滤字段..."
-        />
       </div>
 
       <!-- 批量删除 -->
@@ -191,15 +216,28 @@ onUnmounted(() => {
         @click="editor.batchDelete"
       >
         <Trash2 class="size-3" />
-        删除 ({{ editor.selectedRows.value.size }})
+        {{ t('tableEditor.deleteCount', { count: editor.selectedRows.value.size }) }}
       </Button>
+
+      <div class="flex-1" />
+
+      <!-- 右侧：过滤、撤销/重做、预览/执行 -->
+      <!-- 字段过滤（仅在 columns tab 显示） -->
+      <div v-if="editor.activeTab.value === 'columns'" class="relative">
+        <Search class="absolute left-1.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/50" />
+        <Input
+          v-model="editor.columnFilter.value"
+          class="h-6 w-32 pl-6 text-xs"
+          :placeholder="t('tableEditor.filterFields')"
+        />
+      </div>
 
       <!-- 撤销/重做 -->
       <div class="flex items-center gap-0.5 border-l border-border pl-1.5 ml-1">
-        <Button variant="ghost" size="sm" class="h-6 w-6 p-0" :disabled="editor.undoStack.value.length === 0" title="撤销 (Ctrl+Z)" @click="editor.undo">
+        <Button variant="ghost" size="sm" class="h-6 w-6 p-0" :disabled="editor.undoStack.value.length === 0" :title="t('tableEditor.undoShortcut')" :aria-label="t('tableEditor.undo')" @click="editor.undo">
           ↩
         </Button>
-        <Button variant="ghost" size="sm" class="h-6 w-6 p-0" :disabled="editor.redoStack.value.length === 0" title="重做 (Ctrl+Shift+Z)" @click="editor.redo">
+        <Button variant="ghost" size="sm" class="h-6 w-6 p-0" :disabled="editor.redoStack.value.length === 0" :title="t('tableEditor.redoShortcut')" :aria-label="t('tableEditor.redo')" @click="editor.redo">
           ↪
         </Button>
       </div>
@@ -234,28 +272,28 @@ onUnmounted(() => {
         class="w-full flex items-center gap-1.5 px-3 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
         @click="editor.metaCollapsed.value = !editor.metaCollapsed.value"
       >
-        <ChevronRight class="size-3 transition-transform" :class="editor.metaCollapsed.value ? '' : 'rotate-90'" />
+        <ChevronRight class="size-3 transition-transform duration-150" :class="editor.metaCollapsed.value ? '' : 'rotate-90'" />
         <Table2 class="size-3" />
-        表属性
+        {{ t('tableEditor.tableProperties') }}
       </button>
-      <div v-if="!editor.metaCollapsed.value" class="px-3 pb-2 grid grid-cols-[auto_1fr_auto_1fr] gap-x-3 gap-y-1 items-center text-xs">
-        <label class="text-muted-foreground whitespace-nowrap">表名</label>
-        <Input v-model="editor.tableName.value" class="h-6 text-xs font-mono" placeholder="table_name" />
-        <label class="text-muted-foreground whitespace-nowrap">注释</label>
-        <Input v-model="editor.tableComment.value" class="h-6 text-xs" placeholder="可选" />
+      <div v-if="!editor.metaCollapsed.value" class="px-3 pb-2 grid grid-cols-[auto_1fr_auto_1fr] gap-x-2 gap-y-1.5 items-center text-xs">
+        <label for="te-table-name" class="text-muted-foreground whitespace-nowrap">{{ t('tableEditor.labelTableName') }}</label>
+        <Input id="te-table-name" v-model="editor.tableName.value" class="h-6 text-xs font-mono" placeholder="table_name" />
+        <label for="te-table-comment" class="text-muted-foreground whitespace-nowrap">{{ t('tableEditor.labelComment') }}</label>
+        <Input id="te-table-comment" v-model="editor.tableComment.value" class="h-6 text-xs" :placeholder="t('tableEditor.placeholderOptional')" />
         <template v-if="editor.isMysql.value">
-          <label class="text-muted-foreground whitespace-nowrap">引擎</label>
+          <label for="te-table-engine" class="text-muted-foreground whitespace-nowrap">{{ t('tableEditor.labelEngine') }}</label>
           <Select v-model="editor.tableEngine.value">
-            <SelectTrigger class="h-6 text-xs"><SelectValue /></SelectTrigger>
+            <SelectTrigger id="te-table-engine" class="h-6 text-xs w-full"><SelectValue :placeholder="t('tableEditor.labelEngine')" /></SelectTrigger>
             <SelectContent>
               <SelectItem v-for="e in ['InnoDB', 'MyISAM', 'MEMORY', 'ARCHIVE']" :key="e" :value="e" class="text-xs">{{ e }}</SelectItem>
             </SelectContent>
           </Select>
-          <label class="text-muted-foreground whitespace-nowrap">字符集</label>
+          <label for="te-table-charset" class="text-muted-foreground whitespace-nowrap">{{ t('tableEditor.labelCharset') }}</label>
           <Select v-model="editor.tableCharset.value">
-            <SelectTrigger class="h-6 text-xs"><SelectValue /></SelectTrigger>
+            <SelectTrigger id="te-table-charset" class="h-6 text-xs w-full"><SelectValue :placeholder="t('tableEditor.labelCharset')" /></SelectTrigger>
             <SelectContent>
-              <SelectItem v-for="c in ['utf8mb4', 'utf8', 'latin1', 'gbk', 'gb2312']" :key="c" :value="c" class="text-xs">{{ c }}</SelectItem>
+              <SelectItem v-for="c in charsetOptions" :key="c" :value="c" class="text-xs">{{ c }}</SelectItem>
             </SelectContent>
           </Select>
         </template>
@@ -347,11 +385,11 @@ onUnmounted(() => {
         </div>
         <template v-else>
           <div class="flex items-center justify-between mb-2">
-            <span class="text-xs text-muted-foreground">表定义语句 (DDL)</span>
+            <span class="text-xs text-muted-foreground">{{ t('tableEditor.ddlStatement') }}</span>
             <Button variant="ghost" size="sm" class="h-6 px-2 text-xs gap-1" @click="editor.copyToClipboard(editor.ddlContent.value, 'ddl')">
-              <Check v-if="editor.ddlCopied.value" class="size-3 text-green-500" />
+              <Check v-if="editor.ddlCopied.value" class="size-3 text-df-success" />
               <Copy v-else class="size-3" />
-              {{ editor.ddlCopied.value ? '已复制' : '复制' }}
+              {{ editor.ddlCopied.value ? t('tableEditor.copied') : t('tableEditor.copy') }}
             </Button>
           </div>
           <pre class="flex-1 min-h-0 overflow-auto p-3 text-xs font-mono bg-muted/30 border border-border rounded-md whitespace-pre-wrap break-all" v-html="editor.highlightSql(editor.ddlContent.value)" />
@@ -361,11 +399,11 @@ onUnmounted(() => {
 
     <!-- ===== SQL 预览面板 ===== -->
     <div v-if="editor.showSqlPreview.value" class="border-t border-border shrink-0">
-      <div class="flex items-center justify-between px-3 py-1 bg-muted/30">
-        <span class="text-xs text-muted-foreground">SQL 预览</span>
+      <div class="flex items-center justify-between px-3 py-1 bg-muted/50">
+        <span class="text-xs text-muted-foreground">{{ t('tableEditor.sqlPreview') }}</span>
         <div class="flex items-center gap-1">
           <Button variant="ghost" size="sm" class="h-5 px-1.5 text-[10px] gap-1" @click="editor.copyToClipboard(editor.generatedSql.value, 'sql')">
-            <Check v-if="editor.sqlCopied.value" class="size-3 text-green-500" />
+            <Check v-if="editor.sqlCopied.value" class="size-3 text-df-success" />
             <Copy v-else class="size-3" />
           </Button>
           <Button variant="ghost" size="sm" class="h-5 w-5 p-0" @click="editor.showSqlPreview.value = false">
@@ -373,25 +411,25 @@ onUnmounted(() => {
           </Button>
         </div>
       </div>
-      <pre class="max-h-40 overflow-auto px-3 py-2 text-xs font-mono bg-zinc-950/90 text-zinc-200 whitespace-pre-wrap break-all" v-html="editor.highlightSql(editor.generatedSql.value)" />
+      <pre class="max-h-40 overflow-auto px-3 py-2 text-xs font-mono bg-muted/30 text-foreground whitespace-pre-wrap break-all" v-html="editor.highlightSql(editor.generatedSql.value)" />
     </div>
 
     <!-- ===== 底部状态栏 ===== -->
     <div class="flex items-center justify-between px-3 py-1 border-t border-border bg-muted/20 text-[10px] text-muted-foreground shrink-0">
       <div class="flex items-center gap-3">
-        <span>字段: {{ editor.columns.value.length }}</span>
-        <span>索引: {{ editor.indexes.value.length }}</span>
-        <span>外键: {{ editor.foreignKeys.value.length }}</span>
+        <span>{{ t('tableEditor.fieldCount', { count: editor.columns.value.length }) }}</span>
+        <span>{{ t('tableEditor.indexCount', { count: editor.indexes.value.length }) }}</span>
+        <span>{{ t('tableEditor.fkCount', { count: editor.foreignKeys.value.length }) }}</span>
         <template v-if="editor.isAlterMode.value">
-          <span class="text-green-500" v-if="editor.changeStats.value.added > 0">+{{ editor.changeStats.value.added }}</span>
-          <span class="text-orange-500" v-if="editor.changeStats.value.modified > 0">~{{ editor.changeStats.value.modified }}</span>
-          <span class="text-red-500" v-if="editor.changeStats.value.deleted > 0">-{{ editor.changeStats.value.deleted }}</span>
+          <span class="text-df-success" v-if="editor.changeStats.value.added > 0">+{{ editor.changeStats.value.added }}</span>
+          <span class="text-df-warning" v-if="editor.changeStats.value.modified > 0">~{{ editor.changeStats.value.modified }}</span>
+          <span class="text-destructive" v-if="editor.changeStats.value.deleted > 0">-{{ editor.changeStats.value.deleted }}</span>
         </template>
       </div>
       <div class="flex items-center gap-2">
-        <span v-if="editor.validationErrors.value.length > 0" class="text-red-500">{{ editor.validationErrors.value.length }} 个错误</span>
+        <span v-if="editor.validationErrors.value.length > 0" class="text-destructive">{{ t('tableEditor.errorCount', { count: editor.validationErrors.value.length }) }}</span>
         <span class="text-muted-foreground/50">
-          {{ editor.isAlterMode.value ? '修改表' : '新建表' }} · {{ driver }}
+          {{ editor.isAlterMode.value ? t('tableEditor.alterTable') : t('tableEditor.createTable') }} · {{ driver }}
         </span>
       </div>
     </div>
@@ -400,34 +438,37 @@ onUnmounted(() => {
     <Teleport to="body">
       <div
         v-if="editor.showContextMenu.value"
+        ref="contextMenuRef"
+        role="menu"
         class="fixed z-[9999] bg-popover border border-border rounded-md shadow-lg py-1 min-w-[160px] text-xs"
         :style="{ left: editor.contextMenuPos.value.x + 'px', top: editor.contextMenuPos.value.y + 'px' }"
+        @keydown="handleContextMenuKeydown"
       >
-        <button class="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2" @click="editor.contextInsertAbove">
+        <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2" @click="editor.contextInsertAbove">
           <span class="w-4 text-center text-muted-foreground/50">↑</span>
-          在上方插入行
+          {{ t('tableEditor.insertAbove') }}
         </button>
-        <button class="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2" @click="editor.contextInsertBelow">
+        <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2" @click="editor.contextInsertBelow">
           <span class="w-4 text-center text-muted-foreground/50">↓</span>
-          在下方插入行
+          {{ t('tableEditor.insertBelow') }}
         </button>
-        <div class="my-1 border-t border-border" />
-        <button class="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2" @click="editor.contextDuplicate">
+        <div role="separator" class="my-1 border-t border-border" />
+        <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2" @click="editor.contextDuplicate">
           <Copy class="size-3 text-muted-foreground/50" />
-          复制字段
+          {{ t('tableEditor.duplicateField') }}
         </button>
-        <button class="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2" @click="editor.contextTogglePK">
+        <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2" @click="editor.contextTogglePK">
           <Key class="size-3 text-muted-foreground/50" />
-          切换主键
+          {{ t('tableEditor.togglePrimaryKey') }}
         </button>
-        <button class="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2" @click="editor.contextCopyName">
+        <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2" @click="editor.contextCopyName">
           <Copy class="size-3 text-muted-foreground/50" />
-          复制字段名
+          {{ t('tableEditor.copyFieldName') }}
         </button>
-        <div class="my-1 border-t border-border" />
-        <button class="w-full px-3 py-1.5 text-left hover:bg-accent flex items-center gap-2 text-destructive" @click="editor.contextDelete">
+        <div role="separator" class="my-1 border-t border-border" />
+        <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2 text-destructive" @click="editor.contextDelete">
           <X class="size-3" />
-          删除字段
+          {{ t('tableEditor.deleteField') }}
         </button>
       </div>
     </Teleport>

@@ -119,3 +119,33 @@ pnpm build  # 触发 vue-tsc
 - MySQL `USE` 语句需用 `execute_unprepared()` 执行，不能走 prepared statement
 - Rust 编译较慢，`cargo check` 优先用于验证，完整构建用 `tauri:build`
 - Windows 平台，路径分隔符注意兼容性
+
+---
+
+## Design Context
+
+> 由 Impeccable `/teach-impeccable` 生成，详见 [.impeccable.md](.impeccable.md)
+
+### Users
+- **目标用户**：通用 IT 人员 —— 开发者、运维工程师、DBA、测试人员
+- **使用场景**：日常开发运维中管理数据库、SSH 远程连接、SFTP 文件传输、批量命令执行
+- **核心诉求**：一个工具替代多款工具，减少切换，提高效率
+- **使用频率**：工作日全天高频使用，长时间驻留桌面
+
+### Brand Personality
+- **品牌个性**：专业 · 高效 · 精致
+- **语气**：沉稳可靠但不刻板，现代新颖但不花哨
+- **情感目标**：安心、掌控感、专注
+
+### Aesthetic Direction
+- **视觉调性**：JetBrains / DataGrip 风格 —— 信息密度高、功能分区清晰、暗色主题为主
+- **主题**：暗色优先（dark-first）
+- **配色基底**：zinc 色系（oklch），蓝紫色调微妙偏移（hue ~286）
+- **反面参考**：不要消费级 SaaS 大留白、不要 Electron 套壳感、不要 AI 味设计
+
+### Design Principles
+1. **信息密度优先** — 每一像素为信息服务，紧凑不等于拥挤
+2. **操作零等待** — 所有交互有即时反馈，不让用户等、不让用户猜
+3. **键盘优先** — 快捷键覆盖高频操作，Tab 导航清晰，命令面板随时可达
+4. **沉稳不花哨** — 动效克制有目的，彩色仅用于语义。但鼓励添加精心设计的装饰细节（industrial-grid、noise-texture、状态脉冲点、hover 微交互）来提升高级感和品牌辨识度
+5. **一致到像素** — 间距、圆角、阴影、字号全走 design tokens，模块间统一视觉语言

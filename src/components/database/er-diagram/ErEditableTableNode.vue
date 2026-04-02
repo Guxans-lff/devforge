@@ -92,7 +92,7 @@ function formatType(col: { dataType: string; length?: number }): string {
   <ContextMenu>
     <ContextMenuTrigger as-child>
       <div
-        class="min-w-[200px] max-w-[300px] rounded-lg border bg-background shadow-md transition-all cursor-pointer"
+        class="min-w-[200px] max-w-[300px] rounded-lg border bg-background shadow-md transition-[border-color,box-shadow] cursor-pointer"
         :class="[
           data.isSelected
             ? 'ring-2 ring-primary border-primary'
@@ -139,7 +139,7 @@ function formatType(col: { dataType: string; length?: number }): string {
           >
             <KeyRound
               v-if="col.isPrimaryKey"
-              class="h-3 w-3 shrink-0 text-amber-500"
+              class="h-3 w-3 shrink-0 text-df-warning"
             />
             <span v-else class="h-3 w-3 shrink-0" />
             <span

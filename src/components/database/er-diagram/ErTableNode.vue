@@ -31,10 +31,10 @@ const hiddenCount = computed(() => sortedColumns.value.length - MAX_VISIBLE_COLU
 
 <template>
   <div
-    class="min-w-[200px] max-w-[300px] rounded-lg border bg-background shadow-md transition-all"
+    class="min-w-[200px] max-w-[300px] rounded-lg border bg-background shadow-md transition-[border-color,box-shadow]"
     :class="[
       selected ? 'ring-2 ring-primary border-primary' : 'border-border',
-      data.highlighted ? 'ring-2 ring-amber-400 border-amber-400' : '',
+      data.highlighted ? 'ring-2 ring-df-warning border-df-warning' : '',
     ]"
     @dblclick="emit('openTableEditor', data.tableName, data.database)"
   >
@@ -61,7 +61,7 @@ const hiddenCount = computed(() => sortedColumns.value.length - MAX_VISIBLE_COLU
       >
         <KeyRound
           v-if="col.isPrimaryKey"
-          class="h-3 w-3 shrink-0 text-amber-500"
+          class="h-3 w-3 shrink-0 text-df-warning"
         />
         <span v-else class="h-3 w-3 shrink-0" />
         <span class="font-mono truncate" :class="col.isPrimaryKey ? 'font-bold text-foreground' : 'text-foreground/80'">

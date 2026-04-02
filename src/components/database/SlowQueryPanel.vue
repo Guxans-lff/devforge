@@ -67,7 +67,7 @@ onMounted(() => { fetchDigests() })
     <!-- 标题栏 -->
     <div class="mb-4 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="p-2 rounded-xl bg-rose-500/10 text-rose-500 shadow-sm">
+        <div class="p-2 rounded-xl bg-destructive/10 text-destructive shadow-sm">
           <Clock class="h-5 w-5" />
         </div>
         <div>
@@ -112,21 +112,21 @@ onMounted(() => { fetchDigests() })
             <tr v-for="(d, i) in digests" :key="i" class="text-xs hover:bg-primary/[0.03] transition-colors group">
               <td class="px-4 py-3 font-mono font-bold text-muted-foreground/40">{{ i + 1 }}</td>
               <td class="px-4 py-3 max-w-md">
-                <div class="font-mono text-[11px] leading-relaxed text-foreground/80 line-clamp-2 group-hover:line-clamp-none transition-all">
+                <div class="font-mono text-[11px] leading-relaxed text-foreground/80 line-clamp-2 group-hover:line-clamp-none">
                   {{ d.digestText }}
                 </div>
                 <div v-if="d.lastSeen" class="text-[10px] text-muted-foreground/30 mt-1">
                   最后执行: {{ d.lastSeen }}
                 </div>
               </td>
-              <td class="px-4 py-3 text-right font-mono font-bold text-amber-500">{{ formatRows(d.execCount) }}</td>
-              <td class="px-4 py-3 text-right font-mono font-bold" :class="d.avgTimeMs > 1000 ? 'text-rose-500' : 'text-foreground/70'">
+              <td class="px-4 py-3 text-right font-mono font-bold text-df-warning">{{ formatRows(d.execCount) }}</td>
+              <td class="px-4 py-3 text-right font-mono font-bold" :class="d.avgTimeMs > 1000 ? 'text-destructive' : 'text-foreground/70'">
                 {{ formatMs(d.avgTimeMs) }}
               </td>
-              <td class="px-4 py-3 text-right font-mono font-bold" :class="d.maxTimeMs > 5000 ? 'text-rose-500' : 'text-foreground/70'">
+              <td class="px-4 py-3 text-right font-mono font-bold" :class="d.maxTimeMs > 5000 ? 'text-destructive' : 'text-foreground/70'">
                 {{ formatMs(d.maxTimeMs) }}
               </td>
-              <td class="px-4 py-3 text-right font-mono font-bold text-purple-500">{{ formatMs(d.totalTimeMs) }}</td>
+              <td class="px-4 py-3 text-right font-mono font-bold text-primary">{{ formatMs(d.totalTimeMs) }}</td>
               <td class="px-4 py-3 text-right font-mono text-muted-foreground/60">{{ formatRows(d.rowsExamined) }}</td>
               <td class="px-4 py-3 text-right font-mono text-muted-foreground/60">{{ formatRows(d.rowsSent) }}</td>
               <td class="px-4 py-3">

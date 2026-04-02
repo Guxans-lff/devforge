@@ -100,7 +100,7 @@ function copyUrl() {
             >
               <span class="text-purple-600 dark:text-purple-400 font-mono font-medium shrink-0">{{ key }}</span>
               <span class="text-muted-foreground/50">=</span>
-              <span class="font-mono text-green-600 dark:text-green-400 break-all select-text">{{ val }}</span>
+              <span class="font-mono text-df-success break-all select-text">{{ val }}</span>
             </div>
           </div>
         </div>

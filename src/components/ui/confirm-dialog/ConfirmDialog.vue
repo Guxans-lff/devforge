@@ -68,14 +68,14 @@ function handleCancel() {
         <div class="flex w-full gap-2.5">
           <Button 
             variant="outline" 
-            class="flex-1 h-9 rounded-xl text-[11px] font-bold text-foreground/60 border-border/40 hover:bg-muted transition-all" 
+            class="flex-1 h-9 rounded-xl text-[11px] font-bold text-foreground/60 border-border/40 hover:bg-muted transition-colors" 
             @click="handleCancel"
           >
             {{ cancelLabel }}
           </Button>
           <Button
             :variant="variant === 'destructive' ? 'destructive' : 'default'"
-            class="flex-1 h-9 rounded-xl text-[11px] font-black shadow-lg shadow-primary/20 transition-all active:scale-[0.96]"
+            class="flex-1 h-9 rounded-xl text-[11px] font-black shadow-lg shadow-primary/20 transition-[background-color,color,box-shadow,scale] active:scale-[0.96]"
             :class="variant === 'destructive' ? 'shadow-destructive/20' : 'shadow-primary/20'"
             @click="handleConfirm"
           >

@@ -72,11 +72,11 @@ function formatTime(timestamp?: number): string {
         <div
           v-for="item in historyItems"
           :key="item.id"
-          class="group flex items-center gap-3 rounded-lg border border-border/20 bg-background/40 px-3 py-2.5 transition-all hover:bg-background/60"
+          class="group flex items-center gap-3 rounded-lg border border-border/20 bg-background/40 px-3 py-2.5 transition-[background-color] hover:bg-background/60"
         >
           <!-- Status Icon Indicator -->
           <div class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-muted/30 group-hover:bg-muted/50 transition-colors">
-            <CheckCircle2 v-if="item.status === 'completed'" class="h-4 w-4 text-emerald-500" />
+            <CheckCircle2 v-if="item.status === 'completed'" class="h-4 w-4 text-df-success" />
             <XCircle v-else class="h-4 w-4 text-destructive" />
           </div>
 
@@ -85,7 +85,7 @@ function formatTime(timestamp?: number): string {
             <div class="flex items-center gap-2">
               <p class="truncate text-[11px] font-bold text-foreground/80 group-hover:text-foreground transition-colors">{{ item.fileName }}</p>
               <ArrowUp v-if="item.type === 'upload'" class="h-2.5 w-2.5 text-primary/60" />
-              <ArrowDown v-else class="h-2.5 w-2.5 text-emerald-500/60" />
+              <ArrowDown v-else class="h-2.5 w-2.5 text-df-success/60" />
             </div>
             <p class="truncate text-[9px] font-medium text-muted-foreground/50">
               {{ formatBytes(item.totalBytes) }} <span class="mx-1 opacity-30">•</span> {{ formatDuration(item.startTime, item.endTime) }}

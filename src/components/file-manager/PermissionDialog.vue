@@ -155,7 +155,7 @@ async function handleConfirm() {
                         v-model="permissions[role + perm]" 
                         class="sr-only peer"
                       />
-                      <div class="w-5 h-5 rounded-md border-2 border-border/60 bg-background transition-all peer-checked:bg-primary peer-checked:border-primary peer-checked:shadow-[0_0_10px_rgba(var(--primary),0.2)] peer-focus:ring-4 peer-focus:ring-primary/10 group-active:scale-90"></div>
+                      <div class="w-5 h-5 rounded-md border-2 border-border/60 bg-background transition-[background-color,border-color,box-shadow,scale] peer-checked:bg-primary peer-checked:border-primary peer-checked:shadow-[0_0_10px_rgba(var(--primary),0.2)] peer-focus:ring-4 peer-focus:ring-primary/10 group-active:scale-90"></div>
                       <div class="absolute inset-0 flex items-center justify-center text-white scale-0 transition-transform peer-checked:scale-100">
                         <svg class="w-3 h-3 fill-current" viewBox="0 0 20 20"><path d="M0 11l2-2 5 5L18 3l2 2L7 18z"/></svg>
                       </div>
@@ -187,14 +187,14 @@ async function handleConfirm() {
         <DialogFooter class="flex gap-2.5 mt-5 p-0 sm:justify-start">
           <Button 
             variant="outline" 
-            class="flex-1 h-9 rounded-xl text-[11px] font-bold text-foreground/60 border-border/40 hover:bg-muted transition-all" 
+            class="flex-1 h-9 rounded-xl text-[11px] font-bold text-foreground/60 border-border/40 hover:bg-muted transition-colors" 
             @click="emit('update:open', false)"
           >
             {{ t('common.cancel') }}
           </Button>
           <Button 
             :disabled="saving" 
-            class="flex-1 h-9 rounded-xl text-[11px] font-black shadow-lg shadow-primary/20 transition-all active:scale-[0.96]" 
+            class="flex-1 h-9 rounded-xl text-[11px] font-black shadow-lg shadow-primary/20 transition-[background-color,color,box-shadow,scale] active:scale-[0.96]" 
             @click="handleConfirm"
           >
             <Loader2 v-if="saving" class="mr-2 h-3 w-3 animate-spin" />

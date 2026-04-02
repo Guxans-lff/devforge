@@ -20,7 +20,7 @@ const items = computed(() => {
   const result: { label: string; value: string; color?: string }[] = [
     { label: '总计', value: fmt(basic.totalCount, 0) },
     { label: '唯一', value: fmt(basic.uniqueCount, 0) },
-    { label: 'NULL', value: `${fmt(basic.nullCount, 0)} (${basic.nullPercent.toFixed(1)}%)`, color: basic.nullCount > 0 ? 'text-amber-500' : undefined },
+    { label: 'NULL', value: `${fmt(basic.nullCount, 0)} (${basic.nullPercent.toFixed(1)}%)`, color: basic.nullCount > 0 ? 'text-df-warning' : undefined },
   ]
 
   if (numeric) {
@@ -39,7 +39,7 @@ const items = computed(() => {
       { label: '平均长', value: fmt(strStats.avgLength, 1) },
     )
     if (strStats.emptyCount > 0) {
-      result.push({ label: '空串', value: fmt(strStats.emptyCount, 0), color: 'text-amber-500' })
+      result.push({ label: '空串', value: fmt(strStats.emptyCount, 0), color: 'text-df-warning' })
     }
   }
 

@@ -21,9 +21,9 @@ function handleTabSize(value: string) {
 <template>
   <div class="grid gap-4">
     <!-- Font Size Card -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/5 text-blue-500/60 transition-colors group-hover:bg-blue-500/10 group-hover:text-blue-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <Type class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">
@@ -32,10 +32,10 @@ function handleTabSize(value: string) {
         </div>
       </div>
       <Select :model-value="String(settingsStore.settings.editorFontSize)" @update:model-value="handleFontSize($event as string)">
-        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs transition-all focus:ring-primary/20">
+        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-border/50 font-bold text-xs transition-[border-color,box-shadow] focus:ring-primary/20">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+        <SelectContent class="bg-popover border-border/20 rounded-xl">
           <SelectItem v-for="size in [12, 13, 14, 15, 16, 18, 20, 22, 24]" :key="size" :value="String(size)" class="rounded-lg font-bold">
             {{ size }}px
           </SelectItem>
@@ -44,9 +44,9 @@ function handleTabSize(value: string) {
     </div>
 
     <!-- Tab Size Card -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-500/5 text-indigo-500/60 transition-colors group-hover:bg-indigo-500/10 group-hover:text-indigo-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <PanelLeft class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">
@@ -55,10 +55,10 @@ function handleTabSize(value: string) {
         </div>
       </div>
       <Select :model-value="String(settingsStore.settings.editorTabSize)" @update:model-value="handleTabSize($event as string)">
-        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-white/5 font-bold text-xs transition-all focus:ring-primary/20">
+        <SelectTrigger class="w-40 h-10 rounded-xl bg-background shadow-sm border-border/50 font-bold text-xs transition-[border-color,box-shadow] focus:ring-primary/20">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent class="backdrop-blur-xl bg-background/80 border-border/20 rounded-xl">
+        <SelectContent class="bg-popover border-border/20 rounded-xl">
           <SelectItem v-for="size in [2, 4, 8]" :key="size" :value="String(size)" class="rounded-lg font-bold">
             {{ size }} {{ size === 1 ? 'space' : 'spaces' }}
           </SelectItem>
@@ -67,9 +67,9 @@ function handleTabSize(value: string) {
     </div>
 
     <!-- Word Wrap Card -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-purple-500/5 text-purple-500/60 transition-colors group-hover:bg-purple-500/10 group-hover:text-purple-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <WrapText class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">
@@ -85,9 +85,9 @@ function handleTabSize(value: string) {
     </div>
 
     <!-- Minimap Card -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-pink-500/5 text-pink-500/60 transition-colors group-hover:bg-pink-500/10 group-hover:text-pink-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <Layout class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">

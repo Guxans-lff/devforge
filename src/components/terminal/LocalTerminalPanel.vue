@@ -3,7 +3,8 @@
  * 本地终端面板 — 使用 portable-pty 创建本地 Shell
  * 简化版 TerminalPanel，无 SSH 流控逻辑
  */
-import { ref, onMounted, onBeforeUnmount, onActivated, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -27,6 +28,7 @@ const emit = defineEmits<{
 
 const { activeTheme, activeThemeId } = useTheme()
 const settingsStore = useSettingsStore()
+const { t } = useI18n()
 const terminalRef = ref<HTMLDivElement>()
 const status = ref<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting')
 const errorMessage = ref('')
@@ -206,7 +208,17 @@ onBeforeUnmount(async () => {
   await cleanup()
 })
 
-// KeepAlive 场景：切回时重新 fit 终端并恢复 WebGL 渲染
+// KeepAlive 切走时：释放 GPU 资源 + 断开 ResizeObserver
+onDeactivated(() => {
+  if (webglAddon) {
+    webglAddon.dispose()
+    webglAddon = null
+  }
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
+
+// KeepAlive 切回时：恢复 WebGL 渲染 + 重连 ResizeObserver
 onActivated(() => {
   if (terminal && terminalRef.value) {
     // WebGL 上下文可能在后台丢失，先 dispose 旧实例再重新加载
@@ -219,7 +231,20 @@ onActivated(() => {
       terminal.loadAddon(webglAddon)
     } catch {
       webglAddon = null
-      // WebGL 不可用则保持 canvas 渲染
+    }
+    // 重连 ResizeObserver
+    if (!resizeObserver) {
+      resizeObserver = new ResizeObserver(() => {
+        if (resizeTimer) clearTimeout(resizeTimer)
+        resizeTimer = setTimeout(() => {
+          fitAddon?.fit()
+          if (terminal && status.value === 'connected') {
+            localShellApi.localShellResize(props.sessionId, terminal.cols, terminal.rows)
+              .catch((e: unknown) => console.warn('[LocalTerminal]', e))
+          }
+        }, 100)
+      })
+      resizeObserver.observe(terminalRef.value)
     }
     fitAddon?.fit()
     terminal.focus()
@@ -247,7 +272,7 @@ defineExpose({
     >
       <div class="flex flex-col items-center gap-3">
         <Loader2 class="h-6 w-6 animate-spin text-primary" />
-        <span class="text-sm text-muted-foreground">启动本地终端...</span>
+        <span class="text-sm text-muted-foreground">{{ t('terminal.startingLocal') }}</span>
       </div>
     </div>
 
@@ -259,12 +284,12 @@ defineExpose({
       <div class="flex flex-col items-center gap-3 text-center max-w-md">
         <AlertCircle class="h-8 w-8 text-destructive" />
         <div class="space-y-1">
-          <p class="text-sm font-medium text-foreground">启动失败</p>
+          <p class="text-sm font-medium text-foreground">{{ t('terminal.startFailed') }}</p>
           <p class="text-xs text-muted-foreground">{{ errorMessage }}</p>
         </div>
         <Button variant="outline" size="sm" @click="reconnect">
           <RotateCcw class="h-3.5 w-3.5 mr-1.5" />
-          重试
+          {{ t('common.retry') }}
         </Button>
       </div>
     </div>
@@ -275,10 +300,10 @@ defineExpose({
       class="absolute inset-0 flex items-center justify-center bg-background/80"
     >
       <div class="flex flex-col items-center gap-3">
-        <p class="text-sm text-muted-foreground">Shell 已退出</p>
+        <p class="text-sm text-muted-foreground">{{ t('terminal.shellExited') }}</p>
         <Button variant="outline" size="sm" @click="reconnect">
           <RotateCcw class="h-3.5 w-3.5 mr-1.5" />
-          重新打开
+          {{ t('terminal.reopen') }}
         </Button>
       </div>
     </div>

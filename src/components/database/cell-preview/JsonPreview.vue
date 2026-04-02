@@ -133,9 +133,9 @@ const tree = computed(() => buildTree(parsed.value))
 /** 值的显示颜色 */
 function getValueClass(type: string): string {
   switch (type) {
-    case 'string': return 'text-green-600 dark:text-green-400'
+    case 'string': return 'text-df-success'
     case 'number': return 'text-blue-600 dark:text-blue-400'
-    case 'boolean': return 'text-amber-600 dark:text-amber-400'
+    case 'boolean': return 'text-df-warning'
     case 'null': return 'text-muted-foreground/50 italic'
     default: return ''
   }
@@ -171,7 +171,7 @@ function formatNodeValue(node: JsonNode): string {
         <input
           v-model="searchQuery"
           placeholder="搜索 key 或 value..."
-          class="h-6 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
+          class="h-6 flex-1 bg-transparent text-xs outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50 placeholder:text-muted-foreground/50"
         />
       </div>
       <div class="flex items-center gap-1">

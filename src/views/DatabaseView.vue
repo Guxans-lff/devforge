@@ -445,11 +445,11 @@ async function handleConfirmDeleteTable() {
     if (result.isError) {
       notification.error(t('database.queryFailed'), result.error ?? undefined, true)
     } else {
-      notification.success(t('database.querySuccess'), `表 ${table} 已成功删除`, 3000)
+      notification.success(t('database.querySuccess'), t('database.tableDeleted', { table }), 3000)
       getObjectTree()?.silentRefresh()
     }
   } catch (e: any) {
-    notification.error('删除表失败', String(e), true)
+    notification.error(t('database.deleteTableFailed'), String(e), true)
   }
 }
 
@@ -471,10 +471,10 @@ async function handleConfirmTruncateTable() {
     if (result.isError) {
       notification.error(t('database.queryFailed'), result.error ?? undefined, true)
     } else {
-      notification.success(t('database.querySuccess'), `表 ${table} 已成功清空`, 3000)
+      notification.success(t('database.querySuccess'), t('database.tableTruncated', { table }), 3000)
     }
   } catch (e: any) {
-    notification.error('清空表失败', String(e), true)
+    notification.error(t('database.truncateTableFailed'), String(e), true)
   }
 }
 
@@ -517,14 +517,14 @@ async function handleConfirmDropObject() {
     const sql = `DROP ${objectType} IF EXISTS ${q(database)}.${q(objectName)};`
     const result = await dbApi.dbExecuteQueryInDatabase(props.connectionId, database, sql)
     if (result.isError) {
-      notification.error('删除失败', result.error ?? undefined, true)
+      notification.error(t('database.deleteFailed'), result.error ?? undefined, true)
     } else {
-      const typeLabel: Record<string, string> = { VIEW: '视图', PROCEDURE: '存储过程', FUNCTION: '函数', TRIGGER: '触发器' }
-      notification.success('删除成功', `${typeLabel[objectType] ?? objectType} ${objectName} 已删除`, 3000)
+      const typeLabel: Record<string, string> = { VIEW: t('database.objectTypeView'), PROCEDURE: t('database.objectTypeProcedure'), FUNCTION: t('database.objectTypeFunction'), TRIGGER: t('database.objectTypeTrigger') }
+      notification.success(t('database.deleteObjectSuccess'), t('database.objectDeleted', { type: typeLabel[objectType] ?? objectType, name: objectName }), 3000)
       getObjectTree()?.silentRefresh()
     }
   } catch (e: any) {
-    notification.error('删除对象失败', String(e), true)
+    notification.error(t('database.objectDeleteFailed'), String(e), true)
   }
 }
 
@@ -537,7 +537,7 @@ async function handleShowCreateSql(database: string, table: string) {
       dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, { sql })
     }
   } catch (e: any) {
-    notification.error('获取建表语句失败', String(e), true)
+    notification.error(t('database.getCreateTableFailed'), String(e), true)
   }
 }
 
@@ -550,7 +550,7 @@ async function handleShowObjectDefinition(database: string, name: string, object
       dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, { sql })
     }
   } catch (e: any) {
-    notification.error('获取对象定义失败', String(e), true)
+    notification.error(t('database.getObjectDefFailed'), String(e), true)
   }
 }
 
@@ -631,9 +631,17 @@ function handleOpenScheduler() {
 }
 
 /** 数据同步面板中「保存为定时任务」的处理 */
-function handleSaveAsScheduledTask(_config: import('@/types/data-sync').SyncConfig) {
+function handleSaveAsScheduledTask(config: import('@/types/data-sync').SyncConfig) {
   // 打开调度管理面板并预填配置
   dbWorkspaceStore.openScheduler(props.connectionId)
+  const tabId = `${props.connectionId}-scheduler`
+  dbWorkspaceStore.updateTabContext(props.connectionId, tabId, {
+    prefill: {
+      taskType: 'data_sync',
+      configJson: JSON.stringify(config),
+      name: `${config.sourceDatabase} → ${config.targetDatabase}`,
+    },
+  })
 }
 
 function handleOpenErDiagram(database: string) {
@@ -653,7 +661,7 @@ async function handleGenerateScript(database: string, table: string, scriptType:
     const tab = dbWorkspaceStore.addQueryTab(props.connectionId)
     dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, { sql })
   } catch (e: any) {
-    notification.error('生成脚本失败', String(e), true)
+    notification.error(t('database.generateScriptFailed'), String(e), true)
   }
 }
 
@@ -701,7 +709,7 @@ function handleCreateDatabase() {
 }
 
 function handleCreateDatabaseSuccess(dbName: string) {
-  notification.success('创建成功', `数据库 ${dbName} 已创建`)
+  notification.success(t('database.createSuccess'), t('database.databaseCreated', { name: dbName }))
   objectTreeRef.value?.forceRefresh()
 }
 
@@ -714,7 +722,7 @@ function handleEditDatabase(dbName: string) {
 }
 
 function handleEditDatabaseSuccess() {
-  notification.success('修改成功', `数据库 ${editDatabaseName.value} 属性已更新`)
+  notification.success(t('database.editSuccess'), t('database.databaseUpdated', { name: editDatabaseName.value }))
   objectTreeRef.value?.forceRefresh()
 }
 </script>
@@ -727,17 +735,17 @@ function handleEditDatabaseSuccess() {
       <!-- 更加精致的连接池状态监控（实心锐利版） -->
       <div v-if="poolStatus && isConnected" class="flex items-center bg-muted/50 rounded-full pl-1 pr-2.5 py-0.5 border border-border text-[10px] mr-3 shadow-sm selection:bg-transparent">
         <div class="flex h-4 items-center gap-1.5 px-2 border-r border-border/40">
-          <div class="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.5)]"></div>
-          <span class="text-muted-foreground/60 font-medium">活跃</span>
+          <div class="h-1.5 w-1.5 rounded-full bg-df-success shadow-[0_0_6px_var(--df-success)]"></div>
+          <span class="text-muted-foreground/60 font-medium">{{ t('database.poolActive') }}</span>
           <span class="text-foreground font-bold tabular-nums">{{ poolStatus.activeConnections }}</span>
         </div>
         <div class="flex h-4 items-center gap-1.5 px-2 border-r border-border/40">
-          <div class="h-1.5 w-1.5 rounded-full bg-sky-400 shadow-[0_0_6px_rgba(56,189,248,0.5)]"></div>
-          <span class="text-muted-foreground/60 font-medium">空闲</span>
+          <div class="h-1.5 w-1.5 rounded-full bg-primary shadow-[0_0_6px_var(--color-primary)]"></div>
+          <span class="text-muted-foreground/60 font-medium">{{ t('database.poolIdle') }}</span>
           <span class="text-foreground font-bold tabular-nums">{{ poolStatus.idleConnections }}</span>
         </div>
         <div class="flex h-4 items-center gap-2 pl-2">
-          <span class="text-muted-foreground/40 tabular-nums">总计 {{ poolStatus.activeConnections + poolStatus.idleConnections }}</span>
+          <span class="text-muted-foreground/40 tabular-nums">{{ t('database.poolTotal') }} {{ poolStatus.activeConnections + poolStatus.idleConnections }}</span>
           <span class="text-muted-foreground/20 italic">/</span>
           <span class="text-muted-foreground/50 font-medium tabular-nums">{{ poolStatus.maxConnections }}</span>
         </div>
@@ -746,14 +754,14 @@ function handleEditDatabaseSuccess() {
         <div
           class="h-1.5 w-1.5 rounded-full transition-colors duration-300"
           :class="{
-            'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]': isConnected && !isReconnecting,
-            'bg-yellow-500 animate-pulse': isReconnecting || (isConnecting && !isReconnecting),
-            'bg-red-500': !isConnected && !isConnecting && !isReconnecting,
+            'bg-df-success shadow-[0_0_4px_var(--df-success)]': isConnected && !isReconnecting,
+            'bg-df-warning animate-pulse': isReconnecting || (isConnecting && !isReconnecting),
+            'bg-destructive': !isConnected && !isConnecting && !isReconnecting,
           }"
         />
         <!-- 重连状态提示 -->
-        <span v-if="isReconnecting" class="text-amber-500">
-          正在重连（第 {{ connectionState?.reconnectAttempt ?? 1 }} 次尝试）
+        <span v-if="isReconnecting" class="text-df-warning">
+          {{ t('database.reconnecting', { attempt: connectionState?.reconnectAttempt ?? 1 }) }}
         </span>
         <span v-else>{{ connectionName }}</span>
       </div>
@@ -802,6 +810,7 @@ function handleEditDatabaseSuccess() {
       <Pane :size="75">
         <div class="flex h-full flex-col">
           <EnvironmentBanner
+            v-if="activeTab?.type !== 'data-sync' && activeTab?.type !== 'scheduler'"
             :environment="environment"
             :connection-name="connectionName"
             :host="connectionHost"
@@ -809,6 +818,7 @@ function handleEditDatabaseSuccess() {
           />
           <InnerTabBar :connection-id="connectionId" :environment="environment" />
           <BreadcrumbNav
+            v-if="activeTab?.type !== 'data-sync' && activeTab?.type !== 'scheduler'"
             :connection-name="connectionName"
             :database="breadcrumbDatabase"
             :table="breadcrumbTable"
@@ -929,20 +939,20 @@ function handleEditDatabaseSuccess() {
     <!-- 删除表二次确认对话框 -->
     <ConfirmDialog
       v-model:open="deleteTableDialogOpen"
-      :title="`删除表 ${deleteTableData.table} ?`"
-      description="此操作不可逆，且将永久删除表及表内的所有数据。您确定要这么做吗？"
+      :title="t('database.deleteTableTitle', { table: deleteTableData.table })"
+      :description="t('database.deleteTableDesc')"
       variant="destructive"
-      confirm-label="坚决删除"
+      :confirm-label="t('database.confirmDelete')"
       @confirm="handleConfirmDeleteTable"
     />
 
     <!-- 清空表二次确认对话框 -->
     <ConfirmDialog
       v-model:open="truncateTableDialogOpen"
-      :title="`清空表 ${truncateTableData.table} 的数据?`"
-      description="此操作将快速并且不可逆地删除该表中的所有数据（保留表结构）。您确定要这么做吗？"
+      :title="t('database.truncateTableTitle', { table: truncateTableData.table })"
+      :description="t('database.truncateTableDesc')"
       variant="destructive"
-      confirm-label="坚决清空"
+      :confirm-label="t('database.confirmTruncate')"
       @confirm="handleConfirmTruncateTable"
     />
 
@@ -995,10 +1005,10 @@ function handleEditDatabaseSuccess() {
     <!-- 删除对象二次确认对话框 -->
     <ConfirmDialog
       v-model:open="dropObjectDialogOpen"
-      :title="`删除 ${dropObjectData.objectName} ?`"
-      :description="`此操作将永久删除${({ VIEW: '视图', PROCEDURE: '存储过程', FUNCTION: '函数', TRIGGER: '触发器' } as Record<string, string>)[dropObjectData.objectType] ?? '对象'} ${dropObjectData.objectName}，且不可恢复。`"
+      :title="t('database.dropObjectTitle', { name: dropObjectData.objectName })"
+      :description="t('database.dropObjectDesc', { type: ({ VIEW: t('database.objectTypeView'), PROCEDURE: t('database.objectTypeProcedure'), FUNCTION: t('database.objectTypeFunction'), TRIGGER: t('database.objectTypeTrigger') } as Record<string, string>)[dropObjectData.objectType] ?? t('database.objectTypeDefault'), name: dropObjectData.objectName })"
       variant="destructive"
-      confirm-label="坚决删除"
+      :confirm-label="t('database.confirmDelete')"
       @confirm="handleConfirmDropObject"
     />
   </div>

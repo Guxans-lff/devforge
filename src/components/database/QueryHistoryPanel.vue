@@ -123,9 +123,9 @@ const groupedRecords = computed(() => {
     groupMap.get(key)!.push(record)
   })
 
-  if (groupMap.has('today')) groups.push({ title: '今天', records: groupMap.get('today')! })
-  if (groupMap.has('yesterday')) groups.push({ title: '昨天', records: groupMap.get('yesterday')! })
-  if (groupMap.has('older')) groups.push({ title: '更早', records: groupMap.get('older')! })
+  if (groupMap.has('today')) groups.push({ title: t('queryHistory.today'), records: groupMap.get('today')! })
+  if (groupMap.has('yesterday')) groups.push({ title: t('queryHistory.yesterday'), records: groupMap.get('yesterday')! })
+  if (groupMap.has('older')) groups.push({ title: t('queryHistory.older'), records: groupMap.get('older')! })
 
   return groups
 })
@@ -165,14 +165,14 @@ onMounted(() => loadHistory(true))
         <Input
           v-model="searchText"
           :placeholder="t('queryHistory.searchPlaceholder')"
-          class="h-7 pl-8 rounded-lg border-border/40 bg-background/50 text-[11px] font-bold transition-all focus:border-primary focus:ring-4 focus:ring-primary/5"
+          class="h-7 pl-8 rounded-lg border-border/40 bg-background/50 text-[11px] font-bold transition-[border-color,box-shadow] focus:border-primary focus:ring-4 focus:ring-primary/5"
         />
       </div>
       <Button
         v-if="records.length > 0"
         variant="ghost"
         size="sm"
-        class="h-7 gap-1.5 px-3 rounded-lg text-[10px] font-black text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-all uppercase tracking-tight"
+        class="h-7 gap-1.5 px-3 rounded-lg text-[10px] font-black text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-[color,background-color] uppercase tracking-tight"
         @click="handleClearAll"
       >
         <Trash2 class="h-3 w-3" />
@@ -197,16 +197,21 @@ onMounted(() => loadHistory(true))
           </div>
 
           <!-- Items -->
-          <div class="divide-y divide-border/5">
+          <div role="listbox" :aria-label="group.title" class="divide-y divide-border/5">
             <div
               v-for="record in group.records"
               :key="record.id"
-              class="group relative flex cursor-pointer items-center gap-2.5 rounded-md border border-transparent py-1.5 px-2 transition-all duration-150 hover:bg-muted/40 active:bg-muted/60"
+              role="option"
+              :tabindex="0"
+              :aria-label="truncateSql(record.sqlText, 80)"
+              class="group relative flex cursor-pointer items-center gap-2.5 rounded-md border border-transparent py-1.5 px-2 transition-[background-color] duration-150 hover:bg-muted/40 active:bg-muted/60 outline-none focus-visible:ring-1 focus-visible:ring-ring"
               @click="handleRowClick(record.sqlText)"
               @dblclick="handleExecute(record)"
+              @keydown.enter="handleExecute(record)"
+              @keydown.space.prevent="handleRowClick(record.sqlText)"
             >
               <!-- Status indicator (Left bar) -->
-              <div class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full transition-all duration-300 group-hover:opacity-100 opacity-0" 
+              <div class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-full transition-opacity duration-300 group-hover:opacity-100 opacity-0" 
                    :class="record.isError ? 'bg-destructive' : 'bg-primary'"></div>
 
               <!-- Status icon (Smaller) -->
@@ -237,7 +242,7 @@ onMounted(() => loadHistory(true))
                   <span class="w-16 text-right font-mono tracking-tighter opacity-100">{{ formatTime(record.executedAt) }}</span>
 
                   <!-- Quick Actions (Reveal on hover) -->
-                  <div class="flex items-center gap-0.5 w-0 overflow-hidden group-hover:w-[48px] transition-all duration-200">
+                  <div class="flex items-center gap-0.5 w-[48px] origin-right scale-x-0 overflow-hidden group-hover:scale-x-100 transition-transform duration-200">
                     <Tooltip>
                       <TooltipTrigger as-child>
                         <Button variant="ghost" size="icon" class="h-5 w-5 rounded-md hover:bg-primary/10 hover:text-primary" @click.stop="handleExecute(record)">

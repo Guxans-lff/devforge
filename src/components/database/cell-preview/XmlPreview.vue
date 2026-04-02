@@ -79,8 +79,8 @@ function tokenizeLine(line: string): XmlSegment[] {
 function getSegmentClass(type: XmlSegment['type']): string {
   switch (type) {
     case 'tag': return 'text-blue-600 dark:text-blue-400'
-    case 'attr-name': return 'text-amber-600 dark:text-amber-400'
-    case 'attr-value': return 'text-green-600 dark:text-green-400'
+    case 'attr-name': return 'text-df-warning'
+    case 'attr-value': return 'text-df-success'
     case 'comment': return 'text-muted-foreground/50 italic'
     case 'declaration': return 'text-purple-600 dark:text-purple-400'
     default: return 'text-foreground'

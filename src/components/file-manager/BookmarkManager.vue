@@ -102,7 +102,7 @@ function handleSave() {
           <div
             v-for="(item, index) in items"
             :key="item.path"
-            class="group relative flex items-center gap-3 p-3 rounded-xl border border-border/40 bg-muted/5 hover:bg-primary/[0.02] hover:border-primary/20 transition-all"
+            class="group relative flex items-center gap-3 p-3 rounded-xl border border-border/40 bg-muted/5 hover:bg-primary/[0.02] hover:border-primary/20 transition-[background-color,border-color]"
           >
             <div class="cursor-grab active:cursor-grabbing p-1 text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors">
               <GripVertical class="h-3.5 w-3.5" />
@@ -113,7 +113,7 @@ function handleSave() {
                 <div class="flex-1 relative">
                   <Input
                     :model-value="item.label"
-                    class="h-8 rounded-lg border-border/60 bg-background/50 px-2.5 text-[11px] font-bold transition-all focus:border-primary focus:ring-4 focus:ring-primary/5"
+                    class="h-8 rounded-lg border-border/60 bg-background/50 px-2.5 text-[11px] font-bold transition-[border-color,box-shadow] focus:border-primary focus:ring-4 focus:ring-primary/5"
                     :placeholder="t('fileManager.bookmarkName')"
                     @update:model-value="updateLabel(index, $event as string)"
                   />
@@ -121,7 +121,7 @@ function handleSave() {
                 <div class="w-24 relative">
                   <Input
                     :model-value="item.group"
-                    class="h-8 rounded-lg border-border/60 bg-background/50 px-2.5 text-[11px] font-bold transition-all focus:border-primary focus:ring-4 focus:ring-primary/5 italic text-primary/70"
+                    class="h-8 rounded-lg border-border/60 bg-background/50 px-2.5 text-[11px] font-bold transition-[border-color,box-shadow] focus:border-primary focus:ring-4 focus:ring-primary/5 italic text-primary/70"
                     :placeholder="t('fileManager.bookmarkGroup')"
                     @update:model-value="updateGroup(index, $event as string)"
                   />
@@ -169,13 +169,13 @@ function handleSave() {
       <DialogFooter class="px-5 py-4 border-t border-muted/30 flex gap-2.5 sm:justify-start shrink-0">
         <Button 
           variant="outline" 
-          class="flex-1 h-9 rounded-xl text-[11px] font-bold text-foreground/60 border-border/40 hover:bg-muted transition-all" 
+          class="flex-1 h-9 rounded-xl text-[11px] font-bold text-foreground/60 border-border/40 hover:bg-muted transition-colors"
           @click="emit('update:open', false)"
         >
           {{ t('common.cancel') }}
         </Button>
         <Button 
-          class="flex-1 h-9 rounded-xl text-[11px] font-black shadow-lg shadow-primary/20 transition-all active:scale-[0.96]" 
+          class="flex-1 h-9 rounded-xl text-[11px] font-black shadow-lg shadow-primary/20 transition-[background-color,color,box-shadow,scale] active:scale-[0.96]" 
           @click="handleSave"
         >
           {{ t('common.save') }}

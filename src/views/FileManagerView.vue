@@ -16,7 +16,7 @@ import FileDiffView from '@/components/file-manager/FileDiffView.vue'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { Loader2, Terminal as TerminalIcon, PanelRightClose, PanelRightOpen } from 'lucide-vue-next'
+import { Loader2, Terminal as TerminalIcon, PanelRightClose, PanelRightOpen, WifiOff, KeyRound, Activity } from 'lucide-vue-next'
 import * as sftpApi from '@/api/sftp'
 import { sftpChmod } from '@/api/file-editor'
 import { useToast } from '@/composables/useToast'
@@ -100,7 +100,7 @@ watch(
   },
 )
 
-let unlistenTransferComplete: any = null
+let unlistenTransferComplete: (() => void) | null = null
 
 async function connect() {
   status.value = 'connecting'
@@ -667,7 +667,7 @@ onBeforeUnmount(async () => {
 <template>
   <div class="flex h-full flex-col overflow-hidden bg-transparent">
     <!-- Toolbar -->
-    <div class="flex items-center gap-2 border-b border-border/30 bg-background/50 backdrop-blur-md px-3 py-1.5">
+    <div role="toolbar" :aria-label="t('fileManager.toolbar')" class="flex items-center gap-2 border-b border-border/30 bg-background/50 backdrop-blur-md px-3 py-1.5">
       <TooltipProvider :delay-duration="300">
         <Tooltip>
           <TooltipTrigger as-child>
@@ -675,6 +675,7 @@ onBeforeUnmount(async () => {
               variant="ghost"
               size="icon"
               class="h-7 w-7 text-muted-foreground hover:text-foreground"
+              :aria-label="t('fileManager.openTerminal')"
               @click="openTerminal"
             >
               <TerminalIcon class="h-3.5 w-3.5" />
@@ -691,6 +692,7 @@ onBeforeUnmount(async () => {
               size="icon"
               class="h-7 w-7 text-muted-foreground hover:text-foreground"
               :class="showEditorPanel ? 'bg-accent' : ''"
+              :aria-label="t('fileEditor.toggleEditor')"
               @click="showEditorPanel = !showEditorPanel"
             >
               <component :is="showEditorPanel ? PanelRightClose : PanelRightOpen" class="h-3.5 w-3.5" />
@@ -706,9 +708,9 @@ onBeforeUnmount(async () => {
         <div
           class="h-1.5 w-1.5 rounded-full transition-colors duration-300"
           :class="{
-            'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]': status === 'connected',
-            'bg-yellow-500 animate-pulse': status === 'connecting',
-            'bg-red-500': status === 'disconnected' || status === 'error',
+            'bg-df-success shadow-[0_0_4px_var(--df-success)]': status === 'connected',
+            'bg-df-warning animate-pulse': status === 'connecting',
+            'bg-destructive': status === 'disconnected' || status === 'error',
           }"
         />
         <span>{{ connectionName }}</span>
@@ -731,16 +733,48 @@ onBeforeUnmount(async () => {
       <!-- Error overlay -->
       <div
         v-if="status === 'error'"
-        class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-background/80"
+        class="absolute inset-0 z-10 flex items-center justify-center bg-background/80 p-6"
       >
-        <span class="text-xs text-muted-foreground">{{ errorMessage }}</span>
-        <Button
-          variant="default"
-          size="sm"
-          @click="reconnect"
-        >
-          {{ t('fileManager.reconnect') }}
-        </Button>
+        <div class="w-full max-w-sm rounded-xl border border-border/30 bg-background/90 p-5 shadow-lg">
+          <div class="flex flex-col items-center text-center">
+            <p class="text-sm font-medium text-foreground mb-1">{{ t('fileManager.connectionFailed') }}</p>
+            <p class="text-xs text-muted-foreground/80 break-all mb-4">{{ errorMessage }}</p>
+
+            <!-- 诊断建议 -->
+            <div class="w-full grid grid-cols-1 gap-1.5 text-left mb-5">
+              <div class="flex items-start gap-2 rounded-lg bg-muted/30 p-2 ring-1 ring-border/5">
+                <WifiOff class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                <div>
+                  <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('terminal.diagNetwork') }}</p>
+                  <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('terminal.diagNetworkHint') }}</p>
+                </div>
+              </div>
+              <div class="flex items-start gap-2 rounded-lg bg-muted/30 p-2 ring-1 ring-border/5">
+                <KeyRound class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                <div>
+                  <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('terminal.diagAuth') }}</p>
+                  <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('terminal.diagAuthHint') }}</p>
+                </div>
+              </div>
+              <div class="flex items-start gap-2 rounded-lg bg-muted/30 p-2 ring-1 ring-border/5">
+                <Activity class="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
+                <div>
+                  <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('terminal.diagServer') }}</p>
+                  <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('terminal.diagServerHint') }}</p>
+                </div>
+              </div>
+            </div>
+
+            <Button
+              variant="default"
+              size="sm"
+              class="w-full"
+              @click="reconnect"
+            >
+              {{ t('fileManager.reconnect') }}
+            </Button>
+          </div>
+        </div>
       </div>
 
       <!-- Dual-pane layout -->
@@ -799,18 +833,27 @@ onBeforeUnmount(async () => {
         </Pane>
       </Splitpanes>
 
-      <!-- 搜索面板（覆盖在右侧） -->
-      <div
-        v-if="showSearchPanel && status === 'connected'"
-        class="absolute right-0 top-0 z-20 h-full w-72 border-l border-border bg-background shadow-lg"
+      <!-- 搜索面板（覆盖在右侧，带滑入动画） -->
+      <Transition
+        enter-active-class="transition-transform duration-200 ease-out"
+        leave-active-class="transition-transform duration-150 ease-in"
+        enter-from-class="translate-x-full"
+        enter-to-class="translate-x-0"
+        leave-from-class="translate-x-0"
+        leave-to-class="translate-x-full"
       >
-        <FileSearchPanel
-          :connection-id="connectionId"
-          :current-path="remotePath"
-          @navigate="handleSearchNavigate"
-          @close="showSearchPanel = false"
-        />
-      </div>
+        <div
+          v-if="showSearchPanel && status === 'connected'"
+          class="absolute right-0 top-0 z-20 h-full w-72 border-l border-border bg-background shadow-lg"
+        >
+          <FileSearchPanel
+            :connection-id="connectionId"
+            :current-path="remotePath"
+            @navigate="handleSearchNavigate"
+            @close="showSearchPanel = false"
+          />
+        </div>
+      </Transition>
     </div>
 
     <!-- 编辑器面板 -->

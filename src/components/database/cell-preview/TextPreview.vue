@@ -63,7 +63,7 @@ const byteCount = computed(() => new TextEncoder().encode(props.value ?? '').len
         <input
           v-model="searchQuery"
           placeholder="搜索..."
-          class="h-6 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
+          class="h-6 flex-1 bg-transparent text-xs outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50 placeholder:text-muted-foreground/50"
         />
         <span v-if="searchQuery" class="text-[10px] text-muted-foreground tabular-nums">
           {{ matchCount }} 处匹配

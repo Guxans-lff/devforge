@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::commands::connection::StorageState;
 use crate::commands::db::DbEngineState;
-use crate::models::scheduler::{ScheduledTask, SyncConfig, SyncProgress, TaskExecution};
+use crate::models::scheduler::{BackupConfig, ScheduledTask, SyncConfig, SyncProgress, TaskExecution};
 use crate::services::cron_parser;
 use crate::services::data_sync;
 
@@ -118,6 +118,7 @@ async fn execute_task(
     // 根据任务类型执行
     let result = match task.task_type.as_str() {
         "data_sync" => execute_data_sync(app_handle, engine, task).await,
+        "db_backup" => execute_db_backup(app_handle, engine, task).await,
         _ => Err(format!("不支持的任务类型: {}", task.task_type)),
     };
 
@@ -198,6 +199,51 @@ async fn execute_data_sync(
     data_sync::sync_tables(engine, &config, on_progress)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// 执行数据库备份任务
+async fn execute_db_backup(
+    app_handle: &AppHandle,
+    engine: Arc<crate::services::db_engine::DbEngine>,
+    task: &ScheduledTask,
+) -> Result<String, String> {
+    let config: BackupConfig =
+        serde_json::from_str(&task.config_json).map_err(|e| format!("解析备份配置失败: {}", e))?;
+
+    // 生成带时间戳的输出文件名
+    let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+    let filename = format!("{}_{}.sql", config.database, timestamp);
+    let output_path = std::path::Path::new(&config.output_dir).join(&filename);
+    let output_str = output_path.to_string_lossy().to_string();
+
+    // 如果表列表为空，获取数据库所有表
+    let tables = if config.tables.is_empty() {
+        engine
+            .clone()
+            .get_tables(config.connection_id.clone(), config.database.clone())
+            .await
+            .map_err(|e| format!("获取表列表失败: {}", e))?
+            .into_iter()
+            .map(|t| t.name)
+            .collect()
+    } else {
+        config.tables
+    };
+
+    crate::services::db_backup::backup_database(
+        engine,
+        &config.connection_id,
+        &config.database,
+        tables,
+        config.include_structure,
+        config.include_data,
+        &output_str,
+        app_handle,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    Ok(format!("备份完成: {}", filename))
 }
 
 /// 立即执行指定任务（手动触发，不依赖 cron 调度）

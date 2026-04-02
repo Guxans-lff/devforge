@@ -53,7 +53,7 @@ const emit = defineEmits<{
     <div class="px-4 py-3 border-b border-border/5 space-y-2">
       <div class="flex items-center gap-2">
         <!-- 权限警告 -->
-        <div v-if="!hasGrantOption && !checkingGrant" class="flex items-center gap-1.5 rounded-lg bg-amber-500/5 px-2.5 py-1.5 text-[10px] font-bold text-amber-600 border border-amber-500/10">
+        <div v-if="!hasGrantOption && !checkingGrant" class="flex items-center gap-1.5 rounded-lg bg-df-warning/5 px-2.5 py-1.5 text-[10px] font-bold text-df-warning border border-df-warning/10">
           <AlertTriangle class="h-3.5 w-3.5" />
           <span>权限受限</span>
         </div>
@@ -105,7 +105,7 @@ const emit = defineEmits<{
         <div
           v-for="user in filteredUsers"
           :key="`${user.user}@${user.host}`"
-          class="user-list-item group relative flex items-center gap-3 px-4 h-[72px] cursor-pointer transition-all duration-200 border-b border-border/10 shrink-0 select-none rounded-lg mx-1"
+          class="user-list-item group relative flex items-center gap-3 px-4 h-[72px] cursor-pointer transition-[background-color,color,box-shadow] duration-200 border-b border-border/10 shrink-0 select-none rounded-lg mx-1"
           :class="[
             selectedUser?.user === user.user && selectedUser?.host === user.host
               ? 'bg-primary/[0.06] text-primary shadow-sm shadow-primary/5'
@@ -115,7 +115,7 @@ const emit = defineEmits<{
         >
           <!-- 用户头像 -->
           <div
-            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-background font-bold uppercase transition-all shadow-sm group-hover:bg-accent/10"
+            class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border/50 bg-background font-bold uppercase transition-colors shadow-sm group-hover:bg-accent/10"
             :class="user.accountLocked === 'Y' ? 'text-destructive/60' : 'text-primary/60'"
           >
             <div class="text-[13px]">{{ user.user ? user.user.charAt(0) : '?' }}</div>
@@ -143,11 +143,11 @@ const emit = defineEmits<{
               <span v-if="user.accountLocked === 'Y'" class="shrink-0 flex items-center gap-1 text-[10px] font-bold text-destructive/80 bg-destructive/5 px-1.5 py-0.5 rounded-lg border border-destructive/10 uppercase whitespace-nowrap">
                 <Lock class="h-2.5 w-2.5" /> 锁定
               </span>
-              <span v-else-if="user.passwordExpired === 'Y'" class="shrink-0 flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-500/5 px-1.5 py-0.5 rounded-lg border border-amber-500/10 uppercase whitespace-nowrap">
+              <span v-else-if="user.passwordExpired === 'Y'" class="shrink-0 flex items-center gap-1 text-[10px] font-bold text-df-warning bg-df-warning/5 px-1.5 py-0.5 rounded-lg border border-df-warning/10 uppercase whitespace-nowrap">
                 <AlertTriangle class="h-2.5 w-2.5" /> 过期
               </span>
-              <span v-else class="shrink-0 flex items-center gap-1 text-[10px] font-bold text-emerald-600/70 bg-emerald-500/5 px-1.5 py-0.5 rounded-lg border border-emerald-500/10 whitespace-nowrap">
-                <div class="h-1.5 w-1.5 rounded-full bg-emerald-500/50 blink" /> 活跃
+              <span v-else class="shrink-0 flex items-center gap-1 text-[10px] font-bold text-df-success/70 bg-df-success/5 px-1.5 py-0.5 rounded-lg border border-df-success/10 whitespace-nowrap">
+                <div class="h-1.5 w-1.5 rounded-full bg-df-success/50 blink" /> 活跃
               </span>
               <span v-if="user.user.startsWith('mysql.')" class="shrink-0 text-[9px] font-black tracking-widest text-primary/30 bg-primary/5 px-1.5 py-0.5 rounded-lg border border-primary/10 uppercase whitespace-nowrap">
                 System
@@ -156,7 +156,7 @@ const emit = defineEmits<{
           </div>
 
           <!-- 删除按钮 -->
-          <div class="shrink-0 transition-all duration-300" :class="selectedUser?.user === user.user ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'">
+          <div class="shrink-0 transition-opacity duration-300" :class="selectedUser?.user === user.user ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'">
             <Button
               v-if="hasGrantOption"
               variant="ghost" size="icon"

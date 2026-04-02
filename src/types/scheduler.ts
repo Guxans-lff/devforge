@@ -1,3 +1,22 @@
+/** 支持的任务类型 */
+export type TaskType = 'data_sync' | 'db_backup'
+
+/** 数据库备份配置 */
+export interface BackupConfig {
+  /** 连接 ID */
+  connectionId: string
+  /** 数据库名 */
+  database: string
+  /** 要备份的表列表（空数组 = 全部表） */
+  tables: string[]
+  /** 是否包含表结构 */
+  includeStructure: boolean
+  /** 是否包含数据 */
+  includeData: boolean
+  /** 输出目录（文件名自动生成带时间戳） */
+  outputDir: string
+}
+
 /** 调度任务 */
 export interface ScheduledTask {
   /** 任务唯一标识（UUID） */

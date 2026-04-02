@@ -274,7 +274,7 @@ watch(
         <div
           v-for="task in activeTasks"
           :key="task.id"
-          class="relative group rounded-lg border border-border/20 bg-background/40 p-2.5 transition-all hover:bg-background/60 hover:border-border/40"
+          class="relative group rounded-lg border border-border/20 bg-background/40 p-2.5 transition-[background-color,border-color] hover:bg-background/60 hover:border-border/40"
         >
           <!-- Task Header -->
           <div class="flex items-start justify-between gap-3">
@@ -285,7 +285,7 @@ watch(
                   v-if="task.type === 'upload'"
                   class="h-4 w-4 text-primary"
                 />
-                <ArrowDown v-else class="h-4 w-4 text-emerald-500" />
+                <ArrowDown v-else class="h-4 w-4 text-df-success" />
               </div>
  
               <!-- File Info -->
@@ -304,7 +304,7 @@ watch(
             <div class="flex shrink-0 items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               <CheckCircle2
                 v-if="task.status === 'completed'"
-                class="h-4 w-4 text-emerald-500"
+                class="h-4 w-4 text-df-success"
               />
               <template v-else-if="task.status === 'error'">
                 <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-primary/10" @click="handleRetry(task.id)">
@@ -351,11 +351,11 @@ watch(
             <!-- Progress Bar with Animation -->
             <div class="relative h-1.5 w-full overflow-hidden rounded-full bg-muted/30">
                <div 
-                 class="h-full transition-all duration-500 ease-out h-full"
+                 class="h-full transition-[width] duration-500 ease-out"
                  :class="[
-                   task.status === 'completed' ? 'bg-emerald-500' :
+                   task.status === 'completed' ? 'bg-df-success' :
                    task.status === 'error' ? 'bg-destructive' :
-                   task.status === 'paused' ? 'bg-amber-500' : 'bg-primary shadow-[0_0_8px_rgba(var(--color-primary),0.4)]'
+                   task.status === 'paused' ? 'bg-df-warning' : 'bg-primary shadow-[0_0_8px_rgba(var(--color-primary),0.4)]'
                  ]"
                  :style="{ width: `${getProgress(task)}%` }"
                >
@@ -369,10 +369,10 @@ watch(
               <div class="flex items-center gap-2">
                 <!-- 打包传输阶段显示 -->
                 <template v-if="task.archivePhase">
-                  <span v-if="task.archivePhase === 'packing'" class="text-amber-500">{{ t('transfer.packing') }}</span>
+                  <span v-if="task.archivePhase === 'packing'" class="text-df-warning">{{ t('transfer.packing') }}</span>
                   <span v-else-if="task.archivePhase === 'uploading'" class="text-primary">{{ t('transfer.archiveUploading') }}</span>
-                  <span v-else-if="task.archivePhase === 'extracting'" class="text-violet-500">{{ t('transfer.extracting') }}</span>
-                  <span v-else-if="task.archivePhase === 'completed'" class="text-emerald-500">{{ t('transfer.archiveCompleted') }}</span>
+                  <span v-else-if="task.archivePhase === 'extracting'" class="text-primary">{{ t('transfer.extracting') }}</span>
+                  <span v-else-if="task.archivePhase === 'completed'" class="text-df-success">{{ t('transfer.archiveCompleted') }}</span>
                   <span v-if="task.archiveFileCount" class="text-foreground/40">{{ task.archiveFileCount }} {{ t('transfer.files') }}</span>
                   <span v-if="task.archiveSize" class="text-foreground/40">{{ formatBytes(task.archiveSize) }}</span>
                 </template>
@@ -385,17 +385,17 @@ watch(
                 </template>
               </div>
               
-              <div class="flex items-center gap-2 transition-all">
+              <div class="flex items-center gap-2">
                 <span v-if="task.status === 'transferring'" class="flex items-center gap-1.5 text-primary">
                    <Zap class="h-2.5 w-2.5 animate-pulse" />
                    {{ formatSpeed(task.speed) }}
                    <span class="text-muted-foreground/40">•</span>
-                   <span class="text-foreground/70">剩余 {{ getETA(task) }}</span>
+                   <span class="text-foreground/70">{{ t('transfer.remaining') }} {{ getETA(task) }}</span>
                    <span class="text-muted-foreground/40">•</span>
-                   <span class="text-foreground/50">已用 {{ getElapsedTime(task) }}</span>
+                   <span class="text-foreground/50">{{ t('transfer.elapsed') }} {{ getElapsedTime(task) }}</span>
                 </span>
-                <span v-else-if="task.status === 'paused'" class="text-amber-500 uppercase tracking-widest text-[9px]">{{ t('transfer.paused') }}</span>
-                <span v-else-if="task.status === 'completed'" class="text-emerald-500 uppercase tracking-widest text-[9px]">{{ t('transfer.completed') }} · {{ getElapsedTime(task) }}</span>
+                <span v-else-if="task.status === 'paused'" class="text-df-warning uppercase tracking-widest text-[9px]">{{ t('transfer.paused') }}</span>
+                <span v-else-if="task.status === 'completed'" class="text-df-success uppercase tracking-widest text-[9px]">{{ t('transfer.completed') }} · {{ getElapsedTime(task) }}</span>
                 <span v-else-if="task.status === 'error'" class="text-destructive uppercase tracking-widest text-[9px]">{{ task.error || t('transfer.failed') }}</span>
               </div>
             </div>
@@ -417,8 +417,8 @@ watch(
         </span>
       </div>
       <div class="flex items-center gap-3">
-        <span v-if="transferringTasks.length > 0">剩余 {{ totalRemaining }}</span>
-        <span v-if="transferringTasks.length > 0" class="text-muted-foreground/50">已用 {{ totalElapsed }}</span>
+        <span v-if="transferringTasks.length > 0">{{ t('transfer.remaining') }} {{ totalRemaining }}</span>
+        <span v-if="transferringTasks.length > 0" class="text-muted-foreground/50">{{ t('transfer.elapsed') }} {{ totalElapsed }}</span>
         <span v-if="errorCount > 0" class="text-destructive font-black">
           {{ errorCount }} {{ t('transfer.failed') }}
         </span>

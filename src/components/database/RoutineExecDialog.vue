@@ -29,9 +29,9 @@ const error = ref('')
 
 /** 参数模式的颜色映射 */
 const modeColors: Record<string, string> = {
-  IN: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-  OUT: 'bg-green-500/10 text-green-600 dark:text-green-400',
-  INOUT: 'bg-amber-500/10 text-amber-600 dark:text-amber-400',
+  IN: 'bg-primary/10 text-primary',
+  OUT: 'bg-df-success/10 text-df-success',
+  INOUT: 'bg-df-warning/10 text-df-warning',
 }
 
 /** IN 和 INOUT 参数需要用户填写 */

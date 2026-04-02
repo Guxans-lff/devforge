@@ -63,6 +63,9 @@ const emit = defineEmits<{
 /** 可拖拽的节点类型 */
 const DRAGGABLE_TYPES = new Set(['table', 'view', 'column', 'procedure', 'function'])
 
+/** MySQL 系统数据库（灰显处理） */
+const SYSTEM_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys'])
+
 /** 判断节点是否可拖拽到 SQL 编辑器 */
 function isDraggableNode(node: import('@/types/database').DatabaseTreeNode): boolean {
   return DRAGGABLE_TYPES.has(node.type)
@@ -225,7 +228,7 @@ defineExpose({
     <div class="px-3 pt-2 pb-2 relative border-b border-border/5">
       <div class="relative group flex items-center h-8">
         <!-- Pill Background Container (拟物底座) -->
-        <div class="absolute inset-0 rounded-full bg-zinc-100/50 dark:bg-black/20 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.04),inset_0_0_0_1px_rgba(0,0,0,0.03),0_0.5px_0_rgba(255,255,255,0.6)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(255,255,255,0.04),0_0.5px_0_rgba(255,255,255,0.02)] transform-gpu transition-all duration-300 group-focus-within:bg-white dark:group-focus-within:bg-[#1C1C1E] group-focus-within:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05),0_4px_10px_rgba(0,0,0,0.03),0_0_0_1.5px_rgba(var(--primary-rgb),0.15)] dark:group-focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1),0_4px_12px_rgba(0,0,0,0.4),0_0_0_1.5px_rgba(var(--primary-rgb),0.2)]" />
+        <div class="absolute inset-0 rounded-full bg-zinc-100/50 dark:bg-black/20 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.04),inset_0_0_0_1px_rgba(0,0,0,0.03),0_0.5px_0_rgba(255,255,255,0.6)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(255,255,255,0.04),0_0.5px_0_rgba(255,255,255,0.02)] transform-gpu transition-[background-color,box-shadow] duration-300 group-focus-within:bg-white dark:group-focus-within:bg-[#1C1C1E] group-focus-within:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05),0_4px_10px_rgba(0,0,0,0.03),0_0_0_1.5px_rgba(var(--primary-rgb),0.15)] dark:group-focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1),0_4px_12px_rgba(0,0,0,0.4),0_0_0_1.5px_rgba(var(--primary-rgb),0.2)]" />
         
         <Search class="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 transition-colors group-focus-within:text-primary z-10" />
         <Input
@@ -237,7 +240,7 @@ defineExpose({
         />
         <button
           v-if="tree.combinedSearchQuery.value"
-          class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400/60 hover:text-destructive hover:bg-destructive/5 transition-all z-20"
+          class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400/60 hover:text-destructive hover:bg-destructive/5 transition-colors z-20"
           @click="tree.combinedSearchQuery.value = ''; tree.showObjectSearchDropdown.value = false"
         >
           <X class="h-2.5 w-2.5" />
@@ -262,7 +265,7 @@ defineExpose({
             <div
               v-for="(item, idx) in tree.objectSearchResults.value"
               :key="item.node.id + '-' + idx"
-              class="group/item flex cursor-pointer items-center gap-2.5 px-3 py-2 text-xs transition-all duration-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] border-l-2 border-transparent hover:border-primary"
+              class="group/item flex cursor-pointer items-center gap-2.5 px-3 py-2 text-xs transition-[background-color,border-color] duration-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] border-l-2 border-transparent hover:border-primary"
               @click="tree.handleSearchResultClick(item)"
             >
               <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted/40 text-muted-foreground">
@@ -290,7 +293,7 @@ defineExpose({
     </div>
 
     <!-- 虚拟滚动树 -->
-    <div ref="parentRef" class="min-h-0 flex-1 overflow-y-auto no-scrollbar py-1" style="will-change: transform; contain: strict">
+    <div ref="parentRef" class="min-h-0 flex-1 overflow-y-auto no-scrollbar py-1" role="tree" :aria-label="t('database.objects')" style="will-change: transform; contain: strict">
       <div v-if="(tree.loading.value || connecting) && tree.treeNodes.value.length === 0" class="flex items-center justify-center py-8">
         <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
       </div>
@@ -321,7 +324,10 @@ defineExpose({
               <!-- 系统文件夹节点 -->
               <div
                 v-if="item.isSystemFolder"
-                class="group flex h-full grow cursor-pointer items-center gap-1 px-2 mx-1.5 rounded-[6px] text-xs transition-all duration-300 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
+                class="group flex h-full grow cursor-pointer items-center gap-1 px-2 mx-1.5 rounded-[6px] text-xs transition-colors duration-300 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
+                role="treeitem"
+                :aria-expanded="tree.isSystemExpanded.value"
+                :aria-label="'系统管理'"
                 @click="tree.isSystemExpanded.value = !tree.isSystemExpanded.value"
               >
                 <div class="w-4 shrink-0 flex items-center justify-center">
@@ -338,7 +344,7 @@ defineExpose({
               <!-- 系统子入口节点 -->
               <div
                 v-else-if="item.isSystem"
-                class="group flex h-full grow cursor-pointer items-center gap-1 mx-1.5 rounded-[6px] text-xs transition-all duration-300 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
+                class="group flex h-full grow cursor-pointer items-center gap-1 mx-1.5 rounded-[6px] text-xs transition-colors duration-300 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
                 :style="{ paddingLeft: `${item.level * 12 + 12}px` }"
                 @click="item.systemAction === 'user' ? emit('openUserManagement') : emit('openPerformance')"
               >
@@ -355,21 +361,28 @@ defineExpose({
               <ContextMenu v-else-if="item.node">
                 <ContextMenuTrigger as-child>
                   <div
-                    class="group relative flex h-full grow cursor-pointer items-center gap-1 pr-2 mx-1.5 rounded-[6px] text-xs transition-all duration-300 transform-gpu hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
+                    class="group relative flex h-full grow cursor-pointer items-center gap-1 pr-2 mx-1.5 rounded-[6px] text-xs transition-[background-color,box-shadow] duration-300 transform-gpu hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
                     :class="[
-                      tree.highlightedNodeId.value === item.node.id 
-                        ? 'bg-primary/10 dark:bg-primary/20 shadow-[inset_0_0_0_1px_rgba(var(--primary-rgb),0.2)]' 
-                        : 'border-transparent'
+                      tree.highlightedNodeId.value === item.node.id
+                        ? 'bg-primary/10 dark:bg-primary/20 shadow-[inset_0_0_0_1px_rgba(var(--primary-rgb),0.2)]'
+                        : item.node.type === 'database' && item.node.isExpanded
+                          ? 'bg-muted/30'
+                          : 'border-transparent',
+                      item.node.type === 'database' && SYSTEM_DATABASES.has(item.node.label.toLowerCase()) && 'opacity-50',
                     ]"
                     :style="{ paddingLeft: `${item.level * 12 + 8}px` }"
                     :draggable="isDraggableNode(item.node)"
+                    role="treeitem"
+                    :aria-expanded="item.node.type !== 'column' && item.node.type !== 'procedure' && item.node.type !== 'function' && item.node.type !== 'trigger' ? item.node.isExpanded : undefined"
+                    :aria-level="item.level + 1"
+                    :aria-label="item.node.label"
                     @click="tree.toggleNode(item.node)"
                     @dblclick="tree.handleDoubleClick(item.node)"
                     @dragstart="handleDragStart($event, item.node)"
                   >
                     <!-- 左侧激活指示条 (Apple Style Indicator) -->
                     <div 
-                      class="absolute left-0 top-1.5 bottom-1.5 w-[2.5px] rounded-full bg-primary transition-all duration-500 transform-gpu origin-center"
+                      class="absolute left-0 top-1.5 bottom-1.5 w-[2.5px] rounded-full bg-primary transition-[scale,opacity] duration-500 transform-gpu origin-center"
                       :class="tree.highlightedNodeId.value === item.node.id ? 'scale-y-100 opacity-100' : 'scale-y-0 opacity-0'"
                     />
 
@@ -381,7 +394,7 @@ defineExpose({
                       />
                     </div>
                     <Loader2 v-if="item.node.isLoading" class="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
-                    <component :is="tree.getNodeIcon(item.node)" v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors duration-300 group-hover:text-primary/80" :class="{ 'text-amber-500': item.node.type === 'column' && item.node.meta?.isPrimaryKey }" />
+                    <component :is="tree.getNodeIcon(item.node)" v-else class="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-colors duration-300 group-hover:text-primary/80" :class="{ 'text-df-warning': item.node.type === 'column' && item.node.meta?.isPrimaryKey }" />
                     <span class="truncate transition-colors duration-300 group-hover:text-primary font-medium" :class="{ 'text-muted-foreground': item.node.type === 'column' }">{{ item.node.label }}</span>
 
                     <span

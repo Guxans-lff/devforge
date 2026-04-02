@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, onActivated } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, onActivated, onDeactivated } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connections'
@@ -34,6 +34,7 @@ const activePanel = ref<1 | 2>(1)
 const searchVisible = ref(false)
 const searchQuery = ref('')
 const searchInputRef = ref<HTMLInputElement>()
+const searchHasMatch = ref<boolean | null>(null) // null=未搜索, true=有匹配, false=无匹配
 
 /** 获取当前活跃面板的类型安全引用 */
 function getActivePanel(): TerminalPanelExposed | undefined {
@@ -79,13 +80,19 @@ watch(splitMode, (mode) => {
 })
 
 onBeforeUnmount(() => {
-  // 状态更新由 closeTab 统一处理（已检查同连接其他 tab），此处仅清理事件监听
+  // 兜底：组件真正销毁时确保清理
   window.removeEventListener('keydown', handleGlobalKeydown)
 })
 
-// KeepAlive 重新激活时同步连接状态
+// KeepAlive 重新激活时同步连接状态 + 恢复全局快捷键
 onActivated(() => {
   syncConnectionStatus()
+  window.addEventListener('keydown', handleGlobalKeydown)
+})
+
+// KeepAlive 切走时移除全局快捷键
+onDeactivated(() => {
+  window.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 async function openFileTransfer() {
@@ -145,28 +152,33 @@ function splitHorizontal() {
 function toggleSearch() {
   searchVisible.value = !searchVisible.value
   if (searchVisible.value) {
-    // 聇焦到搜索框
     setTimeout(() => searchInputRef.value?.focus(), 50)
   } else {
-    // 关闭时清除高亮
     getActivePanel()?.searchClear()
     searchQuery.value = ''
+    searchHasMatch.value = null
   }
 }
 
 function doSearch() {
-  if (!searchQuery.value) return
-  getActivePanel()?.searchFind(searchQuery.value)
+  if (!searchQuery.value) {
+    searchHasMatch.value = null
+    return
+  }
+  const found = getActivePanel()?.searchFind(searchQuery.value)
+  searchHasMatch.value = found ?? null
 }
 
 function doSearchNext() {
   if (!searchQuery.value) return
-  getActivePanel()?.searchFindNext(searchQuery.value)
+  const found = getActivePanel()?.searchFindNext(searchQuery.value)
+  searchHasMatch.value = found ?? null
 }
 
 function doSearchPrev() {
   if (!searchQuery.value) return
-  getActivePanel()?.searchFindPrevious(searchQuery.value)
+  const found = getActivePanel()?.searchFindPrevious(searchQuery.value)
+  searchHasMatch.value = found ?? null
 }
 
 function handleSearchKeydown(e: KeyboardEvent) {
@@ -190,10 +202,6 @@ function handleGlobalKeydown(e: KeyboardEvent) {
     toggleSearch()
   }
 }
-
-onMounted(() => {
-  window.addEventListener('keydown', handleGlobalKeydown)
-})
 
 /** 向当前活跃终端发送命令（自动加换行） */
 function sendCommandToTerminal(command: string) {
@@ -229,13 +237,14 @@ const activeSessionInfo = computed(() => {
   <div class="relative flex h-full w-full flex-col overflow-hidden bg-background">
     <!-- Toolbar -->
     <div class="flex h-10 shrink-0 items-center border-b border-border/10 bg-background/95 px-3 backdrop-blur-md">
-      <div class="flex items-center gap-1">
+      <div class="flex items-center gap-1" role="toolbar" :aria-label="t('terminal.toolbar')">
         <TooltipProvider :delay-duration="300">
           <Tooltip>
             <TooltipTrigger as-child>
               <Button
                 variant="ghost"
                 size="icon"
+                :aria-label="t('terminal.toggleSftp')"
                 class="h-7 w-7"
                 :class="sftpVisible ? 'text-foreground bg-accent' : 'text-muted-foreground hover:text-foreground'"
                 @click="toggleSftp"
@@ -253,6 +262,7 @@ const activeSessionInfo = computed(() => {
               <Button
                 variant="ghost"
                 size="icon"
+                :aria-label="t('terminal.commandSnippets')"
                 class="h-7 w-7"
                 :class="snippetsVisible ? 'text-foreground bg-accent' : 'text-muted-foreground hover:text-foreground'"
                 @click="toggleSnippets"
@@ -269,6 +279,7 @@ const activeSessionInfo = computed(() => {
               <Button
                 variant="ghost"
                 size="icon"
+                :aria-label="t('terminal.splitVertical')"
                 class="h-7 w-7"
                 :class="splitMode === 'vertical' ? 'text-foreground bg-accent' : 'text-muted-foreground hover:text-foreground'"
                 @click="splitVertical"
@@ -285,6 +296,7 @@ const activeSessionInfo = computed(() => {
               <Button
                 variant="ghost"
                 size="icon"
+                :aria-label="t('terminal.splitHorizontal')"
                 class="h-7 w-7"
                 :class="splitMode === 'horizontal' ? 'text-foreground bg-accent' : 'text-muted-foreground hover:text-foreground'"
                 @click="splitHorizontal"
@@ -301,6 +313,7 @@ const activeSessionInfo = computed(() => {
               <Button
                 variant="ghost"
                 size="icon"
+                :aria-label="t('terminal.openFileTransfer')"
                 class="h-7 w-7 text-muted-foreground hover:text-foreground"
                 @click="openFileTransfer"
               >
@@ -329,6 +342,7 @@ const activeSessionInfo = computed(() => {
             <Button
               variant="ghost"
               size="icon"
+              :aria-label="t('terminal.search') + ' (Ctrl+F)'"
               class="h-7 w-7"
               :class="searchVisible ? 'text-foreground bg-accent' : 'text-muted-foreground hover:text-foreground'"
               @click="toggleSearch"
@@ -346,9 +360,9 @@ const activeSessionInfo = computed(() => {
         <div
           class="h-1.5 w-1.5 rounded-full transition-colors duration-300"
           :class="{
-            'bg-green-500 shadow-[0_0_4px_rgba(34,197,94,0.6)]': terminalStatus === 'connected',
-            'bg-yellow-500 animate-pulse': terminalStatus === 'connecting',
-            'bg-red-500': terminalStatus === 'error',
+            'bg-df-success shadow-[0_0_4px_var(--df-success)]': terminalStatus === 'connected',
+            'bg-df-warning animate-pulse': terminalStatus === 'connecting',
+            'bg-destructive': terminalStatus === 'error',
             'bg-muted-foreground/30': terminalStatus === 'disconnected',
           }"
         ></div>
@@ -359,7 +373,9 @@ const activeSessionInfo = computed(() => {
     <!-- 搜索栏 Overlay -->
     <div
       v-if="searchVisible"
-      class="absolute right-6 top-12 z-50 flex h-10 items-center gap-2 rounded-xl border border-border bg-background/95 p-2 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-200"
+      class="absolute right-6 top-12 z-50 flex h-10 items-center gap-2 rounded-lg border border-border bg-background/95 p-2 shadow-2xl backdrop-blur-md animate-in fade-in zoom-in-95 duration-200"
+      role="search"
+      :aria-label="t('terminal.search')"
     >
       <div class="flex items-center gap-1.5 px-1">
         <Search class="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -368,15 +384,23 @@ const activeSessionInfo = computed(() => {
           v-model="searchQuery"
           type="text"
           class="w-48 h-7 bg-transparent border-none text-xs text-foreground placeholder:text-muted-foreground/50 outline-none"
-          :placeholder="'搜索...'"
+          :placeholder="t('terminal.searchPlaceholder')"
           @keydown="handleSearchKeydown"
           @input="doSearch"
         />
+        <span
+          v-if="searchQuery && searchHasMatch !== null"
+          class="text-[10px] shrink-0 tabular-nums"
+          :class="searchHasMatch ? 'text-df-success' : 'text-destructive'"
+        >
+          {{ searchHasMatch ? t('terminal.searchFound') : t('terminal.searchNotFound') }}
+        </span>
       </div>
       <div class="flex items-center border-l border-border pl-1 gap-0.5">
         <Button
           variant="ghost"
           size="icon"
+          :aria-label="t('terminal.searchPrevious')"
           class="h-7 w-7 text-muted-foreground hover:text-foreground"
           :disabled="!searchQuery"
           @click="doSearchPrev"
@@ -386,6 +410,7 @@ const activeSessionInfo = computed(() => {
         <Button
           variant="ghost"
           size="icon"
+          :aria-label="t('terminal.searchNext')"
           class="h-7 w-7 text-muted-foreground hover:text-foreground"
           :disabled="!searchQuery"
           @click="doSearchNext"
@@ -395,6 +420,7 @@ const activeSessionInfo = computed(() => {
         <Button
           variant="ghost"
           size="icon"
+          :aria-label="t('common.close')"
           class="h-7 w-7 text-muted-foreground hover:text-foreground ml-1"
           @click="toggleSearch"
         >
@@ -411,7 +437,7 @@ const activeSessionInfo = computed(() => {
           <!-- 第一分栏：始终包含主终端 -->
           <Pane :size="splitMode !== 'none' ? 50 : (sftpVisible ? 70 : 100)">
             <div 
-              class="h-full relative transition-all duration-300"
+              class="h-full relative transition-shadow duration-300"
               :class="{ 'ring-2 ring-inset ring-primary/60 shadow-[0_0_20px_rgba(var(--color-primary)/0.15)] z-10': splitMode !== 'none' && activePanel === 1 }"
               @click="activePanel = 1"
             >
@@ -430,7 +456,7 @@ const activeSessionInfo = computed(() => {
              <!-- 如果是分屏模式，显示第二个终端 -->
              <div 
                v-if="splitMode !== 'none'"
-               class="h-full relative transition-all duration-300"
+               class="h-full relative transition-shadow duration-300"
                :class="{ 'ring-2 ring-inset ring-primary/60 shadow-[0_0_20px_rgba(var(--color-primary)/0.15)] z-10': activePanel === 2 }"
                @click="activePanel = 2"
              >

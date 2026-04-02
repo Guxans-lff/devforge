@@ -9,7 +9,7 @@ import { FlexRender } from '@tanstack/vue-table'
 import {
   ArrowUpDown, ArrowUp, ArrowDown, Clock, AlertCircle, CheckCircle2,
   Hash, Download, Trash2, Filter, ShieldAlert, WifiOff, KeyRound, Eye,
-  Loader2, RotateCcw, Activity,
+  Loader2, RotateCcw, Activity, Play,
   Table as TableIcon,
   BarChart3,
   Settings2,
@@ -105,6 +105,24 @@ const qr = useQueryResult({
 
 /** 控制图表侧边配置面板开关 */
 const chartConfigOpen = ref(false)
+
+/** 数字类型关键字集合 */
+const NUMERIC_TYPES = /^(tiny|small|medium|big)?int|integer|float|double|decimal|numeric|real|number|money|serial/i
+/** 日期时间类型关键字集合 */
+const DATETIME_TYPES = /^date|time|datetime|timestamp|year/i
+
+/** 根据列名获取 dataType */
+function getColumnDataType(colId: string): string {
+  return props.result?.columns.find(c => c.name === colId)?.dataType ?? ''
+}
+/** 判断列是否为数字类型 */
+function isNumericColumn(colId: string): boolean {
+  return NUMERIC_TYPES.test(getColumnDataType(colId))
+}
+/** 判断列是否为日期时间类型 */
+function isDateTimeColumn(colId: string): boolean {
+  return DATETIME_TYPES.test(getColumnDataType(colId))
+}
 </script>
 
 <template>
@@ -125,7 +143,7 @@ const chartConfigOpen = ref(false)
         <template v-if="result.isError" />
         <template v-else>
           <div class="flex items-center gap-1.5 hover:text-foreground transition-colors">
-            <CheckCircle2 class="h-3.5 w-3.5 text-green-500" />
+            <CheckCircle2 class="h-3.5 w-3.5 text-df-success" />
             <span v-if="result.columns.length > 0" class="font-medium tracking-tight tabular-nums">
               {{ result.rows.length }} <span class="opacity-60">{{ t('database.rows') }}</span>
             </span>
@@ -151,7 +169,7 @@ const chartConfigOpen = ref(false)
           <div class="flex items-center gap-1">
             <div class="flex items-center bg-muted/40 rounded-lg p-0.5 border border-border/50">
               <button
-                class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium transition-all"
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium transition-[background-color,color,box-shadow]"
                 :class="!qr.showChart.value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
                 @click="qr.showChart.value = false"
               >
@@ -159,7 +177,7 @@ const chartConfigOpen = ref(false)
                 表格数据
               </button>
               <button
-                class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium transition-all"
+                class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium transition-[background-color,color,box-shadow]"
                 :class="qr.showChart.value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
                 @click="qr.showChart.value = true"
               >
@@ -171,7 +189,7 @@ const chartConfigOpen = ref(false)
             <Button
               v-if="qr.showChart.value"
               variant="ghost" size="sm"
-              class="h-6 gap-1.5 text-[10px] px-2 hover:bg-muted/50 rounded-md transition-all active:scale-95 ml-1"
+              class="h-6 gap-1.5 text-[10px] px-2 hover:bg-muted/50 rounded-md transition-colors active:scale-95 ml-1"
               @click="chartConfigOpen = true"
             >
               <Settings2 class="h-3 w-3" />
@@ -180,7 +198,7 @@ const chartConfigOpen = ref(false)
             <div class="w-px h-3 bg-border/50 mx-1" />
             <Button
               variant="ghost" size="sm"
-              class="h-6 gap-1.5 text-[10px] px-2 hover:bg-muted/50 rounded-md transition-all active:scale-95"
+              class="h-6 gap-1.5 text-[10px] px-2 hover:bg-muted/50 rounded-md transition-colors active:scale-95"
               :class="{ 'text-primary bg-primary/10': qr.showFilters.value }"
               @click="qr.toggleFilters()"
             >
@@ -190,7 +208,7 @@ const chartConfigOpen = ref(false)
             <div class="w-px h-3 bg-border/50 mx-1" />
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="sm" class="h-6 gap-1.5 text-[10px] px-2 hover:bg-muted/50 rounded-md transition-all active:scale-95">
+                <Button variant="ghost" size="sm" class="h-6 gap-1.5 text-[10px] px-2 hover:bg-muted/50 rounded-md transition-colors active:scale-95">
                   <Download class="h-3 w-3" />
                   {{ t('database.export') }}
                 </Button>
@@ -224,21 +242,23 @@ const chartConfigOpen = ref(false)
         <!-- Header -->
         <div class="sticky top-0 z-10 bg-muted">
           <div class="w-full" :style="qr.gridStyle.value">
-            <div class="whitespace-nowrap border-b border-r border-border px-3 py-1.5 text-left text-xs font-medium text-muted-foreground sticky left-0 z-20 bg-muted">
+            <div class="whitespace-nowrap border-b-2 border-border border-r px-3 py-1.5 text-left text-[11px] font-medium text-muted-foreground sticky left-0 z-20 bg-muted">
               #
             </div>
             <ContextMenu v-for="header in qr.table.getFlatHeaders()" :key="'hctx-' + header.id">
               <ContextMenuTrigger as-child>
                 <div
-                  class="group/header relative select-none whitespace-nowrap border-b border-r border-border px-3 py-1.5 text-left text-xs font-bold text-muted-foreground/80 hover:bg-muted/50 transition-colors"
+                  class="group/header relative select-none whitespace-nowrap border-b-2 border-border border-r px-3 py-1.5 text-left text-[11px] font-bold text-muted-foreground/80 uppercase tracking-wider hover:bg-muted/50 transition-colors"
                   :class="{
                     'bg-primary/5 text-primary': qr.selectedStatsColumn.value === header.column.id,
                     'sticky z-20 bg-muted': qr.isColumnPinned(header.column.id),
+                    'text-right': isNumericColumn(header.column.id),
                   }"
                   :style="qr.isColumnPinned(header.column.id) ? { left: qr.pinnedColumnOffsets.value[header.column.id] + 'px' } : undefined"
                 >
                   <div
                     class="flex items-center gap-1 cursor-pointer"
+                    :class="{ 'justify-end': isNumericColumn(header.column.id) }"
                     @click="isTableBrowse ? qr.handleHeaderClick(header.column.id) : header.column.getToggleSortingHandler()?.($event)"
                   >
                     <Pin v-if="qr.isColumnPinned(header.column.id)" class="h-2.5 w-2.5 text-primary/50 shrink-0" />
@@ -281,7 +301,7 @@ const chartConfigOpen = ref(false)
             </ContextMenu>
             <div
               v-if="qr.editable.value"
-              class="whitespace-nowrap border-b border-r border-border px-1 py-1.5 text-center text-xs font-medium text-muted-foreground"
+              class="whitespace-nowrap border-b-2 border-border border-r px-1 py-1.5 text-center text-xs font-medium text-muted-foreground"
             />
           </div>
           <div v-if="qr.showFilters.value" class="flex" :style="qr.gridStyle.value">
@@ -298,7 +318,7 @@ const chartConfigOpen = ref(false)
               <div v-if="isTableBrowse" class="flex gap-0.5">
                 <select
                   :value="qr.filterOperators.value[header.column.id] || 'LIKE'"
-                  class="h-5 w-14 shrink-0 rounded-sm border border-border bg-background text-[9px] outline-none focus:border-primary"
+                  class="h-5 w-14 shrink-0 rounded-sm border border-border bg-background text-[9px] outline-none focus:border-primary focus-visible:ring-[2px] focus-visible:ring-ring/50"
                   @change="qr.handleOperatorChange(header.column.id, ($event.target as HTMLSelectElement).value)"
                 >
                   <option value="LIKE">LIKE</option>
@@ -316,7 +336,7 @@ const chartConfigOpen = ref(false)
                   :value="qr.columnFilters.value[header.column.id] ?? ''"
                   :placeholder="t('database.filterPlaceholder')"
                   :disabled="(qr.filterOperators.value[header.column.id] === 'IS NULL' || qr.filterOperators.value[header.column.id] === 'IS NOT NULL')"
-                  class="h-5 min-w-0 flex-1 rounded-sm border border-border bg-background px-1 text-[10px] outline-none focus:border-primary disabled:opacity-40"
+                  class="h-5 min-w-0 flex-1 rounded-sm border border-border bg-background px-1 text-[10px] outline-none focus:border-primary focus-visible:ring-[2px] focus-visible:ring-ring/50 disabled:opacity-40"
                   @input="qr.handleFilterChange(header.column.id, ($event.target as HTMLInputElement).value)"
                 />
               </div>
@@ -324,7 +344,7 @@ const chartConfigOpen = ref(false)
                 v-else
                 :value="qr.columnFilters.value[header.column.id] ?? ''"
                 :placeholder="t('database.filterPlaceholder')"
-                class="h-5 w-full rounded-sm border border-border bg-background px-1.5 text-[10px] outline-none focus:border-primary"
+                class="h-5 w-full rounded-sm border border-border bg-background px-1.5 text-[10px] outline-none focus:border-primary focus-visible:ring-[2px] focus-visible:ring-ring/50"
                 @input="qr.columnFilters.value = { ...qr.columnFilters.value, [header.column.id]: ($event.target as HTMLInputElement).value }"
               />
             </div>
@@ -343,13 +363,13 @@ const chartConfigOpen = ref(false)
               v-if="vRow && qr.table.getRowModel().rows[vRow.index]"
               class="cursor-pointer absolute left-0 right-0 group/row"
               :style="{ ...qr.rowBaseStyle.value, transform: `translateY(${vRow.start}px)` }"
-              :class="qr.selectedRowIndex.value === vRow.index ? 'selected-row bg-primary/10' : ''"
+              :class="qr.selectedRowIndex.value === vRow.index ? 'selected-row bg-primary/5' : ''"
               @click="qr.selectedRowIndex.value = vRow.index"
               @contextmenu="handleRowContextMenu($event, vRow.index)"
             >
               <div
                 class="whitespace-nowrap border-b border-r border-border px-3 text-[10px] font-bold text-muted-foreground/40 tabular-nums flex items-center justify-center sticky left-0 z-[5]"
-                :class="qr.selectedRowIndex.value === vRow.index ? 'bg-primary/10' : 'bg-muted/5 group-hover/row:bg-muted-foreground/10'"
+                :class="qr.selectedRowIndex.value === vRow.index ? 'bg-primary/5' : 'bg-muted/5 group-hover/row:bg-muted/50'"
               >
                 {{ vRow.index + 1 }}
               </div>
@@ -360,11 +380,13 @@ const chartConfigOpen = ref(false)
                 :class="{
                   'text-muted-foreground/40 italic font-sans': cell.getValue() === null || cell.getValue() === undefined,
                   'cursor-pointer': !qr.editingCell.value || qr.editingCell.value.rowIndex !== vRow.index || qr.editingCell.value.colName !== cell.column.id,
-                  'text-primary font-bold bg-primary/10': qr.selectedRowIndex.value === vRow.index,
-                  'group-hover/row:bg-muted-foreground/10': qr.selectedRowIndex.value !== vRow.index,
+                  'bg-primary/5': qr.selectedRowIndex.value === vRow.index,
+                  'group-hover/row:bg-muted/50': qr.selectedRowIndex.value !== vRow.index,
                   'sticky z-[5]': qr.isColumnPinned(cell.column.id),
-                  '!bg-primary/10': qr.isColumnPinned(cell.column.id) && qr.selectedRowIndex.value === vRow.index,
-                  'bg-background group-hover/row:!bg-muted-foreground/10': qr.isColumnPinned(cell.column.id) && qr.selectedRowIndex.value !== vRow.index,
+                  '!bg-primary/5': qr.isColumnPinned(cell.column.id) && qr.selectedRowIndex.value === vRow.index,
+                  'bg-background group-hover/row:!bg-muted/50': qr.isColumnPinned(cell.column.id) && qr.selectedRowIndex.value !== vRow.index,
+                  'justify-end tabular-nums': cell.getValue() !== null && cell.getValue() !== undefined && isNumericColumn(cell.column.id),
+                  'text-muted-foreground/70': cell.getValue() !== null && cell.getValue() !== undefined && isDateTimeColumn(cell.column.id),
                 }"
                 :style="qr.isColumnPinned(cell.column.id) ? { left: qr.pinnedColumnOffsets.value[cell.column.id] + 'px' } : undefined"
                 @click.stop="qr.handleCellClick(cell.getValue())"
@@ -374,7 +396,7 @@ const chartConfigOpen = ref(false)
                   <input
                     :value="qr.editingValue.value"
                     v-focus
-                    class="h-full w-full bg-background px-1 text-xs font-mono outline-none border border-primary rounded-sm"
+                    class="h-full w-full bg-background px-1 text-xs font-mono outline-none focus-visible:ring-[2px] focus-visible:ring-ring/50 border border-primary rounded-sm"
                     @input="qr.editingValue.value = ($event.target as HTMLInputElement).value"
                     @keydown.enter="qr.saveEdit()"
                     @keydown.escape="qr.cancelEdit()"
@@ -462,8 +484,24 @@ const chartConfigOpen = ref(false)
       </div>
 
       <!-- Empty state -->
-      <div v-else-if="!loading && !result" class="flex h-full items-center justify-center text-muted-foreground">
-        <p class="text-sm font-medium tracking-wide">{{ t('database.noResults') }}</p>
+      <div v-else-if="!loading && !result" class="flex h-full items-center justify-center">
+        <div class="flex flex-col items-center gap-4 max-w-[320px] text-center">
+          <div class="rounded-xl bg-muted/30 p-4">
+            <Play class="h-8 w-8 text-muted-foreground/25" />
+          </div>
+          <div class="space-y-1.5">
+            <p class="text-sm font-bold text-muted-foreground/60">{{ t('database.noResults') }}</p>
+            <p class="text-[11px] text-muted-foreground/40 leading-relaxed">
+              {{ t('database.emptyStateHint') }}
+            </p>
+          </div>
+          <div class="flex items-center gap-3 text-[10px] text-muted-foreground/30">
+            <kbd class="inline-flex items-center gap-1 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 font-mono font-bold">
+              Ctrl+Enter
+            </kbd>
+            <span>{{ t('database.executeCurrentStatement') }}</span>
+          </div>
+        </div>
       </div>
 
       <!-- Success state -->
@@ -471,8 +509,8 @@ const chartConfigOpen = ref(false)
         v-else-if="!loading && result && !result.isError && result.columns.length === 0"
         class="flex h-full flex-col items-center justify-center text-muted-foreground gap-4 animate-in zoom-in-95 duration-300"
       >
-        <div class="rounded-full bg-green-500/10 p-4 shadow-sm">
-          <CheckCircle2 class="h-10 w-10 text-green-500" />
+        <div class="rounded-full bg-df-success/10 p-4 shadow-sm">
+          <CheckCircle2 class="h-10 w-10 text-df-success" />
         </div>
         <div class="text-center space-y-1.5">
           <p class="text-lg font-bold text-foreground">执行成功</p>
@@ -480,10 +518,10 @@ const chartConfigOpen = ref(false)
             <template v-if="result.multiStatementSummary">
               <span class="font-medium text-foreground">{{ result.multiStatementSummary.total }}</span> <span class="opacity-80">条语句</span>
               <span class="mx-1 opacity-30">·</span>
-              <span class="font-medium text-green-500">{{ result.multiStatementSummary.success }} 成功</span>
+              <span class="font-medium text-df-success">{{ result.multiStatementSummary.success }} 成功</span>
               <template v-if="result.multiStatementSummary.fail > 0">
                 <span class="mx-1 opacity-30">·</span>
-                <span class="font-medium text-red-500">{{ result.multiStatementSummary.fail }} 失败</span>
+                <span class="font-medium text-destructive">{{ result.multiStatementSummary.fail }} 失败</span>
               </template>
               <span class="mx-2 opacity-30">|</span>
             </template>
@@ -516,16 +554,16 @@ const chartConfigOpen = ref(false)
       <span class="flex items-center gap-2">
         <!-- 可编辑：显示主键列名 -->
         <template v-if="qr.editableReason.value === 'ok'">
-          <span class="flex items-center gap-1 text-emerald-500/80 font-medium">
+          <span class="flex items-center gap-1 text-df-success/80 font-medium">
             <KeyRound class="h-3 w-3" />
             PK: {{ qr.primaryKeys.value.join(', ') }}
           </span>
           <span class="text-muted-foreground/40">·</span>
-          <span class="text-muted-foreground/60">双击单元格可编辑</span>
+          <span class="text-muted-foreground/30">双击单元格可编辑</span>
         </template>
         <!-- 无主键：只读提示 -->
         <template v-else-if="qr.editableReason.value === 'no-pk'">
-          <span class="flex items-center gap-1 text-amber-500/80">
+          <span class="flex items-center gap-1 text-df-warning/80">
             <ShieldAlert class="h-3 w-3" />
             无主键，只读模式
           </span>

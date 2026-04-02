@@ -183,8 +183,8 @@ onBeforeUnmount(() => {
       <span class="text-xs font-medium">{{ t('fileEditor.diffTitle') }}</span>
       <span class="flex-1" />
       <div v-if="!loading" class="flex items-center gap-2 text-[10px] text-muted-foreground">
-        <span class="text-green-500">+{{ diffStats.added }}</span>
-        <span class="text-red-500">-{{ diffStats.removed }}</span>
+        <span class="text-df-success">+{{ diffStats.added }}</span>
+        <span class="text-destructive">-{{ diffStats.removed }}</span>
       </div>
       <Button variant="ghost" size="sm" class="h-6 w-6 p-0" @click="emit('update:open', false)">
         <X class="h-3.5 w-3.5" />

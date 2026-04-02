@@ -61,8 +61,8 @@ const metricGroups = computed(() => {
     {
       title: 'Buffer Pool',
       icon: Database,
-      color: 'text-blue-500',
-      bg: 'bg-blue-500/10',
+      color: 'text-primary',
+      bg: 'bg-primary/10',
       items: [
         { label: '总页数', value: formatNum(s.bufferPoolPagesTotal) },
         { label: '空闲页', value: formatNum(s.bufferPoolPagesFree) },
@@ -74,8 +74,8 @@ const metricGroups = computed(() => {
     {
       title: '行锁状态',
       icon: Lock,
-      color: 'text-amber-500',
-      bg: 'bg-amber-500/10',
+      color: 'text-df-warning',
+      bg: 'bg-df-warning/10',
       items: [
         { label: '当前等待锁数', value: String(s.rowLockCurrentWaits), warn: s.rowLockCurrentWaits > 0 },
         { label: '平均锁等待 (ms)', value: s.rowLockTimeAvgMs.toFixed(2), warn: s.rowLockTimeAvgMs > 100 },
@@ -85,8 +85,8 @@ const metricGroups = computed(() => {
     {
       title: '行操作统计',
       icon: FileText,
-      color: 'text-emerald-500',
-      bg: 'bg-emerald-500/10',
+      color: 'text-df-success',
+      bg: 'bg-df-success/10',
       items: [
         { label: '读取 (Read)', value: formatNum(s.rowsRead) },
         { label: '插入 (Insert)', value: formatNum(s.rowsInserted) },
@@ -115,7 +115,7 @@ onMounted(() => { fetchStatus() })
     <!-- 标题栏 -->
     <div class="mb-4 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="p-2 rounded-xl bg-blue-500/10 text-blue-500 shadow-sm">
+        <div class="p-2 rounded-xl bg-primary/10 text-primary shadow-sm">
           <Database class="h-5 w-5" />
         </div>
         <div>
@@ -165,10 +165,10 @@ onMounted(() => { fetchStatus() })
               <span class="text-xs text-muted-foreground/70">{{ item.label }}</span>
               <span
                 class="text-sm font-mono font-bold"
-                :class="item.warn ? 'text-rose-500' : 'text-foreground/80'"
+                :class="item.warn ? 'text-destructive' : 'text-foreground/80'"
               >
                 {{ item.value }}
-                <AlertTriangle v-if="item.warn" class="inline h-3 w-3 ml-1 text-rose-500" />
+                <AlertTriangle v-if="item.warn" class="inline h-3 w-3 ml-1 text-destructive" />
               </span>
             </div>
           </div>

@@ -36,6 +36,10 @@ pub struct SchemaDiff {
 }
 
 /// 对比两个数据库的 schema
+///
+/// 性能策略：使用 get_all_columns 一次性获取整个数据库的所有列信息，
+/// 源和目标各一次 SQL 查询（总共 4 次：2 次 get_tables + 2 次 get_all_columns），
+/// 而非逐表查询（N 次往返）。
 pub async fn compare_schemas(
     engine: Arc<DbEngine>,
     source_connection_id: &str,
@@ -43,14 +47,18 @@ pub async fn compare_schemas(
     target_connection_id: &str,
     target_database: &str,
 ) -> Result<SchemaDiff, AppError> {
-    // 获取源和目标的表列表
-    let (source_tables, target_tables) = tokio::join!(
+    // 并发获取：源表列表 + 目标表列表 + 源所有列 + 目标所有列（4 个请求并发）
+    let (source_tables, target_tables, source_all_cols, target_all_cols) = tokio::join!(
         engine.clone().get_tables(source_connection_id.to_string(), source_database.to_string()),
-        engine.clone().get_tables(target_connection_id.to_string(), target_database.to_string())
+        engine.clone().get_tables(target_connection_id.to_string(), target_database.to_string()),
+        engine.clone().get_all_columns(source_connection_id.to_string(), source_database.to_string()),
+        engine.clone().get_all_columns(target_connection_id.to_string(), target_database.to_string())
     );
 
     let source_tables = source_tables?;
     let target_tables = target_tables?;
+    let source_all_cols = source_all_cols?;
+    let target_all_cols = target_all_cols?;
 
     // 构建表名集合
     let source_names: HashMap<String, ()> = source_tables
@@ -79,31 +87,19 @@ pub async fn compare_schemas(
         .cloned()
         .collect();
 
-    // 两边都存在的表 — 对比列差异
-    let common_tables: Vec<String> = source_names
-        .keys()
-        .filter(|name| target_names.contains_key(*name))
-        .cloned()
-        .collect();
-
+    // 两边都存在的表 — 直接从内存中的 HashMap 对比列差异（零网络开销）
+    let empty_cols = Vec::new();
     let mut table_diffs = Vec::new();
 
-    for table_name in &common_tables {
-        let s_conn = source_connection_id.to_string();
-        let s_db = source_database.to_string();
-        let t_conn = target_connection_id.to_string();
-        let t_db = target_database.to_string();
-        let t_name = table_name.to_string();
+    for table_name in source_names.keys() {
+        if !target_names.contains_key(table_name) {
+            continue; // 仅源端有，已记录
+        }
 
-        let source_fut = engine.clone().get_columns(s_conn, s_db, t_name.clone());
-        let target_fut = engine.clone().get_columns(t_conn, t_db, t_name);
-        
-        let (source_cols, target_cols) = tokio::join!(source_fut, target_fut);
+        let source_cols = source_all_cols.get(table_name).unwrap_or(&empty_cols);
+        let target_cols = target_all_cols.get(table_name).unwrap_or(&empty_cols);
 
-        let source_cols = source_cols?;
-        let target_cols = target_cols?;
-
-        let diff = compare_table_columns(table_name, &source_cols, &target_cols);
+        let diff = compare_table_columns(table_name, source_cols, target_cols);
         if !diff.columns_added.is_empty()
             || !diff.columns_removed.is_empty()
             || !diff.columns_modified.is_empty()
@@ -286,7 +282,7 @@ pub async fn generate_migration_sql(
                 col_def.push_str(" NOT NULL");
             }
             if let Some(ref dv) = col.default_value {
-                col_def.push_str(&format!(" DEFAULT {}", dv));
+                col_def.push_str(&format!(" DEFAULT {}", format_default_value(dv)));
             }
             if let Some(ref comment) = col.comment {
                 if !comment.is_empty() {
@@ -352,7 +348,7 @@ pub async fn generate_migration_sql(
                         if let Some(ref dv) = col.default_value {
                             statements.push(format!(
                                 "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} SET DEFAULT {};",
-                                target_database, tbl, col.name, dv
+                                target_database, tbl, col.name, format_default_value(dv)
                             ));
                         } else {
                             statements.push(format!(
@@ -372,7 +368,7 @@ pub async fn generate_migration_sql(
                     modify.push_str(" NOT NULL");
                 }
                 if let Some(ref dv) = col.default_value {
-                    modify.push_str(&format!(" DEFAULT {}", dv));
+                    modify.push_str(&format!(" DEFAULT {}", format_default_value(dv)));
                 }
                 if let Some(ref comment) = col.comment {
                     if !comment.is_empty() {
@@ -393,4 +389,59 @@ pub async fn generate_migration_sql(
     } else {
         Ok(statements.join("\n\n"))
     }
+}
+
+/// 格式化 DEFAULT 值为合法 SQL 表达式
+/// MySQL information_schema 返回的 COLUMN_DEFAULT 是原始字符串值（不带引号），
+/// 需要根据内容判断是否需要加单引号：
+/// - 数字（整数/小数/负数）→ 不加
+/// - NULL → 不加
+/// - 函数/表达式（CURRENT_TIMESTAMP、now()、uuid() 等）→ 不加
+/// - 其他字符串 → 加单引号并转义内部单引号
+fn format_default_value(dv: &str) -> String {
+    let trimmed = dv.trim();
+
+    // NULL
+    if trimmed.eq_ignore_ascii_case("NULL") {
+        return "NULL".to_string();
+    }
+
+    // 数字（含负数、小数）
+    if trimmed.parse::<f64>().is_ok() {
+        return trimmed.to_string();
+    }
+
+    // b'0' / b'1' 等 MySQL bit 字面量
+    if trimmed.starts_with("b'") && trimmed.ends_with('\'') {
+        return trimmed.to_string();
+    }
+
+    // 常见 MySQL/PG 函数和表达式（不加引号）
+    let upper = trimmed.to_uppercase();
+    let is_expression = upper.starts_with("CURRENT_TIMESTAMP")
+        || upper.starts_with("NOW(")
+        || upper.starts_with("UUID(")
+        || upper.starts_with("LOCALTIME")
+        || upper.starts_with("CURRENT_DATE")
+        || upper.starts_with("CURRENT_USER")
+        || upper.starts_with("NEXTVAL(")
+        || upper.starts_with("GEN_RANDOM_")
+        || upper == "TRUE"
+        || upper == "FALSE"
+        // MySQL on update CURRENT_TIMESTAMP
+        || upper.contains("ON UPDATE");
+
+    if is_expression {
+        return trimmed.to_string();
+    }
+
+    // 已经被引号包裹的值（部分 PG driver 会这样返回）
+    if (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+        || (trimmed.starts_with('"') && trimmed.ends_with('"'))
+    {
+        return trimmed.to_string();
+    }
+
+    // 其他情况视为字符串，加单引号
+    format!("'{}'", trimmed.replace('\'', "''"))
 }

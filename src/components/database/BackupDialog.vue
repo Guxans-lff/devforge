@@ -403,7 +403,7 @@ onBeforeUnmount(() => {
               <div
                 v-if="backupDone"
                 class="flex items-center gap-2 rounded-md px-3 py-2 text-xs"
-                :class="backupSuccess ? 'bg-green-500/10 text-green-600 dark:text-green-400' : 'bg-destructive/10 text-destructive'"
+                :class="backupSuccess ? 'bg-df-success/10 text-df-success' : 'bg-destructive/10 text-destructive'"
               >
                 <Check v-if="backupSuccess" class="size-3.5 shrink-0" />
                 <X v-else class="size-3.5 shrink-0" />

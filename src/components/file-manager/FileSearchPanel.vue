@@ -142,7 +142,7 @@ onUnmounted(() => {
         <Input
           v-model="pattern"
           :placeholder="t('fileEditor.searchPlaceholder')"
-          class="h-8 pl-8 pr-10 text-xs bg-muted/20 border-border/40 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-all rounded-lg"
+          class="h-8 pl-8 pr-10 text-xs bg-muted/20 border-border/40 focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-[border-color,box-shadow] rounded-lg"
           autofocus
         />
         <Search class="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/50 group-focus-within:text-primary/70 transition-colors" />
@@ -173,7 +173,7 @@ onUnmounted(() => {
 
       <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
         <label class="flex items-center gap-2 text-[11px] text-muted-foreground/80 cursor-pointer hover:text-foreground transition-colors group">
-          <div class="relative flex items-center justify-center h-3.5 w-3.5 rounded border border-border/60 bg-muted/40 group-hover:border-primary/50 transition-all overflow-hidden">
+          <div class="relative flex items-center justify-center h-3.5 w-3.5 rounded border border-border/60 bg-muted/40 group-hover:border-primary/50 transition-[border-color] overflow-hidden">
             <input type="checkbox" v-model="caseSensitive" class="absolute inset-0 opacity-0 cursor-pointer z-10" />
             <div v-if="caseSensitive" class="h-full w-full bg-primary flex items-center justify-center">
               <div class="h-1.5 w-1.5 rounded-full bg-primary-foreground transform scale-100 transition-transform"></div>
@@ -190,7 +190,7 @@ onUnmounted(() => {
               type="number" 
               min="1" 
               max="50" 
-              class="h-5 w-10 text-center bg-muted/40 border border-border/40 rounded px-1 text-[10px] focus:border-primary/50 focus:outline-none transition-all" 
+              class="h-5 w-10 text-center bg-muted/40 border border-border/40 rounded px-1 text-[10px] focus:border-primary/50 focus:outline-none transition-[border-color]" 
             />
           </div>
         </div>
@@ -229,7 +229,7 @@ onUnmounted(() => {
         <div
           v-for="result in results"
           :key="result.path"
-          class="flex cursor-pointer items-center gap-3 px-2.5 py-2 text-xs rounded-md transition-all hover:bg-muted/40 group active:scale-[0.99]"
+          class="flex cursor-pointer items-center gap-3 px-2.5 py-2 text-xs rounded-md transition-[background-color,scale] hover:bg-muted/40 group active:scale-[0.99]"
           @click="handleResultClick(result)"
         >
           <div class="relative flex items-center justify-center h-8 w-8 shrink-0 rounded-lg bg-muted/30 group-hover:bg-background transition-colors shadow-sm border border-border/10">

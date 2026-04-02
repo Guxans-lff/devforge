@@ -168,13 +168,15 @@ defineExpose({ gridSearch })
     </div>
 
     <!-- 结果标签栏 -->
-    <div v-if="resultTabs.length > 0" class="flex items-center border-b border-border bg-muted/20 overflow-x-auto no-scrollbar" @click.self="emit('closeContextMenu')">
+    <div v-if="resultTabs.length > 0" class="flex items-center border-b border-border bg-muted/20 overflow-x-auto no-scrollbar" role="tablist" :aria-label="'查询结果标签'" @click.self="emit('closeContextMenu')">
       <TooltipProvider :delay-duration="300">
         <div class="flex">
           <Tooltip v-for="tab in resultTabs" :key="tab.id">
             <TooltipTrigger as-child>
               <button
-                class="group relative flex items-center gap-2 px-4 py-2 text-[11px] border-r border-border transition-all duration-200 shrink-0"
+                role="tab"
+                :aria-selected="tab.id === activeResultTabId"
+                class="group relative flex items-center gap-2 px-4 py-2 text-[11px] border-r border-border transition-colors duration-200 shrink-0"
                 :class="tab.id === activeResultTabId ? 'bg-background text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'"
                 @click="emit('setActiveResultTab', tab.id)"
                 @contextmenu="emit('showContextMenu', $event, tab.id)"
@@ -185,12 +187,12 @@ defineExpose({ gridSearch })
                 <div class="flex items-center gap-1.5 min-w-[60px]">
                   <Table2 class="h-3 w-3 shrink-0 opacity-70 group-hover:opacity-100 transition-opacity" :class="tab.id === activeResultTabId ? 'text-primary' : ''" />
                   <span class="truncate font-medium">{{ tab.title }}</span>
-                  <Pin v-if="tab.isPinned" class="h-2.5 w-2.5 text-blue-500 animate-in zoom-in-50" />
+                  <Pin v-if="tab.isPinned" class="h-2.5 w-2.5 text-df-info animate-in zoom-in-50" />
                 </div>
 
                 <button
                   v-if="!tab.isPinned"
-                  class="ml-1 opacity-0 group-hover:opacity-100 rounded-full hover:bg-muted/80 p-0.5 transition-all text-muted-foreground hover:text-foreground"
+                  class="ml-1 opacity-0 group-hover:opacity-100 rounded-full hover:bg-muted/80 p-0.5 transition-[opacity,background-color,color] text-muted-foreground hover:text-foreground"
                   @click.stop="emit('closeResultTab', tab.id)"
                 >
                   <XIcon class="h-2.5 w-2.5" />
@@ -258,8 +260,8 @@ defineExpose({ gridSearch })
         :title="sub.sql"
         @click="emit('setActiveSubResult', idx)"
       >
-        <CheckCircle2 v-if="!sub.result.isError" class="h-3 w-3 text-green-500" />
-        <XCircle v-else class="h-3 w-3 text-red-500" />
+        <CheckCircle2 v-if="!sub.result.isError" class="h-3 w-3 text-df-success" />
+        <XCircle v-else class="h-3 w-3 text-destructive" />
         <span class="max-w-[120px] truncate">{{ sub.statementType }}</span>
         <span class="text-[9px] opacity-50">{{ sub.result.executionTimeMs }}ms</span>
       </button>

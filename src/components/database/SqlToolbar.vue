@@ -70,59 +70,71 @@ const timeoutModel = computed({
 </script>
 
 <template>
-  <div class="flex items-center gap-2 border-b border-border px-2 py-1">
-    <!-- 执行按钮 -->
+  <div
+    class="flex items-center gap-1 border-b border-border px-2 py-1"
+    role="toolbar"
+    :aria-label="t('database.sqlToolbar')"
+  >
+    <!-- ═══ 第一组：主操作 ═══ -->
     <TooltipProvider :delay-duration="300">
+      <!-- 执行按钮（主色突出） -->
       <Tooltip>
         <TooltipTrigger as-child>
           <div>
             <Button
-              variant="default"
+              v-if="!isExecuting"
               size="sm"
-              class="h-6 gap-1 text-[11px]"
-              :disabled="!isConnected || isExecuting"
+              :aria-label="t('database.execute') + ' (Ctrl+Enter)'"
+              class="h-7 gap-1.5 px-3 text-[11px] font-bold"
+              :disabled="!isConnected"
               @click="emit('execute')"
             >
-              <Loader2 v-if="isExecuting" class="h-3 w-3 animate-spin" />
-              <Play v-else class="h-3 w-3" />
+              <Play class="h-3 w-3" />
               {{ t('database.execute') }}
+            </Button>
+            <!-- 执行中：切换为红色 Stop -->
+            <Button
+              v-else
+              variant="destructive"
+              size="sm"
+              :aria-label="t('common.cancel')"
+              class="h-7 gap-1.5 px-3 text-[11px] font-bold animate-pulse"
+              @click="emit('cancel')"
+            >
+              <Square class="h-3 w-3" />
+              {{ t('common.cancel') }}
             </Button>
           </div>
         </TooltipTrigger>
-        <TooltipContent v-if="executeDisabledReason" side="bottom" class="text-xs">
-          {{ executeDisabledReason }}
+        <TooltipContent side="bottom" class="text-xs">
+          <template v-if="executeDisabledReason">{{ executeDisabledReason }}</template>
+          <template v-else-if="isExecuting">{{ t('common.cancel') }} (Ctrl+C)</template>
+          <template v-else>{{ t('database.execute') }} (Ctrl+Enter)</template>
         </TooltipContent>
       </Tooltip>
-    </TooltipProvider>
 
-    <!-- 取消按钮 -->
-    <Button
-      v-if="isExecuting"
-      variant="destructive"
-      size="sm"
-      class="h-6 gap-1 text-[11px]"
-      @click="emit('cancel')"
-    >
-      <Square class="h-3 w-3" />
-      {{ t('common.cancel') }}
-    </Button>
+      <!-- 执行计时器 -->
+      <span
+        v-if="timerRunning"
+        class="flex items-center gap-1 text-[10px] tabular-nums text-muted-foreground animate-in fade-in duration-300 ml-1"
+        aria-live="polite"
+      >
+        <Timer class="h-3 w-3 animate-pulse text-primary" />
+        {{ timerElapsed }}
+      </span>
 
-    <!-- 执行计时器 -->
-    <span
-      v-if="timerRunning"
-      class="flex items-center gap-1 text-[10px] tabular-nums text-muted-foreground animate-in fade-in duration-300"
-    >
-      <Timer class="h-3 w-3 animate-pulse text-primary" />
-      {{ timerElapsed }}
-    </span>
+      <!-- ═══ 分隔符 ═══ -->
+      <div class="w-px h-4 bg-border mx-1" aria-hidden="true" />
 
-    <!-- 格式化 -->
-    <TooltipProvider :delay-duration="300">
+      <!-- ═══ 第二组：SQL 工具 ═══ -->
+
+      <!-- 格式化 -->
       <Tooltip>
         <TooltipTrigger as-child>
           <Button
             variant="ghost"
             size="sm"
+            :aria-label="t('database.format') + ' (Shift+Alt+F)'"
             class="h-6 gap-1 text-[11px]"
             @click="emit('format')"
           >
@@ -130,46 +142,50 @@ const timeoutModel = computed({
             {{ t('database.format') }}
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom" class="text-xs">
-          Shift+Alt+F
-        </TooltipContent>
+        <TooltipContent side="bottom" class="text-xs">Shift+Alt+F</TooltipContent>
       </Tooltip>
-    </TooltipProvider>
 
-    <!-- EXPLAIN -->
-    <Button
-      variant="ghost"
-      size="sm"
-      class="h-6 gap-1 text-[11px]"
-      :disabled="!isConnected || isExplaining"
-      :class="{ 'bg-muted': showExplain }"
-      @click="emit('explain')"
-    >
-      <Loader2 v-if="isExplaining" class="h-3 w-3 animate-spin" />
-      <ListTree v-else class="h-3 w-3" />
-      EXPLAIN
-    </Button>
+      <!-- EXPLAIN -->
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <Button
+            variant="ghost"
+            size="sm"
+            :aria-label="'EXPLAIN'"
+            class="h-6 gap-1 text-[11px]"
+            :disabled="!isConnected || isExplaining"
+            :class="{ 'bg-muted': showExplain }"
+            @click="emit('explain')"
+          >
+            <Loader2 v-if="isExplaining" class="h-3 w-3 animate-spin" />
+            <ListTree v-else class="h-3 w-3" />
+            EXPLAIN
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" class="text-xs">{{ t('database.explainTooltip') }}</TooltipContent>
+      </Tooltip>
 
-    <div class="flex items-center gap-1">
+      <!-- 数据库选择器 -->
       <Popover v-model:open="dbSelectorOpen">
         <PopoverTrigger as-child>
           <Button
             variant="outline"
             role="combobox"
-            class="h-6 min-w-[100px] max-w-[200px] justify-between px-2 text-[11px] font-normal hover:border-primary/50 transition-all bg-background border-border/50"
+            :aria-label="t('database.selectDatabase')"
+            class="h-6 min-w-[100px] max-w-[200px] justify-between px-2 text-[11px] font-normal hover:border-primary/50 transition-[border-color] bg-background border-border/50"
           >
             <div class="flex items-center gap-1.5 min-w-0">
               <Database class="h-3 w-3 shrink-0 text-primary/70" />
               <span class="truncate font-medium">{{ currentDatabase || t('database.selectDatabase') }}</span>
             </div>
-            <ChevronDown class="ml-2 h-3 w-3 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity" />
+            <ChevronDown class="ml-2 h-3 w-3 shrink-0 opacity-40" />
           </Button>
         </PopoverTrigger>
         <PopoverContent class="w-[220px] p-0 shadow-2xl border-primary/10 overflow-hidden" align="start">
           <Command>
-            <CommandInput 
-              :placeholder="t('database.searchDatabase')" 
-              class="border-none ring-0 focus:ring-0" 
+            <CommandInput
+              :placeholder="t('database.searchDatabase')"
+              class="border-none ring-0 focus:ring-0"
             />
             <CommandEmpty class="py-4 text-[10px] text-center text-muted-foreground">{{ t('common.noResults') }}</CommandEmpty>
             <CommandList class="max-h-[300px] overflow-y-auto p-1 custom-scrollbar">
@@ -195,103 +211,119 @@ const timeoutModel = computed({
           </Command>
         </PopoverContent>
       </Popover>
-    </div>
 
-    <!-- 错误策略 -->
-    <TooltipProvider :delay-duration="300">
+      <!-- 错误策略 -->
       <Tooltip>
         <TooltipTrigger as-child>
           <Button
             variant="ghost"
             size="sm"
+            :aria-label="t('database.multiStatement.errorStrategyTooltip', { strategy: errorStrategy === 'stopOnError' ? t('database.multiStatement.stopOnError') : t('database.multiStatement.continueOnError') })"
             class="h-6 w-6 p-0"
             @click="emit('toggleErrorStrategy')"
           >
-            <ShieldAlert v-if="errorStrategy === 'stopOnError'" class="h-3 w-3 text-amber-500" />
-            <ShieldCheck v-else class="h-3 w-3 text-green-500" />
+            <ShieldAlert v-if="errorStrategy === 'stopOnError'" class="h-3 w-3 text-df-warning" />
+            <ShieldCheck v-else class="h-3 w-3 text-df-success" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom" class="text-xs">
+        <TooltipContent side="bottom" class="text-xs max-w-[260px]">
           {{ t('database.multiStatement.errorStrategyTooltip', { strategy: errorStrategy === 'stopOnError' ? t('database.multiStatement.stopOnError') : t('database.multiStatement.continueOnError') }) }}
         </TooltipContent>
       </Tooltip>
-    </TooltipProvider>
 
-    <!-- 事务管理 -->
-    <div class="w-px h-4 bg-border" />
-    <Button
-      v-if="!isInTransaction"
-      variant="ghost"
-      size="sm"
-      class="h-6 gap-1 text-[11px]"
-      :disabled="!isConnected"
-      @click="emit('beginTransaction')"
-    >
-      <PlayCircle class="h-3 w-3" />
-      开始事务
-    </Button>
-    <Button
-      v-if="isInTransaction"
-      variant="ghost"
-      size="sm"
-      class="h-6 gap-1 text-[11px] text-green-600 hover:text-green-700"
-      @click="emit('commit')"
-    >
-      <CheckCircle2 class="h-3 w-3" />
-      提交
-    </Button>
-    <Button
-      v-if="isInTransaction"
-      variant="ghost"
-      size="sm"
-      class="h-6 gap-1 text-[11px] text-red-600 hover:text-red-700"
-      @click="emit('rollback')"
-    >
-      <XCircle class="h-3 w-3" />
-      回滚
-    </Button>
+      <!-- ═══ 分隔符 ═══ -->
+      <div class="w-px h-4 bg-border mx-1" aria-hidden="true" />
 
-    <!-- 代码片段 -->
-    <div class="w-px h-3.5 bg-border/40 mx-1" />
-    <div class="flex items-center gap-1.5 px-1">
+      <!-- ═══ 第三组：高级操作 ═══ -->
+
+      <!-- 事务管理 -->
       <Button
+        v-if="!isInTransaction"
         variant="ghost"
         size="sm"
-        class="h-7 px-2 gap-1.5 text-[11px] font-medium transition-all"
-        :class="snippetPanelOpen ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
-        @click="emit('toggleSnippet')"
+        :aria-label="t('database.beginTransaction')"
+        class="h-6 gap-1 text-[11px]"
+        :disabled="!isConnected"
+        @click="emit('beginTransaction')"
       >
-        <Bookmark class="h-3.5 w-3.5" />
-        {{ t('sqlSnippet.title') }}
+        <PlayCircle class="h-3 w-3" />
+        {{ t('database.beginTransaction') }}
       </Button>
-      <kbd class="hidden sm:inline-flex h-4 items-center gap-1 rounded border border-border/40 bg-muted/50 px-1.5 font-mono text-[9px] font-bold text-muted-foreground/50 opacity-100">
-        <span class="text-[8px]">CTRL</span> ENTER
-      </kbd>
-    </div>
+      <Button
+        v-if="isInTransaction"
+        variant="ghost"
+        size="sm"
+        :aria-label="t('database.commit')"
+        class="h-6 gap-1 text-[11px] text-df-success hover:text-df-success"
+        @click="emit('commit')"
+      >
+        <CheckCircle2 class="h-3 w-3" />
+        {{ t('database.commit') }}
+      </Button>
+      <Button
+        v-if="isInTransaction"
+        variant="ghost"
+        size="sm"
+        :aria-label="t('database.rollback')"
+        class="h-6 gap-1 text-[11px] text-destructive hover:text-destructive"
+        @click="emit('rollback')"
+      >
+        <XCircle class="h-3 w-3" />
+        {{ t('database.rollback') }}
+      </Button>
 
-    <!-- 查询超时 -->
-    <div class="flex items-center gap-2 ml-auto pr-2">
-      <div class="flex items-center gap-1 bg-muted/30 hover:bg-muted/50 border border-border/30 rounded-md px-2 py-0.5 transition-colors group">
-        <Clock class="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground/70" />
-        <input
-          v-model.number="timeoutModel"
-          type="number"
-          min="0"
-          max="3600"
-          class="w-8 bg-transparent border-none focus:ring-0 text-[11px] text-center tabular-nums p-0 text-foreground font-medium appearance-none"
-          placeholder="30"
-          title="查询超时（秒），0 表示不限制"
-        />
-        <span class="text-[10px] text-muted-foreground/30 font-semibold tracking-tighter">SEC</span>
-      </div>
-    </div>
+      <!-- 事务进行中标识 -->
+      <span
+        v-if="isInTransaction"
+        class="inline-flex items-center rounded-md bg-df-warning/10 px-2 py-0.5 text-[10px] font-medium text-df-warning"
+        role="status"
+      >
+        {{ t('database.transactionActive') }}
+      </span>
 
-    <!-- 事务进行中标识 -->
-    <span
-      v-if="isInTransaction"
-      class="inline-flex items-center rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
-    >
-      事务进行中
-    </span>
+      <!-- 代码片段 -->
+      <div class="w-px h-3.5 bg-border/40 mx-1" aria-hidden="true" />
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <Button
+            variant="ghost"
+            size="sm"
+            :aria-label="t('sqlSnippet.title')"
+            :aria-pressed="snippetPanelOpen"
+            class="h-6 px-2 gap-1.5 text-[11px] font-medium transition-colors"
+            :class="snippetPanelOpen ? 'bg-primary/10 text-primary hover:bg-primary/20' : 'text-muted-foreground hover:bg-muted hover:text-foreground'"
+            @click="emit('toggleSnippet')"
+          >
+            <Bookmark class="h-3.5 w-3.5" />
+            {{ t('sqlSnippet.title') }}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" class="text-xs">{{ t('sqlSnippet.title') }}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+
+    <!-- 查询超时（推至右侧） -->
+    <div class="flex items-center gap-2 ml-auto pr-1">
+      <TooltipProvider :delay-duration="300">
+        <Tooltip>
+          <TooltipTrigger as-child>
+            <div class="flex items-center gap-1 bg-muted/30 hover:bg-muted/50 border border-border/30 rounded-md px-2 py-0.5 transition-colors group">
+              <Clock class="h-3 w-3 text-muted-foreground/40 group-hover:text-muted-foreground/70" />
+              <input
+                v-model.number="timeoutModel"
+                type="number"
+                min="0"
+                max="3600"
+                :aria-label="t('database.queryTimeout')"
+                class="w-8 bg-transparent border-none focus:ring-0 text-[11px] text-center tabular-nums p-0 text-foreground font-medium appearance-none"
+                placeholder="30"
+              />
+              <span class="text-[10px] text-muted-foreground/30 font-semibold tracking-tighter">SEC</span>
+            </div>
+          </TooltipTrigger>
+          <TooltipContent side="bottom" class="text-xs">{{ t('database.queryTimeoutTooltip') }}</TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    </div>
   </div>
 </template>

@@ -39,6 +39,15 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-df-shell-bg: var(--df-shell-bg);
+  --color-df-tabbar-bg: var(--df-tabbar-bg);
+  --color-df-tabbar-action-bg: var(--df-tabbar-action-bg);
+  --color-df-sidebar-from: var(--df-sidebar-from);
+  --color-df-sidebar-via: var(--df-sidebar-via);
+  --color-df-sidebar-to: var(--df-sidebar-to);
+  --color-df-success: var(--df-success);
+  --color-df-warning: var(--df-warning);
+  --color-df-info: var(--df-info);
 }
 
 :root {
@@ -123,6 +132,12 @@
   --df-elevated: oklch(0.985 0 0);
   --df-surface: oklch(0.967 0.001 286.375);
   --df-overlay: oklch(0 0 0 / 30%);
+  --df-shell-bg: oklch(0.967 0.001 286.375);
+  --df-tabbar-bg: oklch(0.955 0.001 264);
+  --df-tabbar-action-bg: oklch(0.968 0.001 264);
+  --df-sidebar-from: oklch(0.99 0 0);
+  --df-sidebar-via: oklch(0.977 0.001 264);
+  --df-sidebar-to: oklch(0.955 0.001 264);
 }
 
 .dark {
@@ -132,6 +147,12 @@
   --df-elevated: oklch(0.274 0.006 286.033);
   --df-surface: oklch(0.21 0.006 285.885);
   --df-overlay: oklch(0 0 0 / 60%);
+  --df-shell-bg: oklch(0.08 0.005 285.8);
+  --df-tabbar-bg: oklch(0.09 0.005 285.8);
+  --df-tabbar-action-bg: oklch(0.08 0.005 285.8);
+  --df-sidebar-from: oklch(0.08 0.005 285.8);
+  --df-sidebar-via: oklch(0.08 0.005 285.8);
+  --df-sidebar-to: oklch(0.08 0.005 285.8);
 }
 
 @layer base {
@@ -191,6 +212,18 @@
     background: oklch(1 0 0 / 15%);
   }
 
+}
+
+/* ========= Reduced Motion 全局支持 ========= */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ========= 表格滚动条（独立于 @layer 以确保最高优先级） ========= */
@@ -324,63 +357,5 @@
 
   .animate-shake {
     animation: shake 0.5s ease-in-out;
-  }
-}
-
-@layer utilities {
-  .industrial-grid {
-    background-image: radial-gradient(circle, currentColor 1px, transparent 1px);
-    background-size: 16px 16px;
-  }
-
-  .noise-texture {
-    position: relative;
-  }
-
-  .noise-texture::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    opacity: 0.03;
-    pointer-events: none;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-    z-index: 10;
-  }
-
-  .pulse-ready {
-    animation: pulse-ready 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  }
-
-  @keyframes pulse-ready {
-
-    0%,
-    100% {
-      opacity: 1;
-      transform: scale(1);
-    }
-
-    50% {
-      opacity: 0.5;
-      transform: scale(0.9);
-    }
-  }
-
-  /* Custom Scrollbar for Pro-Tech */
-  .custom-scrollbar::-webkit-scrollbar {
-    width: 4px;
-    height: 4px;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb {
-    background: var(--border);
-    border-radius: 10px;
-  }
-
-  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: var(--muted-foreground);
   }
 }

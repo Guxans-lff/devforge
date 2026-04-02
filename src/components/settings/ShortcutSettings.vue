@@ -174,7 +174,9 @@ function handleKeyCapture(e: KeyboardEvent) {
             :variant="editingId === shortcut.id ? 'default' : conflictId === shortcut.id ? 'destructive' : 'outline'"
             class="cursor-pointer font-mono text-xs select-none"
             :class="{ 'animate-pulse': editingId === shortcut.id }"
+            role="button"
             tabindex="0"
+            :aria-label="editingId === shortcut.id ? t('settings.pressKeys') : `${t(`settings.${shortcutLabels[shortcut.id]}`)} ${shortcut.keys}`"
             @click="startEditing(shortcut.id)"
             @blur="cancelEditing"
           >

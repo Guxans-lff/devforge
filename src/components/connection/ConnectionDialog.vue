@@ -413,10 +413,10 @@ async function handleTestConnection() {
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
     <DialogContent class="sm:max-w-[850px] p-0 overflow-hidden border border-border bg-background shadow-2xl rounded-xl">
-      <div class="flex flex-row h-[520px] bg-background">
+      <div class="flex flex-row h-[min(560px,calc(100vh-120px))] bg-background">
         <!-- Sidebar: Control Panel (Industrial Dark) -->
-        <aside class="w-[280px] shrink-0 flex flex-col border-r border-border/60 bg-muted/20 industrial-grid text-muted-foreground/10 noise-texture relative overflow-hidden">
-          <div class="relative z-20 p-6 pb-4">
+        <aside class="w-[220px] shrink-0 flex flex-col border-r border-border/60 bg-muted/20 industrial-grid text-muted-foreground/10 noise-texture relative overflow-hidden">
+          <div class="relative z-20 p-4 pb-3">
             <div class="flex items-center gap-2 mb-1">
               <div class="p-1.5 rounded-md bg-primary/10 border border-primary/20">
                 <Cpu class="h-4 w-4 text-primary" />
@@ -432,14 +432,14 @@ async function handleTestConnection() {
             <!-- Connection Type Selector (Vertical Modern with Slider) -->
             <div v-if="!isEditing" class="space-y-3">
               <div class="flex items-center justify-between px-2">
-                <Label class="text-[9px] font-black uppercase tracking-widest text-muted-foreground/40">{{ t('connection.type') || 'Select Protocol' }}</Label>
+                <Label class="text-[10px] font-black uppercase tracking-wide text-muted-foreground/40">{{ t('connection.type') || 'Select Protocol' }}</Label>
                 <div class="h-1 w-1 rounded-full bg-primary/40 animate-pulse"></div>
               </div>
               
-              <div class="relative space-y-1">
+              <div class="relative space-y-1" role="radiogroup" :aria-label="t('connection.type')">
                 <!-- Moving Slider Background -->
-                <div 
-                  class="absolute left-0 w-full bg-primary rounded-lg shadow-lg shadow-primary/20 transition-all duration-300 ease-out z-0"
+                <div
+                  class="absolute left-0 w-full bg-primary rounded-lg shadow-lg shadow-primary/20 transition-[top] duration-300 ease-out z-0"
                   :style="{
                     height: '44px',
                     top: `${(['database', 'ssh', 'sftp'].indexOf(connectionType)) * 48}px`,
@@ -447,13 +447,15 @@ async function handleTestConnection() {
                   }"
                 ></div>
 
-                <button 
-                  v-for="type in (['database', 'ssh', 'sftp'] as const)" 
+                <button
+                  v-for="type in (['database', 'ssh', 'sftp'] as const)"
                   :key="type"
+                  role="radio"
+                  :aria-checked="connectionType === type"
                   @click="connectionType = type"
-                  class="relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold transition-all group z-10 h-[44px]"
-                  :class="connectionType === type 
-                    ? 'text-primary-foreground' 
+                  class="relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-xs font-bold transition-colors group z-10 h-[44px] focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
+                  :class="connectionType === type
+                    ? 'text-primary-foreground'
                     : 'text-muted-foreground/60 hover:text-muted-foreground'"
                 >
                   <component :is="type === 'database' ? Database : (type === 'ssh' ? Terminal : FolderOpen)" 
@@ -476,7 +478,7 @@ async function handleTestConnection() {
               <div class="space-y-1.5 px-1">
                 <div class="flex items-center gap-2 px-1 mb-1">
                   <div class="h-1 w-1 rounded-full bg-primary/30"></div>
-                  <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70 truncate flex items-center gap-1">
+                  <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 truncate flex items-center gap-1">
                     {{ t('connection.name') }}
                     <span class="text-destructive font-black">*</span>
                   </Label>
@@ -487,7 +489,9 @@ async function handleTestConnection() {
                     v-model="form.name"
                     :placeholder="t('connection.namePlaceholder')"
                     autocomplete="off"
-                    class="pl-10 h-9 bg-muted/20 border-border/40 rounded-md transition-all focus:ring-2 focus:ring-primary/5 focus:border-primary/40 text-[11px] font-semibold text-foreground placeholder:text-muted-foreground/40"
+                    aria-required="true"
+                    :aria-invalid="!!nameError || undefined"
+                    class="pl-10 h-9 bg-muted/20 border-border/40 rounded-md transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 focus:border-primary/40 text-[11px] font-semibold text-foreground placeholder:text-muted-foreground/40"
                     :class="{ 'border-destructive/40 bg-destructive/5': nameError }"
                   />
                 </div>
@@ -501,8 +505,10 @@ async function handleTestConnection() {
             <!-- New: Inline Test Result in Sidebar -->
             <div
               v-if="testResult"
+              role="alert"
+              aria-live="assertive"
               class="rounded-lg p-3 text-[10px] font-medium border animate-in fade-in slide-in-from-bottom-2 duration-300 overflow-hidden relative group"
-              :class="testResult.success ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-600 dark:text-emerald-400' : 'bg-destructive/5 border-destructive/20 text-destructive'"
+              :class="testResult.success ? 'bg-df-success/5 border-df-success/20 text-df-success' : 'bg-destructive/5 border-destructive/20 text-destructive'"
             >
               <div class="flex items-start gap-2 relative z-10">
                 <CheckCircle2 v-if="testResult.success" class="h-3.5 w-3.5 shrink-0 mt-0.5" />
@@ -511,7 +517,7 @@ async function handleTestConnection() {
                   <div class="font-black uppercase tracking-wider mb-0.5">{{ testResult.success ? t('connection.testSuccessTitle') : t('connection.testFailedTitle') }}</div>
                   <div class="opacity-80 break-words leading-tight">{{ testResult.message }}</div>
                 </div>
-                <button @click="testResult = null" class="opacity-0 group-hover:opacity-40 hover:opacity-100 transition-opacity">
+                <button :aria-label="t('common.close')" @click="testResult = null" class="opacity-0 group-hover:opacity-40 hover:opacity-100 transition-opacity focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none rounded">
                   <XCircle class="h-3 w-3" />
                 </button>
               </div>
@@ -521,7 +527,7 @@ async function handleTestConnection() {
               variant="outline"
               :disabled="testing || !form.host || !form.username"
               @click="handleTestConnection"
-              class="w-full h-9 rounded-md font-bold text-[11px] border-border/60 bg-background hover:bg-primary hover:text-primary-foreground hover:border-primary transition-all shadow-sm group relative overflow-hidden"
+              class="w-full h-9 rounded-md font-bold text-[11px] border-border/60 bg-background hover:bg-primary hover:text-primary-foreground hover:border-primary transition-[background-color,color,border-color] shadow-sm group relative overflow-hidden"
             >
               <div class="absolute inset-0 bg-primary/10 opacity-0 group-hover:opacity-100 transition-opacity industrial-grid text-primary/20"></div>
               <div class="relative flex items-center justify-center gap-2">
@@ -536,7 +542,7 @@ async function handleTestConnection() {
         <!-- Detail Pane: Configuration Sub-Form -->
         <main class="flex-1 flex flex-col min-w-0 bg-background/30">
           <!-- Scrollable detail area -->
-          <div class="flex-1 overflow-y-auto custom-scrollbar p-8">
+          <div class="flex-1 overflow-y-auto custom-scrollbar px-8 py-5">
             <div class="max-w-xl mx-auto space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
               <!-- Sub-form injection with key to trigger re-animation on type change -->
               <div :key="connectionType">
@@ -567,13 +573,13 @@ async function handleTestConnection() {
           <!-- Bottom Action Bar (Fixed at bottom of right pane) -->
           <footer class="h-16 px-6 flex items-center justify-between border-t border-border/40 bg-muted/5 shrink-0 industrial-grid text-muted-foreground/5 overflow-hidden relative">
             <!-- 左侧状态区：调整宽度平衡 -->
-            <div class="flex items-center gap-2 relative z-10 w-[160px] shrink-0">
+            <div class="flex items-center gap-2 relative z-10 w-[140px] shrink-0">
               <div 
-                class="flex items-center gap-2 transition-all duration-300"
+                class="flex items-center gap-2 transition-colors duration-300"
                 :class="canSave ? 'text-primary/90' : 'text-muted-foreground/60'"
               >
                 <div 
-                  class="h-1.5 w-1.5 rounded-full transition-all duration-500"
+                  class="h-1.5 w-1.5 rounded-full transition-[background-color,box-shadow] duration-500"
                   :class="canSave ? 'bg-primary animate-pulse shadow-[0_0_8px_rgba(var(--primary),0.5)]' : 'bg-muted-foreground/30'"
                 ></div>
                 <span class="text-[10px] font-black uppercase tracking-widest font-mono truncate">
@@ -584,10 +590,10 @@ async function handleTestConnection() {
 
             <!-- 右侧按钮组：紧凑且对齐 -->
             <div class="flex items-center gap-2 shrink-0 ml-auto relative z-10">
-              <Button 
-                variant="ghost" 
-                @click="emit('update:open', false)" 
-                class="h-8 w-16 rounded-md font-bold text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-all shrink-0"
+              <Button
+                variant="ghost"
+                @click="emit('update:open', false)"
+                class="h-9 min-w-fit px-4 rounded-md font-bold text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors shrink-0"
               >
                 {{ t('common.cancel') }}
               </Button>
@@ -595,25 +601,25 @@ async function handleTestConnection() {
               <div class="h-4 w-[1px] bg-border/20 shrink-0 mx-0.5"></div>
               
               <Button
-                v-if="connectionType === 'database'"
-                variant="outline"
                 :disabled="saving || !canSave"
-                @click="handleSave(true)"
-                class="h-9 w-[110px] rounded-md font-bold text-[11px] text-primary border-primary/20 hover:bg-primary/5 hover:border-primary/40 active:scale-95 disabled:opacity-30 shrink-0 transition-all flex items-center justify-center gap-1"
+                @click="handleSave(false)"
+                variant="ghost"
+                class="h-9 min-w-fit px-4 rounded-md font-bold text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/80 active:scale-95 disabled:opacity-30 shrink-0 transition-[background-color,color,opacity] flex items-center justify-center gap-1"
               >
                 <Loader2 v-if="saving" class="h-3 w-3 animate-spin" />
-                <span class="truncate">{{ t('connection.saveAndConnect') }}</span>
+                <span>{{ t('common.save') }}</span>
               </Button>
- 
-              <Button 
-                :disabled="saving || !canSave" 
-                @click="handleSave(false)"
-                class="h-9 w-[80px] rounded-md font-bold bg-primary text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:bg-primary/90 hover:shadow-primary/30 active:scale-95 disabled:opacity-50 text-[11px] flex items-center justify-center gap-1 shrink-0"
+
+              <Button
+                v-if="connectionType === 'database'"
+                :disabled="saving || !canSave"
+                @click="handleSave(true)"
+                class="h-9 min-w-fit px-4 rounded-md font-bold bg-primary text-primary-foreground shadow-lg shadow-primary/20 transition-[background-color,box-shadow] hover:bg-primary/90 hover:shadow-primary/30 active:scale-95 disabled:opacity-50 text-[11px] flex items-center justify-center gap-1 shrink-0"
               >
                 <Loader2 v-if="saving" class="h-3 w-3 animate-spin" />
                 <template v-else>
                   <CheckCircle2 v-if="canSave" class="h-3 w-3 animate-in zoom-in-50 duration-300" />
-                  <span>{{ t('common.save') }}</span>
+                  <span class="truncate">{{ t('connection.saveAndConnect') }}</span>
                 </template>
               </Button>
             </div>

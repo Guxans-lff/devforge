@@ -215,7 +215,7 @@ function handleKeydown(e: KeyboardEvent) {
                 <Tooltip>
                   <TooltipTrigger as-child>
                     <button
-                      class="h-5 w-5 flex items-center justify-center rounded-sm text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted/50 transition-all"
+                      class="h-5 w-5 flex items-center justify-center rounded-sm text-muted-foreground/40 opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted/50 transition-[opacity,background-color,color]"
                       @click="copyValue(field.value)"
                     >
                       <Copy class="h-3 w-3" />

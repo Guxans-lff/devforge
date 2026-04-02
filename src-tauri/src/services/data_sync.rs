@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::models::query::ColumnInfo;
@@ -10,23 +11,49 @@ use crate::utils::error::AppError;
 /// 支持同类型数据库之间的全量同步和 UPSERT 同步
 
 /// 预览同步计划：获取每张表的行数、列信息、主键信息
+///
+/// 性能策略：使用 get_all_columns 批量获取列信息 + get_tables 批量获取行数，
+/// 3 次并发查询替代 3N 次串行查询。
 pub async fn sync_preview(
     engine: Arc<DbEngine>,
     config: &SyncConfig,
 ) -> Result<Vec<SyncPreview>, AppError> {
+    // 3 个请求并发：源端列信息 + 源端表列表（含行数）+ 目标端表列表（含行数）
+    let (source_all_cols, source_tables, target_tables) = tokio::join!(
+        engine.clone().get_all_columns(
+            config.source_connection_id.clone(),
+            config.source_database.clone(),
+        ),
+        engine.clone().get_tables(
+            config.source_connection_id.clone(),
+            config.source_database.clone(),
+        ),
+        engine.clone().get_tables(
+            config.target_connection_id.clone(),
+            config.target_database.clone(),
+        )
+    );
+
+    let source_all_cols = source_all_cols?;
+    let source_tables = source_tables?;
+    let target_tables = target_tables?;
+
+    // 构建行数映射：表名 → 行数
+    let source_row_counts: HashMap<&str, u64> = source_tables
+        .iter()
+        .map(|t| (t.name.as_str(), t.row_count.unwrap_or(0) as u64))
+        .collect();
+
+    let target_row_counts: HashMap<&str, u64> = target_tables
+        .iter()
+        .map(|t| (t.name.as_str(), t.row_count.unwrap_or(0) as u64))
+        .collect();
+
+    let empty_cols = Vec::new();
     let mut previews = Vec::new();
 
     for table in &config.tables {
-        // 获取源表列信息
-        let columns = engine
-            .clone()
-            .get_columns(
-                config.source_connection_id.clone(),
-                config.source_database.clone(),
-                table.clone(),
-            )
-            .await?;
-
+        let columns = source_all_cols.get(table).unwrap_or(&empty_cols);
         let column_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
         let primary_keys: Vec<String> = columns
             .iter()
@@ -34,23 +61,8 @@ pub async fn sync_preview(
             .map(|c| c.name.clone())
             .collect();
 
-        // 获取源表行数
-        let source_rows = count_table_rows(
-            engine.clone(),
-            &config.source_connection_id,
-            &config.source_database,
-            table,
-        )
-        .await?;
-
-        // 获取目标表行数
-        let target_rows = count_table_rows(
-            engine.clone(),
-            &config.target_connection_id,
-            &config.target_database,
-            table,
-        )
-        .await?;
+        let source_rows = *source_row_counts.get(table.as_str()).unwrap_or(&0);
+        let target_rows = *target_row_counts.get(table.as_str()).unwrap_or(&0);
 
         previews.push(SyncPreview {
             table: table.clone(),

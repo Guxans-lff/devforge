@@ -98,7 +98,7 @@ onMounted(() => { loadPlans() })
     <!-- 标题栏 -->
     <div class="mb-4 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="p-2 rounded-xl bg-indigo-500/10 text-indigo-500 shadow-sm">
+        <div class="p-2 rounded-xl bg-primary/10 text-primary shadow-sm">
           <GitCompare class="h-5 w-5" />
         </div>
         <div>
@@ -172,14 +172,14 @@ onMounted(() => { loadPlans() })
                 <span
                   class="text-sm font-mono font-bold"
                   :class="{
-                    'text-emerald-500': delta(rightPlan.summary?.totalCost, leftPlan.summary?.totalCost) === 'better',
-                    'text-rose-500': delta(rightPlan.summary?.totalCost, leftPlan.summary?.totalCost) === 'worse',
+                    'text-df-success': delta(rightPlan.summary?.totalCost, leftPlan.summary?.totalCost) === 'better',
+                    'text-destructive': delta(rightPlan.summary?.totalCost, leftPlan.summary?.totalCost) === 'worse',
                   }"
                 >
                   {{ rightPlan.summary?.totalCost?.toFixed(2) ?? '-' }}
                 </span>
-                <TrendingDown v-if="delta(rightPlan.summary?.totalCost, leftPlan.summary?.totalCost) === 'better'" class="h-3 w-3 text-emerald-500" />
-                <TrendingUp v-else-if="delta(rightPlan.summary?.totalCost, leftPlan.summary?.totalCost) === 'worse'" class="h-3 w-3 text-rose-500" />
+                <TrendingDown v-if="delta(rightPlan.summary?.totalCost, leftPlan.summary?.totalCost) === 'better'" class="h-3 w-3 text-df-success" />
+                <TrendingUp v-else-if="delta(rightPlan.summary?.totalCost, leftPlan.summary?.totalCost) === 'worse'" class="h-3 w-3 text-destructive" />
                 <Minus v-else class="h-3 w-3 text-muted-foreground/30" />
               </div>
             </div>
@@ -192,14 +192,14 @@ onMounted(() => { loadPlans() })
                 <span
                   class="text-sm font-mono font-bold"
                   :class="{
-                    'text-emerald-500': delta(rightPlan.summary?.totalRows, leftPlan.summary?.totalRows) === 'better',
-                    'text-rose-500': delta(rightPlan.summary?.totalRows, leftPlan.summary?.totalRows) === 'worse',
+                    'text-df-success': delta(rightPlan.summary?.totalRows, leftPlan.summary?.totalRows) === 'better',
+                    'text-destructive': delta(rightPlan.summary?.totalRows, leftPlan.summary?.totalRows) === 'worse',
                   }"
                 >
                   {{ rightPlan.summary?.totalRows?.toLocaleString() ?? '-' }}
                 </span>
-                <TrendingDown v-if="delta(rightPlan.summary?.totalRows, leftPlan.summary?.totalRows) === 'better'" class="h-3 w-3 text-emerald-500" />
-                <TrendingUp v-else-if="delta(rightPlan.summary?.totalRows, leftPlan.summary?.totalRows) === 'worse'" class="h-3 w-3 text-rose-500" />
+                <TrendingDown v-if="delta(rightPlan.summary?.totalRows, leftPlan.summary?.totalRows) === 'better'" class="h-3 w-3 text-df-success" />
+                <TrendingUp v-else-if="delta(rightPlan.summary?.totalRows, leftPlan.summary?.totalRows) === 'worse'" class="h-3 w-3 text-destructive" />
                 <Minus v-else class="h-3 w-3 text-muted-foreground/30" />
               </div>
             </div>
@@ -216,15 +216,15 @@ onMounted(() => { loadPlans() })
             <div class="text-center">
               <div class="text-[10px] text-muted-foreground/50 mb-1">全表扫描</div>
               <div class="flex items-center justify-center gap-2">
-                <span class="text-sm font-mono font-bold" :class="(leftPlan.summary?.fullScanCount ?? 0) > 0 ? 'text-rose-500' : 'text-emerald-500'">
+                <span class="text-sm font-mono font-bold" :class="(leftPlan.summary?.fullScanCount ?? 0) > 0 ? 'text-destructive' : 'text-df-success'">
                   {{ leftPlan.summary?.fullScanCount ?? '-' }}
                 </span>
                 <ArrowRight class="h-3 w-3 text-muted-foreground/30" />
-                <span class="text-sm font-mono font-bold" :class="(rightPlan.summary?.fullScanCount ?? 0) > 0 ? 'text-rose-500' : 'text-emerald-500'">
+                <span class="text-sm font-mono font-bold" :class="(rightPlan.summary?.fullScanCount ?? 0) > 0 ? 'text-destructive' : 'text-df-success'">
                   {{ rightPlan.summary?.fullScanCount ?? '-' }}
                 </span>
-                <TrendingDown v-if="delta(rightPlan.summary?.fullScanCount, leftPlan.summary?.fullScanCount) === 'better'" class="h-3 w-3 text-emerald-500" />
-                <TrendingUp v-else-if="delta(rightPlan.summary?.fullScanCount, leftPlan.summary?.fullScanCount) === 'worse'" class="h-3 w-3 text-rose-500" />
+                <TrendingDown v-if="delta(rightPlan.summary?.fullScanCount, leftPlan.summary?.fullScanCount) === 'better'" class="h-3 w-3 text-df-success" />
+                <TrendingUp v-else-if="delta(rightPlan.summary?.fullScanCount, leftPlan.summary?.fullScanCount) === 'worse'" class="h-3 w-3 text-destructive" />
                 <Minus v-else class="h-3 w-3 text-muted-foreground/30" />
               </div>
             </div>

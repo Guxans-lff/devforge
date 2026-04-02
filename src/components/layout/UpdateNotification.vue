@@ -36,10 +36,10 @@ function handleSkip() {
 <template>
   <!-- 全局更新通知弹出 -->
   <Transition
-    enter-active-class="transition-all duration-300 ease-out"
+    enter-active-class="transition-[transform,opacity] duration-300 ease-out"
     enter-from-class="translate-y-4 opacity-0 scale-95"
     enter-to-class="translate-y-0 opacity-100 scale-100"
-    leave-active-class="transition-all duration-200 ease-in"
+    leave-active-class="transition-[transform,opacity] duration-200 ease-in"
     leave-from-class="translate-y-0 opacity-100 scale-100"
     leave-to-class="translate-y-4 opacity-0 scale-95"
   >
@@ -91,7 +91,7 @@ function handleSkip() {
         </div>
         <div class="h-1.5 rounded-full bg-muted/30 overflow-hidden">
           <div
-            class="h-full rounded-full bg-primary transition-all duration-300 ease-out"
+            class="h-full rounded-full bg-primary transition-[width] duration-300 ease-out"
             :style="{ width: `${downloadProgress}%` }"
           />
         </div>

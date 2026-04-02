@@ -358,7 +358,7 @@ async function handleSave() {
               新字符集 (Charset)
             </Label>
             <Select v-model="charset" :disabled="isSaving">
-              <SelectTrigger class="w-full bg-muted/20 border-border/40 focus:ring-1 focus:ring-primary/50 transition-all h-10">
+              <SelectTrigger class="w-full bg-muted/20 border-border/40 focus:ring-1 focus:ring-primary/50 transition-[border-color,box-shadow] h-10">
                 <SelectValue placeholder="保持原样" />
               </SelectTrigger>
               <SelectContent position="popper" align="start" side="bottom" class="max-h-[250px] w-[200px]">
@@ -375,7 +375,7 @@ async function handleSave() {
               新排序规则 (Collation)
             </Label>
             <Select v-model="collation" :disabled="isSaving">
-              <SelectTrigger class="w-full bg-muted/20 border-border/40 focus:ring-1 focus:ring-primary/50 transition-all h-10">
+              <SelectTrigger class="w-full bg-muted/20 border-border/40 focus:ring-1 focus:ring-primary/50 transition-[border-color,box-shadow] h-10">
                 <SelectValue placeholder="保持原样" />
               </SelectTrigger>
               <SelectContent position="popper" align="start" side="bottom" class="max-h-[250px] w-[220px]">

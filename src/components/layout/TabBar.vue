@@ -121,16 +121,19 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
 </script>
 
 <template>
-  <div class="relative z-[35] flex h-11 items-center bg-[#f1f3f4] dark:bg-[#101012] select-none transition-colors duration-200">
+  <nav :aria-label="t('tab.navigation')" class="relative z-[35] flex h-11 items-center bg-df-tabbar-bg select-none transition-colors duration-200">
     <!-- 底部固态基准线 (Base Foundation Line) -->
     <div class="absolute bottom-0 left-0 right-0 h-[1px] bg-foreground/5 dark:bg-white/5 z-0" />
     <ScrollArea orientation="horizontal" class="flex-1 h-11 relative z-10">
-      <div class="flex h-11 items-end px-2 pb-[1px]">
+      <div class="flex h-11 items-end px-2 pb-[1px]" role="tablist">
         <TooltipProvider :delay-duration="500">
           <Tooltip v-for="tab in workspace.tabs" :key="tab.id">
             <TooltipTrigger as-child>
               <button
-                class="tab-item group relative flex items-center h-[34px] transition-all duration-200 px-6 mx-[1px]"
+                role="tab"
+                :aria-selected="workspace.activeTabId === tab.id"
+                :aria-label="tab.type === 'welcome' ? t('tab.homepage') : tab.title"
+                class="tab-item group relative flex items-center h-[34px] transition-colors duration-200 px-6 mx-[1px] focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none focus-visible:z-10"
                 :class="[
                   workspace.activeTabId === tab.id ? 'active' : 'inactive'
                 ]"
@@ -150,7 +153,7 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
                 <div class="relative flex items-center gap-2 z-10">
                   <component 
                     :is="getTabIcon(tab.type)" 
-                    class="h-3.5 w-3.5 shrink-0 transition-all duration-300"
+                    class="h-3.5 w-3.5 shrink-0 transition-colors duration-300"
                     :class="workspace.activeTabId === tab.id ? 'text-foreground' : 'text-muted-foreground/50'"
                   />
                   
@@ -169,7 +172,8 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
                   <!-- Close button -->
                   <button
                     v-if="tab.closable"
-                    class="tab-close-btn ml-1 flex h-4 w-4 items-center justify-center rounded-full transition-all duration-200"
+                    :aria-label="t('common.close')"
+                    class="tab-close-btn ml-1 -mr-1.5 flex h-6 w-6 items-center justify-center rounded-full transition-[opacity,scale] duration-200"
                     @click.stop="workspace.closeTab(tab.id)"
                   >
                     <X class="h-2.5 w-2.5" />
@@ -189,13 +193,14 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
     </ScrollArea>
 
     <!-- 右侧功能区 (Elevated for interaction) -->
-    <div class="relative z-[100] flex h-full items-center gap-1 px-2 border-l border-black/[0.04] dark:border-white/5 shrink-0 bg-[#f6f8fa] dark:bg-[#0c0c0e]">
+    <div class="relative z-[100] flex h-full items-center gap-1 px-2 border-l border-black/[0.04] dark:border-white/5 shrink-0 bg-df-tabbar-action-bg">
       <!-- 消息中心按钮 -->
       <TooltipProvider :delay-duration="300">
         <Tooltip>
           <TooltipTrigger as-child>
             <button
-              class="relative flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground/60 transition-all hover:bg-primary/10 hover:text-primary active:scale-90"
+              :aria-label="t('tooltip.messageCenter')"
+              class="relative flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground/60 transition-[background-color,color,scale] hover:bg-primary/10 hover:text-primary active:scale-90 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
               :class="{ 'bg-primary/15 text-primary': messageCenter.isOpen }"
               @click.stop="messageCenter.togglePanel()"
             >
@@ -216,7 +221,7 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
 
     <!-- Message Center Panel -->
     <MessageCenter />
-  </div>
+  </nav>
 
   <!-- 右键菜单 -->
   <Teleport to="body">
@@ -326,13 +331,13 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
 
 /* 活跃状态：物理一体化同步 (打开式) */
 .active .tab-shape-main {
-  background-color: white;
+  background-color: var(--background);
   bottom: -1.5px; /* 物理沉降：刺穿底线 */
 }
 
 
 .dark .active .tab-shape-main {
-  background-color: #1e1e20;
+  background-color: var(--background);
 }
 
 .active .tab-shape-container::before,
@@ -342,14 +347,14 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
   bottom: -1.5px; /* 同步沉降 */
   width: 12px;
   height: 12px;
-  background-color: white;
+  background-color: var(--background);
   pointer-events: none;
 }
 
 
 .dark .active .tab-shape-container::before,
 .dark .active .tab-shape-container::after {
-  background-color: #1e1e20;
+  background-color: var(--background);
 }
 
 .active .tab-shape-container::before {

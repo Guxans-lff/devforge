@@ -65,7 +65,7 @@ function toggleExpand(id: string) {
 function getStatusClass(log: LogEntry): string {
   const details = log.details as Record<string, unknown>
   if (details.type === 'api-error') return 'text-red-400'
-  return 'text-emerald-400'
+  return 'text-df-success'
 }
 
 function getStatusLabel(log: LogEntry): string {
@@ -127,26 +127,26 @@ const errorCount = computed(() => {
         <Input
           v-model="searchText"
           :placeholder="t('devPanel.searchPlaceholder')"
-          class="h-7 pl-8 rounded-lg border-border/40 bg-background/50 text-[11px] font-bold transition-all focus:border-primary focus:ring-4 focus:ring-primary/5"
+          class="h-7 pl-8 rounded-lg border-border/40 bg-background/50 text-[11px] font-bold transition-[border-color,box-shadow] focus:border-primary focus:ring-4 focus:ring-primary/5"
         />
       </div>
 
       <!-- 级别过滤 -->
       <div class="flex h-6 items-center rounded-full bg-muted/20 p-0.5 border border-muted/30">
         <button
-          class="h-full px-2.5 rounded-full text-[9px] font-black uppercase tracking-tight transition-all"
+          class="h-full px-2.5 rounded-full text-[9px] font-black uppercase tracking-tight transition-[background-color,color,box-shadow]"
           :class="filterLevel === 'ALL' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground/50 hover:text-foreground/80'"
           @click="filterLevel = 'ALL'"
         >
           {{ t('devPanel.all') }}
         </button>
         <button
-          class="h-full px-2.5 rounded-full text-[9px] font-black uppercase tracking-tight transition-all"
-          :class="filterLevel === 'ERROR' ? 'bg-red-500/20 text-red-400 shadow-sm' : 'text-muted-foreground/50 hover:text-foreground/80'"
+          class="h-full px-2.5 rounded-full text-[9px] font-black uppercase tracking-tight transition-[background-color,color,box-shadow]"
+          :class="filterLevel === 'ERROR' ? 'bg-destructive/20 text-destructive shadow-sm' : 'text-muted-foreground/50 hover:text-foreground/80'"
           @click="filterLevel = 'ERROR'"
         >
           {{ t('devPanel.errorsOnly') }}
-          <span v-if="errorCount > 0" class="ml-1 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-red-500/20 px-1 text-[8px] font-black text-red-400 border border-red-500/20">
+          <span v-if="errorCount > 0" class="ml-1 inline-flex h-3.5 min-w-[14px] items-center justify-center rounded-full bg-destructive/20 px-1 text-[8px] font-black text-destructive border border-destructive/20">
             {{ errorCount }}
           </span>
         </button>
@@ -156,7 +156,7 @@ const errorCount = computed(() => {
         v-if="apiLogs.length > 0"
         variant="ghost"
         size="sm"
-        class="h-7 gap-1.5 px-3 rounded-lg text-[10px] font-black text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-all uppercase tracking-tight"
+        class="h-7 gap-1.5 px-3 rounded-lg text-[10px] font-black text-muted-foreground/40 hover:text-destructive hover:bg-destructive/10 transition-colors uppercase tracking-tight"
         @click="logStore.clearLogs()"
       >
         <Trash2 class="h-3 w-3" />
@@ -187,8 +187,8 @@ const errorCount = computed(() => {
             <ChevronRight v-else class="h-3 w-3 text-muted-foreground/50 shrink-0" />
 
             <!-- 方向图标 -->
-            <ArrowLeft v-if="(log.details as Record<string, unknown>).type === 'api-response'" class="h-3 w-3 text-emerald-500/60 shrink-0" />
-            <ArrowLeft v-else class="h-3 w-3 text-red-500/60 shrink-0" />
+            <ArrowLeft v-if="(log.details as Record<string, unknown>).type === 'api-response'" class="h-3 w-3 text-df-success/60 shrink-0" />
+            <ArrowLeft v-else class="h-3 w-3 text-destructive/60 shrink-0" />
 
             <!-- 状态 -->
             <span class="w-8 text-[9px] font-black uppercase shrink-0" :class="getStatusClass(log)">

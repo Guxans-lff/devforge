@@ -110,7 +110,7 @@ const chartTypes = [
         <button
           v-for="ct in chartTypes"
           :key="ct.type"
-          class="flex flex-col items-center justify-center gap-1.5 rounded-lg border px-2 py-3 text-[11px] transition-all duration-200"
+          class="flex flex-col items-center justify-center gap-1.5 rounded-lg border px-2 py-3 text-[11px] transition-[background-color,border-color,color,box-shadow] duration-200"
           :class="chartType === ct.type
             ? 'border-primary bg-primary/5 text-primary shadow-sm ring-1 ring-primary/20'
             : 'border-border/50 text-muted-foreground hover:bg-muted/50 hover:border-border'"
@@ -127,7 +127,7 @@ const chartTypes = [
       <p class="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em]">X 轴 / 维度</p>
       <select
         :value="xColumn"
-        class="w-full h-9 rounded-md border border-border bg-muted/20 px-3 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
+        class="w-full h-9 rounded-md border border-border bg-muted/20 px-3 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-[border-color,box-shadow] cursor-pointer"
         @change="xColumn = ($event.target as HTMLSelectElement).value"
       >
         <option v-for="col in columns" :key="col.name" :value="col.name">
@@ -163,7 +163,7 @@ const chartTypes = [
       <p class="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.1em]">数据聚合方式</p>
       <select
         :value="aggregation"
-        class="w-full h-9 rounded-md border border-border bg-muted/20 px-3 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-all cursor-pointer"
+        class="w-full h-9 rounded-md border border-border bg-muted/20 px-3 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 transition-[border-color,box-shadow] cursor-pointer"
         @change="aggregation = ($event.target as HTMLSelectElement).value as ChartConfig['aggregation']"
       >
         <option value="none">原始数据 (不聚合)</option>

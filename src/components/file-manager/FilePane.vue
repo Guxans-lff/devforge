@@ -14,6 +14,7 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuShortcut,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import {
@@ -177,6 +178,10 @@ const selectedCount = computed(() => selectedEntries.value.size)
 const selectedItems = computed(() =>
   sortedEntries.value.filter(e => selectedEntries.value.has(e.path))
 )
+const selectedTotalSize = computed(() => {
+  if (selectedCount.value === 0) return 0
+  return selectedItems.value.reduce((sum, e) => sum + (e.isDir ? 0 : e.size), 0)
+})
 
 watch(
   () => props.currentPath,
@@ -334,6 +339,33 @@ function handleKeyDown(e: KeyboardEvent) {
   }
   if (e.key === 'Escape') {
     clearSelection()
+    return
+  }
+
+  // F2 重命名（单选时）
+  if (e.key === 'F2' && selectedCount.value === 1) {
+    e.preventDefault()
+    const item = selectedItems.value[0]
+    if (item) openRenameDialog(item)
+    return
+  }
+
+  // Delete 删除
+  if (e.key === 'Delete' && selectedCount.value > 0) {
+    e.preventDefault()
+    if (selectedCount.value === 1) {
+      handleDeleteSelected()
+    } else {
+      handleBatchDelete()
+    }
+    return
+  }
+
+  // Enter 打开文件/目录（单选时）
+  if (e.key === 'Enter' && selectedCount.value === 1) {
+    e.preventDefault()
+    const item = selectedItems.value[0]
+    if (item) handleDoubleClick(item)
     return
   }
 
@@ -671,9 +703,6 @@ onBeforeUnmount(() => {
       <span class="text-xs font-medium uppercase tracking-wider text-muted-foreground">
         {{ label }}
       </span>
-      <span v-if="selectedCount > 0" class="text-xs text-primary">
-        ({{ t('fileManager.selectedCount', { count: selectedCount }) }})
-      </span>
     </div>
 
     <!-- Path bar (includes navigation, refresh, mkdir buttons) -->
@@ -691,33 +720,40 @@ onBeforeUnmount(() => {
 
     <!-- 列标题表头 -->
     <div
+      role="row"
       class="flex items-center gap-3 px-3 border-b border-border text-[11px] font-medium text-muted-foreground select-none mx-1"
       :style="{ height: ROW_HEIGHT + 'px' }"
     >
       <div class="w-4 shrink-0" />
       <div
+        role="columnheader"
+        :aria-sort="sortField === 'name' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'"
         class="flex-1 flex items-center gap-1 cursor-pointer hover:text-foreground transition-colors"
         @click="toggleSort('name')"
       >
         {{ t('fileManager.columnName') }}
-        <ArrowUp v-if="sortField === 'name' && sortDirection === 'asc'" class="h-3 w-3" />
-        <ArrowDown v-else-if="sortField === 'name' && sortDirection === 'desc'" class="h-3 w-3" />
+        <ArrowUp v-if="sortField === 'name' && sortDirection === 'asc'" class="h-3 w-3 text-primary" />
+        <ArrowDown v-else-if="sortField === 'name' && sortDirection === 'desc'" class="h-3 w-3 text-primary" />
       </div>
       <div
+        role="columnheader"
+        :aria-sort="sortField === 'size' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'"
         class="w-16 shrink-0 text-right flex items-center justify-end gap-1 cursor-pointer hover:text-foreground transition-colors"
         @click="toggleSort('size')"
       >
         {{ t('fileManager.columnSize') }}
-        <ArrowUp v-if="sortField === 'size' && sortDirection === 'asc'" class="h-3 w-3" />
-        <ArrowDown v-else-if="sortField === 'size' && sortDirection === 'desc'" class="h-3 w-3" />
+        <ArrowUp v-if="sortField === 'size' && sortDirection === 'asc'" class="h-3 w-3 text-primary" />
+        <ArrowDown v-else-if="sortField === 'size' && sortDirection === 'desc'" class="h-3 w-3 text-primary" />
       </div>
       <div
+        role="columnheader"
+        :aria-sort="sortField === 'modified' ? (sortDirection === 'asc' ? 'ascending' : 'descending') : 'none'"
         class="w-28 shrink-0 text-right flex items-center justify-end gap-1 cursor-pointer hover:text-foreground transition-colors"
         @click="toggleSort('modified')"
       >
         {{ t('fileManager.columnModified') }}
-        <ArrowUp v-if="sortField === 'modified' && sortDirection === 'asc'" class="h-3 w-3" />
-        <ArrowDown v-else-if="sortField === 'modified' && sortDirection === 'desc'" class="h-3 w-3" />
+        <ArrowUp v-if="sortField === 'modified' && sortDirection === 'asc'" class="h-3 w-3 text-primary" />
+        <ArrowDown v-else-if="sortField === 'modified' && sortDirection === 'desc'" class="h-3 w-3 text-primary" />
       </div>
     </div>
 
@@ -753,12 +789,14 @@ onBeforeUnmount(() => {
       <ContextMenu v-else-if="entries.length === 0">
         <ContextMenuTrigger as-child>
           <div
-            class="flex items-center justify-center py-12 text-xs text-muted-foreground h-full min-h-[200px]"
+            class="flex flex-col items-center justify-center gap-2 py-12 text-xs text-muted-foreground h-full min-h-[200px]"
             @dragover.prevent="handleDragOver($event)"
             @dragleave="handleDragLeave"
             @drop="handleDrop($event)"
           >
-            {{ t('fileManager.emptyDir') }}
+            <Folder class="h-8 w-8 text-muted-foreground/30" />
+            <span>{{ t('fileManager.emptyDir') }}</span>
+            <span class="text-[10px] text-muted-foreground/50">{{ t('fileManager.emptyDirHint') }}</span>
           </div>
         </ContextMenuTrigger>
         <ContextMenuContent class="w-48">
@@ -783,7 +821,7 @@ onBeforeUnmount(() => {
             <ContextMenuTrigger>
               <div
                 :data-row-index="vRow.index"
-                class="group flex cursor-pointer items-center gap-3 px-3 text-[13px] transition-all duration-200 hover:bg-primary/10 absolute left-1 right-1 rounded-md"
+                class="group flex cursor-pointer items-center gap-3 px-3 text-[13px] transition-colors duration-200 hover:bg-primary/10 absolute left-1 right-1 rounded-md"
                 :style="{ height: `${ROW_HEIGHT}px`, transform: `translateY(${vRow.start}px)` }"
                 :class="{
                   'bg-primary/10 text-primary': isSelected(sortedEntries[vRow.index]!),
@@ -814,7 +852,6 @@ onBeforeUnmount(() => {
                 </span>
               </div>
             </ContextMenuTrigger>
-            <!-- __CONTINUE_HERE__ -->
             <ContextMenuContent class="w-48">
               <!-- 新建操作（所有场景可用） -->
               <ContextMenuItem @click="showMkdirDialog = true">
@@ -854,6 +891,7 @@ onBeforeUnmount(() => {
                 <ContextMenuItem v-if="selectedItems[0]" @click="openRenameDialog(selectedItems[0])">
                   <Pencil class="mr-2 h-4 w-4" />
                   {{ t('fileManager.rename') }}
+                  <ContextMenuShortcut>F2</ContextMenuShortcut>
                 </ContextMenuItem>
                 <ContextMenuItem
                   v-if="panelId === 'remote' && selectedItems[0]"
@@ -876,6 +914,7 @@ onBeforeUnmount(() => {
                 >
                   <Trash2 class="mr-2 h-4 w-4" />
                   {{ t('fileManager.delete') }}
+                  <ContextMenuShortcut>Del</ContextMenuShortcut>
                 </ContextMenuItem>
               </template>
 
@@ -898,6 +937,7 @@ onBeforeUnmount(() => {
                 >
                   <Trash2 class="mr-2 h-4 w-4" />
                   {{ t('fileManager.deleteSelected', { count: selectedCount }) }}
+                  <ContextMenuShortcut>Del</ContextMenuShortcut>
                 </ContextMenuItem>
               </template>
             </ContextMenuContent>
@@ -916,6 +956,11 @@ onBeforeUnmount(() => {
     <!-- Status bar -->
     <div class="flex items-center border-t border-border px-2 py-1 text-[10px] text-muted-foreground">
       <span>{{ t('fileManager.items', { count: entries.length }) }}</span>
+      <template v-if="selectedCount > 0">
+        <span class="mx-1.5 text-border">|</span>
+        <span class="text-primary">{{ t('fileManager.selectedCount', { count: selectedCount }) }}</span>
+        <span v-if="selectedTotalSize > 0" class="ml-1 text-muted-foreground/60">· {{ formatSize(selectedTotalSize) }}</span>
+      </template>
     </div>
 
     <!-- New Folder Dialog -->
@@ -931,7 +976,7 @@ onBeforeUnmount(() => {
               {{ t('fileManager.newFolder') }}
             </DialogTitle>
             <span class="text-[10px] font-medium text-muted-foreground/40 uppercase tracking-[0.1em]">
-              Create New Directory
+              {{ t('fileManager.createNewDirectory') }}
             </span>
           </div>
         </div>
@@ -947,7 +992,7 @@ onBeforeUnmount(() => {
               <div class="relative group">
                 <Input
                   v-model="mkdirName"
-                  class="h-11 rounded-xl border-border/80 bg-background/50 px-4 text-[13px] tracking-wide transition-all focus:border-primary focus:ring-4 focus:ring-primary/5 shadow-sm"
+                  class="h-11 rounded-xl border-border/80 bg-background/50 px-4 text-[13px] tracking-wide transition-[border-color,box-shadow] focus:border-primary focus:ring-4 focus:ring-primary/5 shadow-sm"
                   :placeholder="t('fileManager.newFolderName')"
                   autofocus
                 />
@@ -958,14 +1003,14 @@ onBeforeUnmount(() => {
               <Button 
                 variant="outline" 
                 type="button" 
-                class="flex-1 h-11 rounded-xl text-[12px] font-bold text-foreground/60 hover:text-foreground hover:bg-muted transition-all" 
+                class="flex-1 h-11 rounded-xl text-[12px] font-bold text-foreground/60 hover:text-foreground hover:bg-muted transition-colors"
                 @click="showMkdirDialog = false"
               >
                 {{ t('common.cancel') }}
               </Button>
               <Button 
                 type="submit" 
-                class="flex-1 h-11 rounded-xl text-[12px] font-extrabold shadow-lg shadow-primary/20 transition-all active:scale-[0.96]" 
+                class="flex-1 h-11 rounded-xl text-[12px] font-extrabold shadow-lg shadow-primary/20 transition-[background-color,color,box-shadow,scale] active:scale-[0.96]"
                 :disabled="!mkdirName.trim()"
               >
                 {{ t('common.confirm') }}
@@ -988,7 +1033,7 @@ onBeforeUnmount(() => {
               {{ t('fileManager.newFile') }}
             </DialogTitle>
             <span class="text-[10px] font-medium text-muted-foreground/40 uppercase tracking-[0.1em]">
-              Create New File
+              {{ t('fileManager.createNewFile') }}
             </span>
           </div>
         </div>
@@ -1004,7 +1049,7 @@ onBeforeUnmount(() => {
               <div class="relative group">
                 <Input
                   v-model="newFileName"
-                  class="h-11 rounded-xl border-border/80 bg-background/50 px-4 text-[13px] tracking-wide transition-all focus:border-primary focus:ring-4 focus:ring-primary/5 shadow-sm"
+                  class="h-11 rounded-xl border-border/80 bg-background/50 px-4 text-[13px] tracking-wide transition-[border-color,box-shadow] focus:border-primary focus:ring-4 focus:ring-primary/5 shadow-sm"
                   :placeholder="t('fileManager.newFileName')"
                   autofocus
                 />
@@ -1015,14 +1060,14 @@ onBeforeUnmount(() => {
               <Button
                 variant="outline"
                 type="button"
-                class="flex-1 h-11 rounded-xl text-[12px] font-bold text-foreground/60 hover:text-foreground hover:bg-muted transition-all"
+                class="flex-1 h-11 rounded-xl text-[12px] font-bold text-foreground/60 hover:text-foreground hover:bg-muted transition-colors"
                 @click="showNewFileDialog = false"
               >
                 {{ t('common.cancel') }}
               </Button>
               <Button
                 type="submit"
-                class="flex-1 h-11 rounded-xl text-[12px] font-extrabold shadow-lg shadow-primary/20 transition-all active:scale-[0.96]"
+                class="flex-1 h-11 rounded-xl text-[12px] font-extrabold shadow-lg shadow-primary/20 transition-[background-color,color,box-shadow,scale] active:scale-[0.96]"
                 :disabled="!newFileName.trim()"
               >
                 {{ t('common.confirm') }}
@@ -1051,7 +1096,7 @@ onBeforeUnmount(() => {
               <div class="relative group">
                 <Input
                   v-model="renameName"
-                  class="h-10 rounded-xl border-border/80 bg-muted/20 px-3 text-[13px] tracking-wide transition-all focus:border-primary focus:bg-background focus:ring-4 focus:ring-primary/5 shadow-sm"
+                  class="h-10 rounded-xl border-border/80 bg-muted/20 px-3 text-[13px] tracking-wide transition-[border-color,background-color,box-shadow] focus:border-primary focus:bg-background focus:ring-4 focus:ring-primary/5 shadow-sm"
                   :placeholder="t('fileManager.renameTo')"
                   autofocus
                 />
@@ -1062,14 +1107,14 @@ onBeforeUnmount(() => {
               <Button 
                 variant="outline" 
                 type="button"
-                class="flex-1 h-9 rounded-xl text-[11px] font-bold text-foreground/60 border-border/40 hover:bg-muted transition-all" 
+                class="flex-1 h-9 rounded-xl text-[11px] font-bold text-foreground/60 border-border/40 hover:bg-muted transition-colors"
                 @click="showRenameDialog = false"
               >
                 {{ t('common.cancel') }}
               </Button>
               <Button
                 type="submit"
-                class="flex-1 h-9 rounded-xl text-[11px] font-black shadow-lg shadow-primary/10 transition-all active:scale-[0.96]"
+                class="flex-1 h-9 rounded-xl text-[11px] font-black shadow-lg shadow-primary/10 transition-[background-color,color,box-shadow,scale] active:scale-[0.96]"
                 :disabled="!renameName.trim()"
               >
                 {{ t('common.confirm') }}

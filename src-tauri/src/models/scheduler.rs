@@ -73,6 +73,24 @@ impl SyncConfig {
     }
 }
 
+/// 数据库备份配置（序列化为 JSON 存储在 ScheduledTask.config_json 中）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupConfig {
+    /// 连接 ID
+    pub connection_id: String,
+    /// 数据库名
+    pub database: String,
+    /// 要备份的表列表（空表示全部）
+    pub tables: Vec<String>,
+    /// 是否包含表结构
+    pub include_structure: bool,
+    /// 是否包含数据
+    pub include_data: bool,
+    /// 输出目录（文件名自动生成带时间戳）
+    pub output_dir: String,
+}
+
 /// 同步进度事件（通过 Tauri Channel 推送给前端）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -276,7 +276,7 @@ async function handleSelectFile() {
 
 <template>
   <Dialog :open="open" @update:open="(val) => !isExecuting && emit('update:open', val)">
-    <DialogContent class="sm:max-w-[720px] p-0 overflow-hidden border border-white/10 bg-background/95 backdrop-blur-xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.05)] rounded-2xl transition-all duration-700 ease-in-out">
+    <DialogContent class="sm:max-w-[720px] p-0 overflow-hidden border border-white/10 bg-background/95 backdrop-blur-xl shadow-[0_32px_64px_-16px_rgba(0,0,0,0.4),0_0_0_1px_rgba(255,255,255,0.05)] rounded-2xl transition-[opacity,transform] duration-700 ease-in-out">
       <!-- 3D Layered Header with Metallic Gradient -->
       <div class="px-8 pt-8 pb-7 border-b border-white/5 bg-gradient-to-b from-muted/30 to-muted/5 industrial-grid text-muted-foreground/5 noise-texture relative overflow-hidden">
         <!-- Technical Crosshair Decoration -->
@@ -302,14 +302,14 @@ async function handleSelectFile() {
               <p class="text-[10px] font-medium text-muted-foreground/70 mt-1.5 tracking-tight">{{ t('sqlImport.subtitle') }}</p>
             </div>
           </div>
-          <div v-if="database" class="px-3 py-1.5 rounded-lg bg-foreground/5 text-foreground/80 text-[9px] font-black uppercase tracking-[0.2em] border border-white/10 shadow-inner group transition-all duration-500 hover:bg-primary/5 hover:border-primary/20 hover:text-primary">
+          <div v-if="database" class="px-3 py-1.5 rounded-lg bg-foreground/5 text-foreground/80 text-[9px] font-black uppercase tracking-[0.2em] border border-white/10 shadow-inner group transition-[background-color,border-color,color] duration-500 hover:bg-primary/5 hover:border-primary/20 hover:text-primary">
             <span class="opacity-40 mr-1.5">DB:</span>{{ database }}
           </div>
         </div>
 
         <!-- Integrated Resource Module ("Plug-in" look) -->
         <div 
-          class="relative z-20 group rounded-xl border border-white/5 bg-background p-2 flex items-center gap-3 transition-all duration-700 shadow-[inset_0_2px_4px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.1)]"
+          class="relative z-20 group rounded-xl border border-white/5 bg-background p-2 flex items-center gap-3 transition-[border-color,box-shadow] duration-700 shadow-[inset_0_2px_4px_rgba(0,0,0,0.05),0_4px_12px_rgba(0,0,0,0.1)]"
           :class="selectedFilePath ? 'border-primary/30 ring-4 ring-primary/5' : 'hover:border-primary/20'"
         >
           <div class="pl-3 flex items-center gap-2.5 text-muted-foreground shrink-0 border-r border-white/5 pr-3 mr-1">
@@ -323,7 +323,7 @@ async function handleSelectFile() {
             v-if="!isExecuting" 
             variant="default" 
             size="sm" 
-            class="h-8 px-4 rounded-lg font-bold text-[10px] uppercase tracking-widest bg-foreground text-background hover:bg-foreground/90 transition-all duration-500 shadow-md relative overflow-hidden group/btn"
+            class="h-8 px-4 rounded-lg font-bold text-[10px] uppercase tracking-widest bg-foreground text-background hover:bg-foreground/90 transition-colors duration-500 shadow-md relative overflow-hidden group/btn"
             @click="handleSelectFile"
           >
             <FolderOpen class="w-3.5 h-3.5 mr-2 transition-transform duration-500 group-hover/btn:scale-110" />
@@ -359,7 +359,7 @@ async function handleSelectFile() {
                   @click="importOptions.continueOnError = !importOptions.continueOnError"
                 >
                   <div 
-                    class="h-full rounded-2xl border border-white/5 p-6 flex flex-col items-center text-center gap-5 transition-all duration-700 bg-gradient-to-br from-background to-muted/5 relative overflow-hidden"
+                    class="h-full rounded-2xl border border-white/5 p-6 flex flex-col items-center text-center gap-5 transition-[border-color,box-shadow,scale,opacity] duration-700 bg-gradient-to-br from-background to-muted/5 relative overflow-hidden"
                     :class="importOptions.continueOnError 
                       ? 'border-primary/40 shadow-[0_20px_40px_-12px_rgba(var(--primary),0.15)] ring-1 ring-primary/20 scale-[1.02]' 
                       : 'hover:border-white/10 opacity-60 hover:opacity-90'"
@@ -368,12 +368,12 @@ async function handleSelectFile() {
                     <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.02] to-transparent pointer-events-none"></div>
 
                     <div 
-                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-all duration-700 border"
+                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-[background-color,color,border-color,box-shadow] duration-700 border"
                       :class="importOptions.continueOnError 
                         ? 'bg-primary text-primary-foreground border-primary shadow-[0_8px_16px_rgba(var(--primary),0.2)]' 
                         : 'bg-muted/30 text-muted-foreground/30 border-white/5'"
                     >
-                      <ShieldCheck class="w-7 h-7 transition-all duration-700" :class="importOptions.continueOnError ? 'scale-110' : 'scale-90'" />
+                      <ShieldCheck class="w-7 h-7 transition-transform duration-700" :class="importOptions.continueOnError ? 'scale-110' : 'scale-90'" />
                     </div>
                     <div class="space-y-2 relative z-10">
                       <div class="text-[11px] font-black uppercase tracking-widest transition-colors duration-500" :class="importOptions.continueOnError ? 'text-foreground' : 'text-muted-foreground'">
@@ -385,7 +385,7 @@ async function handleSelectFile() {
                     </div>
                     
                     <!-- Selection Indicator (Sleek Tech Bar) -->
-                    <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-t-full transition-all duration-700"
+                    <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-t-full transition-[background-color,box-shadow] duration-700"
                       :class="importOptions.continueOnError ? 'bg-primary shadow-[0_0_12px_rgba(var(--primary),0.6)]' : 'bg-transparent'"
                     />
                   </div>
@@ -397,19 +397,19 @@ async function handleSelectFile() {
                   @click="importOptions.multipleQueries = !importOptions.multipleQueries"
                 >
                   <div 
-                    class="h-full rounded-2xl border border-white/5 p-6 flex flex-col items-center text-center gap-5 transition-all duration-700 bg-gradient-to-br from-background to-muted/5 relative overflow-hidden"
+                    class="h-full rounded-2xl border border-white/5 p-6 flex flex-col items-center text-center gap-5 transition-[border-color,box-shadow,scale,opacity] duration-700 bg-gradient-to-br from-background to-muted/5 relative overflow-hidden"
                     :class="importOptions.multipleQueries 
                       ? 'border-primary/40 shadow-[0_20px_40px_-12px_rgba(var(--primary),0.15)] ring-1 ring-primary/20 scale-[1.02]' 
                       : 'hover:border-white/10 opacity-60 hover:opacity-90'"
                   >
                     <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.02] to-transparent pointer-events-none"></div>
                     <div 
-                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-all duration-700 border"
+                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-[background-color,color,border-color,box-shadow] duration-700 border"
                       :class="importOptions.multipleQueries 
                         ? 'bg-primary text-primary-foreground border-primary shadow-[0_8px_16px_rgba(var(--primary),0.2)]' 
                         : 'bg-muted/30 text-muted-foreground/30 border-white/5'"
                     >
-                      <Zap class="w-7 h-7 transition-all duration-700" :class="importOptions.multipleQueries ? 'scale-110' : 'scale-90'" />
+                      <Zap class="w-7 h-7 transition-transform duration-700" :class="importOptions.multipleQueries ? 'scale-110' : 'scale-90'" />
                     </div>
                     <div class="space-y-2 relative z-10">
                       <div class="text-[11px] font-black uppercase tracking-widest transition-colors duration-500" :class="importOptions.multipleQueries ? 'text-foreground' : 'text-muted-foreground'">
@@ -419,7 +419,7 @@ async function handleSelectFile() {
                         {{ t('sqlImport.options.multipleQueriesDesc') }}
                       </p>
                     </div>
-                    <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-t-full transition-all duration-700"
+                    <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-t-full transition-[background-color,box-shadow] duration-700"
                       :class="importOptions.multipleQueries ? 'bg-primary shadow-[0_0_12px_rgba(var(--primary),0.6)]' : 'bg-transparent'"
                     />
                   </div>
@@ -431,19 +431,19 @@ async function handleSelectFile() {
                   @click="importOptions.disableAutoCommit = !importOptions.disableAutoCommit"
                 >
                   <div 
-                    class="h-full rounded-2xl border border-white/5 p-6 flex flex-col items-center text-center gap-5 transition-all duration-700 bg-gradient-to-br from-background to-muted/5 relative overflow-hidden"
+                    class="h-full rounded-2xl border border-white/5 p-6 flex flex-col items-center text-center gap-5 transition-[border-color,box-shadow,scale,opacity] duration-700 bg-gradient-to-br from-background to-muted/5 relative overflow-hidden"
                     :class="importOptions.disableAutoCommit 
                       ? 'border-primary/40 shadow-[0_20px_40px_-12px_rgba(var(--primary),0.15)] ring-1 ring-primary/20 scale-[1.02]' 
                       : 'hover:border-white/10 opacity-60 hover:opacity-90'"
                   >
                     <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/[0.02] to-transparent pointer-events-none"></div>
                     <div 
-                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-all duration-700 border"
+                      class="h-14 w-14 rounded-2xl flex items-center justify-center transition-[background-color,color,border-color,box-shadow] duration-700 border"
                       :class="importOptions.disableAutoCommit 
                         ? 'bg-primary text-primary-foreground border-primary shadow-[0_8px_16px_rgba(var(--primary),0.2)]' 
                         : 'bg-muted/30 text-muted-foreground/30 border-white/5'"
                     >
-                      <Timer class="w-7 h-7 transition-all duration-700" :class="importOptions.disableAutoCommit ? 'scale-110' : 'scale-90'" />
+                      <Timer class="w-7 h-7 transition-transform duration-700" :class="importOptions.disableAutoCommit ? 'scale-110' : 'scale-90'" />
                     </div>
                     <div class="space-y-2 relative z-10">
                       <div class="text-[11px] font-black uppercase tracking-widest transition-colors duration-500" :class="importOptions.disableAutoCommit ? 'text-foreground' : 'text-muted-foreground'">
@@ -453,7 +453,7 @@ async function handleSelectFile() {
                         {{ t('sqlImport.options.disableAutoCommitDesc') }}
                       </p>
                     </div>
-                    <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-t-full transition-all duration-700"
+                    <div class="absolute bottom-0 left-1/2 -translate-x-1/2 w-8 h-1 rounded-t-full transition-[background-color,box-shadow] duration-700"
                       :class="importOptions.disableAutoCommit ? 'bg-primary shadow-[0_0_12px_rgba(var(--primary),0.6)]' : 'bg-transparent'"
                     />
                   </div>
@@ -463,7 +463,7 @@ async function handleSelectFile() {
         </div>
 
         <!-- Professional Simplified Progress View -->
-        <div v-else class="space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-1000 ease-out">
+        <div v-else class="space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-700 ease-out">
            
            <!-- High-Depth Stats Module -->
            <div class="flex items-center gap-12 px-2 py-4 bg-muted/10 rounded-2xl border border-white/5 shadow-inner relative overflow-hidden">
@@ -478,8 +478,8 @@ async function handleSelectFile() {
              <div class="w-px h-10 bg-white/5" />
  
              <div class="space-y-1 py-1">
-                <span class="text-[8px] font-black uppercase tracking-[0.2em] text-emerald-500/60 block">{{ t('sqlImport.stats.success') }}</span>
-                <div class="text-2xl font-black font-mono tracking-tight tabular-nums text-emerald-500 drop-shadow-[0_0_12px_rgba(16,185,129,0.2)]">{{ formatNumber(progressData?.success || 0) }}</div>
+                <span class="text-[8px] font-black uppercase tracking-[0.2em] text-df-success/60 block">{{ t('sqlImport.stats.success') }}</span>
+                <div class="text-2xl font-black font-mono tracking-tight tabular-nums text-df-success drop-shadow-[0_0_12px_var(--df-success)]">{{ formatNumber(progressData?.success || 0) }}</div>
              </div>
  
              <div class="w-px h-10 bg-white/5" />
@@ -513,7 +513,7 @@ async function handleSelectFile() {
              </div>
              <div class="relative h-2.5 w-full bg-muted/20 rounded-full overflow-hidden border border-white/5 p-[2px] shadow-inner">
                 <div 
-                  class="h-full bg-gradient-to-r from-primary/80 to-primary rounded-full transition-all duration-1000 ease-out shadow-[0_0_15px_rgba(var(--primary),0.3)] relative"
+                  class="h-full bg-gradient-to-r from-primary/80 to-primary rounded-full transition-[width] duration-1000 ease-out shadow-[0_0_15px_rgba(var(--primary),0.3)] relative"
                   :style="{ width: `${progressPercent}%` }"
                 >
                   <!-- Moving Shine Effect -->
@@ -525,7 +525,7 @@ async function handleSelectFile() {
             <!-- Integrated Log/Stack Terminal -->
             <div class="grid grid-cols-1 gap-4">
                <div 
-                 class="rounded-3xl border border-white/5 bg-muted/5 p-4 relative overflow-hidden group shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)] transition-all duration-700"
+                 class="rounded-3xl border border-white/5 bg-muted/5 p-4 relative overflow-hidden group shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)] transition-[background-color,box-shadow,border-color] duration-700"
                  :class="errorLog.length > 0 ? 'bg-muted/2 shadow-none border-transparent' : 'bg-muted/5'"
                >
                   <!-- Grid Decoration -->
@@ -536,7 +536,7 @@ async function handleSelectFile() {
                     {{ t('sqlImport.progress.currentStack') }}
                   </div>
                   <div 
-                    class="font-mono text-foreground/70 break-all font-medium leading-relaxed relative z-10 transition-all duration-700"
+                    class="font-mono text-foreground/70 break-all font-medium leading-relaxed relative z-10 transition-[color,opacity] duration-700"
                     :class="errorLog.length > 0 ? 'text-[9px] line-clamp-1 min-h-0 opacity-40 italic mt-0' : 'text-[11px] line-clamp-2 min-h-[2.8em]'"
                   >
                      <span v-if="errorLog.length > 0" class="mr-2 text-primary/30 font-black"># PREVIEW:</span>
@@ -554,8 +554,8 @@ async function handleSelectFile() {
                     <span class="text-[9px] font-black font-mono text-white bg-destructive/80 px-2.5 py-1 rounded-full shadow-lg shadow-destructive/20">{{ errorLog.length }} ISSUES</span>
                     <button
                       type="button"
-                      class="h-7 w-7 rounded-full flex items-center justify-center transition-all duration-300 cursor-pointer active:scale-90 outline-none border-none bg-transparent"
-                      :class="copyStates['all'] ? 'bg-emerald-500/10 text-emerald-500' : 'hover:bg-destructive/10 text-destructive/60 hover:text-destructive'"
+                      class="h-7 w-7 rounded-full flex items-center justify-center transition-colors duration-300 cursor-pointer active:scale-90 outline-none border-none bg-transparent"
+                      :class="copyStates['all'] ? 'bg-df-success/10 text-df-success' : 'hover:bg-destructive/10 text-destructive/60 hover:text-destructive'"
                       @mousedown.stop.prevent="handleCopyLog('all', $event)"
                     >
                       <Check v-if="copyStates['all']" class="w-3.5 h-3.5 animate-in zoom-in duration-300" />
@@ -570,9 +570,9 @@ async function handleSelectFile() {
                         <div class="break-all">{{ err }}</div>
                         <button
                           type="button"
-                          class="absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full flex items-center justify-center transition-all duration-300 cursor-pointer active:scale-90 outline-none border-none bg-transparent"
+                          class="absolute right-3 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full flex items-center justify-center transition-colors duration-300 cursor-pointer active:scale-90 outline-none border-none bg-transparent"
                           :class="[
-                            copyStates[i] ? 'opacity-100 bg-emerald-500/10 text-emerald-500' : 'opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-destructive/60 hover:text-destructive'
+                            copyStates[i] ? 'opacity-100 bg-df-success/10 text-df-success' : 'opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-destructive/60 hover:text-destructive'
                           ]"
                           @mousedown.stop.prevent="handleCopyLog(i.toString(), $event, err)"
                         >
@@ -590,13 +590,13 @@ async function handleSelectFile() {
       <!-- Industrial Slab Footer -->
       <footer class="h-20 px-10 flex items-center justify-between border-t border-white/5 bg-gradient-to-t from-muted/20 to-transparent industrial-grid text-muted-foreground/[0.02] overflow-hidden relative">
         <div class="flex items-center gap-5 relative z-10">
-          <div class="flex items-center gap-3.5 px-4 py-2 rounded-full bg-muted/10 border border-white/10 shadow-[inset_0_1px_2px_rgba(255,255,255,0.05),0_4px_12px_rgba(0,0,0,0.1)] backdrop-blur-md transition-all duration-700">
+          <div class="flex items-center gap-3.5 px-4 py-2 rounded-full bg-muted/10 border border-white/10 shadow-[inset_0_1px_2px_rgba(255,255,255,0.05),0_4px_12px_rgba(0,0,0,0.1)] backdrop-blur-md transition-[background-color,border-color,box-shadow] duration-700">
              <div 
-               class="h-2.5 w-2.5 rounded-full transition-all duration-700 relative"
+               class="h-2.5 w-2.5 rounded-full transition-[background-color,box-shadow] duration-700 relative"
                :class="{
                  'bg-destructive shadow-[0_0_15px_rgba(var(--destructive),0.6)] animate-pulse': isCancelling,
-                 'bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]': isExecuting && !isPaused && !isCancelling,
-                 'bg-amber-500 shadow-[0_0_15px_rgba(245,158,11,0.5)] animate-pulse': isPaused && !isCancelling,
+                 'bg-df-success shadow-[0_0_15px_var(--df-success)]': isExecuting && !isPaused && !isCancelling,
+                 'bg-df-warning shadow-[0_0_15px_var(--df-warning)] animate-pulse': isPaused && !isCancelling,
                  'bg-white/10': !isExecuting && !progressData?.isFinished && !isCancelling,
                  'bg-primary shadow-[0_0_15px_rgba(var(--primary),0.6)]': !isExecuting && progressData?.isFinished
                }" 
@@ -619,7 +619,7 @@ async function handleSelectFile() {
             variant="ghost"
             @click="handleCancel"
             :disabled="isCancelling"
-            class="h-10 px-6 rounded-xl font-black text-[10px] text-muted-foreground/60 hover:text-foreground hover:bg-white/5 uppercase tracking-[0.2em] transition-all duration-500"
+            class="h-10 px-6 rounded-xl font-black text-[10px] text-muted-foreground/60 hover:text-foreground hover:bg-white/5 uppercase tracking-[0.2em] transition-colors duration-500"
           >
             <Loader2 v-if="isCancelling" class="w-3.5 h-3.5 mr-2.5 animate-spin" />
             {{ isCancelling ? t('sqlImport.status.cancelling') : ((!isExecuting && progressData?.isFinished) ? t('sqlImport.actions.finish') : t('sqlImport.actions.cancel')) }}
@@ -628,10 +628,10 @@ async function handleSelectFile() {
           <div class="h-6 w-[1px] bg-white/5 mx-2"></div>
  
           <template v-if="isExecuting && !isCancelling">
-            <Button v-if="!isPaused" variant="default" @click="handlePause" class="h-10 rounded-full px-7 font-black text-[10px] bg-amber-500/90 text-white hover:bg-amber-500 shadow-[0_8px_20px_-6px_rgba(245,158,11,0.3)] hover:shadow-[0_12px_24px_-6px_rgba(245,158,11,0.5)] transition-all duration-500 uppercase tracking-[0.2em] group border-transparent">
+            <Button v-if="!isPaused" variant="default" @click="handlePause" class="h-10 rounded-full px-7 font-black text-[10px] bg-df-warning/90 text-white hover:bg-df-warning shadow-[0_8px_20px_-6px_var(--df-warning)] hover:shadow-[0_12px_24px_-6px_var(--df-warning)] transition-[background-color,box-shadow] duration-500 uppercase tracking-[0.2em] group border-transparent">
               <Timer class="w-4 h-4 mr-2.5 transition-transform duration-500 group-hover:rotate-12" /> {{ t('sqlImport.actions.pause') }}
             </Button>
-            <Button v-else variant="default" @click="handleResume" class="h-10 rounded-full px-7 font-black text-[10px] bg-emerald-600 hover:bg-emerald-500 shadow-lg shadow-emerald-500/20 gap-2.5 uppercase tracking-[0.2em] text-white transition-all duration-500 active:scale-95 group">
+            <Button v-else variant="default" @click="handleResume" class="h-10 rounded-full px-7 font-black text-[10px] bg-df-success hover:bg-df-success/90 shadow-lg shadow-df-success/20 gap-2.5 uppercase tracking-[0.2em] text-white transition-[background-color,box-shadow] duration-500 active:scale-95 group">
               <Play class="w-3.5 h-3.5 fill-current transition-transform duration-500 group-hover:scale-110" /> {{ t('sqlImport.actions.resume') }}
             </Button>
           </template>
@@ -639,7 +639,7 @@ async function handleSelectFile() {
           <Button
             v-if="!isExecuting && !progressData"
             variant="default"
-            class="h-11 rounded-full px-10 font-black text-[11px] bg-primary text-primary-foreground shadow-[0_12px_24px_-8px_rgba(var(--primary),0.4)] transition-all duration-700 hover:shadow-[0_16px_32px_-8px_rgba(var(--primary),0.5)] hover:scale-[1.02] active:scale-95 group uppercase tracking-[0.2em] relative overflow-hidden"
+            class="h-11 rounded-full px-10 font-black text-[11px] bg-primary text-primary-foreground shadow-[0_12px_24px_-8px_rgba(var(--primary),0.4)] transition-[box-shadow,scale] duration-700 hover:shadow-[0_16px_32px_-8px_rgba(var(--primary),0.5)] hover:scale-[1.02] active:scale-95 group uppercase tracking-[0.2em] relative overflow-hidden"
             :disabled="!selectedFilePath"
             @click="handleStart"
           >

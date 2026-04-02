@@ -34,17 +34,17 @@ const PAGE_SIZE = 50
 
 /** 操作类型的颜色和标签 */
 const OP_STYLES: Record<string, { color: string; bg: string; label: string }> = {
-  INSERT: { color: 'text-emerald-600', bg: 'bg-emerald-500/10 border-emerald-500/20', label: 'INSERT' },
-  UPDATE: { color: 'text-amber-600', bg: 'bg-amber-500/10 border-amber-500/20', label: 'UPDATE' },
-  DELETE: { color: 'text-red-600', bg: 'bg-red-500/10 border-red-500/20', label: 'DELETE' },
-  CREATE: { color: 'text-blue-600', bg: 'bg-blue-500/10 border-blue-500/20', label: 'CREATE' },
+  INSERT: { color: 'text-df-success', bg: 'bg-df-success/10 border-df-success/20', label: 'INSERT' },
+  UPDATE: { color: 'text-df-warning', bg: 'bg-df-warning/10 border-df-warning/20', label: 'UPDATE' },
+  DELETE: { color: 'text-destructive', bg: 'bg-destructive/10 border-destructive/20', label: 'DELETE' },
+  CREATE: { color: 'text-primary', bg: 'bg-primary/10 border-primary/20', label: 'CREATE' },
   ALTER: { color: 'text-purple-600', bg: 'bg-purple-500/10 border-purple-500/20', label: 'ALTER' },
   DROP: { color: 'text-red-700', bg: 'bg-red-600/10 border-red-600/20', label: 'DROP' },
-  TRUNCATE: { color: 'text-red-500', bg: 'bg-red-400/10 border-red-400/20', label: 'TRUNCATE' },
+  TRUNCATE: { color: 'text-destructive', bg: 'bg-destructive/10 border-destructive/20', label: 'TRUNCATE' },
   GRANT: { color: 'text-teal-600', bg: 'bg-teal-500/10 border-teal-500/20', label: 'GRANT' },
   REVOKE: { color: 'text-orange-600', bg: 'bg-orange-500/10 border-orange-500/20', label: 'REVOKE' },
   REPLACE: { color: 'text-cyan-600', bg: 'bg-cyan-500/10 border-cyan-500/20', label: 'REPLACE' },
-  CALL: { color: 'text-indigo-600', bg: 'bg-indigo-500/10 border-indigo-500/20', label: 'CALL' },
+  CALL: { color: 'text-primary', bg: 'bg-primary/10 border-primary/20', label: 'CALL' },
 }
 const DEFAULT_STYLE = { color: 'text-muted-foreground', bg: 'bg-muted/20 border-border/30', label: '其他' }
 
@@ -241,7 +241,7 @@ onMounted(() => {
 
             <div
               v-for="log in group.items" :key="log.id"
-              class="relative group rounded-lg border border-transparent hover:border-border/30 hover:bg-muted/10 p-2.5 transition-all"
+              class="relative group rounded-lg border border-transparent hover:border-border/30 hover:bg-muted/10 p-2.5 transition-[background-color,border-color]"
             >
               <!-- 时间线圆点 -->
               <div

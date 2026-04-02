@@ -42,11 +42,13 @@ const filteredLogs = computed(() => {
 // 详情展开控制
 const expandedIds = ref(new Set<string>())
 function toggleExpand(id: string) {
-  if (expandedIds.value.has(id)) {
-    expandedIds.value.delete(id)
+  const next = new Set(expandedIds.value)
+  if (next.has(id)) {
+    next.delete(id)
   } else {
-    expandedIds.value.add(id)
+    next.add(id)
   }
+  expandedIds.value = next
 }
 
 // 自动滚动逻辑
@@ -80,7 +82,7 @@ function getLevelClass(level: LogLevel) {
   switch (level) {
     case 'DEBUG': return 'text-muted-foreground/30'
     case 'INFO': return 'text-primary/70'
-    case 'WARN': return 'text-yellow-500/70'
+    case 'WARN': return 'text-df-warning/70'
     case 'ERROR': return 'text-destructive/80'
   }
 }
@@ -123,7 +125,7 @@ function clearAll() {
           <button 
             v-for="lv in (['ALL', 'DEBUG', 'INFO', 'WARN', 'ERROR'] as const)" 
             :key="lv"
-            class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-tight transition-all active:scale-95"
+            class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-tight transition-[background-color,color,box-shadow] active:scale-95 outline-none focus-visible:ring-1 focus-visible:ring-ring"
             :class="[
               filterLevel === lv 
                 ? 'bg-background text-primary shadow-sm' 
@@ -149,30 +151,30 @@ function clearAll() {
       </div>
 
       <div class="flex items-center gap-1">
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          :title="t('log.followMode')"
-          class="h-6 w-6 rounded-lg text-muted-foreground/30 hover:text-primary transition-all active:scale-90"
+        <Button
+          variant="ghost"
+          size="icon"
+          :aria-label="t('log.followMode')"
+          class="h-6 w-6 rounded-lg text-muted-foreground/30 hover:text-primary transition-[color,background-color] active:scale-90 outline-none focus-visible:ring-1 focus-visible:ring-ring"
           :class="{ 'text-primary bg-primary/5': isFollowMode }"
           @click="isFollowMode = !isFollowMode"
         >
           <ArrowDown class="h-3.5 w-3.5" />
         </Button>
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          :title="t('log.download')"
-          class="h-6 w-6 rounded-lg text-muted-foreground/30 hover:text-primary transition-all active:scale-90"
+        <Button
+          variant="ghost"
+          size="icon"
+          :aria-label="t('log.download')"
+          class="h-6 w-6 rounded-lg text-muted-foreground/30 hover:text-primary transition-[color,background-color] active:scale-90 outline-none focus-visible:ring-1 focus-visible:ring-ring"
           @click="handleDownload"
         >
           <Download class="h-3.5 w-3.5" />
         </Button>
-        <Button 
-          variant="ghost" 
-          size="icon" 
-          :title="t('log.clear')"
-          class="h-6 w-6 rounded-lg text-muted-foreground/30 hover:text-destructive transition-all active:scale-90"
+        <Button
+          variant="ghost"
+          size="icon"
+          :aria-label="t('log.clear')"
+          class="h-6 w-6 rounded-lg text-muted-foreground/30 hover:text-destructive transition-[color,background-color] active:scale-90 outline-none focus-visible:ring-1 focus-visible:ring-ring"
           @click="clearAll"
         >
           <Trash2 class="h-3.5 w-3.5" />
@@ -193,7 +195,16 @@ function clearAll() {
           :key="log.id"
           class="group flex flex-col rounded-sm hover:bg-muted/30 transition-colors"
         >
-          <div class="flex items-center gap-3 py-0.5 px-2 cursor-pointer" @click="log.details && toggleExpand(log.id)">
+          <div
+            class="flex items-center gap-3 py-0.5 px-2 rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            :class="log.details ? 'cursor-pointer' : ''"
+            :tabindex="log.details ? 0 : -1"
+            :role="log.details ? 'button' : undefined"
+            :aria-expanded="log.details ? expandedIds.has(log.id) : undefined"
+            @click="log.details && toggleExpand(log.id)"
+            @keydown.enter="log.details && toggleExpand(log.id)"
+            @keydown.space.prevent="log.details && toggleExpand(log.id)"
+          >
             <!-- Timestamp -->
             <span class="shrink-0 text-[10px] tabular-nums text-muted-foreground/30 font-bold w-20 leading-none">
               {{ formatTime(log.timestamp) }}

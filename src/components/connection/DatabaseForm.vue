@@ -20,11 +20,11 @@ import { ENV_PRESETS, ENVIRONMENT_OPTIONS } from '@/types/environment'
 
 /** SSL 模式选项定义 */
 const SSL_MODE_OPTIONS = computed(() => [
-  { value: 'disabled', label: t('connection.sslModeDisabled') },
-  { value: 'preferred', label: t('connection.sslModePreferred') },
-  { value: 'required', label: t('connection.sslModeRequired') },
-  { value: 'verify-ca', label: t('connection.sslModeVerifyCa') },
-  { value: 'verify-identity', label: t('connection.sslModeVerifyIdentity') },
+  { value: 'disabled', label: t('connection.sslModeDisabled'), desc: t('connection.sslModeDisabledDesc') },
+  { value: 'preferred', label: t('connection.sslModePreferred'), desc: t('connection.sslModePreferredDesc') },
+  { value: 'required', label: t('connection.sslModeRequired'), desc: t('connection.sslModeRequiredDesc') },
+  { value: 'verify-ca', label: t('connection.sslModeVerifyCa'), desc: t('connection.sslModeVerifyCaDesc') },
+  { value: 'verify-identity', label: t('connection.sslModeVerifyIdentity'), desc: t('connection.sslModeVerifyIdentityDesc') },
 ])
 
 export interface DatabaseFormData {
@@ -162,12 +162,12 @@ async function browseClientKey() {
 </script>
 
 <template>
-  <div class="space-y-8">
+  <div class="space-y-10">
     <!-- Section 1: Network Configuration -->
-    <section class="space-y-4">
+    <section class="space-y-5">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.networkLayer') }}</h3>
+        <h3 class="text-xs font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.networkLayer') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
@@ -175,11 +175,11 @@ async function browseClientKey() {
         <!-- Driver -->
         <div class="col-span-4 space-y-2">
           <div class="flex items-center justify-between px-1">
-            <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('connection.driver') }}</Label>
+            <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70">{{ t('connection.driver') }}</Label>
             <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.protocol') }}</span>
           </div>
           <Select :model-value="localValue.driver" @update:model-value="updateField('driver', $event as string)">
-            <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs shadow-none">
+            <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 text-xs shadow-none">
               <template #default>
                 <div class="flex items-center gap-1.5 min-w-0 font-bold">
                   <div class="h-5 w-5 rounded flex items-center justify-center bg-background/50 border border-border/50">
@@ -198,60 +198,61 @@ async function browseClientKey() {
         </div>
 
         <!-- Host -->
-        <div class="col-span-8 space-y-2">
+        <div class="col-span-5 space-y-2">
           <div class="flex items-center justify-between px-1">
-            <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70 flex items-center gap-1">
+            <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 flex items-center gap-1">
               {{ t('connection.host') }}
               <span class="text-destructive font-black">*</span>
             </Label>
             <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.endpoint') }}</span>
           </div>
           <div class="relative group">
-            <Globe class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/20 group-focus-within:text-primary transition-colors" />
+            <Globe class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
             <Input
               :model-value="localValue.host"
               @update:model-value="updateField('host', $event as string)"
               placeholder="127.0.0.1"
               autocomplete="off"
-              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs font-mono tracking-tight text-foreground placeholder:text-muted-foreground/30"
+              aria-required="true"
+              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 text-xs font-mono tracking-tight text-foreground placeholder:text-muted-foreground/30"
             />
           </div>
         </div>
-      </div>
-      
-      <div class="space-y-2">
-        <div class="flex items-center justify-between px-1">
-          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('connection.port') }}</Label>
-          <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">0-65535 TCP</span>
-        </div>
-        <div class="relative group">
-          <Hash class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/20 group-focus-within:text-primary transition-colors" />
-          <Input
-            :model-value="localValue.port"
-            @update:model-value="updateField('port', Number($event))"
-            type="number"
-            :placeholder="String(defaultPorts[localValue.driver] || 3306)"
-            autocomplete="off"
-            class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none w-full text-foreground font-bold placeholder:text-muted-foreground/30"
-            :class="{ 'border-destructive/40 bg-destructive/5': portError }"
-          />
-          <div class="absolute right-3 top-1/2 -translate-y-1/2 px-1.5 py-0.5 rounded bg-muted/30 border border-border/50 text-[8px] font-mono font-black text-muted-foreground/60 uppercase">{{ t('connection.portSub') }}</div>
+
+        <!-- Port -->
+        <div class="col-span-3 space-y-2">
+          <div class="flex items-center justify-between px-1">
+            <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70">{{ t('connection.port') }}</Label>
+            <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">TCP</span>
+          </div>
+          <div class="relative group">
+            <Hash class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
+            <Input
+              :model-value="localValue.port"
+              @update:model-value="updateField('port', Number($event))"
+              type="number"
+              :placeholder="String(defaultPorts[localValue.driver] || 3306)"
+              autocomplete="off"
+              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 text-xs font-mono [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none w-full text-foreground font-bold placeholder:text-muted-foreground/30"
+              :class="{ 'border-destructive/40 bg-destructive/5': portError }"
+            />
+          </div>
         </div>
       </div>
     </section>
 
     <!-- Section 2: Access Control -->
-    <section class="space-y-4">
+    <section class="space-y-5">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.authLayer') || t('connection.accessCredentials') }}</h3>
+        <h3 class="text-xs font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.authLayer') || t('connection.accessCredentials') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
       <div class="grid grid-cols-2 gap-4">
         <!-- Username -->
         <div class="space-y-2">
-          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/60 px-1">{{ t('connection.username') }}</Label>
+          <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 px-1">{{ t('connection.username') }}</Label>
           <div class="relative group">
             <User class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
             <Input
@@ -259,14 +260,15 @@ async function browseClientKey() {
               @update:model-value="updateField('username', $event as string)"
               placeholder="root"
               autocomplete="off"
-              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs font-semibold text-foreground placeholder:text-muted-foreground/30"
+              aria-required="true"
+              class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 text-xs font-semibold text-foreground placeholder:text-muted-foreground/30"
             />
           </div>
         </div>
 
         <!-- Password -->
         <div class="space-y-2">
-          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/60 px-1">{{ t('connection.password') }}</Label>
+          <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 px-1">{{ t('connection.password') }}</Label>
           <div class="relative group">
             <Lock class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
             <Input
@@ -274,32 +276,37 @@ async function browseClientKey() {
               @update:model-value="updateField('password', $event as string)"
               :type="showPassword ? 'text' : 'password'"
               :placeholder="isEditing ? t('connection.passwordUnchanged') : ''"
-              class="pl-10 pr-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-mono"
+              class="pl-10 pr-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-primary/5 text-xs font-mono"
             />
             <button
               type="button"
-              class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground/30 hover:text-primary transition-all"
+              :aria-label="showPassword ? t('connection.hidePassword') : t('connection.showPassword')"
+              :aria-pressed="showPassword"
+              class="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-muted-foreground/30 hover:text-primary transition-colors rounded focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none"
               @click="togglePasswordVisibility"
-              tabindex="-1"
             >
               <EyeOff v-if="showPassword" class="h-4 w-4" />
               <Eye v-else class="h-4 w-4" />
             </button>
           </div>
+          <p v-if="isEditing" class="text-[10px] text-muted-foreground/50 px-1 flex items-center gap-1">
+            <ShieldCheck class="h-3 w-3 text-df-success/60" />
+            {{ t('connection.passwordSavedHint') }}
+          </p>
         </div>
       </div>
     </section>
 
     <!-- Section 3: Targeted Resources -->
-    <section class="space-y-4">
+    <section class="space-y-5">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.targetLayer') || t('connection.targetEnvironment') }}</h3>
+        <h3 class="text-xs font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.targetLayer') || t('connection.targetEnvironment') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
       <div class="space-y-2">
-        <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/60 px-1">{{ t('connection.database') }}</Label>
+        <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 px-1">{{ t('connection.database') }}</Label>
         <div class="relative group">
           <DbIcon class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/30 group-focus-within:text-primary transition-colors" />
           <Input
@@ -307,31 +314,31 @@ async function browseClientKey() {
             @update:model-value="updateField('database', $event as string)"
             :placeholder="t('connection.databasePlaceholder')"
             autocomplete="off"
-            class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs font-semibold text-foreground placeholder:text-muted-foreground/30"
+            class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 text-xs font-semibold text-foreground placeholder:text-muted-foreground/30"
           />
         </div>
       </div>
     </section>
 
     <!-- Section 4: 环境与安全 -->
-    <section class="space-y-4">
+    <section class="space-y-5">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('environment.sectionTitle') }}</h3>
+        <h3 class="text-xs font-black uppercase tracking-widest text-muted-foreground/80">{{ t('environment.sectionTitle') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
       <!-- 环境类型选择器 -->
       <div class="space-y-2">
         <div class="flex items-center justify-between px-1">
-          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('environment.type') }}</Label>
+          <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70">{{ t('environment.type') }}</Label>
           <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">ENV</span>
         </div>
         <Select :model-value="localValue.environment" @update:model-value="handleEnvironmentChange($event as EnvironmentType)">
-          <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs shadow-none">
+          <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 text-xs shadow-none">
             <template #default>
               <div class="flex items-center gap-1.5 min-w-0 font-bold">
-                <div class="h-3 w-3 rounded-full shrink-0" :style="{ backgroundColor: ENV_PRESETS[localValue.environment]?.color ?? '#6B7280' }"></div>
+                <div class="h-3 w-3 rounded-full shrink-0" :style="{ backgroundColor: ENV_PRESETS[localValue.environment]?.color ?? 'var(--muted-foreground)' }"></div>
                 <SelectValue />
               </div>
             </template>
@@ -350,7 +357,7 @@ async function browseClientKey() {
       <!-- 只读模式 -->
       <div class="flex items-center justify-between px-1 py-2">
         <div class="space-y-0.5">
-          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('environment.readOnly') }}</Label>
+          <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70">{{ t('environment.readOnly') }}</Label>
           <p class="text-[9px] text-muted-foreground/50">{{ t('environment.readOnlyDesc') }}</p>
         </div>
         <Switch :checked="localValue.readOnly" @update:checked="updateField('readOnly', $event)" />
@@ -359,7 +366,7 @@ async function browseClientKey() {
       <!-- 危险操作确认 -->
       <div class="flex items-center justify-between px-1 py-2">
         <div class="space-y-0.5">
-          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70 flex items-center gap-1">
+          <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 flex items-center gap-1">
             <ShieldAlert class="h-3 w-3 text-destructive/60" />
             {{ t('environment.confirmDanger') }}
           </Label>
@@ -371,21 +378,21 @@ async function browseClientKey() {
 
 
     <!-- Section 6: SSL/TLS 安全配置 -->
-    <section class="space-y-4">
+    <section class="space-y-5">
       <div class="flex items-center gap-2">
         <div class="h-1.5 w-1.5 rounded-full bg-primary/40"></div>
-        <h3 class="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.sslTlsSecurity') }}</h3>
+        <h3 class="text-xs font-black uppercase tracking-widest text-muted-foreground/80">{{ t('connection.sslTlsSecurity') }}</h3>
         <div class="flex-1 h-[1px] bg-border/40"></div>
       </div>
 
       <!-- SSL 模式选择器 -->
       <div class="space-y-2">
         <div class="flex items-center justify-between px-1">
-          <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('connection.sslMode') }}</Label>
+          <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70">{{ t('connection.sslMode') }}</Label>
           <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.encryption') }}</span>
         </div>
         <Select :model-value="localValue.ssl?.mode ?? 'disabled'" @update:model-value="updateSslField('mode', $event as SslConfig['mode'])">
-          <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-2 focus:ring-primary/5 text-xs shadow-none">
+          <SelectTrigger class="h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-2 focus:ring-primary/5 text-xs shadow-none">
             <template #default>
               <div class="flex items-center gap-1.5 min-w-0 font-bold">
                 <div class="h-5 w-5 rounded flex items-center justify-center bg-background/50 border border-border/50">
@@ -397,7 +404,10 @@ async function browseClientKey() {
           </SelectTrigger>
           <SelectContent class="bg-popover border-border rounded-xl shadow-2xl">
             <SelectItem v-for="opt in SSL_MODE_OPTIONS" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
+              <div class="flex flex-col gap-0.5">
+                <span>{{ opt.label }}</span>
+                <span class="text-[10px] text-muted-foreground/50 font-normal">{{ opt.desc }}</span>
+              </div>
             </SelectItem>
           </SelectContent>
         </Select>
@@ -407,7 +417,7 @@ async function browseClientKey() {
       <Transition name="form-fade">
         <div v-if="showCertFields" class="space-y-2 animate-in fade-in zoom-in-95 duration-300">
           <div class="flex items-center justify-between px-1">
-            <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70 flex items-center gap-1">
+            <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70 flex items-center gap-1">
               {{ t('connection.caCertificate') }}
               <span class="text-destructive font-black">*</span>
             </Label>
@@ -420,10 +430,11 @@ async function browseClientKey() {
                 :model-value="localValue.ssl?.caCertPath ?? ''"
                 @update:model-value="updateSslField('caCertPath', $event as string)"
                 placeholder="CA 证书文件路径"
-                class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-mono"
+                aria-required="true"
+                class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-primary/5 text-xs font-mono"
               />
             </div>
-            <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-all shadow-none px-0 rounded-lg" @click="browseCaCert">
+            <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-[background-color,border-color] shadow-none px-0 rounded-lg" @click="browseCaCert">
               <FolderOpen class="h-4 w-4" />
             </Button>
           </div>
@@ -436,7 +447,7 @@ async function browseClientKey() {
           <!-- 客户端证书 -->
           <div class="space-y-2">
             <div class="flex items-center justify-between px-1">
-              <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('connection.clientCertificate') }}</Label>
+              <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70">{{ t('connection.clientCertificate') }}</Label>
               <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.optional') }}</span>
             </div>
             <div class="flex gap-2">
@@ -446,10 +457,10 @@ async function browseClientKey() {
                   :model-value="localValue.ssl?.clientCertPath ?? ''"
                   @update:model-value="updateSslField('clientCertPath', $event as string)"
                   placeholder="客户端证书文件路径"
-                  class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-mono"
+                  class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-primary/5 text-xs font-mono"
                 />
               </div>
-              <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-all shadow-none px-0 rounded-lg" @click="browseClientCert">
+              <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-[background-color,border-color] shadow-none px-0 rounded-lg" @click="browseClientCert">
                 <FolderOpen class="h-4 w-4" />
               </Button>
             </div>
@@ -458,7 +469,7 @@ async function browseClientKey() {
           <!-- 客户端密钥 -->
           <div class="space-y-2">
             <div class="flex items-center justify-between px-1">
-              <Label class="text-[10px] uppercase font-bold tracking-tight text-muted-foreground/70">{{ t('connection.clientKey') }}</Label>
+              <Label class="text-[11px] uppercase font-bold tracking-normal text-muted-foreground/70">{{ t('connection.clientKey') }}</Label>
               <span class="text-[8px] font-mono text-muted-foreground/50 font-black tracking-tighter uppercase bg-muted/30 px-1 rounded-sm">{{ t('connection.optional') }}</span>
             </div>
             <div class="flex gap-2">
@@ -468,10 +479,10 @@ async function browseClientKey() {
                   :model-value="localValue.ssl?.clientKeyPath ?? ''"
                   @update:model-value="updateSslField('clientKeyPath', $event as string)"
                   placeholder="客户端密钥文件路径"
-                  class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-all focus:ring-primary/5 text-xs font-mono"
+                  class="pl-10 h-10 bg-muted/10 border-border rounded-lg transition-[border-color,box-shadow] focus:ring-primary/5 text-xs font-mono"
                 />
               </div>
-              <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-all shadow-none px-0 rounded-lg" @click="browseClientKey">
+              <Button variant="outline" class="h-10 w-10 border-border bg-muted/10 hover:bg-primary/5 hover:border-primary/20 transition-[background-color,border-color] shadow-none px-0 rounded-lg" @click="browseClientKey">
                 <FolderOpen class="h-4 w-4" />
               </Button>
             </div>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
 import { Terminal } from '@xterm/xterm'
@@ -39,7 +39,9 @@ let sessionId = ''
 let unlistenOutput: (() => void) | null = null
 let unlistenStatus: (() => void) | null = null
 let resizeObserver: ResizeObserver | null = null
+let webglAddon: WebglAddon | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | null = null
+let paused = false // deactivated 时暂停数据处理
 let lastDetectedCwd = '' // 最近一次获取到的工作目录
 
 // === 端到端流控写入引擎（参考 VS Code + xterm.js 官方方案）===
@@ -70,7 +72,7 @@ function sendFlowAck() {
 
 /** 将数据写入 xterm.js 并注册处理完成回调用于流控 */
 function flowControlledWrite(data: Uint8Array) {
-  if (!terminal) return
+  if (!terminal || paused) return
 
   const chunkSize = data.length
   totalReceived += chunkSize
@@ -141,10 +143,14 @@ function createTerminal() {
 
     // WebGL 渲染器 — GPU 加速
     try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => { webgl.dispose() })
-      terminal.loadAddon(webgl)
+      webglAddon = new WebglAddon()
+      webglAddon.onContextLoss(() => {
+        webglAddon?.dispose()
+        webglAddon = null
+      })
+      terminal.loadAddon(webglAddon)
     } catch (e) {
+      webglAddon = null
       console.warn('WebGL 渲染器加载失败，回退到 Canvas 2D:', e)
     }
   }
@@ -245,6 +251,12 @@ async function cleanup() {
   totalProcessed = 0
   pendingAckBytes = 0
 
+  paused = false
+  if (webglAddon) {
+    webglAddon.dispose()
+    webglAddon = null
+  }
+
   if (sessionId) {
     await sshApi.sshDisconnect(sessionId).catch((e: unknown) => console.warn('[Terminal]', e))
     sessionId = ''
@@ -269,6 +281,47 @@ onMounted(() => {
 
 onBeforeUnmount(async () => {
   await cleanup()
+})
+
+// KeepAlive 切走时：释放 GPU 资源 + 暂停数据处理
+onDeactivated(() => {
+  paused = true
+  // 释放 GPU 显存
+  if (webglAddon) {
+    webglAddon.dispose()
+    webglAddon = null
+  }
+  // 停止监听窗口大小变化
+  resizeObserver?.disconnect()
+})
+
+// KeepAlive 切回时：恢复 WebGL 渲染 + 重连 ResizeObserver
+onActivated(() => {
+  paused = false
+  if (terminal && terminalRef.value) {
+    // 重建 WebGL 渲染器
+    try {
+      if (webglAddon) {
+        webglAddon.dispose()
+        webglAddon = null
+      }
+      webglAddon = new WebglAddon()
+      webglAddon.onContextLoss(() => {
+        webglAddon?.dispose()
+        webglAddon = null
+      })
+      terminal.loadAddon(webglAddon)
+    } catch {
+      webglAddon = null
+    }
+    // 重连 ResizeObserver
+    if (terminalRef.value && !resizeObserver) {
+      resizeObserver = new ResizeObserver(() => { handleResize() })
+      resizeObserver.observe(terminalRef.value)
+    }
+    fitAddon?.fit()
+    terminal.focus()
+  }
 })
 
 // 响应主题变化
@@ -446,22 +499,22 @@ defineExpose({ reconnect, handleResize, sendData, getSessionInfo, getCwd, reques
              <div class="flex items-start gap-2.5 rounded-lg bg-muted/30 p-2.5 ring-1 ring-border/5 transition-colors hover:bg-muted/50">
                 <WifiOff class="mt-0.5 h-3.5 w-3.5 text-muted-foreground/60" />
                 <div>
-                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">网络检查</p>
-                   <p class="text-[9px] font-medium text-muted-foreground/50">确保本地网络通畅，检查代理或 VPN 设置</p>
+                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('terminal.diagNetwork') }}</p>
+                   <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('terminal.diagNetworkHint') }}</p>
                 </div>
              </div>
              <div class="flex items-start gap-2.5 rounded-lg bg-muted/30 p-2.5 ring-1 ring-border/5 transition-colors hover:bg-muted/50">
                 <KeyRound class="mt-0.5 h-3.5 w-3.5 text-muted-foreground/60" />
                 <div>
-                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">身份验证</p>
-                   <p class="text-[9px] font-medium text-muted-foreground/50">检查连接配置中的用户名、密码 or 私钥</p>
+                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('terminal.diagAuth') }}</p>
+                   <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('terminal.diagAuthHint') }}</p>
                 </div>
              </div>
              <div class="flex items-start gap-2.5 rounded-lg bg-muted/30 p-2.5 ring-1 ring-border/5 transition-colors hover:bg-muted/50">
                 <Activity class="mt-0.5 h-3.5 w-3.5 text-muted-foreground/60" />
                 <div>
-                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">服务器状态</p>
-                   <p class="text-[9px] font-medium text-muted-foreground/50">确认远程主机在线且 22 端口已开放</p>
+                   <p class="text-[10px] font-bold text-foreground/70 uppercase tracking-tighter">{{ t('terminal.diagServer') }}</p>
+                   <p class="text-[9px] font-medium text-muted-foreground/50">{{ t('terminal.diagServerHint') }}</p>
                 </div>
              </div>
           </div>
@@ -469,7 +522,7 @@ defineExpose({ reconnect, handleResize, sendData, getSessionInfo, getCwd, reques
           <!-- 操作按钮 -->
           <div class="flex w-full items-center gap-2">
             <Button
-              class="flex-1 h-9 bg-primary text-[12px] font-bold shadow-[0_4px_12px_rgba(var(--color-primary),0.3)] hover:shadow-[0_6px_20px_rgba(var(--color-primary),0.4)] transition-all active:scale-95"
+              class="flex-1 h-9 bg-primary text-[12px] font-bold shadow-[0_4px_12px_rgba(var(--color-primary),0.3)] hover:shadow-[0_6px_20px_rgba(var(--color-primary),0.4)] transition-[background-color,color,box-shadow,scale] active:scale-95"
               @click="reconnect"
             >
               <RotateCcw class="mr-1.5 h-3.5 w-3.5" />
@@ -477,7 +530,7 @@ defineExpose({ reconnect, handleResize, sendData, getSessionInfo, getCwd, reques
             </Button>
             <Button
               variant="outline"
-              class="h-9 px-4 text-[12px] font-medium border-border/40 hover:bg-muted/30 transition-all active:scale-95"
+              class="h-9 px-4 text-[12px] font-medium border-border/40 hover:bg-muted/30 transition-[background-color,color,scale] active:scale-95"
               @click="status = 'connecting'; connect()"
             >
               {{ t('common.retry') }}

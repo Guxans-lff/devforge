@@ -27,9 +27,9 @@ const visible = computed(() =>
 
 /** 横幅背景色 */
 const bannerClass = computed(() => {
-  if (props.readOnly) return 'bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400'
-  if (props.environment === 'production') return 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'
-  if (props.environment === 'staging') return 'bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400'
+  if (props.readOnly) return 'bg-df-info/10 border-df-info/20 text-df-info'
+  if (props.environment === 'production') return 'bg-destructive/10 border-destructive/20 text-destructive'
+  if (props.environment === 'staging') return 'bg-df-warning/10 border-df-warning/20 text-df-warning'
   return ''
 })
 

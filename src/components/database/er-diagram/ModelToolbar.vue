@@ -51,7 +51,7 @@ const emit = defineEmits<{
     <span class="text-xs font-medium text-foreground truncate max-w-[160px]" :title="projectName">
       {{ projectName }}
     </span>
-    <span v-if="dirty" class="text-xs text-amber-500" title="有未保存的变更">*</span>
+    <span v-if="dirty" class="text-xs text-df-warning" title="有未保存的变更">*</span>
 
     <Separator orientation="vertical" class="mx-1.5 h-4" />
 

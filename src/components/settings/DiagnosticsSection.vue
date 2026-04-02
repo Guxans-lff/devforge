@@ -105,9 +105,9 @@ onMounted(async () => {
 <template>
   <div class="grid gap-4">
     <!-- 开发者模式开关 -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/5 text-orange-500/60 transition-colors group-hover:bg-orange-500/10 group-hover:text-orange-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <Bug class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">
@@ -122,9 +122,9 @@ onMounted(async () => {
     </div>
 
     <!-- 应用版本 -->
-    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group flex items-center justify-between p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-start gap-4">
-        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/5 text-cyan-500/60 transition-colors group-hover:bg-cyan-500/10 group-hover:text-cyan-500">
+        <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
           <Activity class="h-5 w-5" />
         </div>
         <div class="space-y-0.5">
@@ -138,10 +138,10 @@ onMounted(async () => {
     </div>
 
     <!-- 崩溃日志 -->
-    <div class="group p-5 bg-muted/10 border border-border/10 rounded-2xl transition-all hover:bg-muted/20 hover:border-border/30">
+    <div class="group p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
       <div class="flex items-center justify-between">
         <div class="flex items-start gap-4">
-          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/5 text-red-500/60 transition-colors group-hover:bg-red-500/10 group-hover:text-red-500">
+          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
             <FileText class="h-5 w-5" />
           </div>
           <div class="space-y-0.5">
@@ -155,7 +155,7 @@ onMounted(async () => {
           v-if="crashLogs.length > 0"
           variant="outline"
           size="sm"
-          class="h-8 gap-1.5 rounded-xl border-border/30 text-[11px] font-bold transition-all hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
+          class="h-8 gap-1.5 rounded-xl border-border/30 text-[11px] font-bold transition-[background-color,color,border-color] hover:bg-destructive hover:text-destructive-foreground hover:border-destructive"
           @click="showClearConfirm = true"
         >
           <Trash2 class="h-3 w-3" />
@@ -175,7 +175,7 @@ onMounted(async () => {
             <div
               v-for="log in crashLogs"
               :key="log.filename"
-              class="rounded-xl border border-border/10 bg-background/50 transition-all"
+              class="rounded-xl border border-border/10 bg-background/50 transition-[background-color,border-color]"
             >
               <!-- 日志条目头 -->
               <button

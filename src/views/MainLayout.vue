@@ -92,7 +92,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-screen w-screen flex-col overflow-hidden bg-muted/20 dark:bg-[#0c0c0e]">
+  <div class="flex h-screen w-screen flex-col overflow-hidden bg-muted/20 dark:bg-df-shell-bg">
     <!-- 自定义标题栏 -->
     <TitleBar />
 
@@ -101,7 +101,7 @@ onMounted(() => {
     <Sidebar />
 
     <!-- Main Content Area: Floating and elevated -->
-    <div class="flex flex-1 flex-col overflow-hidden bg-background sm:rounded-tl-xl border-t border-l border-border/40 shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.15)] dark:shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.6)] relative z-10 transition-all duration-300">
+    <div class="flex flex-1 flex-col overflow-hidden bg-background sm:rounded-tl-xl border-t border-l border-border/40 shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.15)] dark:shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.6)] relative z-10 transition-[box-shadow,border-color] duration-300">
       <!-- Tab Bar -->
       <TabBar />
 

@@ -80,7 +80,7 @@ onMounted(() => { loadDatabases() })
     <!-- 标题栏 -->
     <div class="mb-4 flex items-center justify-between">
       <div class="flex items-center gap-3">
-        <div class="p-2 rounded-xl bg-amber-500/10 text-amber-500 shadow-sm">
+        <div class="p-2 rounded-xl bg-df-warning/10 text-df-warning shadow-sm">
           <Search class="h-5 w-5" />
         </div>
         <div>
@@ -127,22 +127,22 @@ onMounted(() => { loadDatabases() })
     <div v-if="result" class="flex-1 overflow-auto space-y-4">
       <!-- 概览统计 -->
       <div class="grid grid-cols-2 gap-4">
-        <div class="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+        <div class="rounded-2xl border border-df-warning/20 bg-df-warning/5 p-4">
           <div class="flex items-center gap-2 mb-2">
-            <Trash2 class="h-4 w-4 text-amber-500" />
-            <span class="text-xs font-black uppercase text-amber-500">冗余索引</span>
+            <Trash2 class="h-4 w-4 text-df-warning" />
+            <span class="text-xs font-black uppercase text-df-warning">冗余索引</span>
           </div>
-          <div class="text-2xl font-black" :class="redundantCount() > 0 ? 'text-amber-500' : 'text-emerald-500'">
+          <div class="text-2xl font-black" :class="redundantCount() > 0 ? 'text-df-warning' : 'text-df-success'">
             {{ redundantCount() }}
           </div>
           <p class="text-[10px] text-muted-foreground/50 mt-1">被其他索引完全覆盖的前缀索引</p>
         </div>
-        <div class="rounded-2xl border border-rose-500/20 bg-rose-500/5 p-4">
+        <div class="rounded-2xl border border-destructive/20 bg-destructive/5 p-4">
           <div class="flex items-center gap-2 mb-2">
-            <FileWarning class="h-4 w-4 text-rose-500" />
-            <span class="text-xs font-black uppercase text-rose-500">未使用索引</span>
+            <FileWarning class="h-4 w-4 text-destructive" />
+            <span class="text-xs font-black uppercase text-destructive">未使用索引</span>
           </div>
-          <div class="text-2xl font-black" :class="unusedCount() > 0 ? 'text-rose-500' : 'text-emerald-500'">
+          <div class="text-2xl font-black" :class="unusedCount() > 0 ? 'text-destructive' : 'text-df-success'">
             {{ unusedCount() }}
           </div>
           <p class="text-[10px] text-muted-foreground/50 mt-1">自服务器启动以来未被任何查询读取</p>
@@ -152,7 +152,7 @@ onMounted(() => { loadDatabases() })
       <!-- 冗余索引列表 -->
       <div v-if="redundantCount() > 0" class="rounded-2xl border border-border/10 overflow-hidden bg-muted/5">
         <div class="px-4 py-3 border-b border-border/10 bg-background/50">
-          <h4 class="text-xs font-black uppercase text-amber-500 flex items-center gap-2">
+          <h4 class="text-xs font-black uppercase text-df-warning flex items-center gap-2">
             <Trash2 class="h-3.5 w-3.5" />
             冗余索引详情
           </h4>
@@ -172,9 +172,9 @@ onMounted(() => { loadDatabases() })
             <tbody class="divide-y divide-border/5">
               <tr v-for="(idx, i) in result.redundantIndexes" :key="i" class="text-xs hover:bg-primary/[0.03] transition-colors group">
                 <td class="px-4 py-2 font-mono font-bold text-foreground/80">{{ idx.tableName }}</td>
-                <td class="px-4 py-2 font-mono text-amber-500">{{ idx.indexName }}</td>
+                <td class="px-4 py-2 font-mono text-df-warning">{{ idx.indexName }}</td>
                 <td class="px-4 py-2 font-mono text-[11px] text-muted-foreground/60">{{ idx.indexColumns.join(', ') }}</td>
-                <td class="px-4 py-2 font-mono text-emerald-500">{{ idx.coveredBy }}</td>
+                <td class="px-4 py-2 font-mono text-df-success">{{ idx.coveredBy }}</td>
                 <td class="px-4 py-2 font-mono text-[11px] text-muted-foreground/60">{{ idx.coveredByColumns.join(', ') }}</td>
                 <td class="px-4 py-2">
                   <Button variant="ghost" size="icon" class="h-7 w-7 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity" @click="copySql(idx.dropSql)" title="复制 DROP 语句">
@@ -190,7 +190,7 @@ onMounted(() => { loadDatabases() })
       <!-- 未使用索引列表 -->
       <div v-if="unusedCount() > 0" class="rounded-2xl border border-border/10 overflow-hidden bg-muted/5">
         <div class="px-4 py-3 border-b border-border/10 bg-background/50">
-          <h4 class="text-xs font-black uppercase text-rose-500 flex items-center gap-2">
+          <h4 class="text-xs font-black uppercase text-destructive flex items-center gap-2">
             <FileWarning class="h-3.5 w-3.5" />
             未使用索引详情
           </h4>
@@ -209,7 +209,7 @@ onMounted(() => { loadDatabases() })
             <tbody class="divide-y divide-border/5">
               <tr v-for="(idx, i) in result.unusedIndexes" :key="i" class="text-xs hover:bg-primary/[0.03] transition-colors group">
                 <td class="px-4 py-2 font-mono font-bold text-foreground/80">{{ idx.tableName }}</td>
-                <td class="px-4 py-2 font-mono text-rose-500">{{ idx.indexName }}</td>
+                <td class="px-4 py-2 font-mono text-destructive">{{ idx.indexName }}</td>
                 <td class="px-4 py-2 font-mono text-[11px] text-muted-foreground/60">{{ idx.indexColumns.join(', ') }}</td>
                 <td class="px-4 py-2 text-right font-mono text-foreground/60">{{ idx.sizeEstimate }}</td>
                 <td class="px-4 py-2">
@@ -224,9 +224,9 @@ onMounted(() => { loadDatabases() })
       </div>
 
       <!-- 全部正常 -->
-      <div v-if="redundantCount() === 0 && unusedCount() === 0" class="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-6 text-center">
-        <div class="text-emerald-500 text-2xl mb-2">&#10003;</div>
-        <p class="text-sm font-bold text-emerald-500">索引状态健康</p>
+      <div v-if="redundantCount() === 0 && unusedCount() === 0" class="rounded-2xl border border-df-success/20 bg-df-success/5 p-6 text-center">
+        <div class="text-df-success text-2xl mb-2">&#10003;</div>
+        <p class="text-sm font-bold text-df-success">索引状态健康</p>
         <p class="text-[10px] text-muted-foreground/50 mt-1">未检测到冗余或未使用的索引</p>
       </div>
     </div>

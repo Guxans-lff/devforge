@@ -375,7 +375,7 @@ watch(open, (val) => {
                       />
                     </td>
                     <td class="border-b border-border px-0.5 py-0.5 text-center">
-                      <button class="size-6 inline-flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all" @click="removeColumn(idx)">
+                      <button class="size-6 inline-flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-[opacity,color,background-color]" @click="removeColumn(idx)">
                         <X class="size-3.5" />
                       </button>
                     </td>
@@ -441,7 +441,7 @@ watch(open, (val) => {
                     />
                   </td>
                   <td class="border-b border-border px-0.5 py-0.5 text-center">
-                    <button class="size-6 inline-flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-all" @click="removeIndex(idx)">
+                    <button class="size-6 inline-flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-[opacity,color,background-color]" @click="removeIndex(idx)">
                       <X class="size-3.5" />
                     </button>
                   </td>

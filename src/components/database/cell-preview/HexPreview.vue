@@ -59,7 +59,7 @@ const totalBytes = computed(() => bytes.value.length)
             </template>
           </span>
           <!-- ASCII -->
-          <span class="w-[136px] shrink-0 text-green-600 dark:text-green-400">{{ row.ascii }}</span>
+          <span class="w-[136px] shrink-0 text-df-success">{{ row.ascii }}</span>
         </div>
       </div>
     </div>

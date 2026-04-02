@@ -119,14 +119,14 @@ defineExpose({ saveFromSelection })
       </div>
       <div class="flex items-center gap-0.5">
         <button
-          class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/60 transition-all hover:bg-primary/10 hover:text-primary"
+          class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-primary/10 hover:text-primary"
           @click="openNew"
           title="新建片段"
         >
           <Plus class="h-4 w-4" />
         </button>
         <button
-          class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 transition-all hover:bg-muted hover:text-foreground/70"
+          class="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted hover:text-foreground/70"
           @click="$emit('close')"
         >
           <X class="h-4 w-4" />
@@ -165,7 +165,7 @@ defineExpose({ saveFromSelection })
         <div
           v-for="s in snippets"
           :key="s.id"
-          class="group rounded-lg bg-background/60 border border-border/30 p-3 hover:bg-background hover:border-border/60 hover:shadow-sm transition-all duration-200 cursor-default"
+          class="group rounded-lg bg-background/60 border border-border/30 p-3 hover:bg-background hover:border-border/60 hover:shadow-sm transition-[background-color,border-color,box-shadow] duration-200 cursor-default"
         >
           <div class="flex items-center justify-between mb-2">
             <span class="text-xs font-semibold text-foreground/90 truncate max-w-[180px]">{{ s.title }}</span>
@@ -178,7 +178,7 @@ defineExpose({ saveFromSelection })
                 <Copy class="h-3 w-3" />
               </button>
               <button
-                class="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-green-500/10 hover:text-green-500 transition-colors"
+                class="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground/50 hover:bg-df-success/10 hover:text-df-success transition-colors"
                 @click="handleExecute(s.sqlText)"
                 title="执行"
               >

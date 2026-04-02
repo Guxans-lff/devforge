@@ -7,6 +7,9 @@ import { X } from 'lucide-vue-next'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { FK_ACTIONS } from '@/types/table-editor-constants'
 import type { ForeignKeyDefinition } from '@/types/table-editor'
+import { useI18n } from 'vue-i18n'
+
+const { t } = useI18n()
 
 defineProps<{ foreignKeys: ForeignKeyDefinition[] }>()
 const emit = defineEmits<{
@@ -23,22 +26,22 @@ const inputCls = 'w-full h-6 px-1.5 text-xs font-mono bg-transparent border bord
 <template>
   <div class="flex flex-col flex-1 min-h-0">
     <div class="flex-1 min-h-0 overflow-auto">
-      <table class="w-full border-collapse text-xs">
-        <thead class="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm">
+      <table class="w-full border-collapse text-xs" :aria-label="t('tableEditor.tabForeignKeys')">
+        <thead class="sticky top-0 z-10 bg-background">
           <tr class="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">
-            <th class="border-b border-border px-2 py-1.5 w-7 text-center">#</th>
-            <th class="border-b border-border px-2 py-1.5 min-w-[140px]">名称</th>
-            <th class="border-b border-border px-2 py-1.5 min-w-[140px]">本表列</th>
-            <th class="border-b border-border px-2 py-1.5 min-w-[120px]">引用表</th>
-            <th class="border-b border-border px-2 py-1.5 min-w-[120px]">引用列</th>
-            <th class="border-b border-border px-2 py-1.5 w-24">ON DELETE</th>
-            <th class="border-b border-border px-2 py-1.5 w-24">ON UPDATE</th>
-            <th class="border-b border-border px-2 py-1.5 w-7" />
+            <th scope="col" class="border-b border-border px-2 py-1.5 w-7 text-center">#</th>
+            <th scope="col" class="border-b border-border px-2 py-1.5 min-w-[140px]">{{ t('tableEditor.fkColName') }}</th>
+            <th scope="col" class="border-b border-border px-2 py-1.5 min-w-[140px]">{{ t('tableEditor.fkColLocalColumns') }}</th>
+            <th scope="col" class="border-b border-border px-2 py-1.5 min-w-[120px]">{{ t('tableEditor.fkColRefTable') }}</th>
+            <th scope="col" class="border-b border-border px-2 py-1.5 min-w-[120px]">{{ t('tableEditor.fkColRefColumns') }}</th>
+            <th scope="col" class="border-b border-border px-2 py-1.5 w-24">ON DELETE</th>
+            <th scope="col" class="border-b border-border px-2 py-1.5 w-24">ON UPDATE</th>
+            <th scope="col" class="border-b border-border px-2 py-1.5 w-7" />
           </tr>
         </thead>
         <tbody>
           <tr v-if="foreignKeys.length === 0">
-            <td colspan="8" class="text-center text-muted-foreground/60 py-8 text-xs">暂无外键，点击上方「添加」按钮</td>
+            <td colspan="8" class="text-center text-muted-foreground/60 py-8 text-xs">{{ t('tableEditor.emptyForeignKeys') }}</td>
           </tr>
           <tr
             v-for="(fk, idx) in foreignKeys" :key="idx"
@@ -50,13 +53,13 @@ const inputCls = 'w-full h-6 px-1.5 text-xs font-mono bg-transparent border bord
               <input :value="fk.name" :class="inputCls" @input="emit('updateForeignKey', idx, 'name', ($event.target as HTMLInputElement).value)" />
             </td>
             <td class="border-b border-border/50 p-0.5">
-              <input :value="fk.columns.join(', ')" :class="inputCls" placeholder="col1, col2" @input="emit('updateForeignKey', idx, 'columns', parseColumns(($event.target as HTMLInputElement).value))" />
+              <input :value="fk.columns.join(', ')" :class="inputCls" :placeholder="t('tableEditor.fkPlaceholderColumns')" @input="emit('updateForeignKey', idx, 'columns', parseColumns(($event.target as HTMLInputElement).value))" />
             </td>
             <td class="border-b border-border/50 p-0.5">
-              <input :value="fk.refTable" :class="inputCls" placeholder="表名" @input="emit('updateForeignKey', idx, 'refTable', ($event.target as HTMLInputElement).value)" />
+              <input :value="fk.refTable" :class="inputCls" :placeholder="t('tableEditor.fkPlaceholderTable')" @input="emit('updateForeignKey', idx, 'refTable', ($event.target as HTMLInputElement).value)" />
             </td>
             <td class="border-b border-border/50 p-0.5">
-              <input :value="fk.refColumns.join(', ')" :class="inputCls" placeholder="col1" @input="emit('updateForeignKey', idx, 'refColumns', parseColumns(($event.target as HTMLInputElement).value))" />
+              <input :value="fk.refColumns.join(', ')" :class="inputCls" :placeholder="t('tableEditor.fkPlaceholderRefCol')" @input="emit('updateForeignKey', idx, 'refColumns', parseColumns(($event.target as HTMLInputElement).value))" />
             </td>
             <td class="border-b border-border/50 p-0.5">
               <Select :model-value="fk.onDelete ?? 'NO ACTION'" @update:model-value="emit('updateForeignKey', idx, 'onDelete', $event)">
@@ -75,7 +78,7 @@ const inputCls = 'w-full h-6 px-1.5 text-xs font-mono bg-transparent border bord
               </Select>
             </td>
             <td class="border-b border-border/50 px-0.5 py-0.5 text-center">
-              <button class="size-5 inline-flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-all" @click="emit('removeForeignKey', idx)">
+              <button class="size-5 inline-flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-[opacity,background-color,color]" @click="emit('removeForeignKey', idx)">
                 <X class="size-3" />
               </button>
             </td>

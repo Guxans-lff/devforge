@@ -135,7 +135,7 @@ function reopenClosedTab() {
           :key="tab.id"
           role="tab"
           :aria-selected="tab.id === activeTabId"
-          class="group relative flex h-7 shrink-0 items-center gap-1.5 rounded-md px-3 text-[11px] font-medium transition-all duration-200"
+          class="group relative flex h-7 shrink-0 items-center gap-1.5 rounded-md px-3 text-[11px] font-medium transition-[background-color,color,box-shadow] duration-200"
           :class="[
             tab.id === activeTabId
               ? 'bg-background text-foreground shadow-sm ring-1 ring-border/30'
@@ -153,11 +153,11 @@ function reopenClosedTab() {
           <span class="max-w-[120px] truncate tracking-tight">{{ tab.title }}</span>
 
           <!-- Unsaved dot -->
-          <span v-if="tab.dirty" class="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+          <span v-if="tab.dirty" class="h-1.5 w-1.5 shrink-0 rounded-full bg-df-warning" />
 
           <button
             v-if="tab.closable"
-            class="ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm transition-all duration-150 opacity-0 group-hover:opacity-50 hover:bg-muted hover:!opacity-100"
+            class="ml-1 flex h-4 w-4 shrink-0 items-center justify-center rounded-sm transition-opacity duration-150 opacity-0 group-hover:opacity-50 hover:bg-muted hover:!opacity-100"
             :class="{ '!opacity-40': tab.id === activeTabId }"
             @click="handleClose($event, tab.id)"
           >
@@ -167,7 +167,7 @@ function reopenClosedTab() {
       </div>
 
       <button
-        class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 transition-all hover:bg-muted/80 hover:text-foreground/70"
+        class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/40 transition-colors hover:bg-muted/80 hover:text-foreground/70"
         title="New Query"
         @click="handleAddQuery"
       >
