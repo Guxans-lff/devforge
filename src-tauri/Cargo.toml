@@ -1,6 +1,6 @@
 [package]
 name = "devforge"
-version = "0.5.1"
+version = "0.6.0"
 description = "Unified developer tool: Database + SSH + SFTP"
 authors = ["DevForge Team"]
 license = "MIT"
