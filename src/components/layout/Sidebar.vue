@@ -30,6 +30,7 @@ import {
   Star,
   X,
   ChevronRight,
+  Container,
 } from 'lucide-vue-next'
 import type { ConnectionRecord } from '@/api/connection'
 import type { TabType } from '@/types/workspace'
@@ -122,6 +123,7 @@ const collapsedTypeBadgeColors: Record<string, string> = {
   database: 'text-primary',
   ssh: 'text-df-success',
   sftp: 'text-df-warning',
+  redis: 'text-destructive',
 }
 
 // 折叠态状态颜色
@@ -136,6 +138,7 @@ const typeIcons: Record<string, typeof Database> = {
   database: Database,
   ssh: Terminal,
   sftp: FolderOpen,
+  redis: Container,
 }
 
 /** 根据连接状态返回图标附加动画 class */
@@ -182,11 +185,21 @@ function handleConnectionSaved() {
   connectionStore.loadConnections()
 }
 
-function handleConnectionConnect(connectionId: string, connectionName: string) {
-  connectionStore.loadConnections()
+async function handleConnectionConnect(connectionId: string, connectionName: string) {
+  await connectionStore.loadConnections()
+  // 根据连接类型决定 tab 类型
+  const conn = connectionStore.connections.get(connectionId)
+  const connType = conn?.record.type ?? 'database'
+  const typeToTab: Record<string, TabType> = {
+    database: 'database',
+    ssh: 'terminal',
+    sftp: 'file-manager',
+    redis: 'redis',
+  }
+  const tabType = typeToTab[connType] ?? 'database'
   workspace.addTab({
-    id: `database-${connectionId}`,
-    type: 'database',
+    id: `${tabType}-${connectionId}`,
+    type: tabType,
     title: connectionName,
     connectionId,
     closable: true,
@@ -198,6 +211,7 @@ function handleOpenConnection(conn: ConnectionState) {
     database: 'database',
     ssh: 'terminal',
     sftp: 'file-manager',
+    redis: 'redis',
   }
   const tabType = typeToTab[conn.record.type] ?? 'database'
   workspace.addTab({
@@ -324,6 +338,7 @@ const groupedNonFavorites = computed(() => {
     { type: 'database', label: t('welcome.database'), icon: Database },
     { type: 'ssh', label: t('welcome.terminal'), icon: Terminal },
     { type: 'sftp', label: t('welcome.files'), icon: FolderOpen },
+    { type: 'redis', label: 'Redis', icon: Container },
   ]
 
   return categories.map(cat => ({

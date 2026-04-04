@@ -52,6 +52,9 @@
     "vue-router": "^5.0.2",
     "vue-sonner": "^2.0.9"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "sharp", "vue-demi"]
+  },
   "devDependencies": {
     "@tauri-apps/cli": "^2.10.0",
     "@types/dagre": "^0.7.54",

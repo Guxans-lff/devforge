@@ -12,6 +12,7 @@ use commands::import;
 use commands::import_export;
 use commands::local_shell::{self, LocalShellEngineState};
 use commands::query_history;
+use commands::redis::{self as redis_cmd, RedisEngineState, RedisPubSubState};
 use commands::scheduler;
 use commands::schema_compare;
 use commands::sftp::{self, SftpEngineState};
@@ -29,6 +30,8 @@ use commands::transfer;
 use commands::updater;
 use services::db_engine::DbEngine;
 use services::local_shell_engine::LocalShellEngine;
+use services::redis_engine::RedisEngine;
+use services::redis_pubsub::RedisPubSubManager;
 use services::sftp_engine::SftpEngine;
 use services::ssh_engine::SshEngine;
 use services::ssh_tunnel::SshTunnelEngine;
@@ -57,6 +60,14 @@ pub fn run() {
             // Initialize DbEngine — 不再需要 Mutex，内部使用 RwLock
             let db_engine_state: DbEngineState = Arc::new(DbEngine::new());
             app.manage(db_engine_state);
+
+            // Initialize RedisEngine — 内部使用 RwLock，无需外层 Mutex
+            let redis_engine_state: RedisEngineState = Arc::new(RedisEngine::new());
+            app.manage(redis_engine_state);
+
+            // Initialize RedisPubSubManager
+            let pubsub_state: RedisPubSubState = Arc::new(RedisPubSubManager::new());
+            app.manage(pubsub_state);
 
             // Initialize SshEngine — 内部使用 RwLock，无需外层 Mutex
             let ssh_engine_state: SshEngineState = Arc::new(SshEngine::new());
@@ -334,6 +345,62 @@ pub fn run() {
             updater::download_update,
             updater::launch_installer,
             updater::reveal_in_folder,
+            // Redis
+            redis_cmd::redis_connect,
+            redis_cmd::redis_disconnect,
+            redis_cmd::redis_test_connection,
+            redis_cmd::redis_is_connected,
+            redis_cmd::redis_ping,
+            redis_cmd::redis_select_db,
+            redis_cmd::redis_dbsize,
+            redis_cmd::redis_current_db,
+            redis_cmd::redis_scan_keys,
+            redis_cmd::redis_get_key_info,
+            redis_cmd::redis_get_value,
+            redis_cmd::redis_set_string,
+            redis_cmd::redis_delete_keys,
+            redis_cmd::redis_rename_key,
+            redis_cmd::redis_set_ttl,
+            redis_cmd::redis_remove_ttl,
+            redis_cmd::redis_hash_get_all,
+            redis_cmd::redis_hash_set,
+            redis_cmd::redis_hash_del,
+            redis_cmd::redis_list_range,
+            redis_cmd::redis_list_push,
+            redis_cmd::redis_list_set,
+            redis_cmd::redis_list_rem,
+            redis_cmd::redis_set_members,
+            redis_cmd::redis_set_add,
+            redis_cmd::redis_set_rem,
+            redis_cmd::redis_zset_range,
+            redis_cmd::redis_zset_add,
+            redis_cmd::redis_zset_rem,
+            redis_cmd::redis_get_info,
+            redis_cmd::redis_execute_command,
+            redis_cmd::redis_pubsub_subscribe,
+            redis_cmd::redis_pubsub_add,
+            redis_cmd::redis_pubsub_unsubscribe,
+            redis_cmd::redis_pubsub_stop,
+            redis_cmd::redis_pubsub_get_subscriptions,
+            redis_cmd::redis_publish,
+            // Slowlog
+            redis_cmd::redis_slowlog_get,
+            redis_cmd::redis_slowlog_len,
+            redis_cmd::redis_slowlog_reset,
+            redis_cmd::redis_slowlog_config,
+            redis_cmd::redis_set_slowlog_threshold,
+            redis_cmd::redis_set_slowlog_max_len,
+            // Stream
+            redis_cmd::redis_stream_range,
+            redis_cmd::redis_stream_add,
+            redis_cmd::redis_stream_del,
+            redis_cmd::redis_stream_len,
+            // Cluster
+            redis_cmd::redis_connect_cluster,
+            redis_cmd::redis_test_cluster_connection,
+            redis_cmd::redis_is_cluster,
+            redis_cmd::redis_cluster_info,
+            redis_cmd::redis_cluster_nodes,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

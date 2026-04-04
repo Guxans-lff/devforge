@@ -62,6 +62,15 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })
     }
 
+    // 关闭 Redis tab 时断开连接
+    if (tab.type === 'redis' && tab.connectionId) {
+      const connectionStore = useConnectionStore()
+      connectionStore.updateConnectionStatus(tab.connectionId, 'disconnected')
+      import('@/api/redis').then(({ redisDisconnect }) => {
+        redisDisconnect(tab.connectionId!).catch(() => { })
+      })
+    }
+
     // 关闭本地终端 tab 时清理后端 PTY 资源（KeepAlive 的 backup）
     if (tab.type === 'terminal' && tab.meta?.isLocal) {
       import('@/api/local-shell').then(({ localShellClose }) => {
@@ -152,7 +161,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       // 本地终端 tab 无 connectionId，重启后 PTY 进程已丢失，不恢复
       const validTabs = (data.tabs ?? []).filter(tab => {
         if (tab.type === 'welcome' || tab.type === 'settings') return true
-        if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager') {
+        if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager' || tab.type === 'redis') {
           return !!tab.connectionId
         }
         return true
@@ -206,7 +215,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       // 直接用 deserialize 逻辑
       const validTabs = (data.tabs ?? []).filter(tab => {
         if (tab.type === 'welcome' || tab.type === 'settings') return true
-        if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager') {
+        if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager' || tab.type === 'redis') {
           return !!tab.connectionId
         }
         return true

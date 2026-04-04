@@ -12,6 +12,8 @@ pub mod import_export;
 pub mod known_hosts;
 pub mod local_shell_engine;
 pub mod progress_tracker;
+pub mod redis_engine;
+pub mod redis_pubsub;
 pub mod scheduler;
 pub mod schema_compare;
 pub mod sftp_engine;

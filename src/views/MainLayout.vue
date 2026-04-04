@@ -19,6 +19,7 @@ const SettingsView = defineAsyncComponent(() => import('@/views/SettingsView.vue
 const MultiExecView = defineAsyncComponent(() => import('@/views/MultiExecView.vue'))
 const TerminalPlayerView = defineAsyncComponent(() => import('@/views/TerminalPlayerView.vue'))
 const LocalTerminalView = defineAsyncComponent(() => import('@/views/LocalTerminalView.vue'))
+const RedisView = defineAsyncComponent(() => import('@/views/RedisView.vue'))
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
@@ -46,6 +47,8 @@ const activeTabComponent = computed(() => {
       return MultiExecView
     case 'terminal-player':
       return TerminalPlayerView
+    case 'redis':
+      return tab.connectionId ? RedisView : null
     default:
       return null
   }

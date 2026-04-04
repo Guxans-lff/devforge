@@ -11,6 +11,7 @@ pub mod import;
 pub mod import_export;
 pub mod local_shell;
 pub mod query_history;
+pub mod redis;
 pub mod scheduler;
 pub mod schema_compare;
 pub mod sftp;

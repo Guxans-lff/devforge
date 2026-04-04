@@ -12,18 +12,21 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Database, Terminal, FolderOpen, Loader2, Plug, CheckCircle2, XCircle, Cpu } from 'lucide-vue-next'
+import { Database, Terminal, FolderOpen, Loader2, Plug, CheckCircle2, XCircle, Cpu, Container } from 'lucide-vue-next'
 import DatabaseForm from './DatabaseForm.vue'
 import SshForm from './SshForm.vue'
 import SftpForm from './SftpForm.vue'
+import RedisForm from './RedisForm.vue'
 import type { ConnectionRecord } from '@/api/connection'
+import { redisTestConnection, redisTestClusterConnection } from '@/api/redis'
+import { tunnelOpen, tunnelClose } from '@/api/tunnel'
 import type { SslConfig } from '@/types/connection'
 import type { EnvironmentType } from '@/types/environment'
 
 const props = defineProps<{
   open: boolean
   editingConnection?: ConnectionRecord | null
-  defaultType?: 'database' | 'ssh' | 'sftp'
+  defaultType?: 'database' | 'ssh' | 'sftp' | 'redis'
 }>()
 
 const emit = defineEmits<{
@@ -40,7 +43,7 @@ const saving = ref(false)
 const showPassword = ref(false)
 const testing = ref(false)
 const testResult = ref<{ success: boolean; message: string } | null>(null)
-const connectionType = ref<'database' | 'ssh' | 'sftp'>('database')
+const connectionType = ref<'database' | 'ssh' | 'sftp' | 'redis'>('database')
 
 // Form fields
 const form = ref({
@@ -67,6 +70,18 @@ const form = ref({
   environment: 'development' as EnvironmentType,
   readOnly: false,
   confirmDanger: false,
+  // Redis SSH 隧道
+  useSshTunnel: false,
+  sshHost: '',
+  sshPort: 22,
+  sshUsername: '',
+  sshPassword: '',
+  sshAuthMethod: 'password' as 'password' | 'key',
+  sshPrivateKeyPath: '',
+  sshPassphrase: '',
+  // Redis Cluster
+  isCluster: false,
+  clusterNodes: [] as string[],
 })
 
 const isEditing = computed(() => !!props.editingConnection)
@@ -87,8 +102,13 @@ const portError = computed(() => {
 const canSave = computed(() => {
   const hasName = form.value.name.trim().length > 0
   const hasHost = form.value.host.trim().length > 0
-  const hasUser = form.value.username.trim().length > 0
 
+  // Redis 不需要用户名
+  if (connectionType.value === 'redis') {
+    return hasName && hasHost && !nameError.value && !portError.value
+  }
+
+  const hasUser = form.value.username.trim().length > 0
   return hasName && hasHost && hasUser && !nameError.value && !portError.value
 })
 
@@ -173,6 +193,43 @@ const sftpFormData = computed({
   },
 })
 
+const redisFormData = computed({
+  get: () => ({
+    host: form.value.host,
+    port: form.value.port,
+    password: form.value.password,
+    database: parseInt(form.value.database) || 0,
+    useTls: form.value.ssl?.mode !== 'disabled',
+    isCluster: form.value.isCluster,
+    clusterNodes: form.value.clusterNodes,
+    useSshTunnel: form.value.useSshTunnel,
+    sshHost: form.value.sshHost,
+    sshPort: form.value.sshPort,
+    sshUsername: form.value.sshUsername,
+    sshPassword: form.value.sshPassword,
+    sshAuthMethod: form.value.sshAuthMethod,
+    sshPrivateKeyPath: form.value.sshPrivateKeyPath,
+    sshPassphrase: form.value.sshPassphrase,
+  }),
+  set: (value) => {
+    form.value.host = value.host
+    form.value.port = value.port
+    form.value.password = value.password
+    form.value.database = String(value.database)
+    form.value.ssl = { ...form.value.ssl, mode: value.useTls ? 'required' : 'disabled' }
+    form.value.isCluster = value.isCluster
+    form.value.clusterNodes = value.clusterNodes
+    form.value.useSshTunnel = value.useSshTunnel
+    form.value.sshHost = value.sshHost
+    form.value.sshPort = value.sshPort
+    form.value.sshUsername = value.sshUsername
+    form.value.sshPassword = value.sshPassword
+    form.value.sshAuthMethod = value.sshAuthMethod
+    form.value.sshPrivateKeyPath = value.sshPrivateKeyPath
+    form.value.sshPassphrase = value.sshPassphrase
+  },
+})
+
 watch(
   () => props.open,
   async (open) => {
@@ -180,7 +237,7 @@ watch(
       showPassword.value = false
       testResult.value = null
       const conn = props.editingConnection
-      connectionType.value = conn.type as 'database' | 'ssh' | 'sftp'
+      connectionType.value = conn.type as 'database' | 'ssh' | 'sftp' | 'redis'
       form.value.name = conn.name
       form.value.host = conn.host
       form.value.port = conn.port
@@ -201,6 +258,16 @@ watch(
       } catch {
         // passphrase not found, leave empty
       }
+
+      // 加载 Redis SSH 隧道凭据
+      try {
+        const storedSshPwd = await getCredential(`${conn.id}:sshPassword`)
+        form.value.sshPassword = storedSshPwd ?? ''
+      } catch { /* not found */ }
+      try {
+        const storedSshPassphrase = await getCredential(`${conn.id}:sshPassphrase`)
+        form.value.sshPassphrase = storedSshPassphrase ?? ''
+      } catch { /* not found */ }
 
       try {
         const config = JSON.parse(conn.configJson)
@@ -227,6 +294,20 @@ watch(
             clientKeyPath: config.ssl.clientKeyPath ?? '',
           }
         }
+        // 加载 Redis SSH 隧道配置
+        if (config.sshTunnel?.enabled) {
+          form.value.useSshTunnel = true
+          form.value.sshHost = config.sshTunnel.sshHost ?? ''
+          form.value.sshPort = config.sshTunnel.sshPort ?? 22
+          form.value.sshUsername = config.sshTunnel.sshUsername ?? ''
+          form.value.sshAuthMethod = config.sshTunnel.authMethod ?? 'password'
+          form.value.sshPrivateKeyPath = config.sshTunnel.privateKeyPath ?? ''
+        }
+        // 加载 Redis Cluster 配置
+        if (config.isCluster) {
+          form.value.isCluster = true
+          form.value.clusterNodes = config.clusterNodes ?? []
+        }
       } catch {
         // ignore parse errors
       }
@@ -243,6 +324,8 @@ watch(connectionType, (type) => {
   if (!isEditing.value) {
     if (type === 'ssh' || type === 'sftp') {
       form.value.port = 22
+    } else if (type === 'redis') {
+      form.value.port = 6379
     } else {
       const defaultPorts: Record<string, number> = {
         mysql: 3306,
@@ -283,6 +366,16 @@ function resetForm() {
     environment: 'development' as EnvironmentType,
     readOnly: false,
     confirmDanger: false,
+    useSshTunnel: false,
+    sshHost: '',
+    sshPort: 22,
+    sshUsername: '',
+    sshPassword: '',
+    sshAuthMethod: 'password' as 'password' | 'key',
+    sshPrivateKeyPath: '',
+    sshPassphrase: '',
+    isCluster: false,
+    clusterNodes: [] as string[],
   }
 }
 
@@ -323,10 +416,20 @@ async function handleSave(connectAfter = false) {
       await saveCredential(`${savedId}:passphrase`, form.value.passphrase)
     }
 
+    // 保存 Redis SSH 隧道凭据
+    if (connectionType.value === 'redis' && form.value.useSshTunnel) {
+      if (form.value.sshPassword) {
+        await saveCredential(`${savedId}:sshPassword`, form.value.sshPassword)
+      }
+      if (form.value.sshAuthMethod === 'key' && form.value.sshPassphrase) {
+        await saveCredential(`${savedId}:sshPassphrase`, form.value.sshPassphrase)
+      }
+    }
+
     emit('saved')
     emit('update:open', false)
 
-    if (connectAfter && connectionType.value === 'database') {
+    if (connectAfter && (connectionType.value === 'database' || connectionType.value === 'redis')) {
       emit('connect', savedId, savedName)
     }
   } catch (e) {
@@ -368,12 +471,36 @@ function buildConfigJson(): string {
     return JSON.stringify(config)
   }
   // sftp
-  return JSON.stringify({
-    authMethod: form.value.authMethod,
-    privateKeyPath: form.value.privateKeyPath || undefined,
-    remotePath: form.value.remotePath,
-    sshConnectionId: form.value.sshConnectionId || undefined,
-  })
+  if (connectionType.value === 'sftp') {
+    return JSON.stringify({
+      authMethod: form.value.authMethod,
+      privateKeyPath: form.value.privateKeyPath || undefined,
+      remotePath: form.value.remotePath,
+      sshConnectionId: form.value.sshConnectionId || undefined,
+    })
+  }
+  // redis
+  const redisConfig: Record<string, unknown> = {
+    database: parseInt(form.value.database) || 0,
+    useTls: form.value.ssl?.mode !== 'disabled',
+    timeoutSecs: 10,
+  }
+  // Cluster 模式
+  if (form.value.isCluster) {
+    redisConfig.isCluster = true
+    redisConfig.clusterNodes = form.value.clusterNodes.filter(n => n.trim())
+  }
+  if (form.value.useSshTunnel) {
+    redisConfig.sshTunnel = {
+      enabled: true,
+      sshHost: form.value.sshHost,
+      sshPort: form.value.sshPort,
+      sshUsername: form.value.sshUsername,
+      authMethod: form.value.sshAuthMethod,
+      privateKeyPath: form.value.sshPrivateKeyPath || undefined,
+    }
+  }
+  return JSON.stringify(redisConfig)
 }
 
 async function handleTestConnection() {
@@ -390,6 +517,58 @@ async function handleTestConnection() {
         database: form.value.database || undefined,
         driver: form.value.driver,
       })
+    } else if (connectionType.value === 'redis') {
+      let testHost = form.value.host
+      let testPort = form.value.port
+      let tunnelId: string | null = null
+      try {
+        // Cluster 模式：直接测试集群连接
+        if (form.value.isCluster) {
+          // 收集节点列表：clusterNodes + host:port 作为种子
+          const nodes = [...form.value.clusterNodes.filter(n => n.trim())]
+          const seedNode = `${form.value.host}:${form.value.port}`
+          if (!nodes.includes(seedNode) && form.value.host) {
+            nodes.unshift(seedNode)
+          }
+          const msg = await redisTestClusterConnection({
+            nodes,
+            password: form.value.password || null,
+            useTls: form.value.ssl?.mode !== 'disabled',
+            timeoutSecs: 10,
+          })
+          result = { success: true, message: msg }
+        } else {
+          // 如果启用 SSH 隧道，先建隧道
+          if (form.value.useSshTunnel) {
+            const tunnel = await tunnelOpen({
+              sshHost: form.value.sshHost,
+              sshPort: form.value.sshPort,
+              sshUsername: form.value.sshUsername,
+              sshPassword: form.value.sshPassword || undefined,
+              authMethod: form.value.sshAuthMethod,
+              privateKeyPath: form.value.sshPrivateKeyPath || undefined,
+              passphrase: form.value.sshPassphrase || undefined,
+              localPort: 0,
+              remoteHost: form.value.host,
+              remotePort: form.value.port,
+            })
+            tunnelId = tunnel.tunnelId
+            testHost = '127.0.0.1'
+            testPort = tunnel.localPort
+          }
+          const msg = await redisTestConnection({
+            host: testHost,
+            port: testPort,
+            password: form.value.password || null,
+            database: parseInt(form.value.database) || 0,
+            useTls: form.value.ssl?.mode !== 'disabled',
+            timeoutSecs: 10,
+          })
+          result = { success: true, message: msg }
+        }
+      } finally {
+        if (tunnelId) await tunnelClose(tunnelId).catch(() => {})
+      }
     } else {
       result = await sshTestConnectionParams({
         host: form.value.host,
@@ -402,8 +581,8 @@ async function handleTestConnection() {
       })
     }
     testResult.value = { success: result.success, message: result.message }
-  } catch (e) {
-    testResult.value = { success: false, message: String(e) }
+  } catch (e: any) {
+    testResult.value = { success: false, message: e?.message ?? String(e) }
   } finally {
     testing.value = false
   }
@@ -442,13 +621,13 @@ async function handleTestConnection() {
                   class="absolute left-0 w-full bg-primary rounded-lg shadow-lg shadow-primary/20 transition-[top] duration-300 ease-out z-0"
                   :style="{
                     height: '44px',
-                    top: `${(['database', 'ssh', 'sftp'].indexOf(connectionType)) * 48}px`,
+                    top: `${(['database', 'ssh', 'sftp', 'redis'].indexOf(connectionType)) * 48}px`,
                     opacity: 1
                   }"
                 ></div>
 
                 <button
-                  v-for="type in (['database', 'ssh', 'sftp'] as const)"
+                  v-for="type in (['database', 'ssh', 'sftp', 'redis'] as const)"
                   :key="type"
                   role="radio"
                   :aria-checked="connectionType === type"
@@ -458,12 +637,12 @@ async function handleTestConnection() {
                     ? 'text-primary-foreground'
                     : 'text-muted-foreground/60 hover:text-muted-foreground'"
                 >
-                  <component :is="type === 'database' ? Database : (type === 'ssh' ? Terminal : FolderOpen)" 
+                  <component :is="type === 'database' ? Database : type === 'ssh' ? Terminal : type === 'sftp' ? FolderOpen : Container"
                     class="h-4 w-4 shrink-0 transition-transform duration-300"
-                    :class="connectionType === type ? 'scale-110' : 'group-hover:scale-105'" 
+                    :class="connectionType === type ? 'scale-110' : 'group-hover:scale-105'"
                   />
                   <span class="truncate">{{ t(`connection.type${type.charAt(0).toUpperCase() + type.slice(1)}`) }}</span>
-                  
+
                   <div v-if="connectionType === type" class="ml-auto flex gap-0.5">
                     <div class="w-0.5 h-2 bg-primary-foreground/40 rounded-full"></div>
                     <div class="w-0.5 h-3 bg-primary-foreground/60 rounded-full"></div>
@@ -525,7 +704,7 @@ async function handleTestConnection() {
 
             <Button
               variant="outline"
-              :disabled="testing || !form.host || !form.username"
+              :disabled="testing || !form.host || (connectionType !== 'redis' && !form.username)"
               @click="handleTestConnection"
               class="w-full h-9 rounded-md font-bold text-[11px] border-border/60 bg-background hover:bg-primary hover:text-primary-foreground hover:border-primary transition-[background-color,color,border-color] shadow-sm group relative overflow-hidden"
             >
@@ -563,6 +742,13 @@ async function handleTestConnection() {
                 <SftpForm
                   v-if="connectionType === 'sftp'"
                   v-model="sftpFormData"
+                  v-model:show-password="showPassword"
+                  :is-editing="isEditing"
+                />
+
+                <RedisForm
+                  v-if="connectionType === 'redis'"
+                  v-model="redisFormData"
                   v-model:show-password="showPassword"
                   :is-editing="isEditing"
                 />
@@ -611,7 +797,7 @@ async function handleTestConnection() {
               </Button>
 
               <Button
-                v-if="connectionType === 'database'"
+                v-if="connectionType === 'database' || connectionType === 'redis'"
                 :disabled="saving || !canSave"
                 @click="handleSave(true)"
                 class="h-9 min-w-fit px-4 rounded-md font-bold bg-primary text-primary-foreground shadow-lg shadow-primary/20 transition-[background-color,box-shadow] hover:bg-primary/90 hover:shadow-primary/30 active:scale-95 disabled:opacity-50 text-[11px] flex items-center justify-center gap-1 shrink-0"

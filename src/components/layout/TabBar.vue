@@ -35,6 +35,7 @@ const iconMap: Record<TabType, typeof Database> = {
   welcome: Home,
   'terminal-player': Play,
   'multi-exec': TerminalSquare,
+  redis: Database,
 }
 
 function getTabIcon(type: TabType) {
