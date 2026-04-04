@@ -152,6 +152,18 @@ pub struct RedisConfig {
     /// Cluster 节点列表（"host:port" 格式）
     #[serde(default)]
     pub cluster_nodes: Vec<String>,
+    /// 是否为 Sentinel 模式
+    #[serde(default)]
+    pub is_sentinel: bool,
+    /// Sentinel 节点列表（"host:port" 格式）
+    #[serde(default)]
+    pub sentinel_nodes: Vec<String>,
+    /// Sentinel Master 名称（如 "mymaster"）
+    #[serde(default)]
+    pub sentinel_master_name: String,
+    /// Sentinel 自身密码（可选）
+    #[serde(default)]
+    pub sentinel_password: Option<String>,
 }
 
 fn default_timeout() -> u64 {
@@ -167,6 +179,10 @@ impl Default for RedisConfig {
             notes: String::new(),
             is_cluster: false,
             cluster_nodes: Vec::new(),
+            is_sentinel: false,
+            sentinel_nodes: Vec::new(),
+            sentinel_master_name: String::new(),
+            sentinel_password: None,
         }
     }
 }
@@ -233,4 +249,82 @@ pub struct RedisCliResult {
     pub duration_ms: u64,
     /// 是否出错
     pub is_error: bool,
+}
+
+/// 内存统计信息（INFO memory 提取）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedisMemoryStats {
+    /// 已用内存（字节）
+    pub used_memory: u64,
+    /// 已用内存（人类可读）
+    pub used_memory_human: String,
+    /// 峰值内存（字节）
+    pub used_memory_peak: u64,
+    /// 峰值内存（人类可读）
+    pub used_memory_peak_human: String,
+    /// 内存碎片率
+    pub mem_fragmentation_ratio: f64,
+    /// 已逐出键数
+    pub evicted_keys: u64,
+}
+
+/// 键内存占用信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedisKeyMemory {
+    /// 键名
+    pub key: String,
+    /// 内存占用（字节）
+    pub memory_bytes: i64,
+    /// 键类型
+    pub key_type: String,
+}
+
+/// 客户端连接信息（CLIENT LIST 解析结果）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedisClientInfo {
+    /// 客户端 ID
+    pub id: String,
+    /// 地址（ip:port）
+    pub addr: String,
+    /// 客户端名称
+    pub name: Option<String>,
+    /// 连接时长（秒）
+    pub age: i64,
+    /// 空闲时长（秒）
+    pub idle: i64,
+    /// 标志（N=普通, M=PubSub, x=事务中, b=阻塞中...）
+    pub flags: String,
+    /// 当前数据库
+    pub db: u8,
+    /// 当前执行的命令
+    pub cmd: Option<String>,
+}
+
+/// MONITOR 消息（实时推送到前端）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedisMonitorMessage {
+    /// 时间戳
+    pub timestamp: f64,
+    /// 客户端地址
+    pub client_addr: String,
+    /// 数据库编号
+    pub database: String,
+    /// 完整命令
+    pub command: String,
+    /// 原始消息
+    pub raw: String,
+}
+
+/// Lua 脚本执行结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LuaExecResult {
+    /// 执行结果（JSON 格式）
+    pub result: serde_json::Value,
+    /// 执行耗时（毫秒）
+    pub duration_ms: u64,
 }

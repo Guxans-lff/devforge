@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
@@ -11,9 +11,13 @@ import ServerInfoPanel from '@/components/redis/ServerInfoPanel.vue'
 import NewKeyDialog from '@/components/redis/NewKeyDialog.vue'
 import PubSubPanel from '@/components/redis/PubSubPanel.vue'
 import SlowLogPanel from '@/components/redis/SlowLogPanel.vue'
+import MemoryPanel from '@/components/redis/MemoryPanel.vue'
+import ClientListPanel from '@/components/redis/ClientListPanel.vue'
+import MonitorPanel from '@/components/redis/MonitorPanel.vue'
+import LuaScriptPanel from '@/components/redis/LuaScriptPanel.vue'
 import { useConnectionStore } from '@/stores/connections'
 import { useToast } from '@/composables/useToast'
-import { redisConnect, redisDisconnect, redisDbsize, redisCurrentDb, redisSelectDb, redisPing, redisConnectCluster } from '@/api/redis'
+import { redisConnect, redisDisconnect, redisDbsize, redisCurrentDb, redisSelectDb, redisPing, redisConnectCluster, redisConnectSentinel, redisMonitorStop } from '@/api/redis'
 import { tunnelOpen, tunnelClose } from '@/api/tunnel'
 import { getCredential } from '@/api/connection'
 import type { RedisKeyInfo } from '@/types/redis'
@@ -31,6 +35,7 @@ const toast = useToast()
 const connected = ref(false)
 const connecting = ref(false)
 const isCluster = ref(false)
+const isSentinel = ref(false)
 
 // 当前数据库
 const currentDb = ref(0)
@@ -46,9 +51,20 @@ const showCli = ref(false)
 const showNewKeyDialog = ref(false)
 const showPubSub = ref(false)
 const showSlowLog = ref(false)
+const showMemory = ref(false)
+const showClientList = ref(false)
+const showMonitor = ref(false)
+const showLuaScript = ref(false)
 
 // 刷新触发
 const refreshTrigger = ref(0)
+
+/** 判断是否为通用断连错误（无需额外展示详情） */
+const isGenericDisconnectError = computed(() => {
+  const msg = disconnectError.value
+  if (!msg) return true
+  return msg.includes('连接已断开') || msg.includes('请重新连接') || msg.includes('connection reset')
+})
 
 // 心跳检测
 const heartbeatTimer = ref<number | null>(null)
@@ -66,7 +82,7 @@ async function connectRedis() {
   connectionStore.updateConnectionStatus(props.connectionId, 'connecting')
   try {
     const conn = connectionStore.connections.get(props.connectionId)
-    if (!conn) throw new Error('连接记录不存在')
+    if (!conn) throw new Error(t('redis.connectionNotFound'))
     const record = conn.record
     const config = JSON.parse(record.configJson || '{}')
 
@@ -82,7 +98,9 @@ async function connectRedis() {
 
     // 检查是否为 Cluster 模式
     const clusterMode = config.isCluster === true
+    const sentinelMode = config.isSentinel === true
     isCluster.value = clusterMode
+    isSentinel.value = sentinelMode
 
     if (clusterMode) {
       // Cluster 模式：直接连接集群
@@ -95,6 +113,23 @@ async function connectRedis() {
         connectionId: record.id,
         nodes,
         password,
+        useTls: config.useTls ?? false,
+        timeoutSecs: config.timeoutSecs ?? 10,
+      })
+    } else if (sentinelMode) {
+      // Sentinel 模式：通过哨兵发现 Master
+      const sentinelNodes = config.sentinelNodes || []
+      let sentinelPassword: string | null = null
+      try {
+        sentinelPassword = await getCredential(`${record.id}:sentinelPassword`) || null
+      } catch { /* 无密码 */ }
+      await redisConnectSentinel({
+        connectionId: record.id,
+        sentinelNodes,
+        masterName: config.sentinelMasterName || 'mymaster',
+        password,
+        sentinelPassword,
+        database: config.database ?? 0,
         useTls: config.useTls ?? false,
         timeoutSecs: config.timeoutSecs ?? 10,
       })
@@ -149,7 +184,7 @@ async function connectRedis() {
       activeTunnelId.value = null
     }
     connectionStore.updateConnectionStatus(props.connectionId, 'error')
-    toast.error('Redis 连接失败', (e as any)?.message ?? String(e))
+    toast.error(t('redis.connectFailed'), (e as any)?.message ?? String(e))
   } finally {
     connecting.value = false
   }
@@ -165,7 +200,7 @@ async function handleSelectDb(db: number) {
     selectedKeyInfo.value = null
     refreshTrigger.value++
   } catch (e) {
-    toast.error('切换数据库失败', (e as any)?.message ?? String(e))
+    toast.error(t('redis.selectDbFailed'), (e as any)?.message ?? String(e))
   }
 }
 
@@ -213,14 +248,67 @@ function startHeartbeat() {
     } catch (e) {
       heartbeatFailures.value++
       if (heartbeatFailures.value >= MAX_FAILURES) {
-        const msg = (e as any)?.message ?? String(e)
-        connected.value = false
-        disconnectError.value = msg
-        connectionStore.updateConnectionStatus(props.connectionId, 'disconnected', msg)
-        stopHeartbeat()
+        // Sentinel 模式：自动尝试故障转移重连
+        if (isSentinel.value) {
+          await attemptSentinelFailover()
+        } else {
+          const msg = (e as any)?.message ?? String(e)
+          connected.value = false
+          disconnectError.value = msg
+          connectionStore.updateConnectionStatus(props.connectionId, 'disconnected', msg)
+          stopHeartbeat()
+        }
       }
     }
   }, HEARTBEAT_INTERVAL)
+}
+
+/** Sentinel 故障转移自动重连 */
+async function attemptSentinelFailover() {
+  stopHeartbeat()
+  connecting.value = true
+  connectionStore.updateConnectionStatus(props.connectionId, 'connecting')
+  try {
+    // 先断开旧连接
+    await redisDisconnect(props.connectionId).catch(() => {})
+
+    // 通过 Sentinel 重新发现 Master 并连接
+    const conn = connectionStore.connections.get(props.connectionId)
+    if (!conn) throw new Error('连接记录不存在')
+    const config = JSON.parse(conn.record.configJson || '{}')
+
+    let password: string | null = null
+    try { password = await getCredential(conn.record.id) || null } catch { /* */ }
+    let sentinelPassword: string | null = null
+    try { sentinelPassword = await getCredential(`${conn.record.id}:sentinelPassword`) || null } catch { /* */ }
+
+    await redisConnectSentinel({
+      connectionId: conn.record.id,
+      sentinelNodes: config.sentinelNodes || [],
+      masterName: config.sentinelMasterName || 'mymaster',
+      password,
+      sentinelPassword,
+      database: config.database ?? 0,
+      useTls: config.useTls ?? false,
+      timeoutSecs: config.timeoutSecs ?? 10,
+    })
+
+    connected.value = true
+    heartbeatFailures.value = 0
+    disconnectError.value = ''
+    connectionStore.updateConnectionStatus(props.connectionId, 'connected')
+    toast.success(t('redis.sentinel.failoverSuccess'))
+    startHeartbeat()
+  } catch (e) {
+    // 故障转移失败，显示断开界面
+    const msg = (e as any)?.message ?? String(e)
+    connected.value = false
+    connecting.value = false
+    disconnectError.value = msg
+    connectionStore.updateConnectionStatus(props.connectionId, 'disconnected', msg)
+  } finally {
+    connecting.value = false
+  }
 }
 
 /** 停止心跳检测 */
@@ -250,6 +338,8 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopHeartbeat()
   if (connected.value) {
+    // 停止 MONITOR（如果在运行中）
+    redisMonitorStop(props.connectionId).catch(() => {})
     redisDisconnect(props.connectionId).catch(() => {})
     connectionStore.updateConnectionStatus(props.connectionId, 'disconnected')
   }
@@ -279,6 +369,10 @@ onBeforeUnmount(() => {
       @toggle-cli="showCli = !showCli"
       @toggle-pubsub="showPubSub = !showPubSub"
       @toggle-slowlog="showSlowLog = !showSlowLog"
+      @toggle-memory="showMemory = !showMemory"
+      @toggle-client-list="showClientList = !showClientList"
+      @toggle-monitor="showMonitor = !showMonitor"
+      @toggle-lua="showLuaScript = !showLuaScript"
     />
 
     <!-- 主内容区 -->
@@ -302,7 +396,7 @@ onBeforeUnmount(() => {
               <p class="text-sm text-muted-foreground">{{ t('redis.connectionLostHint') }}</p>
             </div>
             <div
-              v-if="disconnectError"
+              v-if="disconnectError && !isGenericDisconnectError"
               class="w-full p-2.5 bg-destructive/5 border border-destructive/20 rounded text-xs text-destructive/80 font-mono break-all"
             >
               {{ disconnectError }}
@@ -336,7 +430,7 @@ onBeforeUnmount(() => {
           </Pane>
 
           <!-- 编辑器 / 服务器信息 -->
-          <Pane :size="(showCli || showPubSub || showSlowLog) ? 55 : 75">
+          <Pane :size="(showCli || showPubSub || showSlowLog || showMemory || showClientList || showMonitor || showLuaScript) ? 55 : 75">
             <div class="h-full flex flex-col">
               <template v-if="showServerInfo">
                 <ServerInfoPanel :connection-id="connectionId" :is-cluster="isCluster" />
@@ -375,6 +469,26 @@ onBeforeUnmount(() => {
           <!-- 慢查询面板 -->
           <Pane v-if="showSlowLog" :size="20" :min-size="15">
             <SlowLogPanel :connection-id="connectionId" />
+          </Pane>
+
+          <!-- 内存分析面板 -->
+          <Pane v-if="showMemory" :size="20" :min-size="15">
+            <MemoryPanel :connection-id="connectionId" />
+          </Pane>
+
+          <!-- 客户端列表面板 -->
+          <Pane v-if="showClientList" :size="20" :min-size="15">
+            <ClientListPanel :connection-id="connectionId" />
+          </Pane>
+
+          <!-- MONITOR 面板 -->
+          <Pane v-if="showMonitor" :size="20" :min-size="15">
+            <MonitorPanel :connection-id="connectionId" />
+          </Pane>
+
+          <!-- Lua 脚本面板 -->
+          <Pane v-if="showLuaScript" :size="20" :min-size="15">
+            <LuaScriptPanel :connection-id="connectionId" />
           </Pane>
         </Splitpanes>
       </template>

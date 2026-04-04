@@ -12,7 +12,7 @@ use commands::import;
 use commands::import_export;
 use commands::local_shell::{self, LocalShellEngineState};
 use commands::query_history;
-use commands::redis::{self as redis_cmd, RedisEngineState, RedisPubSubState};
+use commands::redis::{self as redis_cmd, RedisEngineState, RedisPubSubState, RedisMonitorState};
 use commands::scheduler;
 use commands::schema_compare;
 use commands::sftp::{self, SftpEngineState};
@@ -31,6 +31,7 @@ use commands::updater;
 use services::db_engine::DbEngine;
 use services::local_shell_engine::LocalShellEngine;
 use services::redis_engine::RedisEngine;
+use services::redis_monitor::RedisMonitorManager;
 use services::redis_pubsub::RedisPubSubManager;
 use services::sftp_engine::SftpEngine;
 use services::ssh_engine::SshEngine;
@@ -68,6 +69,10 @@ pub fn run() {
             // Initialize RedisPubSubManager
             let pubsub_state: RedisPubSubState = Arc::new(RedisPubSubManager::new());
             app.manage(pubsub_state);
+
+            // Initialize RedisMonitorManager
+            let monitor_state: RedisMonitorState = Arc::new(RedisMonitorManager::new());
+            app.manage(monitor_state);
 
             // Initialize SshEngine — 内部使用 RwLock，无需外层 Mutex
             let ssh_engine_state: SshEngineState = Arc::new(SshEngine::new());
@@ -401,6 +406,30 @@ pub fn run() {
             redis_cmd::redis_is_cluster,
             redis_cmd::redis_cluster_info,
             redis_cmd::redis_cluster_nodes,
+            // Sentinel
+            redis_cmd::redis_connect_sentinel,
+            redis_cmd::redis_test_sentinel_connection,
+            // Memory Analysis
+            redis_cmd::redis_memory_stats,
+            redis_cmd::redis_memory_doctor,
+            redis_cmd::redis_memory_usage,
+            redis_cmd::redis_top_keys_by_memory,
+            // Batch Operations
+            redis_cmd::redis_batch_delete,
+            redis_cmd::redis_batch_set_ttl,
+            redis_cmd::redis_batch_export,
+            redis_cmd::redis_batch_import,
+            // Client List
+            redis_cmd::redis_client_list,
+            redis_cmd::redis_client_kill,
+            // Monitor
+            redis_cmd::redis_monitor_start,
+            redis_cmd::redis_monitor_stop,
+            // Lua Script
+            redis_cmd::redis_eval_lua,
+            redis_cmd::redis_script_load,
+            redis_cmd::redis_script_exists,
+            redis_cmd::redis_script_flush,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

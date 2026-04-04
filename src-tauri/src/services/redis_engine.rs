@@ -11,6 +11,7 @@ use crate::models::redis::{
     ClusterNodeInfo, HashField, RedisCliResult, RedisKeyInfo, RedisScanResult, RedisServerInfo,
     RedisInfoSection, RedisInfoEntry, RedisSlowLogConfig, RedisSlowLogEntry,
     RedisValue, StreamEntry, ZSetMember,
+    RedisMemoryStats, RedisKeyMemory, RedisClientInfo, LuaExecResult,
 };
 
 /// 连接类型枚举
@@ -70,7 +71,7 @@ impl RedisEngine {
             Some(RedisConn::Cluster(conn)) => {
                 cmd.query_async(conn).await.map_err(|e| e.to_string())
             }
-            None => Err(format!("连接不存在: {}", connection_id)),
+            None => Err("Redis 连接已断开，请重新连接".to_string()),
         }
     }
 
@@ -282,7 +283,7 @@ impl RedisEngine {
             Some(RedisConn::Cluster(_)) => {
                 Err("集群模式不支持切换数据库".to_string())
             }
-            None => Err(format!("连接不存在: {}", connection_id)),
+            None => Err("Redis 连接已断开，请重新连接".to_string()),
         }
     }
 
@@ -298,7 +299,7 @@ impl RedisEngine {
         match conns.get(connection_id) {
             Some(RedisConn::Standalone(_, db)) => Ok(*db),
             Some(RedisConn::Cluster(_)) => Ok(0),
-            None => Err(format!("连接不存在: {}", connection_id)),
+            None => Err("Redis 连接已断开，请重新连接".to_string()),
         }
     }
 
@@ -1104,6 +1105,594 @@ impl RedisEngine {
             Value::Int(n) => *n,
             Value::BulkString(bytes) => String::from_utf8_lossy(bytes).parse().unwrap_or(0),
             _ => 0,
+        }
+    }
+
+    // ─── Sentinel ───
+
+    /// 通过 Sentinel 发现 Master 并连接
+    ///
+    /// 遍历 sentinel_nodes 列表，连接第一个可用的 Sentinel 节点，
+    /// 执行 SENTINEL get-master-addr-by-name 获取 Master 地址，然后建立 Standalone 连接。
+    pub async fn connect_sentinel(
+        &self,
+        connection_id: &str,
+        sentinel_nodes: Vec<String>,
+        master_name: &str,
+        password: Option<&str>,
+        sentinel_password: Option<&str>,
+        database: u8,
+        use_tls: bool,
+        timeout_secs: u64,
+    ) -> Result<String, String> {
+        if sentinel_nodes.is_empty() {
+            return Err("Sentinel 节点列表为空".to_string());
+        }
+
+        // 遍历 Sentinel 节点，找到第一个可用的
+        let mut last_error = String::new();
+        for node in &sentinel_nodes {
+            match self.resolve_master_from_sentinel(
+                node, master_name, sentinel_password, use_tls, timeout_secs,
+            ).await {
+                Ok((host, port)) => {
+                    // 通过发现的 Master 地址建立 Standalone 连接
+                    return self.connect(
+                        connection_id, &host, port, password, database, use_tls, timeout_secs,
+                    ).await
+                    .map(|_| format!("已通过 Sentinel 连接到 Master {}:{}/{}", host, port, database));
+                }
+                Err(e) => {
+                    last_error = format!("Sentinel {} 失败: {}", node, e);
+                    continue;
+                }
+            }
+        }
+
+        Err(format!("所有 Sentinel 节点均不可用。最后错误: {}", last_error))
+    }
+
+    /// 从单个 Sentinel 节点解析 Master 地址
+    async fn resolve_master_from_sentinel(
+        &self,
+        sentinel_addr: &str,
+        master_name: &str,
+        sentinel_password: Option<&str>,
+        use_tls: bool,
+        timeout_secs: u64,
+    ) -> Result<(String, u16), String> {
+        // 构建 Sentinel 连接 URL（database 固定 0）
+        let parts: Vec<&str> = sentinel_addr.splitn(2, ':').collect();
+        let host = parts.first().copied().unwrap_or("127.0.0.1");
+        let port: u16 = parts.get(1).and_then(|p| p.parse().ok()).unwrap_or(26379);
+
+        let url = Self::build_url(host, port, sentinel_password, 0, use_tls);
+        let client = Client::open(url.as_str())
+            .map_err(|e| format!("创建 Sentinel 客户端失败: {}", e))?;
+
+        let mut conn = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            client.get_multiplexed_async_connection(),
+        )
+        .await
+        .map_err(|_| format!("Sentinel 连接超时（{}秒）", timeout_secs))?
+        .map_err(|e| format!("Sentinel 连接失败: {}", e))?;
+
+        // SENTINEL get-master-addr-by-name <master_name>
+        let result: Vec<String> = redis::cmd("SENTINEL")
+            .arg("get-master-addr-by-name")
+            .arg(master_name)
+            .query_async(&mut conn)
+            .await
+            .map_err(|e| format!("SENTINEL get-master-addr-by-name 失败: {}", e))?;
+
+        if result.len() < 2 {
+            return Err(format!("Master '{}' 未找到", master_name));
+        }
+
+        let master_host = result[0].clone();
+        let master_port: u16 = result[1].parse()
+            .map_err(|_| format!("无效的 Master 端口: {}", result[1]))?;
+
+        Ok((master_host, master_port))
+    }
+
+    /// 测试 Sentinel 连接（不保存）
+    pub async fn test_sentinel_connection(
+        &self,
+        sentinel_nodes: Vec<String>,
+        master_name: &str,
+        password: Option<&str>,
+        sentinel_password: Option<&str>,
+        database: u8,
+        use_tls: bool,
+        timeout_secs: u64,
+    ) -> Result<String, String> {
+        if sentinel_nodes.is_empty() {
+            return Err("Sentinel 节点列表为空".to_string());
+        }
+
+        // 尝试解析 Master
+        let mut last_error = String::new();
+        for node in &sentinel_nodes {
+            match self.resolve_master_from_sentinel(
+                node, master_name, sentinel_password, use_tls, timeout_secs,
+            ).await {
+                Ok((host, port)) => {
+                    // 尝试连接 Master 并 PING
+                    let result = self.test_connection(
+                        &host, port, password, database, use_tls, timeout_secs,
+                    ).await?;
+                    return Ok(format!("{} — via Sentinel → Master {}:{}", result, host, port));
+                }
+                Err(e) => {
+                    last_error = format!("Sentinel {} 失败: {}", node, e);
+                    continue;
+                }
+            }
+        }
+
+        Err(format!("所有 Sentinel 节点均不可用。最后错误: {}", last_error))
+    }
+
+    // ─── 内存分析 ───
+
+    /// 获取内存统计信息（解析 INFO memory）
+    pub async fn memory_stats(&self, connection_id: &str) -> Result<RedisMemoryStats, String> {
+        let raw: String = self.exec_cmd(
+            connection_id,
+            redis::cmd("INFO").arg("memory"),
+        ).await.map_err(|e| format!("INFO memory 失败: {}", e))?;
+
+        let get = |key: &str| -> String {
+            raw.lines()
+                .find(|l| l.starts_with(key))
+                .and_then(|l| l.split_once(':'))
+                .map(|(_, v)| v.trim().to_string())
+                .unwrap_or_default()
+        };
+
+        // 从 INFO stats 获取 evicted_keys
+        let stats_raw: String = self.exec_cmd(
+            connection_id,
+            redis::cmd("INFO").arg("stats"),
+        ).await.unwrap_or_default();
+
+        let evicted_keys = stats_raw.lines()
+            .find(|l| l.starts_with("evicted_keys:"))
+            .and_then(|l| l.split_once(':'))
+            .and_then(|(_, v)| v.trim().parse::<u64>().ok())
+            .unwrap_or(0);
+
+        Ok(RedisMemoryStats {
+            used_memory: get("used_memory:").parse().unwrap_or(0),
+            used_memory_human: get("used_memory_human:"),
+            used_memory_peak: get("used_memory_peak:").parse().unwrap_or(0),
+            used_memory_peak_human: get("used_memory_peak_human:"),
+            mem_fragmentation_ratio: get("mem_fragmentation_ratio:").parse().unwrap_or(0.0),
+            evicted_keys,
+        })
+    }
+
+    /// 获取 MEMORY DOCTOR 建议
+    pub async fn memory_doctor(&self, connection_id: &str) -> Result<String, String> {
+        self.exec_cmd(
+            connection_id,
+            redis::cmd("MEMORY").arg("DOCTOR"),
+        ).await.map_err(|e| format!("MEMORY DOCTOR 失败: {}", e))
+    }
+
+    /// 获取单个键的内存占用
+    pub async fn memory_usage_key(&self, connection_id: &str, key: &str) -> Result<i64, String> {
+        self.exec_cmd(
+            connection_id,
+            redis::cmd("MEMORY").arg("USAGE").arg(key),
+        ).await.map_err(|e| format!("MEMORY USAGE 失败: {}", e))
+    }
+
+    /// 获取占用内存最多的 Top-N 键
+    ///
+    /// 通过 SCAN + MEMORY USAGE 遍历，limit 限制最大扫描键数以防性能问题。
+    pub async fn top_keys_by_memory(
+        &self,
+        connection_id: &str,
+        count: usize,
+        pattern: &str,
+        scan_limit: u64,
+    ) -> Result<Vec<RedisKeyMemory>, String> {
+        let mut all_keys: Vec<RedisKeyMemory> = Vec::new();
+        let mut cursor: u64 = 0;
+        let mut scanned: u64 = 0;
+
+        loop {
+            let result: (u64, Vec<String>) = self.exec_cmd(
+                connection_id,
+                redis::cmd("SCAN")
+                    .arg(cursor)
+                    .arg("MATCH").arg(pattern)
+                    .arg("COUNT").arg(200u64),
+            ).await.map_err(|e| format!("SCAN 失败: {}", e))?;
+
+            cursor = result.0;
+
+            for key in &result.1 {
+                // TYPE
+                let key_type: String = self.exec_cmd(
+                    connection_id,
+                    redis::cmd("TYPE").arg(key.as_str()),
+                ).await.unwrap_or_else(|_| "unknown".to_string());
+
+                // MEMORY USAGE
+                let memory_bytes: i64 = self.exec_cmd(
+                    connection_id,
+                    redis::cmd("MEMORY").arg("USAGE").arg(key.as_str()),
+                ).await.unwrap_or(0);
+
+                all_keys.push(RedisKeyMemory {
+                    key: key.clone(),
+                    memory_bytes,
+                    key_type,
+                });
+
+                scanned += 1;
+                if scanned >= scan_limit {
+                    break;
+                }
+            }
+
+            if cursor == 0 || scanned >= scan_limit {
+                break;
+            }
+        }
+
+        // 按内存降序排列，取前 N 个
+        all_keys.sort_by(|a, b| b.memory_bytes.cmp(&a.memory_bytes));
+        all_keys.truncate(count);
+
+        Ok(all_keys)
+    }
+
+    // ─── 批量操作 ───
+
+    /// 批量删除键（Pipeline DEL）
+    pub async fn batch_delete(&self, connection_id: &str, keys: Vec<String>) -> Result<u64, String> {
+        if keys.is_empty() {
+            return Ok(0);
+        }
+        let mut cmd = redis::cmd("DEL");
+        for k in &keys {
+            cmd.arg(k);
+        }
+        self.exec_cmd(connection_id, &mut cmd).await
+            .map_err(|e| format!("批量删除失败: {}", e))
+    }
+
+    /// 批量设置 TTL（逐个 EXPIRE）
+    pub async fn batch_set_ttl(
+        &self,
+        connection_id: &str,
+        keys: Vec<String>,
+        ttl_secs: i64,
+    ) -> Result<u64, String> {
+        if keys.is_empty() {
+            return Ok(0);
+        }
+        let mut success_count: u64 = 0;
+        for key in &keys {
+            let ok: Result<i64, String> = self.exec_cmd(
+                connection_id,
+                redis::cmd("EXPIRE").arg(key).arg(ttl_secs),
+            ).await;
+            if ok.unwrap_or(0) == 1 {
+                success_count += 1;
+            }
+        }
+        Ok(success_count)
+    }
+
+    /// 批量导出键值（逐个获取类型+TTL+值）
+    pub async fn batch_export(
+        &self,
+        connection_id: &str,
+        keys: Vec<String>,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let mut results = Vec::new();
+        for key in &keys {
+            let key_type: String = self.exec_cmd(
+                connection_id,
+                redis::cmd("TYPE").arg(key.as_str()),
+            ).await.unwrap_or_else(|_| "unknown".to_string());
+
+            let ttl: i64 = self.exec_cmd(
+                connection_id,
+                redis::cmd("TTL").arg(key.as_str()),
+            ).await.unwrap_or(-1);
+
+            // 获取值
+            let value = self.get_value(connection_id, key).await
+                .unwrap_or(RedisValue::Unknown { raw: "(error)".to_string() });
+
+            results.push(serde_json::json!({
+                "key": key,
+                "type": key_type,
+                "ttl": ttl,
+                "value": value,
+            }));
+        }
+        Ok(results)
+    }
+
+    /// 批量导入键值（接受与 batch_export 相同的 JSON 格式）
+    ///
+    /// 每个条目格式：{ key, type, ttl, value }
+    /// value 使用 serde 内部标记: { "type": "string", "value": "..." }
+    /// 根据 value.type 使用不同命令恢复：string→SET, hash→HSET, list→RPUSH, set→SADD, zset→ZADD
+    /// ttl > 0 时自动设置过期时间
+    pub async fn batch_import(
+        &self,
+        connection_id: &str,
+        items: Vec<serde_json::Value>,
+    ) -> Result<u64, String> {
+        let mut success_count: u64 = 0;
+
+        for item in &items {
+            let key = item["key"].as_str().unwrap_or_default();
+            if key.is_empty() { continue; }
+
+            let ttl = item["ttl"].as_i64().unwrap_or(-1);
+            let value = &item["value"];
+            // value 内部 "type" 字段标识类型（serde tag = "type" 序列化格式）
+            let val_type = value.get("type").and_then(|t| t.as_str())
+                .or_else(|| item["type"].as_str())
+                .unwrap_or("string");
+
+            let result = match val_type {
+                "string" => {
+                    // value: { "type": "string", "value": "..." }
+                    let str_val = value.get("value")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default();
+                    self.exec_cmd::<()>(
+                        connection_id,
+                        redis::cmd("SET").arg(key).arg(str_val),
+                    ).await
+                }
+                "hash" => {
+                    // value: { "type": "hash", "fields": [{ "field": "...", "value": "..." }, ...] }
+                    if let Some(fields) = value.get("fields").and_then(|f| f.as_array()) {
+                        let _ = self.exec_cmd::<()>(connection_id, redis::cmd("DEL").arg(key)).await;
+                        let mut cmd = redis::cmd("HSET");
+                        cmd.arg(key);
+                        for field in fields {
+                            let f = field.get("field").and_then(|v| v.as_str()).unwrap_or_default();
+                            let v = field.get("value").and_then(|v| v.as_str()).unwrap_or_default();
+                            cmd.arg(f).arg(v);
+                        }
+                        if !fields.is_empty() {
+                            self.exec_cmd::<()>(connection_id, &mut cmd).await
+                        } else {
+                            Ok(())
+                        }
+                    } else {
+                        Ok(())
+                    }
+                }
+                "list" => {
+                    // value: { "type": "list", "items": ["a", "b", ...], "total": N }
+                    if let Some(items_arr) = value.get("items").and_then(|i| i.as_array()) {
+                        let _ = self.exec_cmd::<()>(connection_id, redis::cmd("DEL").arg(key)).await;
+                        if !items_arr.is_empty() {
+                            let mut cmd = redis::cmd("RPUSH");
+                            cmd.arg(key);
+                            for item in items_arr {
+                                cmd.arg(item.as_str().unwrap_or_default());
+                            }
+                            self.exec_cmd::<()>(connection_id, &mut cmd).await
+                        } else {
+                            Ok(())
+                        }
+                    } else {
+                        Ok(())
+                    }
+                }
+                "set" => {
+                    // value: { "type": "set", "members": ["a", "b", ...] }
+                    if let Some(members) = value.get("members").and_then(|m| m.as_array()) {
+                        let _ = self.exec_cmd::<()>(connection_id, redis::cmd("DEL").arg(key)).await;
+                        if !members.is_empty() {
+                            let mut cmd = redis::cmd("SADD");
+                            cmd.arg(key);
+                            for m in members {
+                                cmd.arg(m.as_str().unwrap_or_default());
+                            }
+                            self.exec_cmd::<()>(connection_id, &mut cmd).await
+                        } else {
+                            Ok(())
+                        }
+                    } else {
+                        Ok(())
+                    }
+                }
+                "zset" => {
+                    // value: { "type": "zset", "members": [{ "member": "...", "score": N }, ...] }
+                    if let Some(members) = value.get("members").and_then(|m| m.as_array()) {
+                        let _ = self.exec_cmd::<()>(connection_id, redis::cmd("DEL").arg(key)).await;
+                        if !members.is_empty() {
+                            let mut cmd = redis::cmd("ZADD");
+                            cmd.arg(key);
+                            for m in members {
+                                let score = m.get("score").and_then(|s| s.as_f64()).unwrap_or(0.0);
+                                let member = m.get("member").and_then(|v| v.as_str()).unwrap_or_default();
+                                cmd.arg(score).arg(member);
+                            }
+                            self.exec_cmd::<()>(connection_id, &mut cmd).await
+                        } else {
+                            Ok(())
+                        }
+                    } else {
+                        Ok(())
+                    }
+                }
+                _ => {
+                    continue; // 跳过不支持的类型（stream、unknown）
+                }
+            };
+
+            if result.is_ok() {
+                // 设置 TTL
+                if ttl > 0 {
+                    let _ = self.exec_cmd::<()>(
+                        connection_id,
+                        redis::cmd("EXPIRE").arg(key).arg(ttl),
+                    ).await;
+                }
+                success_count += 1;
+            }
+        }
+
+        Ok(success_count)
+    }
+
+    // ─── CLIENT LIST ───
+
+    /// 获取客户端列表（解析 CLIENT LIST 输出）
+    pub async fn client_list(&self, connection_id: &str) -> Result<Vec<RedisClientInfo>, String> {
+        let raw: String = self.exec_cmd(
+            connection_id,
+            redis::cmd("CLIENT").arg("LIST"),
+        ).await.map_err(|e| format!("CLIENT LIST 失败: {}", e))?;
+
+        Ok(Self::parse_client_list(&raw))
+    }
+
+    /// 断开指定客户端（CLIENT KILL ADDR addr）
+    pub async fn client_kill(&self, connection_id: &str, addr: &str) -> Result<(), String> {
+        self.exec_cmd::<i64>(
+            connection_id,
+            redis::cmd("CLIENT").arg("KILL").arg("ADDR").arg(addr),
+        ).await.map_err(|e| format!("CLIENT KILL 失败: {}", e))?;
+        Ok(())
+    }
+
+    /// 解析 CLIENT LIST 输出
+    /// 每行格式: key1=value1 key2=value2 ...
+    fn parse_client_list(raw: &str) -> Vec<RedisClientInfo> {
+        let mut clients = Vec::new();
+        for line in raw.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let mut fields: HashMap<String, String> = HashMap::new();
+            for pair in line.split_whitespace() {
+                if let Some((k, v)) = pair.split_once('=') {
+                    fields.insert(k.to_string(), v.to_string());
+                }
+            }
+
+            let get = |k: &str| fields.get(k).cloned().unwrap_or_default();
+
+            clients.push(RedisClientInfo {
+                id: get("id"),
+                addr: get("addr"),
+                name: {
+                    let n = get("name");
+                    if n.is_empty() { None } else { Some(n) }
+                },
+                age: get("age").parse().unwrap_or(0),
+                idle: get("idle").parse().unwrap_or(0),
+                flags: get("flags"),
+                db: get("db").parse().unwrap_or(0),
+                cmd: {
+                    let c = get("cmd");
+                    if c.is_empty() || c == "NULL" { None } else { Some(c) }
+                },
+            });
+        }
+        clients
+    }
+
+    // ─── Lua 脚本 ───
+
+    /// 执行 Lua 脚本（EVAL）
+    pub async fn eval_lua(
+        &self,
+        connection_id: &str,
+        script: &str,
+        keys: Vec<String>,
+        args: Vec<String>,
+    ) -> Result<LuaExecResult, String> {
+        let start = Instant::now();
+
+        let mut cmd = redis::cmd("EVAL");
+        cmd.arg(script).arg(keys.len());
+        for k in &keys {
+            cmd.arg(k);
+        }
+        for a in &args {
+            cmd.arg(a);
+        }
+
+        let result: Value = self.exec_cmd(connection_id, &mut cmd).await
+            .map_err(|e| format!("EVAL 失败: {}", e))?;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let json_value = Self::redis_value_to_json(&result);
+
+        Ok(LuaExecResult {
+            result: json_value,
+            duration_ms,
+        })
+    }
+
+    /// 加载脚本到服务器缓存（SCRIPT LOAD）
+    pub async fn script_load(&self, connection_id: &str, script: &str) -> Result<String, String> {
+        self.exec_cmd(
+            connection_id,
+            redis::cmd("SCRIPT").arg("LOAD").arg(script),
+        ).await.map_err(|e| format!("SCRIPT LOAD 失败: {}", e))
+    }
+
+    /// 检查脚本是否存在（SCRIPT EXISTS）
+    pub async fn script_exists(&self, connection_id: &str, shas: Vec<String>) -> Result<Vec<bool>, String> {
+        let mut cmd = redis::cmd("SCRIPT");
+        cmd.arg("EXISTS");
+        for sha in &shas {
+            cmd.arg(sha);
+        }
+        let results: Vec<i64> = self.exec_cmd(connection_id, &mut cmd).await
+            .map_err(|e| format!("SCRIPT EXISTS 失败: {}", e))?;
+        Ok(results.into_iter().map(|v| v == 1).collect())
+    }
+
+    /// 清除所有脚本缓存（SCRIPT FLUSH）
+    pub async fn script_flush(&self, connection_id: &str) -> Result<(), String> {
+        self.exec_cmd::<()>(
+            connection_id,
+            redis::cmd("SCRIPT").arg("FLUSH"),
+        ).await.map_err(|e| format!("SCRIPT FLUSH 失败: {}", e))
+    }
+
+    /// 将 Redis Value 递归转换为 serde_json::Value
+    fn redis_value_to_json(value: &Value) -> serde_json::Value {
+        match value {
+            Value::Nil => serde_json::Value::Null,
+            Value::Int(n) => serde_json::json!(*n),
+            Value::BulkString(bytes) => {
+                match String::from_utf8(bytes.clone()) {
+                    Ok(s) => serde_json::json!(s),
+                    Err(_) => serde_json::json!(format!("(binary) {} bytes", bytes.len())),
+                }
+            }
+            Value::SimpleString(s) => serde_json::json!(s),
+            Value::Okay => serde_json::json!("OK"),
+            Value::Array(items) => {
+                let arr: Vec<serde_json::Value> = items.iter().map(Self::redis_value_to_json).collect();
+                serde_json::json!(arr)
+            }
+            Value::Double(f) => serde_json::json!(*f),
+            Value::Boolean(b) => serde_json::json!(*b),
+            _ => serde_json::json!(format!("{:?}", value)),
         }
     }
 }

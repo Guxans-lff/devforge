@@ -4,15 +4,20 @@ use tauri::State;
 use crate::models::redis::{
     ClusterNodeInfo, HashField, RedisCliResult, RedisKeyInfo, RedisScanResult, RedisServerInfo,
     RedisSlowLogConfig, RedisSlowLogEntry, RedisValue, StreamEntry, ZSetMember, PubSubSubscription,
+    RedisMemoryStats, RedisKeyMemory, RedisClientInfo, LuaExecResult,
 };
 use crate::services::redis_engine::RedisEngine;
 use crate::services::redis_pubsub::RedisPubSubManager;
+use crate::services::redis_monitor::RedisMonitorManager;
 
 /// Redis 引擎全局状态
 pub type RedisEngineState = Arc<RedisEngine>;
 
 /// PubSub 管理器全局状态
 pub type RedisPubSubState = Arc<RedisPubSubManager>;
+
+/// MONITOR 管理器全局状态
+pub type RedisMonitorState = Arc<RedisMonitorManager>;
 
 // ─── 连接管理 ───
 
@@ -661,4 +666,251 @@ pub async fn redis_cluster_nodes(
     connection_id: String,
 ) -> Result<Vec<ClusterNodeInfo>, String> {
     state.cluster_nodes(&connection_id).await
+}
+
+// ─── Sentinel ───
+
+/// 通过 Sentinel 连接 Redis
+#[tauri::command]
+pub async fn redis_connect_sentinel(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    sentinel_nodes: Vec<String>,
+    master_name: String,
+    password: Option<String>,
+    sentinel_password: Option<String>,
+    database: u8,
+    use_tls: bool,
+    timeout_secs: Option<u64>,
+) -> Result<String, String> {
+    state
+        .connect_sentinel(
+            &connection_id,
+            sentinel_nodes,
+            &master_name,
+            password.as_deref(),
+            sentinel_password.as_deref(),
+            database,
+            use_tls,
+            timeout_secs.unwrap_or(10),
+        )
+        .await
+}
+
+/// 测试 Sentinel 连接
+#[tauri::command]
+pub async fn redis_test_sentinel_connection(
+    state: State<'_, RedisEngineState>,
+    sentinel_nodes: Vec<String>,
+    master_name: String,
+    password: Option<String>,
+    sentinel_password: Option<String>,
+    database: u8,
+    use_tls: bool,
+    timeout_secs: Option<u64>,
+) -> Result<String, String> {
+    state
+        .test_sentinel_connection(
+            sentinel_nodes,
+            &master_name,
+            password.as_deref(),
+            sentinel_password.as_deref(),
+            database,
+            use_tls,
+            timeout_secs.unwrap_or(10),
+        )
+        .await
+}
+
+// ─── 内存分析 ───
+
+/// 获取内存统计
+#[tauri::command]
+pub async fn redis_memory_stats(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+) -> Result<RedisMemoryStats, String> {
+    state.memory_stats(&connection_id).await
+}
+
+/// 获取 MEMORY DOCTOR 建议
+#[tauri::command]
+pub async fn redis_memory_doctor(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+) -> Result<String, String> {
+    state.memory_doctor(&connection_id).await
+}
+
+/// 获取单个键的内存占用
+#[tauri::command]
+pub async fn redis_memory_usage(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    key: String,
+) -> Result<i64, String> {
+    state.memory_usage_key(&connection_id, &key).await
+}
+
+/// 获取占用内存最多的 Top-N 键
+#[tauri::command]
+pub async fn redis_top_keys_by_memory(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    count: Option<usize>,
+    pattern: Option<String>,
+    scan_limit: Option<u64>,
+) -> Result<Vec<RedisKeyMemory>, String> {
+    state
+        .top_keys_by_memory(
+            &connection_id,
+            count.unwrap_or(20),
+            pattern.as_deref().unwrap_or("*"),
+            scan_limit.unwrap_or(10000),
+        )
+        .await
+}
+
+// ─── 批量操作 ───
+
+/// 批量删除键
+#[tauri::command]
+pub async fn redis_batch_delete(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    keys: Vec<String>,
+) -> Result<u64, String> {
+    state.batch_delete(&connection_id, keys).await
+}
+
+/// 批量设置 TTL
+#[tauri::command]
+pub async fn redis_batch_set_ttl(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    keys: Vec<String>,
+    ttl_secs: i64,
+) -> Result<u64, String> {
+    state.batch_set_ttl(&connection_id, keys, ttl_secs).await
+}
+
+/// 批量导出键值
+#[tauri::command]
+pub async fn redis_batch_export(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    keys: Vec<String>,
+) -> Result<Vec<serde_json::Value>, String> {
+    state.batch_export(&connection_id, keys).await
+}
+
+/// 批量导入键值（接受 batch_export 相同格式的 JSON）
+#[tauri::command]
+pub async fn redis_batch_import(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    items: Vec<serde_json::Value>,
+) -> Result<u64, String> {
+    state.batch_import(&connection_id, items).await
+}
+
+// ─── CLIENT LIST ───
+
+/// 获取客户端列表
+#[tauri::command]
+pub async fn redis_client_list(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+) -> Result<Vec<RedisClientInfo>, String> {
+    state.client_list(&connection_id).await
+}
+
+/// 断开指定客户端
+#[tauri::command]
+pub async fn redis_client_kill(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    addr: String,
+) -> Result<(), String> {
+    state.client_kill(&connection_id, &addr).await
+}
+
+// ─── MONITOR ───
+
+/// 启动 MONITOR
+#[tauri::command]
+pub async fn redis_monitor_start(
+    monitor_state: State<'_, RedisMonitorState>,
+    app_handle: tauri::AppHandle,
+    connection_id: String,
+    host: String,
+    port: u16,
+    password: Option<String>,
+    use_tls: bool,
+    timeout_secs: Option<u64>,
+) -> Result<(), String> {
+    monitor_state
+        .start(
+            &connection_id,
+            &host,
+            port,
+            password.as_deref(),
+            use_tls,
+            timeout_secs.unwrap_or(10),
+            app_handle,
+        )
+        .await
+}
+
+/// 停止 MONITOR
+#[tauri::command]
+pub async fn redis_monitor_stop(
+    monitor_state: State<'_, RedisMonitorState>,
+    connection_id: String,
+) -> Result<(), String> {
+    monitor_state.stop(&connection_id).await;
+    Ok(())
+}
+
+// ─── Lua 脚本 ───
+
+/// 执行 Lua 脚本
+#[tauri::command]
+pub async fn redis_eval_lua(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    script: String,
+    keys: Vec<String>,
+    args: Vec<String>,
+) -> Result<LuaExecResult, String> {
+    state.eval_lua(&connection_id, &script, keys, args).await
+}
+
+/// 加载 Lua 脚本到服务器
+#[tauri::command]
+pub async fn redis_script_load(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    script: String,
+) -> Result<String, String> {
+    state.script_load(&connection_id, &script).await
+}
+
+/// 检查脚本是否存在
+#[tauri::command]
+pub async fn redis_script_exists(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+    shas: Vec<String>,
+) -> Result<Vec<bool>, String> {
+    state.script_exists(&connection_id, shas).await
+}
+
+/// 清除脚本缓存
+#[tauri::command]
+pub async fn redis_script_flush(
+    state: State<'_, RedisEngineState>,
+    connection_id: String,
+) -> Result<(), String> {
+    state.script_flush(&connection_id).await
 }

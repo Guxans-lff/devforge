@@ -576,7 +576,7 @@ impl SftpEngine {
         let (channel, start) = {
             let connections = self.connections.read().await;
             let conn = connections.get(connection_id)
-                .ok_or_else(|| AppError::Other(format!("连接不存在: {}", connection_id)))?;
+                .ok_or_else(|| AppError::Other("连接已断开，请重新连接".to_string()))?;
             
             let start = std::time::Instant::now();
             log::debug!("[SFTP] Opening new channel for connection: {}", connection_id);
@@ -623,7 +623,7 @@ impl SftpEngine {
         let mut channel = {
             let connections = self.connections.read().await;
             let conn = connections.get(connection_id)
-                .ok_or_else(|| AppError::Other(format!("连接不存在: {}", connection_id)))?;
+                .ok_or_else(|| AppError::Other("连接已断开，请重新连接".to_string()))?;
 
             conn.ssh_session
                 .channel_open_session()

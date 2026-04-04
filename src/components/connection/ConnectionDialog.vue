@@ -18,7 +18,7 @@ import SshForm from './SshForm.vue'
 import SftpForm from './SftpForm.vue'
 import RedisForm from './RedisForm.vue'
 import type { ConnectionRecord } from '@/api/connection'
-import { redisTestConnection, redisTestClusterConnection } from '@/api/redis'
+import { redisTestConnection, redisTestClusterConnection, redisTestSentinelConnection } from '@/api/redis'
 import { tunnelOpen, tunnelClose } from '@/api/tunnel'
 import type { SslConfig } from '@/types/connection'
 import type { EnvironmentType } from '@/types/environment'
@@ -82,6 +82,11 @@ const form = ref({
   // Redis Cluster
   isCluster: false,
   clusterNodes: [] as string[],
+  // Redis Sentinel
+  isSentinel: false,
+  sentinelNodes: [] as string[],
+  sentinelMasterName: '',
+  sentinelPassword: '',
 })
 
 const isEditing = computed(() => !!props.editingConnection)
@@ -202,6 +207,10 @@ const redisFormData = computed({
     useTls: form.value.ssl?.mode !== 'disabled',
     isCluster: form.value.isCluster,
     clusterNodes: form.value.clusterNodes,
+    isSentinel: form.value.isSentinel,
+    sentinelNodes: form.value.sentinelNodes,
+    sentinelMasterName: form.value.sentinelMasterName,
+    sentinelPassword: form.value.sentinelPassword,
     useSshTunnel: form.value.useSshTunnel,
     sshHost: form.value.sshHost,
     sshPort: form.value.sshPort,
@@ -219,6 +228,10 @@ const redisFormData = computed({
     form.value.ssl = { ...form.value.ssl, mode: value.useTls ? 'required' : 'disabled' }
     form.value.isCluster = value.isCluster
     form.value.clusterNodes = value.clusterNodes
+    form.value.isSentinel = value.isSentinel
+    form.value.sentinelNodes = value.sentinelNodes
+    form.value.sentinelMasterName = value.sentinelMasterName
+    form.value.sentinelPassword = value.sentinelPassword
     form.value.useSshTunnel = value.useSshTunnel
     form.value.sshHost = value.sshHost
     form.value.sshPort = value.sshPort
@@ -269,6 +282,12 @@ watch(
         form.value.sshPassphrase = storedSshPassphrase ?? ''
       } catch { /* not found */ }
 
+      // 加载 Redis Sentinel 密码
+      try {
+        const storedSentinelPwd = await getCredential(`${conn.id}:sentinelPassword`)
+        form.value.sentinelPassword = storedSentinelPwd ?? ''
+      } catch { /* not found */ }
+
       try {
         const config = JSON.parse(conn.configJson)
         form.value.database = config.database ?? ''
@@ -307,6 +326,12 @@ watch(
         if (config.isCluster) {
           form.value.isCluster = true
           form.value.clusterNodes = config.clusterNodes ?? []
+        }
+        // 加载 Redis Sentinel 配置
+        if (config.isSentinel) {
+          form.value.isSentinel = true
+          form.value.sentinelNodes = config.sentinelNodes ?? []
+          form.value.sentinelMasterName = config.sentinelMasterName ?? ''
         }
       } catch {
         // ignore parse errors
@@ -376,6 +401,10 @@ function resetForm() {
     sshPassphrase: '',
     isCluster: false,
     clusterNodes: [] as string[],
+    isSentinel: false,
+    sentinelNodes: [] as string[],
+    sentinelMasterName: '',
+    sentinelPassword: '',
   }
 }
 
@@ -424,6 +453,11 @@ async function handleSave(connectAfter = false) {
       if (form.value.sshAuthMethod === 'key' && form.value.sshPassphrase) {
         await saveCredential(`${savedId}:sshPassphrase`, form.value.sshPassphrase)
       }
+    }
+
+    // 保存 Redis Sentinel 密码
+    if (connectionType.value === 'redis' && form.value.isSentinel && form.value.sentinelPassword) {
+      await saveCredential(`${savedId}:sentinelPassword`, form.value.sentinelPassword)
     }
 
     emit('saved')
@@ -490,6 +524,12 @@ function buildConfigJson(): string {
     redisConfig.isCluster = true
     redisConfig.clusterNodes = form.value.clusterNodes.filter(n => n.trim())
   }
+  // Sentinel 模式
+  if (form.value.isSentinel) {
+    redisConfig.isSentinel = true
+    redisConfig.sentinelNodes = form.value.sentinelNodes.filter(n => n.trim())
+    redisConfig.sentinelMasterName = form.value.sentinelMasterName
+  }
   if (form.value.useSshTunnel) {
     redisConfig.sshTunnel = {
       enabled: true,
@@ -533,6 +573,19 @@ async function handleTestConnection() {
           const msg = await redisTestClusterConnection({
             nodes,
             password: form.value.password || null,
+            useTls: form.value.ssl?.mode !== 'disabled',
+            timeoutSecs: 10,
+          })
+          result = { success: true, message: msg }
+        } else if (form.value.isSentinel) {
+          // Sentinel 模式：测试 Sentinel 连接
+          const nodes = form.value.sentinelNodes.filter(n => n.trim())
+          const msg = await redisTestSentinelConnection({
+            sentinelNodes: nodes,
+            masterName: form.value.sentinelMasterName,
+            password: form.value.password || null,
+            sentinelPassword: form.value.sentinelPassword || null,
+            database: parseInt(form.value.database) || 0,
             useTls: form.value.ssl?.mode !== 'disabled',
             timeoutSecs: 10,
           })

@@ -77,6 +77,14 @@ export interface RedisConfig {
   isCluster?: boolean
   /** Cluster 节点列表（"host:port" 格式） */
   clusterNodes?: string[]
+  /** 是否为 Sentinel 模式 */
+  isSentinel?: boolean
+  /** Sentinel 节点列表（"host:port" 格式） */
+  sentinelNodes?: string[]
+  /** Sentinel Master 名称 */
+  sentinelMasterName?: string
+  /** Sentinel 自身密码 */
+  sentinelPassword?: string
 }
 
 /** Cluster 节点信息（CLUSTER NODES 解析结果） */
@@ -125,4 +133,56 @@ export interface RedisSlowLogConfig {
   thresholdUs: number
   maxLen: number
   currentLen: number
+}
+
+/** 内存统计信息 */
+export interface RedisMemoryStats {
+  usedMemory: number
+  usedMemoryHuman: string
+  usedMemoryPeak: number
+  usedMemoryPeakHuman: string
+  memFragmentationRatio: number
+  evictedKeys: number
+}
+
+/** 键内存占用 */
+export interface RedisKeyMemory {
+  key: string
+  memoryBytes: number
+  keyType: string
+}
+
+/** 客户端连接信息 */
+export interface RedisClientInfo {
+  id: string
+  addr: string
+  name: string | null
+  age: number
+  idle: number
+  flags: string
+  db: number
+  cmd: string | null
+}
+
+/** MONITOR 实时消息 */
+export interface RedisMonitorMessage {
+  timestamp: number
+  clientAddr: string
+  database: string
+  command: string
+  raw: string
+}
+
+/** Lua 脚本执行结果 */
+export interface LuaExecResult {
+  result: unknown
+  durationMs: number
+}
+
+/** 批量导出的键值 */
+export interface BatchExportItem {
+  key: string
+  keyType: string
+  ttl: number
+  value: unknown
 }

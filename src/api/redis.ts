@@ -12,6 +12,11 @@ import type {
   RedisSlowLogEntry,
   RedisSlowLogConfig,
   ClusterNodeInfo,
+  RedisMemoryStats,
+  RedisKeyMemory,
+  RedisClientInfo,
+  LuaExecResult,
+  BatchExportItem,
 } from '@/types/redis'
 
 // ─── 连接管理 ───
@@ -399,4 +404,174 @@ export function redisClusterInfo(connectionId: string): Promise<string> {
 /** 获取集群节点列表（CLUSTER NODES） */
 export function redisClusterNodes(connectionId: string): Promise<ClusterNodeInfo[]> {
   return invokeCommand('redis_cluster_nodes', { connectionId })
+}
+
+// ─── Sentinel ───
+
+/** 连接 Sentinel 模式 Redis */
+export function redisConnectSentinel(params: {
+  connectionId: string
+  sentinelNodes: string[]
+  masterName: string
+  password?: string | null
+  sentinelPassword?: string | null
+  database?: number
+  useTls?: boolean
+  timeoutSecs?: number
+}): Promise<string> {
+  return invokeCommand('redis_connect_sentinel', {
+    connectionId: params.connectionId,
+    sentinelNodes: params.sentinelNodes,
+    masterName: params.masterName,
+    password: params.password ?? null,
+    sentinelPassword: params.sentinelPassword ?? null,
+    database: params.database ?? 0,
+    useTls: params.useTls ?? false,
+    timeoutSecs: params.timeoutSecs ?? 10,
+  })
+}
+
+/** 测试 Sentinel 连接 */
+export function redisTestSentinelConnection(params: {
+  sentinelNodes: string[]
+  masterName: string
+  password?: string | null
+  sentinelPassword?: string | null
+  database?: number
+  useTls?: boolean
+  timeoutSecs?: number
+}): Promise<string> {
+  return invokeCommand('redis_test_sentinel_connection', {
+    sentinelNodes: params.sentinelNodes,
+    masterName: params.masterName,
+    password: params.password ?? null,
+    sentinelPassword: params.sentinelPassword ?? null,
+    database: params.database ?? 0,
+    useTls: params.useTls ?? false,
+    timeoutSecs: params.timeoutSecs ?? 10,
+  })
+}
+
+// ─── 内存分析 ───
+
+/** 获取内存统计信息 */
+export function redisMemoryStats(connectionId: string): Promise<RedisMemoryStats> {
+  return invokeCommand('redis_memory_stats', { connectionId })
+}
+
+/** 获取 MEMORY DOCTOR 建议 */
+export function redisMemoryDoctor(connectionId: string): Promise<string> {
+  return invokeCommand('redis_memory_doctor', { connectionId })
+}
+
+/** 获取单个键的内存占用 */
+export function redisMemoryUsage(connectionId: string, key: string): Promise<number> {
+  return invokeCommand('redis_memory_usage', { connectionId, key })
+}
+
+/** 获取内存占用 Top-N 键 */
+export function redisTopKeysByMemory(params: {
+  connectionId: string
+  count?: number
+  pattern?: string
+  scanLimit?: number
+}): Promise<RedisKeyMemory[]> {
+  return invokeCommand('redis_top_keys_by_memory', {
+    connectionId: params.connectionId,
+    count: params.count ?? null,
+    pattern: params.pattern ?? null,
+    scanLimit: params.scanLimit ?? null,
+  })
+}
+
+// ─── 批量操作 ───
+
+/** 批量删除键 */
+export function redisBatchDelete(connectionId: string, keys: string[]): Promise<number> {
+  return invokeCommand('redis_batch_delete', { connectionId, keys })
+}
+
+/** 批量设置 TTL */
+export function redisBatchSetTtl(connectionId: string, keys: string[], ttlSecs: number): Promise<number> {
+  return invokeCommand('redis_batch_set_ttl', { connectionId, keys, ttlSecs })
+}
+
+/** 批量导出键值 */
+export function redisBatchExport(connectionId: string, keys: string[]): Promise<BatchExportItem[]> {
+  return invokeCommand('redis_batch_export', { connectionId, keys })
+}
+
+/** 批量导入键值（接受 batchExport 相同格式的 JSON） */
+export function redisBatchImport(connectionId: string, items: unknown[]): Promise<number> {
+  return invokeCommand('redis_batch_import', { connectionId, items })
+}
+
+// ─── CLIENT LIST ───
+
+/** 获取客户端连接列表 */
+export function redisClientList(connectionId: string): Promise<RedisClientInfo[]> {
+  return invokeCommand('redis_client_list', { connectionId })
+}
+
+/** 断开指定客户端连接 */
+export function redisClientKill(connectionId: string, addr: string): Promise<void> {
+  return invokeCommand('redis_client_kill', { connectionId, addr })
+}
+
+// ─── MONITOR ───
+
+/** 启动 MONITOR 实时监控 */
+export function redisMonitorStart(params: {
+  connectionId: string
+  host: string
+  port: number
+  password?: string | null
+  useTls?: boolean
+  timeoutSecs?: number
+}): Promise<void> {
+  return invokeCommand('redis_monitor_start', {
+    connectionId: params.connectionId,
+    host: params.host,
+    port: params.port,
+    password: params.password ?? null,
+    useTls: params.useTls ?? false,
+    timeoutSecs: params.timeoutSecs ?? 10,
+  })
+}
+
+/** 停止 MONITOR 监控 */
+export function redisMonitorStop(connectionId: string): Promise<void> {
+  return invokeCommand('redis_monitor_stop', { connectionId })
+}
+
+// ─── Lua 脚本 ───
+
+/** 执行 Lua 脚本（EVAL） */
+export function redisEvalLua(params: {
+  connectionId: string
+  script: string
+  keys: string[]
+  args: string[]
+}): Promise<LuaExecResult> {
+  return invokeCommand('redis_eval_lua', {
+    connectionId: params.connectionId,
+    script: params.script,
+    keys: params.keys,
+    args: params.args,
+  })
+}
+
+/** 加载 Lua 脚本（SCRIPT LOAD） */
+export function redisScriptLoad(connectionId: string, script: string): Promise<string> {
+  return invokeCommand('redis_script_load', { connectionId, script })
+}
+
+/** 检查脚本是否存在（SCRIPT EXISTS） */
+export function redisScriptExists(connectionId: string, shas: string[]): Promise<boolean[]> {
+  return invokeCommand('redis_script_exists', { connectionId, shas })
+}
+
+/** 清空脚本缓存（SCRIPT FLUSH） */
+export function redisScriptFlush(connectionId: string): Promise<void> {
+  return invokeCommand('redis_script_flush', { connectionId })
 }

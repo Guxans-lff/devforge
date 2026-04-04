@@ -8,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { RefreshCw, Plus, Info, TerminalSquare, Database, Loader2, Radio, Activity } from 'lucide-vue-next'
+import { RefreshCw, Plus, Info, TerminalSquare, Database, Loader2, Radio, Activity, MemoryStick, Users, Eye, Code } from 'lucide-vue-next'
 
 const props = defineProps<{
   connectionId: string
@@ -28,6 +28,10 @@ const emit = defineEmits<{
   toggleCli: []
   togglePubsub: []
   toggleSlowlog: []
+  toggleMemory: []
+  toggleClientList: []
+  toggleMonitor: []
+  toggleLua: []
 }>()
 
 const { t } = useI18n()
@@ -95,8 +99,20 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
       <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('togglePubsub')">
         <Radio class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleSlowlog')">
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleSlowlog')" :title="t('redis.slowlog.title')">
         <Activity class="h-3.5 w-3.5" />
+      </Button>
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleMemory')" :title="t('redis.memory.title')">
+        <MemoryStick class="h-3.5 w-3.5" />
+      </Button>
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleClientList')" :title="t('redis.clients.title')">
+        <Users class="h-3.5 w-3.5" />
+      </Button>
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleMonitor')" :title="t('redis.monitor.title')">
+        <Eye class="h-3.5 w-3.5" />
+      </Button>
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleLua')" :title="t('redis.lua.title')">
+        <Code class="h-3.5 w-3.5" />
       </Button>
     </template>
     <Loader2 v-else-if="connecting" class="h-4 w-4 animate-spin text-muted-foreground" />

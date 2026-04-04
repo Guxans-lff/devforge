@@ -24,6 +24,11 @@ export interface RedisFormData {
   // Cluster 模式
   isCluster: boolean
   clusterNodes: string[]
+  // Sentinel 模式
+  isSentinel: boolean
+  sentinelNodes: string[]
+  sentinelMasterName: string
+  sentinelPassword: string
   // SSH 隧道
   useSshTunnel: boolean
   sshHost: string
@@ -88,6 +93,25 @@ function updateClusterNode(index: number, value: string) {
   nodes[index] = value
   localValue.value = { ...localValue.value, clusterNodes: nodes }
 }
+
+/** 新增 Sentinel 节点 */
+function addSentinelNode() {
+  const nodes = [...localValue.value.sentinelNodes, '']
+  localValue.value = { ...localValue.value, sentinelNodes: nodes }
+}
+
+/** 删除 Sentinel 节点 */
+function removeSentinelNode(index: number) {
+  const nodes = localValue.value.sentinelNodes.filter((_, i) => i !== index)
+  localValue.value = { ...localValue.value, sentinelNodes: nodes }
+}
+
+/** 更新 Sentinel 节点地址 */
+function updateSentinelNode(index: number, value: string) {
+  const nodes = [...localValue.value.sentinelNodes]
+  nodes[index] = value
+  localValue.value = { ...localValue.value, sentinelNodes: nodes }
+}
 </script>
 
 <template>
@@ -101,8 +125,8 @@ function updateClusterNode(index: number, value: string) {
         </span>
       </div>
 
-      <!-- Host + Port -->
-      <div class="grid grid-cols-3 gap-3">
+      <!-- Host + Port（Sentinel 模式下隐藏，由哨兵自动发现 Master 地址） -->
+      <div v-if="!localValue.isSentinel" class="grid grid-cols-3 gap-3">
         <div class="col-span-2 space-y-1.5">
           <Label class="text-[11px] font-bold text-muted-foreground/70 flex items-center gap-1.5">
             <Globe class="h-3 w-3" />
@@ -195,7 +219,7 @@ function updateClusterNode(index: number, value: string) {
         </div>
         <Switch
           :checked="localValue.isCluster"
-          @update:checked="localValue = { ...localValue, isCluster: $event }"
+          @update:checked="localValue = { ...localValue, isCluster: $event, isSentinel: $event ? false : localValue.isSentinel }"
         />
       </div>
 
@@ -235,6 +259,108 @@ function updateClusterNode(index: number, value: string) {
             {{ t('redis.cluster.addNode') }}
           </Button>
           <p class="text-[9px] text-muted-foreground/40">{{ t('redis.cluster.nodesHint') }}</p>
+        </div>
+      </template>
+    </div>
+
+    <!-- Sentinel 区块 -->
+    <div class="space-y-4">
+      <div class="flex items-center gap-2">
+        <div class="h-1 w-1 rounded-full bg-primary/50"></div>
+        <span class="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/50">
+          {{ t('redis.sentinel.mode') }}
+        </span>
+      </div>
+
+      <!-- Sentinel 开关 -->
+      <div class="flex items-center justify-between rounded-lg border border-border/40 bg-muted/10 p-3">
+        <div class="space-y-0.5">
+          <Label class="text-[11px] font-bold text-foreground/80">{{ t('redis.sentinel.mode') }}</Label>
+          <p class="text-[9px] text-muted-foreground/50">{{ t('redis.sentinel.hint') }}</p>
+        </div>
+        <Switch
+          :checked="localValue.isSentinel"
+          @update:checked="localValue = { ...localValue, isSentinel: $event, isCluster: $event ? false : localValue.isCluster }"
+        />
+      </div>
+
+      <!-- Sentinel 配置（开启时显示） -->
+      <template v-if="localValue.isSentinel">
+        <!-- Master 名称 -->
+        <div class="space-y-1.5">
+          <Label class="text-[11px] font-bold text-muted-foreground/70 flex items-center gap-1.5">
+            <Shield class="h-3 w-3" />
+            {{ t('redis.sentinel.masterName') }}
+          </Label>
+          <Input
+            :model-value="localValue.sentinelMasterName"
+            @update:model-value="localValue = { ...localValue, sentinelMasterName: $event as string }"
+            placeholder="mymaster"
+            class="h-9 text-[12px] font-medium"
+          />
+        </div>
+
+        <!-- Sentinel 节点列表 -->
+        <div class="space-y-2">
+          <Label class="text-[11px] font-bold text-muted-foreground/70 flex items-center gap-1.5">
+            <Network class="h-3 w-3" />
+            {{ t('redis.sentinel.nodes') }}
+          </Label>
+          <div
+            v-for="(node, index) in localValue.sentinelNodes"
+            :key="index"
+            class="flex items-center gap-2"
+          >
+            <Input
+              :model-value="node"
+              @update:model-value="updateSentinelNode(index, $event as string)"
+              :placeholder="t('redis.sentinel.nodePlaceholder')"
+              class="h-8 text-[12px] font-medium flex-1"
+            />
+            <button
+              type="button"
+              class="h-8 w-8 flex items-center justify-center rounded-md text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 transition-colors"
+              @click="removeSentinelNode(index)"
+            >
+              <X class="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            class="h-8 text-[11px] font-medium gap-1.5"
+            @click="addSentinelNode"
+          >
+            <Plus class="h-3 w-3" />
+            {{ t('redis.sentinel.addNode') }}
+          </Button>
+        </div>
+
+        <!-- Sentinel 密码 -->
+        <div class="space-y-1.5">
+          <Label class="text-[11px] font-bold text-muted-foreground/70 flex items-center gap-1.5">
+            <Lock class="h-3 w-3" />
+            {{ t('redis.sentinel.password') }}
+            <span class="text-muted-foreground/30 font-normal">({{ t('redis.optional') }})</span>
+          </Label>
+          <div class="relative">
+            <Input
+              :type="showPassword ? 'text' : 'password'"
+              :model-value="localValue.sentinelPassword"
+              @update:model-value="localValue = { ...localValue, sentinelPassword: $event as string }"
+              :placeholder="t('redis.sentinel.passwordHint')"
+              autocomplete="off"
+              class="h-9 text-[12px] font-medium pr-9"
+            />
+            <button
+              type="button"
+              class="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+              @click="emit('update:showPassword', !showPassword)"
+            >
+              <Eye v-if="!showPassword" class="h-3.5 w-3.5" />
+              <EyeOff v-else class="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </template>
     </div>
