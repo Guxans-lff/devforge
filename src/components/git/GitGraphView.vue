@@ -74,8 +74,8 @@ const COLORS = [
   '#6cb6ff', '#f47067', '#8ddb8c', '#f2cc60',
   '#dcbdfb', '#f69dab', '#76e3ea', '#adbac7',
 ]
-function colColor(col: number) {
-  return COLORS[col % COLORS.length]
+function colColor(col: number): string {
+  return COLORS[col % COLORS.length]!
 }
 
 // ── 计算属性 ────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ async function loadMore() {
 
 // ── 缓存 hashToRow 映射，仅在 graph 变更时重建 ────────────────
 let _cachedHashToRow: Map<string, number> | null = null
-let _cachedGraphNodes: typeof graph.value extends { nodes: infer N } ? N : never = null as any
+let _cachedGraphNodes: GitGraphNode[] | null = null
 
 function getHashToRow(nodes: GitGraphNode[]): Map<string, number> {
   if (_cachedHashToRow && _cachedGraphNodes === nodes) return _cachedHashToRow
@@ -135,7 +135,7 @@ function getHashToRow(nodes: GitGraphNode[]): Map<string, number> {
     map.set(node.hash, node.row)
   }
   _cachedHashToRow = map
-  _cachedGraphNodes = nodes as any
+  _cachedGraphNodes = nodes
   return map
 }
 

@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
-import type { GitCommit, GitDiff, GitFileDiff } from '@/types/git'
+import type { GitCommit } from '@/types/git'
 import { Loader2, Copy, Tag, GitBranch as GitBranchIcon } from 'lucide-vue-next'
 
 const props = defineProps<{

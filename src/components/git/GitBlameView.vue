@@ -47,7 +47,7 @@ function blameGroupClass(index: number): string {
   if (index === 0) return ''
   const prev = lines.value[index - 1]
   const curr = lines.value[index]
-  if (prev.commitHash !== curr.commitHash) return 'border-t border-border/30'
+  if (prev && curr && prev.commitHash !== curr.commitHash) return 'border-t border-border/30'
   return ''
 }
 

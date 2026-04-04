@@ -40,7 +40,7 @@ async function loadContributors() {
 /** 提交数 → 百分比条宽度 */
 function barWidth(commits: number) {
   if (!contributors.value.length) return '0%'
-  const max = contributors.value[0].commits
+  const max = contributors.value[0]?.commits ?? 1
   return `${(commits / max) * 100}%`
 }
 

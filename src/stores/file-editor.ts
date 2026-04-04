@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { shallowRef, triggerRef, computed } from 'vue'
+import { shallowRef, triggerRef, computed, ref } from 'vue'
 import { sftpReadFileContent, sftpWriteFileContent } from '@/api/file-editor'
 
 export interface OpenFile {

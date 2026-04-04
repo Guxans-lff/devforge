@@ -79,7 +79,7 @@ function initDiffEditor() {
     const originalModel = monaco.editor.createModel(props.oldContent ?? '', language)
     const modifiedModel = monaco.editor.createModel(props.newContent ?? '', language)
     diffEditor.setModel({ original: originalModel, modified: modifiedModel })
-    diffEditor.updateOptions({ theme: themeId })
+    diffEditor.updateOptions({ renderSideBySide: true })
     // 销毁旧 model
     oldModel?.original.dispose()
     oldModel?.modified.dispose()

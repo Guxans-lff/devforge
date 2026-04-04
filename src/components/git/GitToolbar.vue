@@ -30,7 +30,7 @@ const operating = computed(() => props.workspace.operating)
 const defaultRemote = computed(() => {
   const remotes = props.workspace.remotes
   if (remotes.length === 0) return 'origin'
-  return remotes.find(r => r.name === 'origin')?.name ?? remotes[0].name
+  return remotes.find(r => r.name === 'origin')?.name ?? remotes[0]?.name ?? 'origin'
 })
 
 async function handleRefresh() {
