@@ -6,3 +6,4 @@ pub mod ssh;
 pub mod table_editor;
 pub mod redis;
 pub mod transfer;
+pub mod git;

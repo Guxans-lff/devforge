@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { shallowRef, triggerRef } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { useLogStore } from './log'
 import { t } from '@/utils/i18n-helper'
@@ -27,8 +27,8 @@ export interface TransferTask {
 }
 
 export const useTransferStore = defineStore('transfer', () => {
-  const tasks = ref<Map<string, TransferTask>>(new Map())
-  const history = ref<TransferTask[]>([])
+  const tasks = shallowRef<Map<string, TransferTask>>(new Map())
+  const history = shallowRef<TransferTask[]>([])
   const logStore = useLogStore()
 
   // 监听传输进度事件
@@ -39,7 +39,7 @@ export const useTransferStore = defineStore('transfer', () => {
 
   function flushProgressUpdates() {
     if (pendingProgressUpdates) {
-      tasks.value = new Map(tasks.value)
+      triggerRef(tasks)
       pendingProgressUpdates = false
     }
     progressThrottleTimer = null
@@ -76,7 +76,7 @@ export const useTransferStore = defineStore('transfer', () => {
             status: 'pending',
             startTime: Date.now(),
           })
-          tasks.value = new Map(tasks.value)
+          triggerRef(tasks)
         }
       },
     ))
@@ -120,7 +120,7 @@ export const useTransferStore = defineStore('transfer', () => {
               archivePhase: 'extracting',
               status: 'transferring',
             })
-            tasks.value = new Map(tasks.value)
+            triggerRef(tasks)
             return
           }
 
@@ -137,14 +137,14 @@ export const useTransferStore = defineStore('transfer', () => {
           const next = [{ ...completed }, ...history.value]
           history.value = next.length > 100 ? next.slice(0, 100) : next
           // 触发响应式更新
-          tasks.value = new Map(tasks.value)
+          triggerRef(tasks)
           // 3秒后从活动列表移除（检查状态防止删除被复用的任务）
           const completedId = event.payload.id
           setTimeout(() => {
             const current = tasks.value.get(completedId)
             if (current && current.status === 'completed') {
               tasks.value.delete(completedId)
-              tasks.value = new Map(tasks.value)
+              triggerRef(tasks)
             }
           }, 3000)
         }
@@ -170,7 +170,7 @@ export const useTransferStore = defineStore('transfer', () => {
           })
 
           // 触发响应式更新
-          tasks.value = new Map(tasks.value)
+          triggerRef(tasks)
         }
       },
     ))
@@ -228,12 +228,12 @@ export const useTransferStore = defineStore('transfer', () => {
             const current = tasks.value.get(id)
             if (current && current.status === 'completed') {
               tasks.value.delete(id)
-              tasks.value = new Map(tasks.value)
+              triggerRef(tasks)
             }
           }, 3000)
         }
 
-        tasks.value = new Map(tasks.value)
+        triggerRef(tasks)
       },
     ))
   }
@@ -253,12 +253,12 @@ export const useTransferStore = defineStore('transfer', () => {
       remote: task.remotePath
     })
 
-    tasks.value = new Map(tasks.value)
+    triggerRef(tasks)
   }
 
   function removeTask(id: string) {
     tasks.value.delete(id)
-    tasks.value = new Map(tasks.value)
+    triggerRef(tasks)
   }
 
   function clearCompleted() {
@@ -269,7 +269,7 @@ export const useTransferStore = defineStore('transfer', () => {
       }
     }
     toDelete.forEach(id => tasks.value.delete(id))
-    tasks.value = new Map(tasks.value)
+    triggerRef(tasks)
   }
 
   /** 将任务标记为失败 */
@@ -277,7 +277,7 @@ export const useTransferStore = defineStore('transfer', () => {
     const task = tasks.value.get(id)
     if (task) {
       tasks.value.set(id, { ...task, status: 'error', error })
-      tasks.value = new Map(tasks.value)
+      triggerRef(tasks)
     }
   }
 

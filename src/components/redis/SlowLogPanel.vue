@@ -142,42 +142,42 @@ onMounted(() => { loadData() })
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <Activity class="h-3.5 w-3.5 text-muted-foreground/50" />
-      <span class="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">
+      <span class="text-xs font-bold text-muted-foreground/50 uppercase tracking-wider">
         {{ t('redis.slowlog.title') }}
       </span>
-      <span v-if="config" class="text-[9px] font-mono text-primary/50">
+      <span v-if="config" class="text-[10px] font-mono text-primary/50">
         {{ config.currentLen }}
       </span>
       <div class="flex-1" />
       <Button
         variant="ghost"
         size="sm"
-        class="h-6 w-6 p-0"
+        class="h-7 w-7 p-0"
         :disabled="loading"
         @click="loadData"
       >
-        <RefreshCw class="h-3 w-3" :class="{ 'animate-spin': loading }" />
+        <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loading }" />
       </Button>
       <Button
         variant="ghost"
         size="sm"
-        class="h-6 w-6 p-0"
+        class="h-7 w-7 p-0"
         @click="showConfig = true"
       >
-        <Settings class="h-3 w-3" />
+        <Settings class="h-3.5 w-3.5" />
       </Button>
       <Button
         variant="ghost"
         size="sm"
-        class="h-6 w-6 p-0"
+        class="h-7 w-7 p-0"
         @click="showResetConfirm = true"
       >
-        <Trash2 class="h-3 w-3" />
+        <Trash2 class="h-3.5 w-3.5" />
       </Button>
     </div>
 
     <!-- 配置摘要 -->
-    <div v-if="config" class="flex items-center gap-3 px-3 py-1 border-b border-border/10 text-[9px] text-muted-foreground/40 shrink-0">
+    <div v-if="config" class="flex items-center gap-3 px-3 py-1.5 border-b border-border/10 text-[10px] text-muted-foreground/40 shrink-0">
       <span>{{ t('redis.slowlog.threshold') }}: {{ config.thresholdUs }}μs</span>
       <span>{{ t('redis.slowlog.maxEntries') }}: {{ config.maxLen }}</span>
     </div>
@@ -185,14 +185,14 @@ onMounted(() => { loadData() })
     <!-- 内容区 -->
     <div class="flex-1 overflow-auto">
       <!-- 空状态 -->
-      <div v-if="sortedEntries.length === 0" class="text-muted-foreground/20 text-center py-8 text-[11px]">
+      <div v-if="sortedEntries.length === 0" class="text-muted-foreground/20 text-center py-8 text-xs">
         {{ t('redis.slowlog.noEntries') }}
       </div>
 
       <!-- 列表 -->
-      <div v-else class="font-mono text-[11px]">
+      <div v-else class="font-mono text-xs">
         <!-- 表头 -->
-        <div class="flex items-center gap-1.5 px-3 py-1 text-[9px] font-bold text-muted-foreground/40 border-b border-border/10 sticky top-0 bg-zinc-950/80 backdrop-blur-sm">
+        <div class="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold text-muted-foreground/40 border-b border-border/10 sticky top-0 bg-zinc-950/80 backdrop-blur-sm">
           <span class="w-8 shrink-0">ID</span>
           <span class="w-24 shrink-0">{{ t('redis.slowlog.time') }}</span>
           <span class="w-14 shrink-0 text-right">{{ t('redis.slowlog.duration') }}</span>
@@ -206,7 +206,7 @@ onMounted(() => { loadData() })
             @click="toggleExpand(entry.id)"
           >
             <span class="w-8 shrink-0 text-muted-foreground/30">#{{ entry.id }}</span>
-            <span class="w-24 shrink-0 text-muted-foreground/50 text-[10px]">
+            <span class="w-24 shrink-0 text-muted-foreground/50 text-xs">
               {{ formatTime(entry.timestamp) }}
             </span>
             <span
@@ -232,13 +232,13 @@ onMounted(() => { loadData() })
             v-if="expandedEntries.has(entry.id)"
             class="bg-muted/5 px-3 py-2 border-t border-border/5 space-y-1.5"
           >
-            <div class="text-[10px] text-muted-foreground/50">
+            <div class="text-xs text-muted-foreground/50">
               <span class="font-bold">{{ t('redis.slowlog.fullCommand') }}:</span>
             </div>
-            <div class="bg-zinc-900/60 rounded px-2 py-1.5 text-[10px] text-foreground/60 overflow-x-auto max-h-20 whitespace-pre-wrap break-all">
+            <div class="bg-zinc-900/60 rounded px-2 py-1.5 text-xs text-foreground/60 overflow-x-auto max-h-20 whitespace-pre-wrap break-all">
               {{ entry.commandArgs.join(' ') }}
             </div>
-            <div class="flex gap-4 text-[9px] text-muted-foreground/30">
+            <div class="flex gap-4 text-[10px] text-muted-foreground/30">
               <span>{{ entry.durationUs }}μs</span>
               <span>{{ t('redis.slowlog.client') }}: {{ entry.clientAddr }}</span>
               <span v-if="entry.clientName">{{ t('redis.slowlog.clientName') }}: {{ entry.clientName }}</span>
@@ -258,15 +258,15 @@ onMounted(() => { loadData() })
         <div class="space-y-4 py-4">
           <div class="space-y-2">
             <label class="text-sm font-medium">{{ t('redis.slowlog.threshold') }}</label>
-            <Input v-model.number="newThreshold" type="number" class="text-[11px]" />
-            <p class="text-[10px] text-muted-foreground/50">
+            <Input v-model.number="newThreshold" type="number" class="text-xs" />
+            <p class="text-xs text-muted-foreground/50">
               {{ t('redis.slowlog.currentValue') }}: {{ config?.thresholdUs ?? 0 }}μs
             </p>
           </div>
           <div class="space-y-2">
             <label class="text-sm font-medium">{{ t('redis.slowlog.maxEntries') }}</label>
-            <Input v-model.number="newMaxLen" type="number" class="text-[11px]" />
-            <p class="text-[10px] text-muted-foreground/50">
+            <Input v-model.number="newMaxLen" type="number" class="text-xs" />
+            <p class="text-xs text-muted-foreground/50">
               {{ t('redis.slowlog.currentValue') }}: {{ config?.maxLen ?? 0 }}
             </p>
           </div>

@@ -1,6 +1,6 @@
 [package]
 name = "devforge"
-version = "0.6.0"
+version = "0.6.1"
 description = "Unified developer tool: Database + SSH + SFTP"
 authors = ["DevForge Team"]
 license = "MIT"
@@ -97,6 +97,9 @@ shell-escape = "0.1"
 
 # Redis 客户端
 redis = { version = "0.27", features = ["tokio-comp", "aio", "connection-manager", "cluster-async"] }
+
+# Git 操作（libgit2 绑定）
+git2 = { version = "0.19", features = ["vendored-libgit2"] }
 
 # SHA-256 校验（更新包完整性）
 sha2 = "0.10"

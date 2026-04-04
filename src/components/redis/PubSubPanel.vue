@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { Input } from '@/components/ui/input'
@@ -50,10 +50,17 @@ const sentMessages = new Set<string>()
 let unlisten: UnlistenFn | null = null
 const outputRef = ref<HTMLElement>()
 
-// 过滤后的消息
+// 过滤后的消息（防抖：输入停止 200ms 后才触发过滤）
+const debouncedFilter = ref('')
+let _filterTimer: ReturnType<typeof setTimeout> | null = null
+watch(filterText, (val) => {
+  if (_filterTimer) clearTimeout(_filterTimer)
+  _filterTimer = setTimeout(() => { debouncedFilter.value = val }, 200)
+})
+
 const filteredMessages = computed(() => {
-  if (!filterText.value) return messages.value
-  const keyword = filterText.value.toLowerCase()
+  if (!debouncedFilter.value) return messages.value
+  const keyword = debouncedFilter.value.toLowerCase()
   return messages.value.filter(m =>
     m.channel.toLowerCase().includes(keyword) ||
     m.payload.toLowerCase().includes(keyword)
@@ -238,6 +245,8 @@ onMounted(() => {
 })
 
 onBeforeUnmount(async () => {
+  // 清理过滤防抖 timer
+  if (_filterTimer) clearTimeout(_filterTimer)
   // 取消事件监听
   if (unlisten) {
     unlisten()
@@ -255,8 +264,8 @@ onBeforeUnmount(async () => {
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <Radio class="h-3.5 w-3.5 text-muted-foreground/50" />
-      <span class="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">PUB/SUB</span>
-      <span v-if="messageCount > 0" class="text-[9px] font-mono text-primary/50">{{ messageCount }}</span>
+      <span class="text-xs font-bold text-muted-foreground/50 uppercase tracking-wider">PUB/SUB</span>
+      <span v-if="messageCount > 0" class="text-[10px] font-mono text-primary/50">{{ messageCount }}</span>
       <div class="flex-1" />
       <Button
         variant="ghost"
@@ -293,7 +302,7 @@ onBeforeUnmount(async () => {
       <Input
         v-model="filterText"
         :placeholder="t('redis.pubsub.filterPlaceholder')"
-        class="h-6 flex-1 text-[10px] font-mono"
+        class="h-7 flex-1 text-xs font-mono"
       />
     </div>
 
@@ -302,12 +311,12 @@ onBeforeUnmount(async () => {
       <Input
         v-model="channelInput"
         :placeholder="t('redis.pubsub.channelPlaceholder')"
-        class="h-7 flex-1 text-[11px] font-mono"
+        class="h-8 flex-1 text-xs font-mono"
         @keydown.enter="handleSubscribe(false)"
       />
       <Button
         size="sm"
-        class="h-7 text-[10px] px-2"
+        class="h-8 text-xs px-2"
         :disabled="!channelInput.trim()"
         @click="handleSubscribe(false)"
       >
@@ -316,7 +325,7 @@ onBeforeUnmount(async () => {
       <Button
         variant="outline"
         size="sm"
-        class="h-7 text-[10px] px-2"
+        class="h-8 text-xs px-2"
         :disabled="!channelInput.trim()"
         @click="handleSubscribe(true)"
       >
@@ -329,7 +338,7 @@ onBeforeUnmount(async () => {
       <span
         v-for="ch in subscribedChannels"
         :key="'ch-' + ch"
-        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono bg-primary/10 text-primary/70"
+        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-primary/10 text-primary/70"
       >
         {{ ch }}
         <button class="hover:text-destructive ml-0.5" @click="handleUnsubscribe(ch, false)">
@@ -339,7 +348,7 @@ onBeforeUnmount(async () => {
       <span
         v-for="pat in subscribedPatterns"
         :key="'pat-' + pat"
-        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-mono bg-amber-500/10 text-amber-500/70"
+        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-500/70"
       >
         {{ pat }}
         <button class="hover:text-destructive ml-0.5" @click="handleUnsubscribe(pat, true)">
@@ -347,7 +356,7 @@ onBeforeUnmount(async () => {
         </button>
       </span>
       <button
-        class="text-[9px] text-muted-foreground/40 hover:text-destructive/60 ml-auto"
+        class="text-[10px] text-muted-foreground/40 hover:text-destructive/60 ml-auto"
         @click="handleStopAll"
       >
         {{ t('redis.pubsub.stopAll') }}
@@ -355,26 +364,26 @@ onBeforeUnmount(async () => {
     </div>
 
     <!-- 消息流 -->
-    <div ref="outputRef" class="flex-1 overflow-auto p-3 space-y-0.5 font-mono text-[11px]">
+    <div ref="outputRef" class="flex-1 overflow-auto p-3 space-y-0.5 font-mono text-xs">
       <template v-if="filteredMessages.length > 0">
         <div
           v-for="(msg, i) in filteredMessages"
           :key="i"
-          class="flex items-start gap-2 py-1 hover:bg-muted/10 rounded px-1.5 -mx-1"
+          class="flex items-start gap-2 py-1.5 hover:bg-muted/10 rounded px-1.5 -mx-1"
         >
-          <span class="text-[9px] text-muted-foreground/30 shrink-0 tabular-nums w-[80px] pt-0.5">
+          <span class="text-[10px] text-muted-foreground/30 shrink-0 tabular-nums w-[80px] pt-0.5">
             {{ formatTime(msg.timestampMs) }}
           </span>
           <!-- 方向标记 -->
           <span
-            class="text-[9px] shrink-0 pt-0.5 w-[16px] text-center"
+            class="text-[10px] shrink-0 pt-0.5 w-[16px] text-center"
             :class="msg.isSent ? 'text-amber-400' : 'text-emerald-400'"
             :title="msg.isSent ? t('redis.pubsub.sent') : t('redis.pubsub.received')"
           >{{ msg.isSent ? '↑' : '↓' }}</span>
-          <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-primary/10 text-primary/70 text-[10px] shrink-0 max-w-[140px] truncate" :title="msg.channel">
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-primary/10 text-primary/70 text-xs shrink-0 max-w-[140px] truncate" :title="msg.channel">
             {{ msg.channel }}
           </span>
-          <span v-if="msg.pattern" class="inline-flex items-center px-1 py-0.5 rounded bg-amber-500/10 text-amber-500/50 text-[9px] shrink-0">
+          <span v-if="msg.pattern" class="inline-flex items-center px-1 py-0.5 rounded bg-amber-500/10 text-amber-500/50 text-[10px] shrink-0">
             {{ msg.pattern }}
           </span>
           <span class="text-foreground/80 break-all leading-relaxed">"{{ msg.payload }}"</span>
@@ -400,12 +409,12 @@ onBeforeUnmount(async () => {
       <Input
         v-model="publishChannel"
         :placeholder="t('redis.pubsub.publishChannelPlaceholder')"
-        class="h-7 w-28 text-[11px] font-mono"
+        class="h-8 w-28 text-xs font-mono"
       />
       <Input
         v-model="publishMessage"
         :placeholder="t('redis.pubsub.publishMessagePlaceholder')"
-        class="h-7 flex-1 text-[11px] font-mono"
+        class="h-8 flex-1 text-xs font-mono"
         @keydown.enter="handlePublish"
       />
       <Button

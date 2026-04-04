@@ -158,10 +158,10 @@ async function handleFlush() {
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <Code class="h-3.5 w-3.5 text-muted-foreground/50" />
-      <span class="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">{{ t('redis.lua.title') }}</span>
+      <span class="text-xs font-bold text-muted-foreground/50 uppercase tracking-wider">{{ t('redis.lua.title') }}</span>
       <div class="flex-1" />
-      <Button variant="ghost" size="sm" class="h-6 text-[9px] px-2" @click="handleFlush">
-        <Trash2 class="h-3 w-3 mr-1" />
+      <Button variant="ghost" size="sm" class="h-7 text-xs px-2" @click="handleFlush">
+        <Trash2 class="h-3.5 w-3.5 mr-1" />
         {{ t('redis.lua.scriptFlush') }}
       </Button>
     </div>
@@ -171,19 +171,19 @@ async function handleFlush() {
 
     <!-- KEYS & ARGV -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
-      <span class="text-[9px] text-muted-foreground/50 w-10 shrink-0">KEYS</span>
+      <span class="text-xs text-muted-foreground/50 w-10 shrink-0">KEYS</span>
       <Input
         v-model="keysInput"
         :placeholder="t('redis.lua.keysPlaceholder')"
-        class="h-6 flex-1 text-[10px] font-mono"
+        class="h-7 flex-1 text-xs font-mono"
       />
     </div>
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
-      <span class="text-[9px] text-muted-foreground/50 w-10 shrink-0">ARGV</span>
+      <span class="text-xs text-muted-foreground/50 w-10 shrink-0">ARGV</span>
       <Input
         v-model="argsInput"
         :placeholder="t('redis.lua.argsPlaceholder')"
-        class="h-6 flex-1 text-[10px] font-mono"
+        class="h-7 flex-1 text-xs font-mono"
       />
     </div>
 
@@ -191,16 +191,16 @@ async function handleFlush() {
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <Button
         size="sm"
-        class="h-7 text-[10px] px-3"
+        class="h-7 text-xs px-3"
         :disabled="executing"
         @click="handleExecute"
       >
-        <Loader2 v-if="executing" class="h-3 w-3 mr-1 animate-spin" />
-        <Play v-else class="h-3 w-3 mr-1" />
+        <Loader2 v-if="executing" class="h-3.5 w-3.5 mr-1 animate-spin" />
+        <Play v-else class="h-3.5 w-3.5 mr-1" />
         {{ t('redis.lua.execute') }}
       </Button>
-      <span class="text-[9px] text-muted-foreground/30">Ctrl+Enter</span>
-      <span v-if="hasResult && !isError" class="text-[9px] text-muted-foreground/40 ml-auto">
+      <span class="text-[10px] text-muted-foreground/30">Ctrl+Enter</span>
+      <span v-if="hasResult && !isError" class="text-[10px] text-muted-foreground/40 ml-auto">
         {{ t('redis.lua.duration', { ms: durationMs }) }}
       </span>
     </div>
@@ -209,11 +209,11 @@ async function handleFlush() {
     <div class="flex-1 min-h-[60px] overflow-auto p-3">
       <div v-if="hasResult">
         <pre
-          class="text-[11px] font-mono whitespace-pre-wrap break-words leading-relaxed"
+          class="text-xs font-mono whitespace-pre-wrap break-words leading-relaxed"
           :class="isError ? 'text-destructive' : 'text-foreground/80'"
         >{{ resultText }}</pre>
       </div>
-      <div v-else class="text-muted-foreground/20 text-center py-8 text-[11px]">
+      <div v-else class="text-muted-foreground/20 text-center py-8 text-xs">
         {{ t('redis.lua.noResult') }}
       </div>
     </div>

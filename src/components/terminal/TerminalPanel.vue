@@ -355,17 +355,22 @@ watch(activeThemeId, () => {
 
 // 响应用户设置变化
 watch(
-  () => settingsStore.settings,
-  (s) => {
+  () => [
+    settingsStore.settings.terminalFontSize,
+    settingsStore.settings.terminalFontFamily,
+    settingsStore.settings.terminalCursorStyle,
+    settingsStore.settings.terminalCursorBlink,
+    settingsStore.settings.terminalScrollback,
+  ] as const,
+  ([fontSize, fontFamily, cursorStyle, cursorBlink, scrollback]) => {
     if (!terminal) return
-    terminal.options.fontSize = s.terminalFontSize
-    terminal.options.fontFamily = s.terminalFontFamily
-    terminal.options.cursorStyle = s.terminalCursorStyle
-    terminal.options.cursorBlink = s.terminalCursorBlink
-    terminal.options.scrollback = s.terminalScrollback ?? 5000
+    terminal.options.fontSize = fontSize
+    terminal.options.fontFamily = fontFamily
+    terminal.options.cursorStyle = cursorStyle
+    terminal.options.cursorBlink = cursorBlink
+    terminal.options.scrollback = scrollback ?? 5000
     fitAddon?.fit()
   },
-  { deep: true },
 )
 
 function sendData(data: string) {

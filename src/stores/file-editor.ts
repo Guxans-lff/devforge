@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { shallowRef, triggerRef, computed } from 'vue'
 import { sftpReadFileContent, sftpWriteFileContent } from '@/api/file-editor'
 
 export interface OpenFile {
@@ -75,7 +75,7 @@ function getLanguageFromPath(filePath: string): string {
 }
 
 export const useFileEditorStore = defineStore('fileEditor', () => {
-  const openFiles = ref<Map<string, OpenFile>>(new Map())
+  const openFiles = shallowRef<Map<string, OpenFile>>(new Map())
   const activeFileId = ref<string | null>(null)
 
   const activeFile = computed(() => {
@@ -119,7 +119,7 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
     }
 
     openFiles.value.set(id, file)
-    openFiles.value = new Map(openFiles.value)
+    triggerRef(openFiles)
     activeFileId.value = id
 
     try {
@@ -132,12 +132,12 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
           content,
           isLoading: false,
         })
-        openFiles.value = new Map(openFiles.value)
+        triggerRef(openFiles)
       }
     } catch (e) {
       // 加载失败，移除标签
       openFiles.value.delete(id)
-      openFiles.value = new Map(openFiles.value)
+      triggerRef(openFiles)
       if (activeFileId.value === id) {
         activeFileId.value = openFiles.value.size > 0
           ? openFiles.value.keys().next().value ?? null
@@ -157,7 +157,7 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
       content,
       isDirty: content !== file.originalContent,
     })
-    openFiles.value = new Map(openFiles.value)
+    triggerRef(openFiles)
   }
 
   /** 保存文件到远程 */
@@ -169,7 +169,7 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
     const savedContent = file.content
 
     openFiles.value.set(id, { ...file, isSaving: true })
-    openFiles.value = new Map(openFiles.value)
+    triggerRef(openFiles)
 
     try {
       await sftpWriteFileContent(file.connectionId, file.remotePath, savedContent)
@@ -182,13 +182,13 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
           isDirty: current.content !== savedContent,
           isSaving: false,
         })
-        openFiles.value = new Map(openFiles.value)
+        triggerRef(openFiles)
       }
     } catch (e) {
       const current = openFiles.value.get(id)
       if (current) {
         openFiles.value.set(id, { ...current, isSaving: false })
-        openFiles.value = new Map(openFiles.value)
+        triggerRef(openFiles)
       }
       throw e
     }
@@ -208,7 +208,7 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
   /** 关闭文件 */
   function closeFile(id: string) {
     openFiles.value.delete(id)
-    openFiles.value = new Map(openFiles.value)
+    triggerRef(openFiles)
 
     if (activeFileId.value === id) {
       activeFileId.value = openFiles.value.size > 0
@@ -220,7 +220,7 @@ export const useFileEditorStore = defineStore('fileEditor', () => {
   /** 关闭所有文件 */
   function closeAllFiles() {
     openFiles.value.clear()
-    openFiles.value = new Map(openFiles.value)
+    triggerRef(openFiles)
     activeFileId.value = null
   }
 

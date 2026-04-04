@@ -20,6 +20,7 @@ const MultiExecView = defineAsyncComponent(() => import('@/views/MultiExecView.v
 const TerminalPlayerView = defineAsyncComponent(() => import('@/views/TerminalPlayerView.vue'))
 const LocalTerminalView = defineAsyncComponent(() => import('@/views/LocalTerminalView.vue'))
 const RedisView = defineAsyncComponent(() => import('@/views/RedisView.vue'))
+const GitView = defineAsyncComponent(() => import('@/views/GitView.vue'))
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
@@ -49,6 +50,8 @@ const activeTabComponent = computed(() => {
       return TerminalPlayerView
     case 'redis':
       return tab.connectionId ? RedisView : null
+    case 'git':
+      return GitView
     default:
       return null
   }
@@ -63,6 +66,10 @@ const activeTabProps = computed(() => {
   // 本地终端：传递 tabId 作为 sessionId
   if (tab.type === 'terminal' && tab.meta?.isLocal) {
     return { sessionId: tab.id }
+  }
+  // Git：传递仓库路径
+  if (tab.type === 'git' && tab.meta?.repositoryPath) {
+    return { repositoryPath: tab.meta.repositoryPath }
   }
   if (tab.connectionId) {
     const base: Record<string, string> = {

@@ -16,6 +16,7 @@ import {
   Bell,
   Play,
   TerminalSquare,
+  GitBranch,
 } from 'lucide-vue-next'
 import type { TabType } from '@/types/workspace'
 import { parseEnvironment } from '@/api/connection'
@@ -36,6 +37,7 @@ const iconMap: Record<TabType, typeof Database> = {
   'terminal-player': Play,
   'multi-exec': TerminalSquare,
   redis: Database,
+  git: GitBranch,
 }
 
 function getTabIcon(type: TabType) {

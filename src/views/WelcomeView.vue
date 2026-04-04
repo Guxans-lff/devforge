@@ -26,7 +26,7 @@ const settingsStore = useSettingsStore()
 
 const appVersion = ref('')
 const showConnectionDialog = ref(false)
-const presetConnectionType = ref<'database' | 'ssh' | 'sftp'>('database')
+const presetConnectionType = ref<'database' | 'ssh' | 'sftp' | 'redis' | 'git'>('database')
 
 // 动态欢迎语
 const currentTime = ref(new Date())
@@ -63,8 +63,11 @@ function handleConnectionConnect(connectionId: string, connectionName: string) {
     database: 'database',
     ssh: 'terminal',
     sftp: 'file-manager',
+    redis: 'redis',
+    git: 'git',
   }
   const tabType = typeToTab[presetConnectionType.value] ?? 'database'
+  // Git 连接不需要 connectionId，而是在 Sidebar 里通过 host 字段获取路径
   workspace.addTab({
     id: `${tabType}-${connectionId}`,
     type: tabType,
@@ -77,13 +80,27 @@ function handleConnectionConnect(connectionId: string, connectionName: string) {
 function handleConnectionSaved() {
   connectionStore.loadConnections()
 }
-function openConnection(conn: { record: { id: string; name: string; type: string } }) {
+function openConnection(conn: { record: { id: string; name: string; type: string; host: string } }) {
   const typeToTab: Record<string, TabType> = {
     database: 'database',
     ssh: 'terminal',
     sftp: 'file-manager',
+    redis: 'redis',
+    git: 'git',
   }
   const tabType = typeToTab[conn.record.type] ?? 'database'
+  // Git 连接：用 host 字段作为仓库路径
+  if (conn.record.type === 'git') {
+    const repoPath = conn.record.host
+    workspace.addTab({
+      id: `git-${repoPath.replace(/[\\/:]/g, '_')}`,
+      type: 'git',
+      title: conn.record.name,
+      closable: true,
+      meta: { repositoryPath: repoPath },
+    })
+    return
+  }
   workspace.addTab({
     id: `${tabType}-${conn.record.id}`,
     type: tabType,

@@ -78,6 +78,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       })
     }
 
+    // 关闭 Git tab 时清理后端仓库缓存
+    if (tab.type === 'git' && tab.meta?.repositoryPath) {
+      const repoPath = tab.meta.repositoryPath
+      import('@/api/git').then(({ gitClose }) => {
+        gitClose(repoPath).catch(() => { })
+      })
+    }
+
     // 关闭 SSH 终端 / SFTP tab 时，若该连接无其他打开的 tab，则更新连接状态
     if ((tab.type === 'terminal' || tab.type === 'file-manager') && tab.connectionId && !tab.meta?.isLocal) {
       const connId = tab.connectionId
@@ -161,6 +169,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       // 本地终端 tab 无 connectionId，重启后 PTY 进程已丢失，不恢复
       const validTabs = (data.tabs ?? []).filter(tab => {
         if (tab.type === 'welcome' || tab.type === 'settings') return true
+        if (tab.type === 'git') return !!tab.meta?.repositoryPath
         if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager' || tab.type === 'redis') {
           return !!tab.connectionId
         }
@@ -215,6 +224,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       // 直接用 deserialize 逻辑
       const validTabs = (data.tabs ?? []).filter(tab => {
         if (tab.type === 'welcome' || tab.type === 'settings') return true
+        if (tab.type === 'git') return !!tab.meta?.repositoryPath
         if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager' || tab.type === 'redis') {
           return !!tab.connectionId
         }

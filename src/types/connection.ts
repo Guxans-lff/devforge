@@ -1,4 +1,4 @@
-export type ConnectionType = 'database' | 'ssh' | 'sftp'
+export type ConnectionType = 'database' | 'ssh' | 'sftp' | 'git'
 
 export type DatabaseDriver = 'mysql' | 'postgresql' | 'sqlite' | 'mssql'
 

@@ -230,7 +230,6 @@ watch(
       }
     })
   },
-  { deep: true }
 )
 </script>
 

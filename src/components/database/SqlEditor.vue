@@ -193,17 +193,21 @@ watch(
 
 // React to user settings changes
 watch(
-  () => settingsStore.settings,
-  (s) => {
+  () => [
+    settingsStore.settings.editorFontSize,
+    settingsStore.settings.editorTabSize,
+    settingsStore.settings.editorWordWrap,
+    settingsStore.settings.editorMinimap,
+  ] as const,
+  ([fontSize, tabSize, wordWrap, minimap]) => {
     if (!editor) return
     editor.updateOptions({
-      fontSize: s.editorFontSize,
-      tabSize: s.editorTabSize,
-      wordWrap: s.editorWordWrap ? 'on' : 'off',
-      minimap: { enabled: s.editorMinimap },
+      fontSize,
+      tabSize,
+      wordWrap: wordWrap ? 'on' : 'off',
+      minimap: { enabled: minimap },
     })
   },
-  { deep: true },
 )
 
 /** 监听命令面板发出的 insert-sql 事件（片段/历史插入） */

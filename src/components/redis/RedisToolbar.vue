@@ -18,6 +18,15 @@ const props = defineProps<{
   currentDb: number
   dbSize: number
   isCluster?: boolean
+  /** 各面板激活状态（用于按钮高亮） */
+  activeInfo?: boolean
+  activeCli?: boolean
+  activePubsub?: boolean
+  activeSlowlog?: boolean
+  activeMemory?: boolean
+  activeClientList?: boolean
+  activeMonitor?: boolean
+  activeLua?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -43,15 +52,15 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
 <template>
   <div class="flex items-center gap-2 px-3 py-2 border-b border-border/40 bg-muted/10 shrink-0">
     <!-- 连接名称 -->
-    <div class="flex items-center gap-2 mr-2">
+    <div class="flex items-center gap-2 mr-1">
       <div
-        class="h-2 w-2 rounded-full transition-colors"
+        class="h-2.5 w-2.5 rounded-full transition-colors"
         :class="connected ? 'bg-df-success shadow-[0_0_6px_var(--df-success)]' : connecting ? 'bg-df-warning animate-pulse' : 'bg-muted-foreground/30'"
       />
       <span class="text-xs font-bold text-foreground truncate max-w-[160px]">{{ connectionName }}</span>
     </div>
 
-    <div class="h-4 w-px bg-border/30" />
+    <div class="h-4 w-px bg-border/40" />
 
     <!-- 数据库选择（Cluster 模式隐藏） -->
     <div class="flex items-center gap-1.5" v-if="connected && !isCluster">
@@ -60,7 +69,7 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
         :model-value="String(currentDb)"
         @update:model-value="emit('selectDb', Number($event))"
       >
-        <SelectTrigger class="h-7 w-[90px] text-[11px] font-medium border-border/40">
+        <SelectTrigger class="h-7 w-[90px] text-xs font-medium border-border/40">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -68,13 +77,13 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
             v-for="db in dbOptions"
             :key="db"
             :value="String(db)"
-            class="text-[11px]"
+            class="text-xs"
           >
             DB {{ db }}
           </SelectItem>
         </SelectContent>
       </Select>
-      <span class="text-[10px] text-muted-foreground/50 font-mono">
+      <span class="text-xs text-muted-foreground/60 font-mono tabular-nums">
         {{ dbSize }} {{ t('redis.keys') }}
       </span>
     </div>
@@ -83,35 +92,91 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
 
     <!-- 操作按钮 -->
     <template v-if="connected">
-      <Button variant="ghost" size="sm" class="h-7 px-2 text-[11px]" @click="emit('newKey')">
+      <!-- 新建 + 刷新 -->
+      <Button variant="ghost" size="sm" class="h-7 px-2 text-xs" @click="emit('newKey')">
         <Plus class="h-3.5 w-3.5 mr-1" />
         {{ t('redis.newKey') }}
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('refresh')">
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :title="t('redis.refresh')" @click="emit('refresh')">
         <RefreshCw class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleInfo')">
+
+      <div class="h-4 w-px bg-border/30" />
+
+      <!-- 面板切换按钮（带激活态高亮） -->
+      <Button
+        variant="ghost" size="sm"
+        class="h-7 w-7 p-0 transition-colors"
+        :class="activeInfo ? 'bg-accent text-accent-foreground' : ''"
+        :title="t('redis.serverInfo')"
+        @click="emit('toggleInfo')"
+      >
         <Info class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleCli')">
+      <Button
+        variant="ghost" size="sm"
+        class="h-7 w-7 p-0 transition-colors"
+        :class="activeCli ? 'bg-accent text-accent-foreground' : ''"
+        :title="t('redis.cli')"
+        @click="emit('toggleCli')"
+      >
         <TerminalSquare class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('togglePubsub')">
+      <Button
+        variant="ghost" size="sm"
+        class="h-7 w-7 p-0 transition-colors"
+        :class="activePubsub ? 'bg-accent text-accent-foreground' : ''"
+        :title="t('redis.pubsub.title')"
+        @click="emit('togglePubsub')"
+      >
         <Radio class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleSlowlog')" :title="t('redis.slowlog.title')">
+
+      <div class="h-4 w-px bg-border/30" />
+
+      <Button
+        variant="ghost" size="sm"
+        class="h-7 w-7 p-0 transition-colors"
+        :class="activeSlowlog ? 'bg-accent text-accent-foreground' : ''"
+        :title="t('redis.slowlog.title')"
+        @click="emit('toggleSlowlog')"
+      >
         <Activity class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleMemory')" :title="t('redis.memory.title')">
+      <Button
+        variant="ghost" size="sm"
+        class="h-7 w-7 p-0 transition-colors"
+        :class="activeMemory ? 'bg-accent text-accent-foreground' : ''"
+        :title="t('redis.memory.title')"
+        @click="emit('toggleMemory')"
+      >
         <MemoryStick class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleClientList')" :title="t('redis.clients.title')">
+      <Button
+        variant="ghost" size="sm"
+        class="h-7 w-7 p-0 transition-colors"
+        :class="activeClientList ? 'bg-accent text-accent-foreground' : ''"
+        :title="t('redis.clients.title')"
+        @click="emit('toggleClientList')"
+      >
         <Users class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleMonitor')" :title="t('redis.monitor.title')">
+      <Button
+        variant="ghost" size="sm"
+        class="h-7 w-7 p-0 transition-colors"
+        :class="activeMonitor ? 'bg-accent text-accent-foreground' : ''"
+        :title="t('redis.monitor.title')"
+        @click="emit('toggleMonitor')"
+      >
         <Eye class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="emit('toggleLua')" :title="t('redis.lua.title')">
+      <Button
+        variant="ghost" size="sm"
+        class="h-7 w-7 p-0 transition-colors"
+        :class="activeLua ? 'bg-accent text-accent-foreground' : ''"
+        :title="t('redis.lua.title')"
+        @click="emit('toggleLua')"
+      >
         <Code class="h-3.5 w-3.5" />
       </Button>
     </template>

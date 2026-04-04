@@ -11,7 +11,7 @@ import ListEditor from './ListEditor.vue'
 import SetEditor from './SetEditor.vue'
 import ZSetEditor from './ZSetEditor.vue'
 import StreamEditor from './StreamEditor.vue'
-import { redisDeleteKeys, redisRenameKey, redisSetTtl, redisRemoveTtl, redisGetKeyInfo } from '@/api/redis'
+import { redisDeleteKeys, redisRenameKey, redisSetTtl, redisRemoveTtl } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
 import type { RedisKeyInfo } from '@/types/redis'
 
@@ -54,12 +54,12 @@ const ttlDisplay = computed(() => {
 })
 
 const typeColors: Record<string, string> = {
-  string: 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-  hash: 'bg-orange-500/10 text-orange-500 border-orange-500/20',
-  list: 'bg-green-500/10 text-green-500 border-green-500/20',
-  set: 'bg-purple-500/10 text-purple-500 border-purple-500/20',
-  zset: 'bg-pink-500/10 text-pink-500 border-pink-500/20',
-  stream: 'bg-cyan-500/10 text-cyan-500 border-cyan-500/20',
+  string: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
+  hash: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+  list: 'bg-green-500/15 text-green-400 border-green-500/30',
+  set: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
+  zset: 'bg-pink-500/15 text-pink-400 border-pink-500/30',
+  stream: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
 }
 
 /** 删除键 */
@@ -100,13 +100,14 @@ async function handleSetTtl() {
   try {
     if (seconds === 0) {
       await redisRemoveTtl(props.connectionId, props.redisKey)
+      // 本地更新 TTL 为 -1（永不过期），避免冗余 API 调用
+      localKeyInfo.value = { ...localKeyInfo.value, ttl: -1 }
     } else {
       await redisSetTtl(props.connectionId, props.redisKey, seconds)
+      // 本地更新 TTL 为设置的值
+      localKeyInfo.value = { ...localKeyInfo.value, ttl: seconds }
     }
     ttlEditing.value = false
-    // 刷新键信息
-    const info = await redisGetKeyInfo(props.connectionId, props.redisKey)
-    localKeyInfo.value = info
   } catch (e) {
     toast.error('设置 TTL 失败', (e as any)?.message ?? String(e))
   }
@@ -132,7 +133,7 @@ function startEditTtl() {
         <template v-if="renaming">
           <Input
             v-model="renameInput"
-            class="h-7 text-[12px] font-mono flex-1"
+            class="h-8 text-xs font-mono flex-1"
             @keydown.enter="handleRename"
             @keydown.escape="renaming = false"
             autofocus
@@ -150,46 +151,46 @@ function startEditTtl() {
       </div>
 
       <!-- 元信息 -->
-      <div class="flex items-center gap-3 text-[10px]">
-        <Badge variant="outline" :class="typeColors[localKeyInfo.keyType] || ''">
+      <div class="flex items-center gap-3 text-xs">
+        <Badge variant="outline" class="text-xs font-semibold px-2 py-0.5" :class="typeColors[localKeyInfo.keyType] || ''">
           {{ localKeyInfo.keyType.toUpperCase() }}
         </Badge>
 
         <!-- TTL -->
-        <div class="flex items-center gap-1 text-muted-foreground/60">
-          <Clock class="h-3 w-3" />
+        <div class="flex items-center gap-1.5 text-muted-foreground/70">
+          <Clock class="h-3.5 w-3.5" />
           <template v-if="ttlEditing">
             <Input
               v-model="ttlInput"
               type="number"
               placeholder="0 = 永不过期"
-              class="h-6 w-24 text-[10px] font-mono"
+              class="h-7 w-28 text-xs font-mono"
               @keydown.enter="handleSetTtl"
               @keydown.escape="ttlEditing = false"
               autofocus
             />
-            <Button variant="ghost" size="sm" class="h-6 px-1" @click="handleSetTtl">
-              <Save class="h-3 w-3" />
+            <Button variant="ghost" size="sm" class="h-7 px-1.5" @click="handleSetTtl">
+              <Save class="h-3.5 w-3.5" />
             </Button>
           </template>
           <template v-else>
-            <span class="cursor-pointer hover:text-foreground" @click="startEditTtl">{{ ttlDisplay }}</span>
+            <span class="cursor-pointer hover:text-foreground transition-colors" @click="startEditTtl">{{ ttlDisplay }}</span>
           </template>
         </div>
 
         <!-- 大小 -->
-        <span v-if="localKeyInfo.memoryUsage" class="text-muted-foreground/40 font-mono">
+        <span v-if="localKeyInfo.memoryUsage" class="text-muted-foreground/50 font-mono">
           {{ localKeyInfo.memoryUsage > 1024 ? `${(localKeyInfo.memoryUsage / 1024).toFixed(1)}KB` : `${localKeyInfo.memoryUsage}B` }}
         </span>
 
-        <span class="text-muted-foreground/40 font-mono">
+        <span class="text-muted-foreground/50 font-mono">
           {{ t('redis.size') }}: {{ localKeyInfo.size }}
         </span>
 
         <div class="flex-1" />
 
-        <Button variant="ghost" size="sm" class="h-6 px-2 text-destructive/60 hover:text-destructive" @click="handleDelete">
-          <Trash2 class="h-3 w-3 mr-1" />
+        <Button variant="ghost" size="sm" class="h-7 px-2 text-xs text-destructive/60 hover:text-destructive" @click="handleDelete">
+          <Trash2 class="h-3.5 w-3.5 mr-1" />
           {{ t('redis.deleteKey') }}
         </Button>
       </div>

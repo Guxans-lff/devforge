@@ -201,18 +201,18 @@ onBeforeUnmount(async () => {
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <Eye class="h-3.5 w-3.5 text-muted-foreground/50" />
-      <span class="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">MONITOR</span>
-      <span v-if="messageCount > 0" class="text-[9px] font-mono text-primary/50">{{ messageCount }}</span>
+      <span class="text-xs font-bold text-muted-foreground/50 uppercase tracking-wider">MONITOR</span>
+      <span v-if="messageCount > 0" class="text-[10px] font-mono text-primary/50">{{ messageCount }}</span>
       <div class="flex-1" />
-      <Button variant="ghost" size="sm" class="h-6 w-6 p-0" @click="showFilter = !showFilter">
-        <Filter class="h-3 w-3" :class="showFilter ? 'text-primary' : ''" />
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="showFilter = !showFilter">
+        <Filter class="h-3.5 w-3.5" :class="showFilter ? 'text-primary' : ''" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-6 w-6 p-0" @click="paused = !paused">
-        <Pause v-if="!paused" class="h-3 w-3" />
-        <Play v-else class="h-3 w-3 text-df-success" />
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="paused = !paused">
+        <Pause v-if="!paused" class="h-3.5 w-3.5" />
+        <Play v-else class="h-3.5 w-3.5 text-df-success" />
       </Button>
-      <Button variant="ghost" size="sm" class="h-6 w-6 p-0" @click="clearMessages">
-        <Trash2 class="h-3 w-3" />
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" @click="clearMessages">
+        <Trash2 class="h-3.5 w-3.5" />
       </Button>
     </div>
 
@@ -221,7 +221,7 @@ onBeforeUnmount(async () => {
       <Input
         v-model="filterText"
         :placeholder="t('redis.monitor.filterPlaceholder')"
-        class="h-6 flex-1 text-[10px] font-mono"
+        class="h-7 flex-1 text-xs font-mono"
       />
     </div>
 
@@ -230,7 +230,7 @@ onBeforeUnmount(async () => {
       <Button
         v-if="!monitoring"
         size="sm"
-        class="h-7 text-[10px] px-3"
+        class="h-7 text-xs px-3"
         :disabled="starting"
         @click="handleStart"
       >
@@ -240,22 +240,22 @@ onBeforeUnmount(async () => {
         v-else
         variant="destructive"
         size="sm"
-        class="h-7 text-[10px] px-3"
+        class="h-7 text-xs px-3"
         @click="handleStop"
       >
         {{ t('redis.monitor.stop') }}
       </Button>
-      <span v-if="monitoring" class="text-[9px] text-df-success/60 flex items-center gap-1">
+      <span v-if="monitoring" class="text-[10px] text-df-success/60 flex items-center gap-1">
         <span class="h-1.5 w-1.5 rounded-full bg-df-success animate-pulse" />
         {{ t('redis.monitor.running') }}
       </span>
-      <span class="text-[9px] text-muted-foreground/30 ml-auto">{{ t('redis.monitor.hint') }}</span>
+      <span class="text-[10px] text-muted-foreground/30 ml-auto">{{ t('redis.monitor.hint') }}</span>
     </div>
 
     <!-- 虚拟滚动命令流 -->
     <div
       ref="parentRef"
-      class="flex-1 overflow-auto font-mono text-[11px]"
+      class="flex-1 overflow-auto font-mono text-xs"
       @scroll="handleScroll"
     >
       <template v-if="filteredMessages.length > 0">
@@ -266,13 +266,13 @@ onBeforeUnmount(async () => {
             class="flex items-center gap-2 py-0.5 hover:bg-muted/10 px-3 absolute left-0 w-full"
             :style="{ height: `${row.size}px`, transform: `translateY(${row.start}px)` }"
           >
-            <span class="text-[9px] text-muted-foreground/30 shrink-0 tabular-nums w-[80px]">
+            <span class="text-[10px] text-muted-foreground/30 shrink-0 tabular-nums w-[80px]">
               {{ formatTime(filteredMessages[row.index]!.timestamp) }}
             </span>
-            <span class="text-[9px] text-primary/40 shrink-0 w-[40px] truncate" :title="filteredMessages[row.index]!.database">
+            <span class="text-[10px] text-primary/40 shrink-0 w-[40px] truncate" :title="filteredMessages[row.index]!.database">
               [{{ filteredMessages[row.index]!.database }}]
             </span>
-            <span class="text-[9px] text-muted-foreground/40 shrink-0 w-[120px] truncate" :title="filteredMessages[row.index]!.clientAddr">
+            <span class="text-[10px] text-muted-foreground/40 shrink-0 w-[120px] truncate" :title="filteredMessages[row.index]!.clientAddr">
               {{ filteredMessages[row.index]!.clientAddr }}
             </span>
             <span class="truncate leading-relaxed" :class="commandColor(filteredMessages[row.index]!.command)">

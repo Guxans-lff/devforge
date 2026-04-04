@@ -31,9 +31,11 @@ import {
   X,
   ChevronRight,
   Container,
+  GitBranch,
 } from 'lucide-vue-next'
 import type { ConnectionRecord } from '@/api/connection'
 import type { TabType } from '@/types/workspace'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
@@ -139,6 +141,7 @@ const typeIcons: Record<string, typeof Database> = {
   ssh: Terminal,
   sftp: FolderOpen,
   redis: Container,
+  git: GitBranch,
 }
 
 /** 根据连接状态返回图标附加动画 class */
@@ -195,6 +198,7 @@ async function handleConnectionConnect(connectionId: string, connectionName: str
     ssh: 'terminal',
     sftp: 'file-manager',
     redis: 'redis',
+    git: 'git',
   }
   const tabType = typeToTab[connType] ?? 'database'
   workspace.addTab({
@@ -212,8 +216,22 @@ function handleOpenConnection(conn: ConnectionState) {
     ssh: 'terminal',
     sftp: 'file-manager',
     redis: 'redis',
+    git: 'git',
   }
   const tabType = typeToTab[conn.record.type] ?? 'database'
+  // Git 连接：使用路径作为 meta，不需要 connectionId
+  if (conn.record.type === 'git') {
+    const repoPath = conn.record.host // git 连接把路径存在 host 字段
+    const tabId = `git-${repoPath.replace(/[\\/:]/g, '_')}`
+    workspace.addTab({
+      id: tabId,
+      type: 'git',
+      title: conn.record.name,
+      closable: true,
+      meta: { repositoryPath: repoPath },
+    })
+    return
+  }
   workspace.addTab({
     id: `${tabType}-${conn.record.id}`,
     type: tabType,
@@ -249,6 +267,28 @@ async function handleDuplicateConnection(conn: ConnectionRecord) {
   } catch (e) {
     toast.error(t('connection.saveFailed'), String(e))
   }
+}
+
+// --- Git 快捷打开 ---
+async function handleOpenGitRepo() {
+  const selected = await openDialog({
+    directory: true,
+    multiple: false,
+    title: t('git.selectRepository'),
+  })
+  if (!selected) return
+  const repoPath = typeof selected === 'string' ? selected : selected[0]
+  if (!repoPath) return
+  // 以路径生成稳定 ID，避免重复打开
+  const tabId = `git-${repoPath.replace(/[\\/:]/g, '_')}`
+  const folderName = repoPath.split(/[\\/]/).filter(Boolean).pop() ?? repoPath
+  workspace.addTab({
+    id: tabId,
+    type: 'git',
+    title: folderName,
+    closable: true,
+    meta: { repositoryPath: repoPath },
+  })
 }
 
 // --- 颜色标签 ---
@@ -339,6 +379,7 @@ const groupedNonFavorites = computed(() => {
     { type: 'ssh', label: t('welcome.terminal'), icon: Terminal },
     { type: 'sftp', label: t('welcome.files'), icon: FolderOpen },
     { type: 'redis', label: 'Redis', icon: Container },
+    { type: 'git', label: t('connection.typeGit'), icon: GitBranch },
   ]
 
   return categories.map(cat => ({
@@ -608,6 +649,19 @@ const groupedNonFavorites = computed(() => {
               </Button>
             </TooltipTrigger>
             <TooltipContent :side="isCollapsed ? 'right' : 'top'" class="text-[11px] font-medium"><p>{{ t('sidebar.localTerminal') }}</p></TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10"
+                @click="handleOpenGitRepo"
+              >
+                <GitBranch class="h-4 w-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent :side="isCollapsed ? 'right' : 'top'" class="text-[11px] font-medium"><p>{{ t('git.openRepository') }}</p></TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as-child>

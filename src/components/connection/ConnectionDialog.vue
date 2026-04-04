@@ -12,11 +12,12 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Database, Terminal, FolderOpen, Loader2, Plug, CheckCircle2, XCircle, Cpu, Container } from 'lucide-vue-next'
+import { Database, Terminal, FolderOpen, Loader2, Plug, CheckCircle2, XCircle, Cpu, Container, GitBranch } from 'lucide-vue-next'
 import DatabaseForm from './DatabaseForm.vue'
 import SshForm from './SshForm.vue'
 import SftpForm from './SftpForm.vue'
 import RedisForm from './RedisForm.vue'
+import GitForm from './GitForm.vue'
 import type { ConnectionRecord } from '@/api/connection'
 import { redisTestConnection, redisTestClusterConnection, redisTestSentinelConnection } from '@/api/redis'
 import { tunnelOpen, tunnelClose } from '@/api/tunnel'
@@ -26,7 +27,7 @@ import type { EnvironmentType } from '@/types/environment'
 const props = defineProps<{
   open: boolean
   editingConnection?: ConnectionRecord | null
-  defaultType?: 'database' | 'ssh' | 'sftp' | 'redis'
+  defaultType?: 'database' | 'ssh' | 'sftp' | 'redis' | 'git'
 }>()
 
 const emit = defineEmits<{
@@ -43,7 +44,7 @@ const saving = ref(false)
 const showPassword = ref(false)
 const testing = ref(false)
 const testResult = ref<{ success: boolean; message: string } | null>(null)
-const connectionType = ref<'database' | 'ssh' | 'sftp' | 'redis'>('database')
+const connectionType = ref<'database' | 'ssh' | 'sftp' | 'redis' | 'git'>('database')
 
 // Form fields
 const form = ref({
@@ -87,6 +88,8 @@ const form = ref({
   sentinelNodes: [] as string[],
   sentinelMasterName: '',
   sentinelPassword: '',
+  // Git
+  repositoryPath: '',
 })
 
 const isEditing = computed(() => !!props.editingConnection)
@@ -106,6 +109,12 @@ const portError = computed(() => {
 
 const canSave = computed(() => {
   const hasName = form.value.name.trim().length > 0
+
+  // Git 只需要 name + repositoryPath
+  if (connectionType.value === 'git') {
+    return hasName && form.value.repositoryPath.trim().length > 0 && !nameError.value
+  }
+
   const hasHost = form.value.host.trim().length > 0
 
   // Redis 不需要用户名
@@ -243,6 +252,15 @@ const redisFormData = computed({
   },
 })
 
+const gitFormData = computed({
+  get: () => ({
+    repositoryPath: form.value.repositoryPath,
+  }),
+  set: (value) => {
+    form.value.repositoryPath = value.repositoryPath
+  },
+})
+
 watch(
   () => props.open,
   async (open) => {
@@ -250,12 +268,17 @@ watch(
       showPassword.value = false
       testResult.value = null
       const conn = props.editingConnection
-      connectionType.value = conn.type as 'database' | 'ssh' | 'sftp' | 'redis'
+      connectionType.value = conn.type as 'database' | 'ssh' | 'sftp' | 'redis' | 'git'
       form.value.name = conn.name
       form.value.host = conn.host
       form.value.port = conn.port
       form.value.username = conn.username
       form.value.password = ''
+
+      // Git 连接把路径存在 host 字段
+      if (conn.type === 'git') {
+        form.value.repositoryPath = conn.host
+      }
 
       try {
         const stored = await getCredential(conn.id)
@@ -290,6 +313,10 @@ watch(
 
       try {
         const config = JSON.parse(conn.configJson)
+        // Git 连接：从 configJson 恢复 repositoryPath
+        if (conn.type === 'git') {
+          form.value.repositoryPath = config.repositoryPath ?? conn.host ?? ''
+        }
         form.value.database = config.database ?? ''
         form.value.driver = config.driver ?? 'mysql'
         form.value.authMethod = config.authMethod ?? 'password'
@@ -351,6 +378,8 @@ watch(connectionType, (type) => {
       form.value.port = 22
     } else if (type === 'redis') {
       form.value.port = 6379
+    } else if (type === 'git') {
+      form.value.port = 0
     } else {
       const defaultPorts: Record<string, number> = {
         mysql: 3306,
@@ -405,6 +434,7 @@ function resetForm() {
     sentinelNodes: [] as string[],
     sentinelMasterName: '',
     sentinelPassword: '',
+    repositoryPath: '',
   }
 }
 
@@ -415,12 +445,17 @@ async function handleSave(connectAfter = false) {
     let savedId: string
     let savedName: string
 
+    // Git 连接：路径存在 host 字段
+    const saveHost = connectionType.value === 'git' ? form.value.repositoryPath : form.value.host
+    const savePort = connectionType.value === 'git' ? 0 : form.value.port
+    const saveUsername = connectionType.value === 'git' ? '' : form.value.username
+
     if (isEditing.value && props.editingConnection) {
       const record = await connectionStore.editConnection(props.editingConnection.id, {
         name: form.value.name,
-        host: form.value.host,
-        port: form.value.port,
-        username: form.value.username,
+        host: saveHost,
+        port: savePort,
+        username: saveUsername,
         configJson,
         password: form.value.password || undefined,
       })
@@ -430,9 +465,9 @@ async function handleSave(connectAfter = false) {
       const record = await connectionStore.addConnection({
         name: form.value.name,
         type: connectionType.value,
-        host: form.value.host,
-        port: form.value.port,
-        username: form.value.username,
+        host: saveHost,
+        port: savePort,
+        username: saveUsername,
         configJson,
         password: form.value.password || undefined,
       })
@@ -463,7 +498,7 @@ async function handleSave(connectAfter = false) {
     emit('saved')
     emit('update:open', false)
 
-    if (connectAfter && (connectionType.value === 'database' || connectionType.value === 'redis')) {
+    if (connectAfter && (connectionType.value === 'database' || connectionType.value === 'redis' || connectionType.value === 'git')) {
       emit('connect', savedId, savedName)
     }
   } catch (e) {
@@ -474,6 +509,11 @@ async function handleSave(connectAfter = false) {
 }
 
 function buildConfigJson(): string {
+  if (connectionType.value === 'git') {
+    return JSON.stringify({
+      repositoryPath: form.value.repositoryPath,
+    })
+  }
   if (connectionType.value === 'database') {
     const config: Record<string, unknown> = {
       driver: form.value.driver,
@@ -674,13 +714,13 @@ async function handleTestConnection() {
                   class="absolute left-0 w-full bg-primary rounded-lg shadow-lg shadow-primary/20 transition-[top] duration-300 ease-out z-0"
                   :style="{
                     height: '44px',
-                    top: `${(['database', 'ssh', 'sftp', 'redis'].indexOf(connectionType)) * 48}px`,
+                    top: `${(['database', 'ssh', 'sftp', 'redis', 'git'].indexOf(connectionType)) * 48}px`,
                     opacity: 1
                   }"
                 ></div>
 
                 <button
-                  v-for="type in (['database', 'ssh', 'sftp', 'redis'] as const)"
+                  v-for="type in (['database', 'ssh', 'sftp', 'redis', 'git'] as const)"
                   :key="type"
                   role="radio"
                   :aria-checked="connectionType === type"
@@ -690,7 +730,7 @@ async function handleTestConnection() {
                     ? 'text-primary-foreground'
                     : 'text-muted-foreground/60 hover:text-muted-foreground'"
                 >
-                  <component :is="type === 'database' ? Database : type === 'ssh' ? Terminal : type === 'sftp' ? FolderOpen : Container"
+                  <component :is="type === 'database' ? Database : type === 'ssh' ? Terminal : type === 'sftp' ? FolderOpen : type === 'git' ? GitBranch : Container"
                     class="h-4 w-4 shrink-0 transition-transform duration-300"
                     :class="connectionType === type ? 'scale-110' : 'group-hover:scale-105'"
                   />
@@ -757,7 +797,7 @@ async function handleTestConnection() {
 
             <Button
               variant="outline"
-              :disabled="testing || !form.host || (connectionType !== 'redis' && !form.username)"
+              :disabled="testing || connectionType === 'git' || !form.host || (connectionType !== 'redis' && !form.username)"
               @click="handleTestConnection"
               class="w-full h-9 rounded-md font-bold text-[11px] border-border/60 bg-background hover:bg-primary hover:text-primary-foreground hover:border-primary transition-[background-color,color,border-color] shadow-sm group relative overflow-hidden"
             >
@@ -805,6 +845,11 @@ async function handleTestConnection() {
                   v-model:show-password="showPassword"
                   :is-editing="isEditing"
                 />
+
+                <GitForm
+                  v-if="connectionType === 'git'"
+                  v-model="gitFormData"
+                />
               </div>
             </div>
           </div>
@@ -850,7 +895,7 @@ async function handleTestConnection() {
               </Button>
 
               <Button
-                v-if="connectionType === 'database' || connectionType === 'redis'"
+                v-if="connectionType === 'database' || connectionType === 'redis' || connectionType === 'git'"
                 :disabled="saving || !canSave"
                 @click="handleSave(true)"
                 class="h-9 min-w-fit px-4 rounded-md font-bold bg-primary text-primary-foreground shadow-lg shadow-primary/20 transition-[background-color,box-shadow] hover:bg-primary/90 hover:shadow-primary/30 active:scale-95 disabled:opacity-50 text-[11px] flex items-center justify-center gap-1 shrink-0"

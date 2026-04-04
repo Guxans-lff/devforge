@@ -66,11 +66,12 @@ const isGenericDisconnectError = computed(() => {
   return msg.includes('连接已断开') || msg.includes('请重新连接') || msg.includes('connection reset')
 })
 
-// 心跳检测
+// 心跳检测（指数退避）
 const heartbeatTimer = ref<number | null>(null)
 const heartbeatFailures = ref(0)
-const HEARTBEAT_INTERVAL = 5_000  // 5 秒
-const MAX_FAILURES = 2            // 连续 2 次失败判定断开
+const BASE_HEARTBEAT_INTERVAL = 5_000   // 基础间隔 5 秒
+const MAX_HEARTBEAT_INTERVAL = 60_000   // 最大间隔 60 秒
+const MAX_FAILURES = 2                  // 连续 2 次失败判定断开
 const disconnectError = ref('')
 
 // SSH 隧道
@@ -217,11 +218,12 @@ function handleRefresh() {
   redisDbsize(props.connectionId).then(s => { dbSize.value = s }).catch(() => {})
 }
 
-/** 键被删除后清除选中 */
+/** 键被删除后清除选中（键列表由 KeyBrowser 本地更新，不触发全量 SCAN） */
 function handleKeyDeleted() {
   selectedKey.value = null
   selectedKeyInfo.value = null
-  handleRefresh()
+  // 仅更新 dbSize 统计，不触发全量 SCAN 刷新
+  redisDbsize(props.connectionId).then(s => { dbSize.value = s }).catch(() => {})
 }
 
 /** 键被重命名 */
@@ -237,14 +239,27 @@ function handleKeyCreated(key: string) {
   selectedKey.value = key
 }
 
-/** 启动心跳检测 */
+/** 启动心跳检测（指数退避：成功时 5s，失败时 5s → 10s → 20s → 60s） */
 function startHeartbeat() {
   stopHeartbeat()
-  heartbeatTimer.value = window.setInterval(async () => {
-    if (!connected.value) return
+  heartbeatStopped = false
+  scheduleNextHeartbeat()
+}
+
+let heartbeatStopped = false
+
+function scheduleNextHeartbeat() {
+  if (heartbeatStopped) return
+  const interval = Math.min(
+    BASE_HEARTBEAT_INTERVAL * Math.pow(2, heartbeatFailures.value),
+    MAX_HEARTBEAT_INTERVAL,
+  )
+  heartbeatTimer.value = window.setTimeout(async () => {
+    if (heartbeatStopped || !connected.value) return
     try {
       await redisPing(props.connectionId)
       heartbeatFailures.value = 0
+      scheduleNextHeartbeat()
     } catch (e) {
       heartbeatFailures.value++
       if (heartbeatFailures.value >= MAX_FAILURES) {
@@ -256,11 +271,13 @@ function startHeartbeat() {
           connected.value = false
           disconnectError.value = msg
           connectionStore.updateConnectionStatus(props.connectionId, 'disconnected', msg)
-          stopHeartbeat()
+          // 不再调度下一次
         }
+      } else {
+        scheduleNextHeartbeat()
       }
     }
-  }, HEARTBEAT_INTERVAL)
+  }, interval)
 }
 
 /** Sentinel 故障转移自动重连 */
@@ -313,8 +330,9 @@ async function attemptSentinelFailover() {
 
 /** 停止心跳检测 */
 function stopHeartbeat() {
+  heartbeatStopped = true
   if (heartbeatTimer.value !== null) {
-    clearInterval(heartbeatTimer.value)
+    clearTimeout(heartbeatTimer.value)
     heartbeatTimer.value = null
   }
 }
@@ -362,6 +380,14 @@ onBeforeUnmount(() => {
       :current-db="currentDb"
       :db-size="dbSize"
       :is-cluster="isCluster"
+      :active-info="showServerInfo"
+      :active-cli="showCli"
+      :active-pubsub="showPubSub"
+      :active-slowlog="showSlowLog"
+      :active-memory="showMemory"
+      :active-client-list="showClientList"
+      :active-monitor="showMonitor"
+      :active-lua="showLuaScript"
       @select-db="handleSelectDb"
       @refresh="handleRefresh"
       @new-key="showNewKeyDialog = true"

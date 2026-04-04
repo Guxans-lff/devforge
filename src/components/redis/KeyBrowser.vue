@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Search, CheckSquare, Trash2, Clock, Download, Upload, CheckCheck, XSquare } from 'lucide-vue-next'
+import { Search, CheckSquare, Trash2, Clock, Download, Upload, CheckCheck, XSquare, Database } from 'lucide-vue-next'
 import KeyTreeItem from './KeyTreeItem.vue'
 import type { TreeNode } from './KeyTreeItem.vue'
 import { redisScanKeys, redisGetKeyInfo, redisDeleteKeys, redisRenameKey, redisSetTtl, redisBatchDelete, redisBatchSetTtl, redisBatchExport, redisBatchImport } from '@/api/redis'
@@ -134,12 +134,14 @@ async function handleSelect(node: TreeNode) {
   }
 }
 
-/** 删除键 */
+/** 删除键（本地移除，避免全量 SCAN 刷新） */
 async function handleDeleteKey(key: string, event: Event) {
   event.stopPropagation()
   try {
     await redisDeleteKeys(props.connectionId, [key])
     toast.success(t('redis.keyDeleted'))
+    keys.value = keys.value.filter(k => k !== key)
+    buildTree()
     emit('delete')
   } catch (e) {
     toast.error(t('redis.deleteKeyFailed'), (e as any)?.message ?? String(e))
@@ -188,15 +190,20 @@ function deselectAll() {
   selectedKeys.value = new Set()
 }
 
-/** 批量删除 */
+/** 批量删除（本地移除已删键，避免全量 SCAN 刷新） */
 async function handleBatchDelete() {
   if (selectedCount.value === 0) return
   const count = selectedCount.value
   if (!confirm(t('redis.batch.deleteConfirm', { count }))) return
   batchLoading.value = true
   try {
-    await redisBatchDelete(props.connectionId, [...selectedKeys.value])
+    const deletedKeys = [...selectedKeys.value]
+    await redisBatchDelete(props.connectionId, deletedKeys)
     toast.success(t('redis.batch.deleteSuccess', { count }))
+    // 本地移除已删键，避免全量 SCAN
+    const deletedSet = new Set(deletedKeys)
+    keys.value = keys.value.filter(k => !deletedSet.has(k))
+    buildTree()
     selectedKeys.value = new Set()
     emit('delete')
   } catch (e) {
@@ -314,6 +321,8 @@ async function handleContextAction(action: string, key: string) {
       try {
         await redisDeleteKeys(props.connectionId, [key])
         toast.success(t('redis.keyDeleted'))
+        keys.value = keys.value.filter(k => k !== key)
+        buildTree()
         emit('delete')
       } catch (e) {
         toast.error(t('redis.deleteKeyFailed'), (e as any)?.message ?? String(e))
@@ -367,49 +376,49 @@ onMounted(() => {
         <Input
           v-model="pattern"
           :placeholder="t('redis.searchPlaceholder')"
-          class="h-8 pl-8 text-[11px] font-medium"
+          class="h-8 pl-8 text-xs font-medium"
           @keydown.enter="loadKeys(true)"
         />
       </div>
     </div>
 
     <!-- 批量操作工具栏 -->
-    <div class="flex items-center gap-1 px-2 py-1 border-b border-border/20 shrink-0">
-      <Button variant="ghost" size="sm" class="h-6 px-2 text-[10px]" :class="batchMode && 'text-primary'" @click="toggleBatchMode">
-        <CheckSquare class="h-3 w-3 mr-1" />
+    <div class="flex items-center gap-1 px-2 py-1.5 border-b border-border/20 shrink-0">
+      <Button variant="ghost" size="sm" class="h-7 px-2 text-xs" :class="batchMode && 'text-primary'" @click="toggleBatchMode">
+        <CheckSquare class="h-3.5 w-3.5 mr-1" />
         {{ t('redis.batch.selectMode') }}
       </Button>
       <template v-if="batchMode">
-        <div class="h-3 w-px bg-border/30" />
-        <span class="text-[9px] text-muted-foreground/50">{{ t('redis.batch.selected', { count: selectedCount }) }}</span>
+        <div class="h-3.5 w-px bg-border/30" />
+        <span class="text-[10px] text-muted-foreground/60">{{ t('redis.batch.selected', { count: selectedCount }) }}</span>
         <div class="flex-1" />
-        <Button variant="ghost" size="sm" class="h-5 px-1.5 text-[9px]" @click="selectAll">
-          <CheckCheck class="h-2.5 w-2.5 mr-0.5" />
+        <Button variant="ghost" size="sm" class="h-6 px-1.5 text-[10px]" @click="selectAll">
+          <CheckCheck class="h-3 w-3 mr-0.5" />
           {{ t('redis.batch.selectAll') }}
         </Button>
-        <Button variant="ghost" size="sm" class="h-5 px-1.5 text-[9px]" @click="deselectAll">
-          <XSquare class="h-2.5 w-2.5 mr-0.5" />
+        <Button variant="ghost" size="sm" class="h-6 px-1.5 text-[10px]" @click="deselectAll">
+          <XSquare class="h-3 w-3 mr-0.5" />
           {{ t('redis.batch.deselectAll') }}
         </Button>
       </template>
     </div>
 
     <!-- 批量操作按钮（选中时显示） -->
-    <div v-if="batchMode && selectedCount > 0" class="flex items-center gap-1 px-2 py-1 border-b border-border/20 bg-muted/10 shrink-0">
-      <Button variant="ghost" size="sm" class="h-6 px-2 text-[10px] text-destructive" :disabled="batchLoading" @click="handleBatchDelete">
-        <Trash2 class="h-3 w-3 mr-1" />
+    <div v-if="batchMode && selectedCount > 0" class="flex items-center gap-1 px-2 py-1.5 border-b border-border/20 bg-muted/10 shrink-0">
+      <Button variant="ghost" size="sm" class="h-7 px-2 text-xs text-destructive" :disabled="batchLoading" @click="handleBatchDelete">
+        <Trash2 class="h-3.5 w-3.5 mr-1" />
         {{ t('redis.batch.delete') }}
       </Button>
-      <Button variant="ghost" size="sm" class="h-6 px-2 text-[10px]" :disabled="batchLoading" @click="handleBatchSetTtl">
-        <Clock class="h-3 w-3 mr-1" />
+      <Button variant="ghost" size="sm" class="h-7 px-2 text-xs" :disabled="batchLoading" @click="handleBatchSetTtl">
+        <Clock class="h-3.5 w-3.5 mr-1" />
         {{ t('redis.batch.setTtl') }}
       </Button>
-      <Button variant="ghost" size="sm" class="h-6 px-2 text-[10px]" :disabled="batchLoading" @click="handleBatchExport">
-        <Download class="h-3 w-3 mr-1" />
+      <Button variant="ghost" size="sm" class="h-7 px-2 text-xs" :disabled="batchLoading" @click="handleBatchExport">
+        <Download class="h-3.5 w-3.5 mr-1" />
         {{ t('redis.batch.export') }}
       </Button>
-      <Button variant="ghost" size="sm" class="h-6 px-2 text-[10px]" :disabled="batchLoading" @click="handleBatchImport">
-        <Upload class="h-3 w-3 mr-1" />
+      <Button variant="ghost" size="sm" class="h-7 px-2 text-xs" :disabled="batchLoading" @click="handleBatchImport">
+        <Upload class="h-3.5 w-3.5 mr-1" />
         {{ t('redis.batch.import') }}
       </Button>
     </div>
@@ -436,7 +445,7 @@ onMounted(() => {
           <Button
             variant="ghost"
             size="sm"
-            class="w-full h-7 text-[10px] text-muted-foreground"
+            class="w-full h-8 text-xs text-muted-foreground"
             :disabled="loading"
             @click="loadMore"
           >
@@ -445,8 +454,10 @@ onMounted(() => {
         </div>
 
         <!-- 空状态 -->
-        <div v-if="!loading && keys.length === 0" class="px-3 py-8 text-center">
-          <p class="text-xs text-muted-foreground/40">{{ t('redis.noKeys') }}</p>
+        <div v-if="!loading && keys.length === 0" class="px-3 py-12 text-center">
+          <Database class="h-8 w-8 mx-auto mb-3 text-muted-foreground/20" />
+          <p class="text-sm text-muted-foreground/50 font-medium">{{ t('redis.noKeys') }}</p>
+          <p class="text-xs text-muted-foreground/30 mt-1">{{ t('redis.noKeysHint') }}</p>
         </div>
       </div>
     </ScrollArea>
@@ -457,12 +468,12 @@ onMounted(() => {
         <div class="bg-popover border border-border rounded-lg p-4 w-[300px] space-y-3 shadow-xl">
           <div class="text-sm font-bold text-foreground">{{ t('redis.batch.setTtlTitle') }}</div>
           <div class="space-y-1.5">
-            <label class="text-[11px] text-muted-foreground">{{ t('redis.batch.ttlSeconds') }}</label>
-            <Input v-model.number="batchTtl" type="number" class="h-8 text-[11px]" min="1" />
+            <label class="text-xs text-muted-foreground">{{ t('redis.batch.ttlSeconds') }}</label>
+            <Input v-model.number="batchTtl" type="number" class="h-8 text-xs" min="1" />
           </div>
           <div class="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" class="h-7 text-[10px]" @click="showTtlDialog = false">{{ t('common.cancel') }}</Button>
-            <Button size="sm" class="h-7 text-[10px]" :disabled="batchLoading" @click="confirmBatchSetTtl">{{ t('common.confirm') }}</Button>
+            <Button variant="ghost" size="sm" class="h-7 text-xs" @click="showTtlDialog = false">{{ t('common.cancel') }}</Button>
+            <Button size="sm" class="h-7 text-xs" :disabled="batchLoading" @click="confirmBatchSetTtl">{{ t('common.confirm') }}</Button>
           </div>
         </div>
       </div>
@@ -474,12 +485,12 @@ onMounted(() => {
         <div class="bg-popover border border-border rounded-lg p-4 w-[340px] space-y-3 shadow-xl">
           <div class="text-sm font-bold text-foreground">{{ t('redis.contextMenu.renameTitle') }}</div>
           <div class="space-y-1.5">
-            <label class="text-[11px] text-muted-foreground">{{ t('redis.contextMenu.newKeyName') }}</label>
-            <Input v-model="renameNewKey" class="h-8 text-[11px] font-mono" @keydown.enter="confirmRename" />
+            <label class="text-xs text-muted-foreground">{{ t('redis.contextMenu.newKeyName') }}</label>
+            <Input v-model="renameNewKey" class="h-8 text-xs font-mono" @keydown.enter="confirmRename" />
           </div>
           <div class="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" class="h-7 text-[10px]" @click="showRenameDialog = false">{{ t('common.cancel') }}</Button>
-            <Button size="sm" class="h-7 text-[10px]" @click="confirmRename">{{ t('common.confirm') }}</Button>
+            <Button variant="ghost" size="sm" class="h-7 text-xs" @click="showRenameDialog = false">{{ t('common.cancel') }}</Button>
+            <Button size="sm" class="h-7 text-xs" @click="confirmRename">{{ t('common.confirm') }}</Button>
           </div>
         </div>
       </div>
@@ -490,14 +501,14 @@ onMounted(() => {
       <div v-if="showKeyTtlDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="showKeyTtlDialog = false">
         <div class="bg-popover border border-border rounded-lg p-4 w-[300px] space-y-3 shadow-xl">
           <div class="text-sm font-bold text-foreground">{{ t('redis.contextMenu.setTtlTitle') }}</div>
-          <div class="text-[10px] text-muted-foreground/60 font-mono truncate">{{ contextKey }}</div>
+          <div class="text-xs text-muted-foreground/60 font-mono truncate">{{ contextKey }}</div>
           <div class="space-y-1.5">
-            <label class="text-[11px] text-muted-foreground">{{ t('redis.batch.ttlSeconds') }}</label>
-            <Input v-model.number="keyTtlValue" type="number" class="h-8 text-[11px]" min="1" @keydown.enter="confirmKeyTtl" />
+            <label class="text-xs text-muted-foreground">{{ t('redis.batch.ttlSeconds') }}</label>
+            <Input v-model.number="keyTtlValue" type="number" class="h-8 text-xs" min="1" @keydown.enter="confirmKeyTtl" />
           </div>
           <div class="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" class="h-7 text-[10px]" @click="showKeyTtlDialog = false">{{ t('common.cancel') }}</Button>
-            <Button size="sm" class="h-7 text-[10px]" @click="confirmKeyTtl">{{ t('common.confirm') }}</Button>
+            <Button variant="ghost" size="sm" class="h-7 text-xs" @click="showKeyTtlDialog = false">{{ t('common.cancel') }}</Button>
+            <Button size="sm" class="h-7 text-xs" @click="confirmKeyTtl">{{ t('common.confirm') }}</Button>
           </div>
         </div>
       </div>

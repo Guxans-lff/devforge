@@ -53,7 +53,7 @@ onMounted(() => { loadInfo() })
   <div class="flex h-full flex-col">
     <!-- 头部 -->
     <div class="flex items-center justify-between px-4 py-2 border-b border-border/30 shrink-0">
-      <span class="text-[11px] font-bold text-muted-foreground/60 uppercase tracking-wider">{{ t('redis.serverInfo') }}</span>
+      <span class="text-xs font-bold text-muted-foreground/60 uppercase tracking-wider">{{ t('redis.serverInfo') }}</span>
       <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :disabled="loading" @click="loadInfo">
         <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loading }" />
       </Button>
@@ -73,15 +73,15 @@ onMounted(() => { loadInfo() })
                 class="h-3 w-3 text-muted-foreground/40 transition-transform"
                 :class="{ 'rotate-90': expandedSections.has('ClusterNodes') }"
               />
-              <span class="text-[11px] font-bold text-foreground/80">{{ t('redis.cluster.nodes') }}</span>
-              <span class="text-[9px] text-muted-foreground/30 font-mono">{{ clusterNodeList.length }}</span>
+              <span class="text-xs font-bold text-foreground/80">{{ t('redis.cluster.nodes') }}</span>
+              <span class="text-[10px] text-muted-foreground/30 font-mono">{{ clusterNodeList.length }}</span>
             </button>
 
             <div v-if="expandedSections.has('ClusterNodes')" class="pb-2 px-4">
               <div
                 v-for="node in clusterNodeList"
                 :key="node.id"
-                class="flex items-center gap-3 py-1.5 px-4 text-[11px] hover:bg-muted/10 rounded"
+                class="flex items-center gap-3 py-1.5 px-4 text-xs hover:bg-muted/10 rounded"
               >
                 <!-- 状态指示灯 -->
                 <div
@@ -90,7 +90,7 @@ onMounted(() => { loadInfo() })
                 />
                 <!-- 角色标签 -->
                 <span
-                  class="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 min-w-[48px] text-center"
+                  class="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0 min-w-[48px] text-center"
                   :class="node.flags.includes('master')
                     ? 'bg-primary/10 text-primary'
                     : 'bg-muted/40 text-muted-foreground/60'"
@@ -100,13 +100,13 @@ onMounted(() => { loadInfo() })
                 <!-- 地址 -->
                 <span class="font-mono text-foreground/70 min-w-[160px]">{{ node.addr }}</span>
                 <!-- 哈希槽 -->
-                <span v-if="node.slots" class="font-mono text-muted-foreground/50 text-[10px]">
+                <span v-if="node.slots" class="font-mono text-muted-foreground/50 text-xs">
                   {{ t('redis.cluster.slots') }}: {{ node.slots }}
                 </span>
                 <!-- Master ID（从节点显示） -->
                 <span
                   v-if="node.flags.includes('slave') && node.masterId !== '-'"
-                  class="font-mono text-muted-foreground/30 text-[9px] truncate"
+                  class="font-mono text-muted-foreground/30 text-[10px] truncate"
                 >
                   → {{ node.masterId.slice(0, 8) }}
                 </span>
@@ -124,8 +124,8 @@ onMounted(() => { loadInfo() })
                 class="h-3 w-3 text-muted-foreground/40 transition-transform"
                 :class="{ 'rotate-90': expandedSections.has(section.name) }"
               />
-              <span class="text-[11px] font-bold text-foreground/80">{{ section.name }}</span>
-              <span class="text-[9px] text-muted-foreground/30 font-mono">{{ section.entries.length }}</span>
+              <span class="text-xs font-bold text-foreground/80">{{ section.name }}</span>
+              <span class="text-[10px] text-muted-foreground/30 font-mono">{{ section.entries.length }}</span>
             </button>
 
             <!-- Section 内容 -->
@@ -133,7 +133,7 @@ onMounted(() => { loadInfo() })
               <div
                 v-for="entry in section.entries"
                 :key="entry.key"
-                class="flex items-center px-8 py-0.5 text-[11px] hover:bg-muted/10"
+                class="flex items-center px-8 py-1 text-xs hover:bg-muted/10"
               >
                 <span class="w-[200px] shrink-0 font-mono text-muted-foreground/60 truncate">{{ entry.key }}</span>
                 <span class="font-mono text-foreground/70 truncate">{{ entry.value }}</span>

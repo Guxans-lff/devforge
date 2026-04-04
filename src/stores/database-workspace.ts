@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { shallowRef, triggerRef } from 'vue'
 import { t } from '@/utils/i18n-helper'
 import { usePersistence } from '@/plugins/persistence'
 import type {
@@ -39,12 +39,12 @@ interface PersistedState {
 }
 
 export const useDatabaseWorkspaceStore = defineStore('database-workspace', () => {
-  const workspaces = ref<Map<string, ConnectionWorkspace>>(new Map())
+  const workspaces = shallowRef<Map<string, ConnectionWorkspace>>(new Map())
 
   const queryCounters = new Map<string, number>()
 
   /** 已关闭的标签页记录（按连接分组，每个连接最多 20 条） */
-  const closedTabs = ref<Map<string, InnerTab[]>>(new Map())
+  const closedTabs = shallowRef<Map<string, InnerTab[]>>(new Map())
 
   function nextQueryCounter(connectionId: string): number {
     const count = (queryCounters.get(connectionId) ?? 0) + 1
@@ -75,7 +75,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
       activeTabId: defaultTab.id,
     }
 
-    workspaces.value = new Map(workspaces.value).set(connectionId, workspace)
+    workspaces.value.set(connectionId, workspace)
+    triggerRef(workspaces)
     return workspace
   }
 
@@ -102,7 +103,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
       tabs: [...ws.tabs, tab],
       activeTabId: tab.id,
     }
-    workspaces.value = new Map(workspaces.value).set(connectionId, updated)
+    workspaces.value.set(connectionId, updated)
+    triggerRef(workspaces)
     return tab
   }
 
@@ -112,14 +114,16 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     if (existing) {
       // 已存在则激活
       const updated: ConnectionWorkspace = { ...ws, activeTabId: tab.id }
-      workspaces.value = new Map(workspaces.value).set(connectionId, updated)
+      workspaces.value.set(connectionId, updated)
+    triggerRef(workspaces)
       return
     }
     const updated: ConnectionWorkspace = {
       tabs: [...ws.tabs, tab],
       activeTabId: tab.id,
     }
-    workspaces.value = new Map(workspaces.value).set(connectionId, updated)
+    workspaces.value.set(connectionId, updated)
+    triggerRef(workspaces)
   }
 
   function closeInnerTab(connectionId: string, tabId: string): void {
@@ -132,7 +136,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     // 保存到已关闭列表（用于撤销关闭）
     const existing = closedTabs.value.get(connectionId) ?? []
     const updatedClosed = [{ ...tab }, ...existing].slice(0, 20)
-    closedTabs.value = new Map(closedTabs.value).set(connectionId, updatedClosed)
+    closedTabs.value.set(connectionId, updatedClosed)
+    triggerRef(closedTabs)
 
     // 如果关闭的是查询 Tab，释放其 Session 连接
     if (tab.type === 'query') {
@@ -154,7 +159,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
       tabs: newTabs,
       activeTabId: newActiveId,
     }
-    workspaces.value = new Map(workspaces.value).set(connectionId, updated)
+    workspaces.value.set(connectionId, updated)
+    triggerRef(workspaces)
   }
 
   function closeOtherTabs(connectionId: string, tabId: string): void {
@@ -166,7 +172,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
       tabs: newTabs,
       activeTabId: tabId,
     }
-    workspaces.value = new Map(workspaces.value).set(connectionId, updated)
+    workspaces.value.set(connectionId, updated)
+    triggerRef(workspaces)
   }
 
   function closeAllTabs(connectionId: string): void {
@@ -178,7 +185,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
       tabs: newTabs,
       activeTabId: newTabs[0]?.id ?? '',
     }
-    workspaces.value = new Map(workspaces.value).set(connectionId, updated)
+    workspaces.value.set(connectionId, updated)
+    triggerRef(workspaces)
   }
 
   function setActiveInnerTab(connectionId: string, tabId: string): void {
@@ -186,7 +194,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     if (!ws) return
 
     const updated: ConnectionWorkspace = { ...ws, activeTabId: tabId }
-    workspaces.value = new Map(workspaces.value).set(connectionId, updated)
+    workspaces.value.set(connectionId, updated)
+    triggerRef(workspaces)
   }
 
   function updateTabContext(
@@ -203,7 +212,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     })
 
     const updated: ConnectionWorkspace = { ...ws, tabs: newTabs as InnerTab[] }
-    workspaces.value = new Map(workspaces.value).set(connectionId, updated)
+    workspaces.value.set(connectionId, updated)
+    triggerRef(workspaces)
   }
 
   function setTabDirty(connectionId: string, tabId: string, dirty: boolean): void {
@@ -216,13 +226,13 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     })
 
     const updated: ConnectionWorkspace = { ...ws, tabs: newTabs }
-    workspaces.value = new Map(workspaces.value).set(connectionId, updated)
+    workspaces.value.set(connectionId, updated)
+    triggerRef(workspaces)
   }
 
   function cleanup(connectionId: string): void {
-    const newMap = new Map(workspaces.value)
-    newMap.delete(connectionId)
-    workspaces.value = newMap
+    workspaces.value.delete(connectionId)
+    triggerRef(workspaces)
     queryCounters.delete(connectionId)
   }
 
@@ -351,7 +361,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
 
     const [restored, ...rest] = stack
     if (!restored) return null
-    closedTabs.value = new Map(closedTabs.value).set(connectionId, rest)
+    closedTabs.value.set(connectionId, rest)
+    triggerRef(closedTabs)
 
     // 用新 ID 重新添加，避免冲突
     const newTab: InnerTab = {

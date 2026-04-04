@@ -5,7 +5,7 @@
  * 同时承载 P0 键盘可操作性、P1 design tokens、P1-3 语义化、P2-3 精确过渡
  */
 import {
-  Database, Terminal, FolderOpen,
+  Database, Terminal, FolderOpen, Container, GitBranch,
   Plug, FlaskConical, Pencil, Copy, Trash2, Star, StarOff,
 } from 'lucide-vue-next'
 import {
@@ -47,6 +47,8 @@ const typeIcons: Record<string, typeof Database> = {
   database: Database,
   ssh: Terminal,
   sftp: FolderOpen,
+  redis: Container,
+  git: GitBranch,
 }
 
 // 类型颜色 — 使用 design tokens
@@ -54,6 +56,8 @@ const typeBadgeColors: Record<string, string> = {
   database: 'text-primary',
   ssh: 'text-df-success',
   sftp: 'text-df-warning',
+  redis: 'text-destructive',
+  git: 'text-purple-500',
 }
 
 // 状态颜色 — connected 使用 df-success token

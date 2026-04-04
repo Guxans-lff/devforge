@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, shallowRef, triggerRef, computed } from 'vue'
 import type { ConnectionStatus, ReconnectParams, ReconnectResult } from '@/types/connection'
 import { dbCheckAndReconnect } from '@/api/database'
 import { getCredential } from '@/api/connection'
@@ -60,7 +60,7 @@ export function parseAutoReconnect(configJson: string): boolean {
 }
 
 export const useConnectionStore = defineStore('connections', () => {
-  const connections = ref<Map<string, ConnectionState>>(new Map())
+  const connections = shallowRef<Map<string, ConnectionState>>(new Map())
   const groups = ref<ConnectionGroupRecord[]>([])
   const searchQuery = ref('')
   const loading = ref(false)
@@ -139,29 +139,30 @@ export const useConnectionStore = defineStore('connections', () => {
 
   async function addConnection(params: CreateConnectionParams): Promise<ConnectionRecord> {
     const record = await apiCreateConnection(params)
-    connections.value = new Map(connections.value).set(record.id, {
+    connections.value.set(record.id, {
       record,
       status: 'disconnected',
     })
+    triggerRef(connections)
     return record
   }
 
   async function editConnection(id: string, params: UpdateConnectionParams): Promise<ConnectionRecord> {
     const record = await apiUpdateConnection(id, params)
     const existing = connections.value.get(id)
-    connections.value = new Map(connections.value).set(id, {
+    connections.value.set(id, {
       record,
       status: existing?.status ?? 'disconnected',
       error: existing?.error,
     })
+    triggerRef(connections)
     return record
   }
 
   async function removeConnection(id: string) {
     await apiDeleteConnection(id)
-    const next = new Map(connections.value)
-    next.delete(id)
-    connections.value = next
+    connections.value.delete(id)
+    triggerRef(connections)
   }
 
   async function testConnectionById(id: string): Promise<TestResult> {
@@ -184,11 +185,12 @@ export const useConnectionStore = defineStore('connections', () => {
   function updateConnectionStatus(id: string, status: ConnectionStatus, error?: string) {
     const state = connections.value.get(id)
     if (!state) return
-    connections.value = new Map(connections.value).set(id, {
+    connections.value.set(id, {
       ...state,
       status,
       error,
     })
+    triggerRef(connections)
   }
 
   async function addGroup(name: string): Promise<ConnectionGroupRecord> {
@@ -216,10 +218,11 @@ export const useConnectionStore = defineStore('connections', () => {
     const state = connections.value.get(connectionId)
     if (state) {
       const updatedRecord = { ...state.record, groupId: targetGroupId }
-      connections.value = new Map(connections.value).set(connectionId, {
+      connections.value.set(connectionId, {
         ...state,
         record: updatedRecord,
       })
+      triggerRef(connections)
     }
   }
 
@@ -236,17 +239,16 @@ export const useConnectionStore = defineStore('connections', () => {
     await apiReorderConnections(orderedIds)
     // 更新本地排序
     let sortOrder = 0
-    const newMap = new Map(connections.value)
     for (const id of orderedIds) {
-      const state = newMap.get(id)
+      const state = connections.value.get(id)
       if (state) {
-        newMap.set(id, {
+        connections.value.set(id, {
           ...state,
           record: { ...state.record, sortOrder: sortOrder++ },
         })
       }
     }
-    connections.value = newMap
+    triggerRef(connections)
   }
 
   function setSearchQuery(query: string) {
@@ -338,10 +340,11 @@ export const useConnectionStore = defineStore('connections', () => {
   function updateReconnectAttempt(id: string, attempt: number) {
     const state = connections.value.get(id)
     if (!state) return
-    connections.value = new Map(connections.value).set(id, {
+    connections.value.set(id, {
       ...state,
       reconnectAttempt: attempt,
     })
+    triggerRef(connections)
   }
 
   /**

@@ -23,6 +23,7 @@ use commands::command_snippet;
 use commands::app_state;
 use commands::audit_log;
 use commands::ssh::{self, SshEngineState};
+use commands::git::{self as git_cmd, GitEngineState};
 use commands::table_editor;
 use commands::terminal_recorder::{self, TerminalRecorderState};
 use commands::tunnel::{self, SshTunnelEngineState};
@@ -36,6 +37,7 @@ use services::redis_pubsub::RedisPubSubManager;
 use services::sftp_engine::SftpEngine;
 use services::ssh_engine::SshEngine;
 use services::ssh_tunnel::SshTunnelEngine;
+use services::git_engine::GitEngine;
 use services::terminal_recorder::TerminalRecorder;
 use services::storage::Storage;
 use services::transfer_manager::{TransferManager, TransferManagerState};
@@ -96,6 +98,10 @@ pub fn run() {
             let local_shell_state: LocalShellEngineState =
                 Arc::new(LocalShellEngine::new());
             app.manage(local_shell_state);
+
+            // Initialize GitEngine — 内部使用 RwLock
+            let git_engine_state: GitEngineState = Arc::new(GitEngine::new());
+            app.manage(git_engine_state);
 
             // Initialize TransferManager
             let transfer_manager = TransferManager::with_default_config();
@@ -430,6 +436,60 @@ pub fn run() {
             redis_cmd::redis_script_load,
             redis_cmd::redis_script_exists,
             redis_cmd::redis_script_flush,
+            // Git
+            git_cmd::git_open,
+            git_cmd::git_close,
+            git_cmd::git_is_open,
+            git_cmd::git_validate_repo,
+            git_cmd::git_get_status,
+            git_cmd::git_current_branch,
+            git_cmd::git_get_commits,
+            git_cmd::git_get_commit_detail,
+            git_cmd::git_stage_file,
+            git_cmd::git_unstage_file,
+            git_cmd::git_stage_all,
+            git_cmd::git_unstage_all,
+            git_cmd::git_commit,
+            git_cmd::git_get_diff_working,
+            git_cmd::git_get_diff_staged,
+            git_cmd::git_get_diff_commit,
+            git_cmd::git_get_branches,
+            git_cmd::git_create_branch,
+            git_cmd::git_delete_branch,
+            git_cmd::git_checkout_branch,
+            git_cmd::git_get_stashes,
+            git_cmd::git_create_stash,
+            git_cmd::git_apply_stash,
+            git_cmd::git_drop_stash,
+            git_cmd::git_get_graph,
+            // Git — Remote 操作
+            git_cmd::git_get_remotes,
+            git_cmd::git_push,
+            git_cmd::git_pull,
+            git_cmd::git_fetch,
+            // Git — Merge & Rebase
+            git_cmd::git_merge_branch,
+            git_cmd::git_abort_merge,
+            git_cmd::git_rebase_branch,
+            git_cmd::git_abort_rebase,
+            // Git — Tag
+            git_cmd::git_get_tags,
+            git_cmd::git_create_tag,
+            git_cmd::git_delete_tag,
+            // Git — 文件操作
+            git_cmd::git_discard_file,
+            git_cmd::git_discard_all,
+            git_cmd::git_get_file_content,
+            // Git — Config / Amend / Pop Stash
+            git_cmd::git_get_config,
+            git_cmd::git_amend_commit,
+            git_cmd::git_pop_stash,
+            // Git — Cherry-pick / Search / Blame / File History
+            git_cmd::git_cherry_pick,
+            git_cmd::git_search_commits,
+            git_cmd::git_blame_file,
+            git_cmd::git_file_history,
+            git_cmd::git_get_contributors,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

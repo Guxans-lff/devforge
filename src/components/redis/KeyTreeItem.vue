@@ -53,8 +53,8 @@ function countLeaves(node: TreeNode): number {
     <ContextMenu>
       <ContextMenuTrigger as-child>
         <div
-          class="flex items-center gap-1.5 px-2 py-1 cursor-pointer text-[11px] font-medium group hover:bg-muted/50 transition-colors"
-          :class="node.isLeaf && node.fullKey === selectedKey ? 'bg-primary/10 text-primary' : 'text-foreground/80'"
+          class="flex items-center gap-1.5 px-2 py-1.5 cursor-pointer text-xs font-medium group hover:bg-muted/50 transition-colors"
+          :class="node.isLeaf && node.fullKey === selectedKey ? 'bg-primary/10 text-primary border-l-2 border-primary' : 'text-foreground/80 border-l-2 border-transparent'"
           :style="{ paddingLeft: `${8 + depth * 16}px` }"
           @click="batchMode && node.isLeaf ? emit('toggleCheck', node.fullKey) : emit('select', node)"
         >
@@ -82,7 +82,7 @@ function countLeaves(node: TreeNode): number {
           <span class="truncate flex-1">{{ node.name }}</span>
 
           <!-- 非叶子数量 -->
-          <span v-if="!node.isLeaf" class="text-[9px] text-muted-foreground/30 font-mono">
+          <span v-if="!node.isLeaf" class="text-[10px] text-muted-foreground/40 font-mono tabular-nums">
             {{ countLeaves(node) }}
           </span>
 
