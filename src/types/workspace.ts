@@ -1,4 +1,4 @@
-export type TabType = 'database' | 'terminal' | 'file-manager' | 'settings' | 'welcome' | 'multi-exec' | 'terminal-player' | 'redis' | 'git'
+export type TabType = 'database' | 'terminal' | 'file-manager' | 'settings' | 'welcome' | 'multi-exec' | 'terminal-player' | 'redis' | 'git' | 'screenshot' | 'tunnel'
 
 export interface Tab {
   id: string

@@ -11,6 +11,7 @@ use crate::models::git::{
     GitBlameLine, GitBranch, GitCommit, GitConfig, GitContributor, GitDiff, GitDiffHunk, GitDiffLine, GitDiffStats,
     GitFileDiff, GitFileStatus, GitGraph, GitGraphEdge, GitGraphNode, GitMergeResult,
     GitRef, GitRemote, GitRepositoryInfo, GitStash, GitStatus, GitTag,
+    RebaseAction, RebaseEntry, RebaseResult,
 };
 use crate::utils::error::AppError;
 
@@ -920,6 +921,232 @@ impl GitEngine {
         })
     }
 
+    // ── 交互式 Rebase ──────────────────────────────────────────
+
+    /// 获取交互式 rebase 计划：列出 base_commit..HEAD 的提交
+    pub async fn interactive_rebase_plan(
+        &self,
+        path: &str,
+        base_commit: &str,
+    ) -> Result<Vec<RebaseEntry>, AppError> {
+        let base = base_commit.to_string();
+        with_repo!(path, |repo| {
+            let base_oid = git2::Oid::from_str(&base)
+                .map_err(|e| AppError::Validation(format!("无效的提交哈希: {e}")))?;
+
+            let head_oid = repo.head()
+                .map_err(|e| AppError::Other(format!("获取 HEAD 失败: {e}")))?
+                .target()
+                .ok_or_else(|| AppError::Other("HEAD 不指向有效提交".into()))?;
+
+            // 如果 base == HEAD，没有可操作的提交
+            if base_oid == head_oid {
+                return Ok(vec![]);
+            }
+
+            let mut revwalk = repo.revwalk()
+                .map_err(|e| AppError::Other(format!("创建 revwalk 失败: {e}")))?;
+            revwalk.push(head_oid)
+                .map_err(|e| AppError::Other(format!("push HEAD 失败: {e}")))?;
+            revwalk.hide(base_oid)
+                .map_err(|e| AppError::Other(format!("hide base 失败: {e}")))?;
+            revwalk.set_sorting(Sort::TOPOLOGICAL | Sort::REVERSE)
+                .map_err(|e| AppError::Other(format!("设置排序失败: {e}")))?;
+
+            let mut entries = Vec::new();
+            for oid in revwalk {
+                let oid = oid.map_err(|e| AppError::Other(format!("遍历提交失败: {e}")))?;
+                let commit = repo.find_commit(oid)
+                    .map_err(|e| AppError::Other(format!("查找提交失败: {e}")))?;
+                let hash = oid.to_string();
+                entries.push(RebaseEntry {
+                    short_hash: hash[..7.min(hash.len())].to_string(),
+                    hash,
+                    message: commit.summary().unwrap_or("").to_string(),
+                    author: commit.author().name().unwrap_or("").to_string(),
+                    timestamp: commit.time().seconds(),
+                    action: RebaseAction::Pick,
+                });
+            }
+            Ok(entries)
+        })
+    }
+
+    /// 执行交互式 rebase
+    /// 按照用户指定的 plan 顺序，在 base_commit 之上依次 cherry-pick/squash/reword/drop
+    pub async fn interactive_rebase_execute(
+        &self,
+        path: &str,
+        base_commit: &str,
+        plan: Vec<RebaseEntry>,
+    ) -> Result<RebaseResult, AppError> {
+        let base = base_commit.to_string();
+        let total = plan.iter().filter(|e| !matches!(e.action, RebaseAction::Drop)).count();
+
+        with_repo!(path, |repo| {
+            // 保存原始 HEAD 用于 abort 回滚
+            let original_head = repo.head()
+                .map_err(|e| AppError::Other(format!("获取 HEAD 失败: {e}")))?
+                .target()
+                .ok_or_else(|| AppError::Other("HEAD 不指向有效提交".into()))?;
+
+            // 将 HEAD 重置到 base_commit
+            let base_oid = git2::Oid::from_str(&base)
+                .map_err(|e| AppError::Validation(format!("无效的 base 哈希: {e}")))?;
+            let base_obj = repo.find_object(base_oid, None)
+                .map_err(|e| AppError::Other(format!("查找 base 对象失败: {e}")))?;
+            repo.reset(&base_obj, git2::ResetType::Hard, None)
+                .map_err(|e| AppError::Other(format!("重置到 base 失败: {e}")))?;
+
+            // 在 .git 中写入原始 HEAD 引用（用于 abort）
+            let git_dir = repo.path();
+            let rebase_head_path = git_dir.join("INTERACTIVE_REBASE_ORIG_HEAD");
+            std::fs::write(&rebase_head_path, original_head.to_string())
+                .map_err(|e| AppError::Other(format!("保存原始 HEAD 失败: {e}")))?;
+
+            let mut completed = 0usize;
+            let mut pending_squash_messages: Vec<String> = Vec::new();
+
+            for entry in &plan {
+                match &entry.action {
+                    RebaseAction::Drop => continue,
+                    RebaseAction::Pick | RebaseAction::Reword(_) | RebaseAction::Squash | RebaseAction::Fixup => {
+                        let oid = git2::Oid::from_str(&entry.hash)
+                            .map_err(|e| AppError::Validation(format!("无效哈希 {}: {e}", entry.short_hash)))?;
+                        let commit = repo.find_commit(oid)
+                            .map_err(|e| AppError::Other(format!("查找提交 {} 失败: {e}", entry.short_hash)))?;
+
+                        // cherry-pick 到当前 HEAD
+                        repo.cherrypick(&commit, None)
+                            .map_err(|e| AppError::Other(format!("Cherry-pick {} 失败: {e}", entry.short_hash)))?;
+
+                        let mut index = repo.index()
+                            .map_err(|e| AppError::Other(format!("获取索引失败: {e}")))?;
+
+                        if index.has_conflicts() {
+                            // 冲突 → 回滚到原始 HEAD
+                            let orig_obj = repo.find_object(original_head, None)
+                                .map_err(|e| AppError::Other(format!("查找原始 HEAD 失败: {e}")))?;
+                            repo.reset(&orig_obj, git2::ResetType::Hard, None)
+                                .map_err(|e| AppError::Other(format!("回滚失败: {e}")))?;
+                            let _ = std::fs::remove_file(&rebase_head_path);
+
+                            let mut conflicts = Vec::new();
+                            if let Ok(iter) = index.conflicts() {
+                                for conflict in iter.flatten() {
+                                    if let Some(our) = conflict.our {
+                                        conflicts.push(String::from_utf8_lossy(&our.path).to_string());
+                                    }
+                                }
+                            }
+                            return Ok(RebaseResult {
+                                success: false,
+                                conflicts,
+                                completed_steps: completed,
+                                total_steps: total,
+                                message: format!("Rebase 在 {} 处遇到冲突，已回滚", entry.short_hash),
+                            });
+                        }
+
+                        let sig = repo.signature()
+                            .map_err(|e| AppError::Other(format!("获取签名失败: {e}")))?;
+                        let tree_oid = index.write_tree()
+                            .map_err(|e| AppError::Other(format!("写入 tree 失败: {e}")))?;
+                        let tree = repo.find_tree(tree_oid)
+                            .map_err(|e| AppError::Other(format!("查找 tree 失败: {e}")))?;
+                        let head_commit = repo.head()
+                            .map_err(|e| AppError::Other(format!("获取 HEAD 失败: {e}")))?
+                            .peel_to_commit()
+                            .map_err(|e| AppError::Other(format!("HEAD 不是提交: {e}")))?;
+
+                        let original_msg = commit.message().unwrap_or("");
+
+                        match &entry.action {
+                            RebaseAction::Pick => {
+                                // 使用原始 commit message
+                                if !pending_squash_messages.is_empty() {
+                                    // 如果之前有积攒的 squash 消息，先处理（不应出现，但保险起见）
+                                    pending_squash_messages.clear();
+                                }
+                                repo.commit(Some("HEAD"), &sig, &sig, original_msg, &tree, &[&head_commit])
+                                    .map_err(|e| AppError::Other(format!("创建提交失败: {e}")))?;
+                            }
+                            RebaseAction::Reword(new_msg) => {
+                                repo.commit(Some("HEAD"), &sig, &sig, new_msg, &tree, &[&head_commit])
+                                    .map_err(|e| AppError::Other(format!("创建提交失败: {e}")))?;
+                            }
+                            RebaseAction::Squash => {
+                                // 收集消息，amend 上一个提交
+                                let combined_msg = format!(
+                                    "{}\n\n{}",
+                                    head_commit.message().unwrap_or(""),
+                                    original_msg
+                                );
+                                // Amend: 创建新提交替换 HEAD
+                                let head_parents: Vec<_> = (0..head_commit.parent_count())
+                                    .filter_map(|i| head_commit.parent(i).ok())
+                                    .collect();
+                                let parent_refs: Vec<&git2::Commit<'_>> = head_parents.iter().collect();
+                                repo.commit(Some("HEAD"), &sig, &sig, &combined_msg, &tree, &parent_refs)
+                                    .map_err(|e| AppError::Other(format!("Squash 提交失败: {e}")))?;
+                            }
+                            RebaseAction::Fixup => {
+                                // 与上一个合并但不改消息 → amend HEAD 用相同消息
+                                let keep_msg = head_commit.message().unwrap_or("");
+                                let head_parents: Vec<_> = (0..head_commit.parent_count())
+                                    .filter_map(|i| head_commit.parent(i).ok())
+                                    .collect();
+                                let parent_refs: Vec<&git2::Commit<'_>> = head_parents.iter().collect();
+                                repo.commit(Some("HEAD"), &sig, &sig, keep_msg, &tree, &parent_refs)
+                                    .map_err(|e| AppError::Other(format!("Fixup 提交失败: {e}")))?;
+                            }
+                            RebaseAction::Drop => unreachable!(),
+                        }
+
+                        repo.cleanup_state()
+                            .map_err(|e| AppError::Other(format!("清理状态失败: {e}")))?;
+                        completed += 1;
+                    }
+                }
+            }
+
+            let _ = std::fs::remove_file(&rebase_head_path);
+
+            Ok(RebaseResult {
+                success: true,
+                conflicts: vec![],
+                completed_steps: completed,
+                total_steps: total,
+                message: format!("交互式 Rebase 完成，处理了 {} 个提交", completed),
+            })
+        })
+    }
+
+    /// 中止交互式 rebase（回滚到原始 HEAD）
+    pub async fn interactive_rebase_abort(&self, path: &str) -> Result<(), AppError> {
+        with_repo!(path, |repo| {
+            let git_dir = repo.path();
+            let rebase_head_path = git_dir.join("INTERACTIVE_REBASE_ORIG_HEAD");
+
+            if !rebase_head_path.exists() {
+                return Err(AppError::Validation("没有正在进行的交互式 Rebase".into()));
+            }
+
+            let orig_hash = std::fs::read_to_string(&rebase_head_path)
+                .map_err(|e| AppError::Other(format!("读取原始 HEAD 失败: {e}")))?;
+            let orig_oid = git2::Oid::from_str(orig_hash.trim())
+                .map_err(|e| AppError::Validation(format!("无效的原始 HEAD: {e}")))?;
+            let orig_obj = repo.find_object(orig_oid, None)
+                .map_err(|e| AppError::Other(format!("查找原始 HEAD 对象失败: {e}")))?;
+
+            repo.reset(&orig_obj, git2::ResetType::Hard, None)
+                .map_err(|e| AppError::Other(format!("回滚失败: {e}")))?;
+
+            let _ = std::fs::remove_file(&rebase_head_path);
+            Ok(())
+        })
+    }
+
     // ── 搜索提交 ────────────────────────────────────────────────
 
     /// 搜索提交（按消息/作者/哈希）
@@ -1478,7 +1705,10 @@ fn parse_diff(diff: &Diff) -> Result<GitDiff, AppError> {
     // 遍历每个 delta
     let num_deltas = diff.deltas().len();
     for i in 0..num_deltas {
-        let delta = diff.get_delta(i).unwrap();
+        let delta = match diff.get_delta(i) {
+            Some(d) => d,
+            None => continue,
+        };
         let new_file = delta.new_file();
         let old_file = delta.old_file();
 

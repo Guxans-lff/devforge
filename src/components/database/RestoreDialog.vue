@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onBeforeUnmount } from 'vue'
+import { parseBackendError } from '@/types/error'
 import { useI18n } from 'vue-i18n'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
@@ -97,10 +98,10 @@ async function startRestore() {
     restoreSuccess.value = true
     toast.success(t('restore.success'))
     emit('success')
-  } catch (e: any) {
+  } catch (e: unknown) {
     restoreDone.value = true
     restoreSuccess.value = false
-    restoreError.value = e?.message ?? String(e)
+    restoreError.value = parseBackendError(e).message
     toast.error(t('restore.failed'), restoreError.value ?? '')
   } finally {
     restoring.value = false

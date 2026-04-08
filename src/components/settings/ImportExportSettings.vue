@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { open, save } from '@tauri-apps/plugin-dialog'
-import { invoke } from '@tauri-apps/api/core'
+import { readTextFile, writeTextFile } from '@/api/database'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -25,13 +25,7 @@ const conflictStrategy = ref<ImportOptions['conflictStrategy']>('skip')
 const includePasswords = ref(true)
 
 // 读写文件的辅助函数
-async function readTextFile(path: string): Promise<string> {
-  return invoke('read_text_file', { path })
-}
-
-async function writeTextFile(path: string, content: string): Promise<void> {
-  return invoke('write_text_file', { path, content })
-}
+// readTextFile / writeTextFile 已从 @/api/database 导入
 
 async function handleExport() {
   try {

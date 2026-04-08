@@ -13,6 +13,8 @@ import type {
   GitConfig,
   GitBlameLine,
   GitContributor,
+  RebaseEntry,
+  RebaseResult,
 } from '@/types/git'
 
 // ── 仓库生命周期 ──────────────────────────────────────────────────
@@ -239,4 +241,18 @@ export function gitFileHistory(path: string, filePath: string, skip: number, lim
 
 export function gitGetContributors(path: string): Promise<GitContributor[]> {
   return invokeCommand<GitContributor[]>('git_get_contributors', { path }, { source: 'GIT' })
+}
+
+// ── 交互式 Rebase ──────────────────────────────────────────────
+
+export function gitInteractiveRebasePlan(path: string, baseCommit: string): Promise<RebaseEntry[]> {
+  return invokeCommand<RebaseEntry[]>('git_interactive_rebase_plan', { path, baseCommit }, { source: 'GIT' })
+}
+
+export function gitInteractiveRebaseExecute(path: string, baseCommit: string, plan: RebaseEntry[]): Promise<RebaseResult> {
+  return invokeCommand<RebaseResult>('git_interactive_rebase_execute', { path, baseCommit, plan }, { source: 'GIT' })
+}
+
+export function gitInteractiveRebaseAbort(path: string): Promise<void> {
+  return invokeCommand('git_interactive_rebase_abort', { path }, { source: 'GIT' })
 }

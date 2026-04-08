@@ -13,6 +13,12 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '@/component
 import ConnectionDialog from '@/components/connection/ConnectionDialog.vue'
 import ConnectionItem from '@/components/layout/sidebar/ConnectionItem.vue'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useToast } from '@/composables/useToast'
 import { parseIsFavorite, updateConnection } from '@/api/connection'
 import {
@@ -32,6 +38,9 @@ import {
   ChevronRight,
   Container,
   GitBranch,
+  Camera,
+  Cable,
+  MoreHorizontal,
 } from 'lucide-vue-next'
 import type { ConnectionRecord } from '@/api/connection'
 import type { TabType } from '@/types/workspace'
@@ -626,19 +635,6 @@ const groupedNonFavorites = computed(() => {
                 variant="ghost"
                 size="icon"
                 class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10"
-                @click="workspace.addTab({ id: 'multi-exec', type: 'multi-exec', title: t('tab.multiExec'), closable: true })"
-              >
-                <LayoutGrid class="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent :side="isCollapsed ? 'right' : 'top'" class="text-[11px] font-medium"><p>{{ t('tooltip.multiExec') }}</p></TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10"
                 @click="() => {
                   const localCount = workspace.tabs.filter(tab => tab.type === 'terminal' && tab.meta?.isLocal).length
                   const title = `${t('sidebar.localTerminal')}${localCount > 0 ? ` ${localCount + 1}` : ''}`
@@ -656,19 +652,6 @@ const groupedNonFavorites = computed(() => {
                 variant="ghost"
                 size="icon"
                 class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10"
-                @click="handleOpenGitRepo"
-              >
-                <GitBranch class="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent :side="isCollapsed ? 'right' : 'top'" class="text-[11px] font-medium"><p>{{ t('git.openRepository') }}</p></TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10"
                 @click="workspace.addTab({ id: 'settings', type: 'settings', title: t('tab.settings'), closable: true })"
               >
                 <Settings class="h-4 w-4" />
@@ -676,6 +659,32 @@ const groupedNonFavorites = computed(() => {
             </TooltipTrigger>
             <TooltipContent :side="isCollapsed ? 'right' : 'top'" class="text-[11px] font-medium"><p>{{ t('tooltip.settings') }}</p></TooltipContent>
           </Tooltip>
+          <!-- 更多功能菜单 -->
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10">
+                <MoreHorizontal class="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent :side="isCollapsed ? 'right' : 'top'" :align="isCollapsed ? 'start' : 'end'" class="min-w-[180px]">
+              <DropdownMenuItem @click="workspace.addTab({ id: 'multi-exec', type: 'multi-exec', title: t('tab.multiExec'), closable: true })">
+                <LayoutGrid class="mr-2 h-4 w-4" />
+                {{ t('tooltip.multiExec') }}
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="handleOpenGitRepo">
+                <GitBranch class="mr-2 h-4 w-4" />
+                {{ t('git.openRepository') }}
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="workspace.addTab({ id: 'screenshot', type: 'screenshot', title: t('tab.screenshot'), closable: true })">
+                <Camera class="mr-2 h-4 w-4" />
+                {{ t('tooltip.screenshot') }}
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="workspace.addTab({ id: 'tunnel', type: 'tunnel', title: t('tunnel.title'), closable: true })">
+                <Cable class="mr-2 h-4 w-4" />
+                {{ t('tunnel.title') }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
         <!-- 折叠按钮 -->
         <Tooltip>

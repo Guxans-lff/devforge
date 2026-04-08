@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { parseBackendError } from '@/types/error'
 import { useI18n } from 'vue-i18n'
 import { save } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
@@ -157,8 +158,8 @@ async function loadTables() {
   try {
     tables.value = await dbApi.dbGetTables(props.connectionId, props.database)
     selectedTables.value = new Set(tables.value.map((t) => t.name))
-  } catch (e: any) {
-    toast.error(t('backup.loadTablesFailed'), e?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('backup.loadTablesFailed'), parseBackendError(e).message)
   } finally {
     loadingTables.value = false
   }
@@ -221,10 +222,10 @@ async function startBackup() {
     backupSuccess.value = true
     toast.success(t('backup.success'))
     emit('success')
-  } catch (e: any) {
+  } catch (e: unknown) {
     backupDone.value = true
     backupSuccess.value = false
-    backupError.value = e?.message ?? String(e)
+    backupError.value = parseBackendError(e).message
     toast.error(t('backup.failed'), backupError.value ?? '')
   } finally {
     backing.value = false

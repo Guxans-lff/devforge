@@ -17,6 +17,7 @@ import { useAdaptiveOverscan } from '@/composables/useAdaptiveOverscan'
 import { computeColumnStatsAsync, type ColumnStatsResult } from '@/utils/columnStatistics'
 import { fetchPrimaryKeys } from '@/composables/usePrimaryKey'
 import type { QueryResult as QueryResultType } from '@/types/database'
+import { parseBackendError } from '@/types/error'
 
 export type RowData = Record<string, unknown> & { __originalIndex: number }
 
@@ -627,9 +628,9 @@ export function useQueryResult(options: UseQueryResultOptions) {
           }
         })
       }
-    } catch (e: any) {
-      const errorMsg = e?.message || e?.msg || (typeof e === 'string' ? e : JSON.stringify(e))
-      toast.error(t('database.queryError'), errorMsg as string)
+    } catch (e: unknown) {
+      const errorMsg = parseBackendError(e).message
+      toast.error(t('database.queryError'), errorMsg)
     }
     cancelEdit()
   }
@@ -651,13 +652,13 @@ export function useQueryResult(options: UseQueryResultOptions) {
     if (!result.value || !editable.value) return
     const row = getOriginalRow(displayIndex)
     if (!row) return
-    
+
     const db = database.value
     if (!db) {
       toast.error(t('database.queryError'), '无法确定目标数据库，请先选择数据库')
       return
     }
-    
+
     const scrollTop = tableScrollRef.value?.scrollTop ?? 0
     const scrollLeft = tableScrollRef.value?.scrollLeft ?? 0
     const sql = `DELETE FROM ${quoteId(tableName.value!)} WHERE ${buildOptimisticWhereClause(row)} LIMIT 1`
@@ -674,9 +675,9 @@ export function useQueryResult(options: UseQueryResultOptions) {
           }
         })
       }
-    } catch (e: any) {
-      const errorMsg = e?.message || e?.msg || (typeof e === 'string' ? e : JSON.stringify(e))
-      toast.error(t('database.queryError'), errorMsg as string)
+    } catch (e: unknown) {
+      const errorMsg = parseBackendError(e).message
+      toast.error(t('database.queryError'), errorMsg)
     }
   }
 
@@ -714,9 +715,9 @@ export function useQueryResult(options: UseQueryResultOptions) {
       const content = formatData(result.value, format, tablePart, ddl)
       await writeTextFile(path, content)
       toast.success(t('toast.exportSuccess'))
-    } catch (e: any) {
-      const errorMsg = e?.message || e?.msg || (typeof e === 'string' ? e : JSON.stringify(e))
-      toast.error(t('toast.exportFailed'), errorMsg as string)
+    } catch (e: unknown) {
+      const errorMsg = parseBackendError(e).message
+      toast.error(t('toast.exportFailed'), errorMsg)
     }
   }
 

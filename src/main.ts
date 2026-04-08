@@ -1,5 +1,8 @@
 import { setupMonacoLocale } from '@/utils/monacoLocale'
 
+// 调试：输出当前窗口 URL
+if (import.meta.env.DEV) console.log('[main.ts] window.location:', window.location.href)
+
 // 必须在 Monaco Editor 加载之前初始化中文语言包
 setupMonacoLocale()
 
@@ -31,6 +34,16 @@ const router = createRouter({
       path: '/',
       name: 'main',
       component: () => import('@/views/MainLayout.vue'),
+    },
+    {
+      path: '/pin',
+      name: 'pin',
+      component: () => import('@/components/screenshot/PinWindow.vue'),
+    },
+    {
+      path: '/region-select',
+      name: 'region-select',
+      component: () => import('@/views/RegionSelectWindow.vue'),
     },
   ],
 })

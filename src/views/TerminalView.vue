@@ -9,9 +9,10 @@ import TerminalPanel from '@/components/terminal/TerminalPanelLazy.vue'
 import SftpSidebar from '@/components/terminal/SftpSidebar.vue'
 import CommandSnippetPanel from '@/components/terminal/CommandSnippetPanel.vue'
 import RecordingIndicator from '@/components/terminal/RecordingIndicator.vue'
+import ServerDashboard from '@/components/terminal/ServerDashboard.vue'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { FolderOpen, PanelRightClose, PanelRightOpen, Bookmark, Columns2, Rows2, Search, X, ChevronUp, ChevronDown } from 'lucide-vue-next'
+import { FolderOpen, PanelRightClose, PanelRightOpen, Bookmark, Columns2, Rows2, Search, X, ChevronUp, ChevronDown, Activity } from 'lucide-vue-next'
 import type { TerminalPanelExposed } from '@/types/component-exposed'
 
 const props = defineProps<{
@@ -35,6 +36,9 @@ const searchVisible = ref(false)
 const searchQuery = ref('')
 const searchInputRef = ref<HTMLInputElement>()
 const searchHasMatch = ref<boolean | null>(null) // null=未搜索, true=有匹配, false=无匹配
+
+/** 视图模式：终端 / 监控仪表盘 */
+const viewMode = ref<'terminal' | 'dashboard'>('terminal')
 
 /** 获取当前活跃面板的类型安全引用 */
 function getActivePanel(): TerminalPanelExposed | undefined {
@@ -335,6 +339,31 @@ const activeSessionInfo = computed(() => {
       </div>
       <div class="flex-1" />
 
+      <!-- 视图模式切换：终端 / 仪表盘 -->
+      <div v-if="terminalStatus === 'connected'" class="flex items-center mr-2">
+        <div class="flex items-center rounded-md border border-border/30 bg-muted/30 p-0.5">
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-6 px-2 text-[11px] rounded-sm"
+            :class="viewMode === 'terminal' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="viewMode = 'terminal'"
+          >
+            Terminal
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-6 px-2 text-[11px] rounded-sm gap-1"
+            :class="viewMode === 'dashboard' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="viewMode = 'dashboard'"
+          >
+            <Activity class="h-3 w-3" />
+            {{ t('terminal.dashboard') }}
+          </Button>
+        </div>
+      </div>
+
       <!-- 搜索按钮 -->
       <TooltipProvider :delay-duration="300">
         <Tooltip>
@@ -431,7 +460,15 @@ const activeSessionInfo = computed(() => {
 
     <!-- 主展示区 -->
     <div class="flex-1 flex overflow-hidden bg-background relative">
-      <div class="flex-1 flex overflow-hidden">
+      <!-- 服务器监控仪表盘 -->
+      <ServerDashboard
+        v-if="viewMode === 'dashboard'"
+        :connection-id="connectionId"
+        :active="viewMode === 'dashboard'"
+        class="flex-1"
+      />
+
+      <div v-show="viewMode === 'terminal'" class="flex-1 flex overflow-hidden">
         <!-- 核心：通过控制外层 flex 属性实现布局切换，避免 v-if 销毁组件 -->
         <Splitpanes class="h-full" :horizontal="splitMode === 'horizontal'">
           <!-- 第一分栏：始终包含主终端 -->
@@ -483,7 +520,7 @@ const activeSessionInfo = computed(() => {
 
       <!-- 命令片段面板 -->
       <CommandSnippetPanel
-        v-if="snippetsVisible"
+        v-if="snippetsVisible && viewMode === 'terminal'"
         class="glass-panel w-64 shrink-0 rounded-xl"
         @send="sendCommandToTerminal"
       />

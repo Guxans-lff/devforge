@@ -167,30 +167,46 @@ pub async fn query_logs(
 ) -> Result<Vec<AuditLogEntry>, AppError> {
     let pool = storage.get_pool().await;
 
-    let mut sql = String::from(
-        "SELECT id, connection_id, connection_name, database_name, operation_type, sql_text, affected_rows, execution_time_ms, is_error, error_message, created_at FROM audit_logs WHERE 1=1"
-    );
-    let mut params: Vec<String> = Vec::new();
+    // 动态构建参数化查询，避免 SQL 注入
+    let mut conditions = Vec::new();
+    let mut bind_values: Vec<String> = Vec::new();
 
     if let Some(ref cid) = filter.connection_id {
-        sql.push_str(&format!(" AND connection_id = '{}'", cid.replace('\'', "''")));
+        conditions.push("connection_id = ?");
+        bind_values.push(cid.clone());
     }
     if let Some(ref op) = filter.operation_type {
-        sql.push_str(&format!(" AND operation_type = '{}'", op.replace('\'', "''")));
+        conditions.push("operation_type = ?");
+        bind_values.push(op.clone());
     }
     if let Some(ref db) = filter.database_name {
-        sql.push_str(&format!(" AND database_name = '{}'", db.replace('\'', "''")));
+        conditions.push("database_name = ?");
+        bind_values.push(db.clone());
     }
     if let Some(ref s) = filter.search {
-        let escaped = s.replace('\'', "''").replace('%', "\\%");
-        sql.push_str(&format!(" AND sql_text LIKE '%{}%' ESCAPE '\\'", escaped));
-        params.push(escaped);
+        conditions.push("sql_text LIKE '%' || ? || '%'");
+        bind_values.push(s.clone());
     }
 
     let limit = if filter.limit > 0 && filter.limit <= 500 { filter.limit } else { 100 };
-    sql.push_str(&format!(" ORDER BY created_at DESC LIMIT {} OFFSET {}", limit, filter.offset));
 
-    let rows = sqlx::query(&sql)
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {}", conditions.join(" AND "))
+    };
+
+    let sql = format!(
+        "SELECT id, connection_id, connection_name, database_name, operation_type, sql_text, affected_rows, execution_time_ms, is_error, error_message, created_at FROM audit_logs WHERE 1=1{} ORDER BY created_at DESC LIMIT {} OFFSET {}",
+        where_clause, limit, filter.offset
+    );
+
+    let mut query = sqlx::query(&sql);
+    for val in &bind_values {
+        query = query.bind(val);
+    }
+
+    let rows = query
         .fetch_all(&*pool)
         .await?;
 
@@ -234,21 +250,31 @@ pub async fn get_stats(
 ) -> Result<AuditStats, AppError> {
     let pool = storage.get_pool().await;
 
-    let where_clause = match connection_id {
-        Some(cid) => format!("WHERE connection_id = '{}'", cid.replace('\'', "''")),
-        None => String::new(),
+    let (sql, bind_cid) = match connection_id {
+        Some(cid) => (
+            "SELECT COUNT(*) as total,
+             SUM(CASE WHEN is_error = 1 THEN 1 ELSE 0 END) as error_count,
+             MIN(created_at) as earliest,
+             MAX(created_at) as latest
+             FROM audit_logs WHERE connection_id = ?".to_string(),
+            Some(cid.to_string()),
+        ),
+        None => (
+            "SELECT COUNT(*) as total,
+             SUM(CASE WHEN is_error = 1 THEN 1 ELSE 0 END) as error_count,
+             MIN(created_at) as earliest,
+             MAX(created_at) as latest
+             FROM audit_logs".to_string(),
+            None,
+        ),
     };
 
-    let row = sqlx::query(&format!(
-        "SELECT COUNT(*) as total,
-         SUM(CASE WHEN is_error = 1 THEN 1 ELSE 0 END) as error_count,
-         MIN(created_at) as earliest,
-         MAX(created_at) as latest
-         FROM audit_logs {}",
-        where_clause
-    ))
-    .fetch_one(&*pool)
-    .await?;
+    let mut query = sqlx::query(&sql);
+    if let Some(ref cid) = bind_cid {
+        query = query.bind(cid);
+    }
+
+    let row = query.fetch_one(&*pool).await?;
 
     Ok(AuditStats {
         total: row.get::<i64, _>("total") as u64,

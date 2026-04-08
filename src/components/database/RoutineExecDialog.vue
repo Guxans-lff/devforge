@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { parseBackendError } from '@/types/error'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -88,8 +89,8 @@ onMounted(async () => {
       vals[p.name] = ''
     }
     paramValues.value = vals
-  } catch (e: any) {
-    error.value = e?.message ?? String(e)
+  } catch (e: unknown) {
+    error.value = parseBackendError(e).message
   } finally {
     loading.value = false
   }

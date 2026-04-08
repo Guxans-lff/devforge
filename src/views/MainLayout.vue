@@ -21,6 +21,8 @@ const TerminalPlayerView = defineAsyncComponent(() => import('@/views/TerminalPl
 const LocalTerminalView = defineAsyncComponent(() => import('@/views/LocalTerminalView.vue'))
 const RedisView = defineAsyncComponent(() => import('@/views/RedisView.vue'))
 const GitView = defineAsyncComponent(() => import('@/views/GitView.vue'))
+const ScreenshotView = defineAsyncComponent(() => import('@/views/ScreenshotView.vue'))
+const TunnelView = defineAsyncComponent(() => import('@/views/TunnelView.vue'))
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
@@ -52,6 +54,10 @@ const activeTabComponent = computed(() => {
       return tab.connectionId ? RedisView : null
     case 'git':
       return GitView
+    case 'screenshot':
+      return ScreenshotView
+    case 'tunnel':
+      return TunnelView
     default:
       return null
   }

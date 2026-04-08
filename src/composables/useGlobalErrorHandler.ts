@@ -91,6 +91,21 @@ async function persistError(source: string, error: unknown, extra?: string): Pro
  *
  * @param app Vue 应用实例
  */
+/** 全局监听器清理函数（由 cleanupGlobalErrorHandler 调用） */
+let _cleanup: (() => void) | null = null
+
+/**
+ * 设置全局错误捕获
+ *
+ * 捕获三类错误：
+ * 1. Vue 组件错误（app.config.errorHandler）
+ * 2. 全局 JS 错误（window.error）
+ * 3. 未处理的 Promise rejection（window.unhandledrejection）
+ *
+ * 所有错误经隐私过滤后写入本地日志文件。
+ *
+ * @param app Vue 应用实例
+ */
 export function setupGlobalErrorHandler(app: App): void {
   // 1. Vue 组件错误
   app.config.errorHandler = (err, instance, info) => {
@@ -101,7 +116,7 @@ export function setupGlobalErrorHandler(app: App): void {
   }
 
   // 2. 全局 JS 错误
-  window.addEventListener('error', (event) => {
+  const onError = (event: ErrorEvent) => {
     // 忽略资源加载错误（图片、脚本等），只处理 JS 运行时错误
     if (event.target && (event.target as HTMLElement).tagName) {
       return
@@ -113,11 +128,28 @@ export function setupGlobalErrorHandler(app: App): void {
       event.error || event.message,
       `文件: ${event.filename || '未知'} | 行: ${event.lineno}:${event.colno}`,
     )
-  })
+  }
 
   // 3. 未处理的 Promise rejection
-  window.addEventListener('unhandledrejection', (event) => {
+  const onUnhandledRejection = (event: PromiseRejectionEvent) => {
     console.error('[Unhandled Rejection]', event.reason)
     persistError('unhandled-rejection', event.reason)
-  })
+  }
+
+  window.addEventListener('error', onError)
+  window.addEventListener('unhandledrejection', onUnhandledRejection)
+
+  _cleanup = () => {
+    app.config.errorHandler = null
+    window.removeEventListener('error', onError)
+    window.removeEventListener('unhandledrejection', onUnhandledRejection)
+    _cleanup = null
+  }
+}
+
+/**
+ * 清理全局错误捕获（应用销毁时调用）
+ */
+export function cleanupGlobalErrorHandler(): void {
+  _cleanup?.()
 }

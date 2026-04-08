@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Play, Table2, FileUp, Database, Plus, X, GitCompareArrows, Activity, Users, Network, ArrowLeftRight, CalendarClock } from 'lucide-vue-next'
+import { Play, Table2, FileUp, Database, Plus, X, GitCompareArrows, Activity, Users, Network, ArrowLeftRight, CalendarClock, Workflow } from 'lucide-vue-next'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import type { InnerTabType } from '@/types/database-workspace'
 import type { EnvironmentType } from '@/types/environment'
@@ -31,6 +31,7 @@ const iconMap: Record<InnerTabType, typeof Play> = {
   'er-diagram': Network,
   'data-sync': ArrowLeftRight,
   'scheduler': CalendarClock,
+  'sql-builder': Workflow,
 }
 
 // 右键菜单状态

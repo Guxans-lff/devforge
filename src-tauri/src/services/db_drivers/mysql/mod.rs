@@ -383,6 +383,8 @@ pub async fn cancel_running_query(pool: &MySqlPool) -> Result<(), AppError> {
 
     for row in &rows {
         if let Ok(id) = row.try_get::<i64, usize>(0usize) {
+            // SAFETY: id 是 i64 类型，不存在 SQL 注入风险；
+            // KILL QUERY 是管理命令，不支持参数绑定
             let _ = sqlx::query(&format!("KILL QUERY {}", id)).execute(pool).await;
         }
     }

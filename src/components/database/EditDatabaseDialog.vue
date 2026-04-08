@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
+import { parseBackendError } from '@/types/error'
 import {
   Dialog,
   DialogContent,
@@ -317,8 +318,8 @@ async function handleSave() {
     await dbApi.dbExecuteQuery(props.connectionId, sql)
     emit('success')
     emit('update:open', false)
-  } catch (e: any) {
-    error.value = String(e)
+  } catch (e: unknown) {
+    error.value = parseBackendError(e).message
   } finally {
     isSaving.value = false
   }

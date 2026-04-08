@@ -17,7 +17,7 @@ import {
   FileUp, Code, Plus, Search, X, FolderOpen, Folder,
   HardDrive, Upload, Users, Activity, FileCode, FileDown,
   Trash2, Eraser, Network, GitCompareArrows, Play,
-  ArrowLeftRight, CalendarClock,
+  ArrowLeftRight, CalendarClock, Workflow,
 } from 'lucide-vue-next'
 import { useObjectTree } from '@/composables/useObjectTree'
 
@@ -46,6 +46,7 @@ const emit = defineEmits<{
   openDataSync: []
   openScheduler: []
   openErDiagram: [database: string]
+  openSqlBuilder: [database: string]
   generateScript: [database: string, table: string, scriptType: string]
   exportDatabaseDdl: [database: string]
   runSqlFile: [database: string]
@@ -433,6 +434,9 @@ defineExpose({
                     </ContextMenuItem>
                     <ContextMenuItem class="gap-2 text-xs" @click="emit('openErDiagram', item.node.meta?.database ?? item.node.label)">
                       <Network class="h-3.5 w-3.5" /> ER 关系图
+                    </ContextMenuItem>
+                    <ContextMenuItem class="gap-2 text-xs" @click="emit('openSqlBuilder', item.node.meta?.database ?? item.node.label)">
+                      <Workflow class="h-3.5 w-3.5" /> SQL Builder
                     </ContextMenuItem>
                     <ContextMenuItem class="gap-2 text-xs" @click="emit('openDataSync')">
                       <ArrowLeftRight class="h-3.5 w-3.5" /> {{ t('dataSync.title') }}

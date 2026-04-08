@@ -2,7 +2,7 @@
  * 表编辑器核心业务逻辑 composable
  * 从 TableEditorPanel.vue 提取，负责表结构的 CRUD、撤销/重做、SQL 生成等
  */
-import { ref, computed, type Ref } from 'vue'
+import { ref, shallowRef, computed, onBeforeUnmount, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
 import { useConnectionStore } from '@/stores/connections'
@@ -105,18 +105,18 @@ export function useTableEditor(options: UseTableEditorOptions) {
   const originalTableCollation = ref('')
   const originalTableComment = ref('')
 
-  // — 数据集合 —
-  const columns = ref<ColumnDefinition[]>([])
-  const originalColumns = ref<ColumnDefinition[]>([])
-  const indexes = ref<IndexDefinition[]>([])
-  const originalIndexes = ref<IndexDefinition[]>([])
-  const foreignKeys = ref<ForeignKeyDefinition[]>([])
-  const originalForeignKeys = ref<ForeignKeyDefinition[]>([])
-  const triggers = ref<TriggerDefinition[]>([])
+  // — 数据集合（shallowRef：不需要深度响应，全量替换触发更新） —
+  const columns = shallowRef<ColumnDefinition[]>([])
+  const originalColumns = shallowRef<ColumnDefinition[]>([])
+  const indexes = shallowRef<IndexDefinition[]>([])
+  const originalIndexes = shallowRef<IndexDefinition[]>([])
+  const foreignKeys = shallowRef<ForeignKeyDefinition[]>([])
+  const originalForeignKeys = shallowRef<ForeignKeyDefinition[]>([])
+  const triggers = shallowRef<TriggerDefinition[]>([])
 
   // — 撤销/重做 —
-  const undoStack = ref<HistorySnapshot[]>([])
-  const redoStack = ref<HistorySnapshot[]>([])
+  const undoStack = shallowRef<HistorySnapshot[]>([])
+  const redoStack = shallowRef<HistorySnapshot[]>([])
   const isUndoRedo = ref(false)
 
   function cloneState(): HistorySnapshot {
@@ -463,6 +463,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
   }
 
   // — DDL & SQL —
+  const copiedTimers = new Set<ReturnType<typeof setTimeout>>()
   async function showDdlInfo() {
     if (!table.value) { toast.info(t('tableEditor.newTableNoDdl')); return }
     activeTab.value = 'ddl'; ddlLoading.value = true
@@ -473,10 +474,17 @@ export function useTableEditor(options: UseTableEditorOptions) {
   async function copyToClipboard(text: string, flag: 'ddl' | 'sql') {
     try {
       await navigator.clipboard.writeText(text)
-      if (flag === 'ddl') { ddlCopied.value = true; setTimeout(() => ddlCopied.value = false, 2000) }
-      else { sqlCopied.value = true; setTimeout(() => sqlCopied.value = false, 2000) }
+      if (flag === 'ddl') { ddlCopied.value = true } else { sqlCopied.value = true }
+      const timer = setTimeout(() => {
+        if (flag === 'ddl') { ddlCopied.value = false } else { sqlCopied.value = false }
+        copiedTimers.delete(timer)
+      }, 2000)
+      copiedTimers.add(timer)
     } catch { toast.error(t('tableEditor.copyFailed')) }
   }
+
+  // 清理定时器
+  try { onBeforeUnmount(() => { copiedTimers.forEach(clearTimeout); copiedTimers.clear() }) } catch { /* 非组件上下文 */ }
   function buildTableDefinition(): TableDefinition {
     return {
       name: tableName.value, database: database.value, columns: columns.value, indexes: indexes.value,

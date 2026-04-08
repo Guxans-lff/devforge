@@ -18,6 +18,7 @@ import type { QueryResult, QueryChunk, ErrorStrategy } from '@/types/database'
 import type { QueryTabContext, ResultTab, SubStatementResult } from '@/types/database-workspace'
 import { isMultiStatement, extractTableName } from '@/utils/sqlParser'
 import type { EnvironmentType } from '@/types/environment'
+import { parseBackendError } from '@/types/error'
 
 /** useQueryExecution 入参 */
 export interface UseQueryExecutionOptions {
@@ -338,8 +339,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         )
       }
       saveHistory(sql, result)
-    } catch (e: any) {
-      const errorStr = typeof e === 'string' ? e : (e?.message || e?.msg || JSON.stringify(e))
+    } catch (e: unknown) {
+      const errorStr = parseBackendError(e).message
       const errorResult: QueryResult = {
         columns: [], rows: [], affectedRows: 0,
         executionTimeMs: Date.now() - startTime,
@@ -415,8 +416,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       }
 
       if (lastResult) saveHistory(sql, lastResult)
-    } catch (e: any) {
-      const errorStr = typeof e === 'string' ? e : (e?.message || e?.msg || JSON.stringify(e))
+    } catch (e: unknown) {
+      const errorStr = parseBackendError(e).message
       const errorResult: QueryResult = {
         columns: [], rows: [], affectedRows: 0,
         executionTimeMs: Date.now() - startTime,

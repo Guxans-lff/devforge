@@ -1,18 +1,28 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from 'vue'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useTheme } from '@/composables/useTheme'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connections'
 import { useSettingsStore } from '@/stores/settings'
 import { startPerformanceMonitoring } from '@/composables/usePerformance'
 import { useUpdater } from '@/composables/useUpdater'
+import { useGlobalScreenshot, cleanupGlobalScreenshot } from '@/composables/useGlobalScreenshot'
+import { cleanupGlobalErrorHandler } from '@/composables/useGlobalErrorHandler'
 import UpdateNotification from '@/components/layout/UpdateNotification.vue'
 
-// 初始化主题
-const { initScheduler } = useTheme()
+/** 当前窗口标签（main / pin-xxx / region-select） */
+const currentWindowLabel = getCurrentWindow().label
+const isMainWindow = currentWindowLabel === 'main'
+if (import.meta.env.DEV) console.log('[App.vue] 窗口标签:', currentWindowLabel, '是否主窗口:', isMainWindow)
 
-// 初始化更新器
+// 以下初始化仅在主窗口执行
+const { initScheduler } = useTheme()
 const { initUpdater, destroyUpdater } = useUpdater()
+
+if (isMainWindow) {
+  useGlobalScreenshot()
+}
 
 // 全局 UI 字体大小响应：监听设置变化，实时应用到 document 根元素
 const settingsStore = useSettingsStore()
@@ -91,16 +101,22 @@ if (import.meta.env.DEV) {
   startPerformanceMonitoring()
 }
 
-// 应用启动时恢复工作区状态
+// 仅主窗口执行启动恢复和初始化
 onMounted(() => {
-  console.info('[Startup] App mounted')
-  void showMainWindow()
-  void restoreStartupState()
-  initUpdater()
+  if (isMainWindow) {
+    console.info('[Startup] App mounted')
+    void showMainWindow()
+    void restoreStartupState()
+    initUpdater()
+  }
 })
 
 onUnmounted(() => {
-  destroyUpdater()
+  if (isMainWindow) {
+    cleanupGlobalScreenshot()
+    cleanupGlobalErrorHandler()
+    destroyUpdater()
+  }
 })
 </script>
 

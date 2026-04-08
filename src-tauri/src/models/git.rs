@@ -301,3 +301,53 @@ pub struct GitContributor {
     /// 首次提交时间（Unix 秒）
     pub first_commit: i64,
 }
+
+/// 交互式 Rebase 操作类型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RebaseAction {
+    /// 保留提交
+    Pick,
+    /// 合并到上一个提交（保留消息）
+    Squash,
+    /// 合并到上一个提交（丢弃消息）
+    Fixup,
+    /// 修改提交消息
+    Reword(String),
+    /// 丢弃提交
+    Drop,
+}
+
+/// 交互式 Rebase 计划条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebaseEntry {
+    /// 完整提交哈希
+    pub hash: String,
+    /// 短哈希
+    pub short_hash: String,
+    /// 提交消息
+    pub message: String,
+    /// 作者
+    pub author: String,
+    /// 时间戳
+    pub timestamp: i64,
+    /// 操作
+    pub action: RebaseAction,
+}
+
+/// 交互式 Rebase 执行结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RebaseResult {
+    /// 是否全部完成
+    pub success: bool,
+    /// 冲突文件列表（有冲突时非空）
+    pub conflicts: Vec<String>,
+    /// 已完成的步骤数
+    pub completed_steps: usize,
+    /// 总步骤数
+    pub total_steps: usize,
+    /// 结果消息
+    pub message: String,
+}

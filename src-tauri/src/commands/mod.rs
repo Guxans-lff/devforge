@@ -24,3 +24,4 @@ pub mod transfer;
 pub mod tunnel;
 pub mod updater;
 pub mod git;
+pub mod screenshot;

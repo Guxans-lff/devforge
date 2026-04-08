@@ -16,6 +16,8 @@ import { defineAsyncComponent } from 'vue'
 
 /** 懒加载 ER 图面板（vue-flow + dagre 较大） */
 const ErDiagramPanel = defineAsyncComponent(() => import('@/components/database/ErDiagramPanel.vue'))
+/** 懒加载 SQL Builder 面板 */
+const SqlBuilderPanel = defineAsyncComponent(() => import('@/components/database/sql-builder/SqlBuilderPanel.vue'))
 import BackupDialog from '@/components/database/BackupDialog.vue'
 import RestoreDialog from '@/components/database/RestoreDialog.vue'
 import CreateDatabaseDialog from '@/components/database/CreateDatabaseDialog.vue'
@@ -33,12 +35,13 @@ import { useSchemaRegistryStore } from '@/stores/schema-registry'
 import * as dbApi from '@/api/database'
 import type { ScriptOptions } from '@/api/database'
 import type { PoolStatus } from '@/types/connection'
-import type { TableEditorTabContext, ImportTabContext, ErDiagramTabContext, QueryTabContext } from '@/types/database-workspace'
+import type { TableEditorTabContext, ImportTabContext, ErDiagramTabContext, SqlBuilderTabContext, QueryTabContext } from '@/types/database-workspace'
 import type { ObjectTreeExposed } from '@/types/component-exposed'
 import { useToast } from '@/composables/useToast'
 import { useSchemaCache } from '@/composables/useSchemaCache'
 import { useNotification } from '@/composables/useNotification'
 import { parseEnvironment, parseReadOnly, parseConfirmDanger } from '@/api/connection'
+import { parseBackendError } from '@/types/error'
 import type { EnvironmentType } from '@/types/environment'
 
 const props = defineProps<{
@@ -448,8 +451,8 @@ async function handleConfirmDeleteTable() {
       notification.success(t('database.querySuccess'), t('database.tableDeleted', { table }), 3000)
       getObjectTree()?.silentRefresh()
     }
-  } catch (e: any) {
-    notification.error(t('database.deleteTableFailed'), String(e), true)
+  } catch (e: unknown) {
+    notification.error(t('database.deleteTableFailed'), parseBackendError(e).message, true)
   }
 }
 
@@ -473,8 +476,8 @@ async function handleConfirmTruncateTable() {
     } else {
       notification.success(t('database.querySuccess'), t('database.tableTruncated', { table }), 3000)
     }
-  } catch (e: any) {
-    notification.error(t('database.truncateTableFailed'), String(e), true)
+  } catch (e: unknown) {
+    notification.error(t('database.truncateTableFailed'), parseBackendError(e).message, true)
   }
 }
 
@@ -523,8 +526,8 @@ async function handleConfirmDropObject() {
       notification.success(t('database.deleteObjectSuccess'), t('database.objectDeleted', { type: typeLabel[objectType] ?? objectType, name: objectName }), 3000)
       getObjectTree()?.silentRefresh()
     }
-  } catch (e: any) {
-    notification.error(t('database.objectDeleteFailed'), String(e), true)
+  } catch (e: unknown) {
+    notification.error(t('database.objectDeleteFailed'), parseBackendError(e).message, true)
   }
 }
 
@@ -536,8 +539,8 @@ async function handleShowCreateSql(database: string, table: string) {
     if (activeQueryTab) {
       dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, { sql })
     }
-  } catch (e: any) {
-    notification.error(t('database.getCreateTableFailed'), String(e), true)
+  } catch (e: unknown) {
+    notification.error(t('database.getCreateTableFailed'), parseBackendError(e).message, true)
   }
 }
 
@@ -549,8 +552,8 @@ async function handleShowObjectDefinition(database: string, name: string, object
     if (activeQueryTab) {
       dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, { sql })
     }
-  } catch (e: any) {
-    notification.error(t('database.getObjectDefFailed'), String(e), true)
+  } catch (e: unknown) {
+    notification.error(t('database.getObjectDefFailed'), parseBackendError(e).message, true)
   }
 }
 
@@ -648,6 +651,16 @@ function handleOpenErDiagram(database: string) {
   dbWorkspaceStore.openErDiagram(props.connectionId, database)
 }
 
+function handleOpenSqlBuilder(database: string) {
+  dbWorkspaceStore.openSqlBuilder(props.connectionId, database)
+}
+
+/** SQL Builder 执行按钮：在新查询标签页中打开 SQL */
+function handleExecuteSqlFromBuilder(sql: string) {
+  const tab = dbWorkspaceStore.addQueryTab(props.connectionId)
+  dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, { type: 'query', sql })
+}
+
 /** 生成表对象的 DDL 脚本并在新查询标签页中打开 */
 async function handleGenerateScript(database: string, table: string, scriptType: string) {
   try {
@@ -660,8 +673,8 @@ async function handleGenerateScript(database: string, table: string, scriptType:
     // 创建新的查询标签页并填入生成的脚本
     const tab = dbWorkspaceStore.addQueryTab(props.connectionId)
     dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, { sql })
-  } catch (e: any) {
-    notification.error(t('database.generateScriptFailed'), String(e), true)
+  } catch (e: unknown) {
+    notification.error(t('database.generateScriptFailed'), parseBackendError(e).message, true)
   }
 }
 
@@ -794,6 +807,7 @@ function handleEditDatabaseSuccess() {
           @open-data-sync="handleOpenDataSync"
           @open-scheduler="handleOpenScheduler"
           @open-er-diagram="handleOpenErDiagram"
+          @open-sql-builder="handleOpenSqlBuilder"
           @generate-script="handleGenerateScript"
           @export-database-ddl="handleExportDatabaseDdl"
           @run-sql-file="handleRunSqlFile"
@@ -903,6 +917,13 @@ function handleEditDatabaseSuccess() {
                 :connection-id="connectionId"
                 :database="(activeTab.context as ErDiagramTabContext).database"
                 @open-table-editor="(db: string, table: string) => dbWorkspaceStore.openTableEditor(connectionId, db, table)"
+              />
+              <SqlBuilderPanel
+                v-else-if="activeTab?.type === 'sql-builder'"
+                :key="activeTab.id"
+                :connection-id="connectionId"
+                :database="(activeTab.context as SqlBuilderTabContext).database"
+                @execute-in-query="handleExecuteSqlFromBuilder"
               />
               <DataSyncPanel
                 v-else-if="activeTab?.type === 'data-sync'"

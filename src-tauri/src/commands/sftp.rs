@@ -451,6 +451,8 @@ pub async fn get_available_drives() -> Result<Vec<String>, AppError> {
     {
         use winapi::um::fileapi::GetLogicalDrives;
 
+        // SAFETY: GetLogicalDrives 是 Windows API 纯函数，无副作用，
+        // 返回 DWORD 位掩码表示可用逻辑驱动器，无需外部资源或指针操作
         let drives_mask = unsafe { GetLogicalDrives() };
         let mut drives = Vec::new();
 

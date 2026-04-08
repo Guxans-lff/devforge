@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onUnmounted } from 'vue'
+import { parseBackendError } from '@/types/error'
 import { useI18n } from 'vue-i18n'
 import * as dbApi from '@/api/database'
 import type { SqlFileProgress } from '@/api/database'
@@ -180,12 +181,12 @@ async function handleStart() {
     if (finalProgress && finalProgress.fail === 0 && finalProgress.isFinished) {
        emit('success')
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     isExecuting.value = false
     isPaused.value = false
     if (timer) { clearInterval(timer); timer = null }
     if (progressRafId) { cancelAnimationFrame(progressRafId); progressRafId = null }
-    errorLog.value.push(`[Fatal] ${String(e)}`)
+    errorLog.value.push(`[Fatal] ${parseBackendError(e).message}`)
     // 确保切换到进度视图以展示错误信息
     if (!progressData.value) {
       progressData.value = {

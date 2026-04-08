@@ -178,3 +178,30 @@ export interface GitContributor {
   /** Unix 秒 */
   lastCommit: number
 }
+
+/** 交互式 Rebase 操作类型 */
+export type RebaseAction =
+  | 'pick'
+  | 'squash'
+  | 'fixup'
+  | { reword: string }
+  | 'drop'
+
+/** 交互式 Rebase 计划条目 */
+export interface RebaseEntry {
+  hash: string
+  shortHash: string
+  message: string
+  author: string
+  timestamp: number
+  action: RebaseAction
+}
+
+/** 交互式 Rebase 执行结果 */
+export interface RebaseResult {
+  success: boolean
+  conflicts: string[]
+  completedSteps: number
+  totalSteps: number
+  message: string
+}

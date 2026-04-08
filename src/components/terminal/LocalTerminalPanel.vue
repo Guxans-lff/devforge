@@ -4,6 +4,7 @@
  * 简化版 TerminalPanel，无 SSH 流控逻辑
  */
 import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch } from 'vue'
+import { parseBackendError } from '@/types/error'
 import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
 import { Terminal } from '@xterm/xterm'
@@ -135,9 +136,9 @@ async function connect() {
     status.value = 'connected'
     emit('statusChange', 'connected')
     terminal.focus()
-  } catch (e: any) {
+  } catch (e: unknown) {
     status.value = 'error'
-    errorMessage.value = e?.message ?? String(e)
+    errorMessage.value = parseBackendError(e).message
     emit('statusChange', 'error')
     return
   }

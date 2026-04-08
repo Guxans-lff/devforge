@@ -5,6 +5,7 @@ import { useConnectionStore } from '@/stores/connections'
 import { getCredential, saveCredential, testConnectionParams } from '@/api/connection'
 import { sshTestConnectionParams } from '@/api/ssh'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import {
   Dialog,
   DialogContent,
@@ -674,8 +675,8 @@ async function handleTestConnection() {
       })
     }
     testResult.value = { success: result.success, message: result.message }
-  } catch (e: any) {
-    testResult.value = { success: false, message: e?.message ?? String(e) }
+  } catch (e: unknown) {
+    testResult.value = { success: false, message: parseBackendError(e).message }
   } finally {
     testing.value = false
   }

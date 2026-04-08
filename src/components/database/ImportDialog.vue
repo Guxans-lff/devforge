@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { parseBackendError } from '@/types/error'
 import { useI18n } from 'vue-i18n'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
@@ -103,8 +104,8 @@ async function runPreview() {
   try {
     preview.value = await importPreview(filePath.value, fileType.value)
     autoMapColumns()
-  } catch (e: any) {
-    toast.error(t('dataImport.preview'), e?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('dataImport.preview'), parseBackendError(e).message)
   } finally {
     previewing.value = false
   }
@@ -182,10 +183,10 @@ async function startImport() {
     } else {
       toast.error(t('dataImport.importFailed'), result.error ?? '')
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     importDone.value = true
     importSuccess.value = false
-    importError.value = e?.message ?? String(e)
+    importError.value = parseBackendError(e).message
     toast.error(t('dataImport.importFailed'), importError.value ?? '')
   } finally {
     importing.value = false

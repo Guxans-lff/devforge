@@ -1,6 +1,7 @@
 use crate::models::git::{
     GitBlameLine, GitBranch, GitCommit, GitConfig, GitContributor, GitDiff, GitGraph, GitMergeResult,
     GitRemote, GitRepositoryInfo, GitStash, GitStatus, GitTag,
+    RebaseEntry, RebaseResult,
 };
 use crate::services::git_engine::GitEngine;
 use crate::utils::error::AppError;
@@ -466,4 +467,33 @@ pub async fn git_get_contributors(
     path: String,
 ) -> Result<Vec<GitContributor>, AppError> {
     state.get_contributors(&path).await
+}
+
+// ── 交互式 Rebase ────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn git_interactive_rebase_plan(
+    state: tauri::State<'_, GitEngineState>,
+    path: String,
+    base_commit: String,
+) -> Result<Vec<RebaseEntry>, AppError> {
+    state.interactive_rebase_plan(&path, &base_commit).await
+}
+
+#[tauri::command]
+pub async fn git_interactive_rebase_execute(
+    state: tauri::State<'_, GitEngineState>,
+    path: String,
+    base_commit: String,
+    plan: Vec<RebaseEntry>,
+) -> Result<RebaseResult, AppError> {
+    state.interactive_rebase_execute(&path, &base_commit, plan).await
+}
+
+#[tauri::command]
+pub async fn git_interactive_rebase_abort(
+    state: tauri::State<'_, GitEngineState>,
+    path: String,
+) -> Result<(), AppError> {
+    state.interactive_rebase_abort(&path).await
 }

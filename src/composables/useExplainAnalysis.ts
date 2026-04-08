@@ -4,6 +4,7 @@
  */
 import { ref, type Ref } from 'vue'
 import * as dbApi from '@/api/database'
+import { parseBackendError } from '@/types/error'
 
 export interface UseExplainAnalysisOptions {
   connectionId: Ref<string>
@@ -57,8 +58,8 @@ export function useExplainAnalysis(options: UseExplainAnalysisOptions) {
           return obj
         })
       }
-    } catch (e: any) {
-      explainResult.value = { error: (e?.message || e?.msg || JSON.stringify(e)) as string }
+    } catch (e: unknown) {
+      explainResult.value = { error: parseBackendError(e).message }
     } finally {
       isExplaining.value = false
     }

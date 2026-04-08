@@ -6,6 +6,7 @@ import { type Ref } from 'vue'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useNotification } from '@/composables/useNotification'
 import * as dbApi from '@/api/database'
+import { parseBackendError } from '@/types/error'
 
 export interface UseTransactionControlOptions {
   connectionId: Ref<string>
@@ -25,8 +26,8 @@ export function useTransactionControl(options: UseTransactionControlOptions) {
       store.updateTabContext(connectionId.value, tabId.value, {
         isInTransaction: true,
       })
-    } catch (e: any) {
-      notification.error('开始事务失败', (e?.message || e?.msg || JSON.stringify(e)) as string, true)
+    } catch (e: unknown) {
+      notification.error('开始事务失败', parseBackendError(e).message, true)
     }
   }
 
@@ -37,8 +38,8 @@ export function useTransactionControl(options: UseTransactionControlOptions) {
       store.updateTabContext(connectionId.value, tabId.value, {
         isInTransaction: false,
       })
-    } catch (e: any) {
-      notification.error('提交事务失败', (e?.message || e?.msg || JSON.stringify(e)) as string, true)
+    } catch (e: unknown) {
+      notification.error('提交事务失败', parseBackendError(e).message, true)
     }
   }
 
@@ -49,8 +50,8 @@ export function useTransactionControl(options: UseTransactionControlOptions) {
       store.updateTabContext(connectionId.value, tabId.value, {
         isInTransaction: false,
       })
-    } catch (e: any) {
-      notification.error('回滚事务失败', (e?.message || e?.msg || JSON.stringify(e)) as string, true)
+    } catch (e: unknown) {
+      notification.error('回滚事务失败', parseBackendError(e).message, true)
     }
   }
 

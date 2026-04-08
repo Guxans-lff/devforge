@@ -58,7 +58,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       connectionStore.updateConnectionStatus(tab.connectionId, 'disconnected')
       // 异步断开数据库连接，不阻塞 UI
       import('@/api/database').then(({ dbDisconnect }) => {
-        dbDisconnect(tab.connectionId!).catch(() => { })
+        dbDisconnect(tab.connectionId!).catch((e: unknown) => console.warn('[Workspace] 断开数据库连接失败:', e))
       })
     }
 
@@ -67,14 +67,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const connectionStore = useConnectionStore()
       connectionStore.updateConnectionStatus(tab.connectionId, 'disconnected')
       import('@/api/redis').then(({ redisDisconnect }) => {
-        redisDisconnect(tab.connectionId!).catch(() => { })
+        redisDisconnect(tab.connectionId!).catch((e: unknown) => console.warn('[Workspace] 断开 Redis 连接失败:', e))
       })
     }
 
     // 关闭本地终端 tab 时清理后端 PTY 资源（KeepAlive 的 backup）
     if (tab.type === 'terminal' && tab.meta?.isLocal) {
       import('@/api/local-shell').then(({ localShellClose }) => {
-        localShellClose(tabId).catch(() => { })
+        localShellClose(tabId).catch((e: unknown) => console.warn('[Workspace] 关闭本地终端失败:', e))
       })
     }
 
@@ -82,7 +82,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (tab.type === 'git' && tab.meta?.repositoryPath) {
       const repoPath = tab.meta.repositoryPath
       import('@/api/git').then(({ gitClose }) => {
-        gitClose(repoPath).catch(() => { })
+        gitClose(repoPath).catch((e: unknown) => console.warn('[Workspace] 关闭 Git 仓库失败:', e))
       })
     }
 
@@ -98,7 +98,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
         // SFTP 可以按 connectionId 断开；SSH 需要 sessionId，由组件 unmount 时处理
         if (tab.type === 'file-manager') {
           import('@/api/sftp').then(({ sftpDisconnect }) => {
-            sftpDisconnect(connId).catch(() => { })
+            sftpDisconnect(connId).catch((e: unknown) => console.warn('[Workspace] 断开 SFTP 连接失败:', e))
           })
         }
       }

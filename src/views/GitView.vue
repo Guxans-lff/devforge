@@ -27,6 +27,7 @@ import GitBlameView from '@/components/git/GitBlameView.vue'
 import GitFileHistory from '@/components/git/GitFileHistory.vue'
 import GitGraphView from '@/components/git/GitGraphView.vue'
 import GitContributorsPanel from '@/components/git/GitContributorsPanel.vue'
+import InteractiveRebasePanel from '@/components/git/InteractiveRebasePanel.vue'
 
 const props = defineProps<{
   repositoryPath: string
@@ -149,6 +150,23 @@ async function handleCherryPick(hash: string) {
 // ── Blame / File History 浮层 ───────────────────────────────────
 const blameFilePath = ref<string | null>(null)
 const fileHistoryPath = ref<string | null>(null)
+
+// ── 交互式 Rebase ───────────────────────────────────────────────
+const rebaseBaseCommit = ref<string | null>(null)
+
+function handleInteractiveRebase(hash: string) {
+  rebaseBaseCommit.value = hash
+}
+
+function handleRebaseDone() {
+  rebaseBaseCommit.value = null
+  // 刷新仓库状态
+  store.refresh(props.repositoryPath)
+}
+
+function handleRebaseClose() {
+  rebaseBaseCommit.value = null
+}
 
 function handleViewBlame(path: string) {
   blameFilePath.value = path
@@ -283,10 +301,19 @@ function statusColor(s: string) {
             @cherry-pick="handleCherryPick"
             @create-branch="handleCreateBranchFromCommit"
             @create-tag="handleCreateTagFromCommit"
+            @interactive-rebase="handleInteractiveRebase"
           />
         </Pane>
         <Pane :size="60">
-          <div class="flex flex-col h-full">
+          <!-- 交互式 Rebase 面板 -->
+          <InteractiveRebasePanel
+            v-if="rebaseBaseCommit"
+            :repo-path="repositoryPath"
+            :base-commit="rebaseBaseCommit"
+            @done="handleRebaseDone"
+            @close="handleRebaseClose"
+          />
+          <div v-else class="flex flex-col h-full">
             <!-- 提交 diff 文件选择 -->
             <div v-if="historyDiff && historyDiff.files.length > 0" class="border-b border-border">
               <div class="flex flex-wrap gap-1 p-1">

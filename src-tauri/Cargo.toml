@@ -17,7 +17,7 @@ tauri-build = { version = "2.5.4", features = [] }
 
 [dependencies]
 # Tauri
-tauri = { version = "2.10.0", features = [] }
+tauri = { version = "2.10.0", features = ["protocol-asset"] }
 tauri-plugin-log = "2"
 
 # Serialization
@@ -82,6 +82,7 @@ urlencoding = "2.1"
 tauri-plugin-dialog = "2.6.0"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-global-shortcut = "2"
 base64 = "0.22.1"
 
 # Local terminal PTY (ConPTY on Windows)
@@ -100,6 +101,11 @@ redis = { version = "0.27", features = ["tokio-comp", "aio", "connection-manager
 
 # Git 操作（libgit2 绑定）
 git2 = { version = "0.19", features = ["vendored-libgit2"] }
+
+# 截图（屏幕/窗口/区域截取）
+xcap = "0.5"
+image = { version = "0.25", features = ["png"] }
+arboard = { version = "3", features = ["image-data"] }
 
 # SHA-256 校验（更新包完整性）
 sha2 = "0.10"

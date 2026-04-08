@@ -25,7 +25,12 @@
         "dragDropEnabled": false
       }
     ],
-    "security": {}
+    "security": {
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/**"]
+      }
+    }
   },
   "plugins": {},
   "bundle": {

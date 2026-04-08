@@ -8,6 +8,7 @@ import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import * as dbApi from '@/api/database'
 import type { QueryTabContext } from '@/types/database-workspace'
 import { TablePageCache } from './useQueryResultCache'
+import { parseBackendError } from '@/types/error'
 
 export interface UseTableBrowseOptions {
   connectionId: Ref<string>
@@ -38,8 +39,8 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
         tableBrowse: { database, table, currentPage: 1, pageSize: 200, whereClause, orderBy },
         activeResultTabId: undefined,
       })
-    } catch (e: any) {
-      const errorStr = typeof e === 'string' ? e : (e?.message || e?.msg || JSON.stringify(e))
+    } catch (e: unknown) {
+      const errorStr = parseBackendError(e).message
       store.updateTabContext(connectionId.value, tabId.value, {
         result: {
           columns: [],

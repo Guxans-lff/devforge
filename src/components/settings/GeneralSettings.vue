@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { parseBackendError } from '@/types/error'
 import { useI18n } from 'vue-i18n'
-import { invoke } from '@tauri-apps/api/core'
+import { updateBootConfig } from '@/api/system'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/composables/useLocale'
 import { useSettingsStore, type ThemeScheduleMode } from '@/stores/settings'
@@ -71,16 +72,16 @@ async function handleChoosePath() {
   if (selected && typeof selected === 'string') {
     settingsStore.update({ dataStoragePath: selected })
     try {
-      await invoke('update_boot_config', { dataStoragePath: selected })
+      await updateBootConfig(selected)
       await connectionStore.loadConnections()
 
       toast.success(t('settings.migrationSuccess'), {
         description: t('settings.dataReloadedSuccess') || '数据库已成功热重构，数据已即时更新',
         duration: 3000
       })
-    } catch (e: any) {
+    } catch (e: unknown) {
       toast.error(t('settings.migrationFailed'), {
-        description: e.toString()
+        description: parseBackendError(e).message
       })
     }
   }

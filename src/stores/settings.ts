@@ -1,12 +1,12 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
 import { usePersistence } from '@/plugins/persistence'
+import { getSuggestedDataPath } from '@/api/system'
 
 /** localStorage 遗留 key（仅用于一次性迁移） */
 const LEGACY_STORAGE_KEY = 'devforge-settings'
 
-export type ShortcutCategory = 'connection' | 'tab' | 'editor' | 'view' | 'general'
+export type ShortcutCategory = 'connection' | 'tab' | 'editor' | 'view' | 'general' | 'screenshot'
 
 export interface ShortcutBinding {
   id: string
@@ -103,6 +103,10 @@ const defaultShortcuts: ShortcutBinding[] = [
   { id: 'settings', keys: 'Ctrl+,', category: 'general' },
   { id: 'help', keys: 'F1', category: 'general' },
   { id: 'quit', keys: 'Ctrl+Q', category: 'general' },
+
+  // 截图（全局快捷键，由 Rust 侧注册）
+  { id: 'screenshotFullscreen', keys: 'Ctrl+Shift+A', category: 'screenshot' },
+  { id: 'screenshotOpen', keys: 'Ctrl+Shift+X', category: 'screenshot' },
 ]
 
 const defaults: AppSettings = {
@@ -211,7 +215,7 @@ export const useSettingsStore = defineStore('settings', () => {
     // 如果还没配置过，或者还在用以前死板的默认值，就去问后端拿”智能建议”
     if (!settings.value.dataStoragePath || settings.value.dataStoragePath === 'D:\\DevForgeData') {
       try {
-        const suggested = await invoke<string>('get_suggested_data_path')
+        const suggested = await getSuggestedDataPath()
         if (suggested) {
           update({ dataStoragePath: suggested })
         }

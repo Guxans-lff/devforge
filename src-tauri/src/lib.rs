@@ -24,6 +24,7 @@ use commands::app_state;
 use commands::audit_log;
 use commands::ssh::{self, SshEngineState};
 use commands::git::{self as git_cmd, GitEngineState};
+use commands::screenshot::{self as screenshot_cmd, ScreenshotEngineState};
 use commands::table_editor;
 use commands::terminal_recorder::{self, TerminalRecorderState};
 use commands::tunnel::{self, SshTunnelEngineState};
@@ -38,6 +39,7 @@ use services::sftp_engine::SftpEngine;
 use services::ssh_engine::SshEngine;
 use services::ssh_tunnel::SshTunnelEngine;
 use services::git_engine::GitEngine;
+use services::screenshot_engine::ScreenshotEngine;
 use services::terminal_recorder::TerminalRecorder;
 use services::storage::Storage;
 use services::transfer_manager::{TransferManager, TransferManagerState};
@@ -102,6 +104,78 @@ pub fn run() {
             // Initialize GitEngine — 内部使用 RwLock
             let git_engine_state: GitEngineState = Arc::new(GitEngine::new());
             app.manage(git_engine_state);
+
+            // Initialize ScreenshotEngine — 无状态引擎，管理截图文件
+            let app_data_dir = app.path().app_data_dir().expect("获取 app data 目录失败");
+            let screenshot_engine_state: ScreenshotEngineState =
+                Arc::new(ScreenshotEngine::new(app_data_dir));
+            app.manage(screenshot_engine_state);
+
+            // 全局快捷键注册 — 截图功能
+            {
+                use tauri_plugin_global_shortcut::{
+                    Builder as GsBuilder, Code, Modifiers, ShortcutState,
+                };
+                use tauri::Emitter;
+
+                let screenshot_state_for_gs =
+                    app.state::<ScreenshotEngineState>().inner().clone();
+
+                let gs_plugin = GsBuilder::new()
+                        .with_shortcuts(["ctrl+shift+a"])?
+                        .with_handler(move |app, shortcut, event| {
+                            println!("[GlobalShortcut] 收到快捷键事件: {:?}, state: {:?}", shortcut, event.state);
+                            if event.state == ShortcutState::Pressed {
+                                println!("[GlobalShortcut] Pressed 状态确认");
+                                // Ctrl+Shift+A → 全屏截图 + 触发区域选择覆盖层
+                                if shortcut
+                                    .matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyA)
+                                {
+                                    println!("[GlobalShortcut] 匹配 Ctrl+Shift+A → 区域截图");
+                                    let engine = screenshot_state_for_gs.clone();
+                                    let handle = app.clone();
+                                    std::thread::spawn(move || {
+                                        // 销毁可能残留的旧截图窗口
+                                        if let Some(win) = handle.get_webview_window("region-select") {
+                                            let _ = win.destroy();
+                                            std::thread::sleep(std::time::Duration::from_millis(100));
+                                        }
+                                        // 先隐藏主窗口，避免截到应用自身
+                                        if let Some(win) = handle.get_webview_window("main") {
+                                            let _ = win.hide();
+                                        }
+                                        // 等待窗口隐藏动画完成
+                                        std::thread::sleep(std::time::Duration::from_millis(200));
+
+                                        match engine.capture_fullscreen(None) {
+                                            Ok(result) => {
+                                                let _ = handle.emit(
+                                                    "global-screenshot-region-start",
+                                                    &result,
+                                                );
+                                            }
+                                            Err(e) => {
+                                                // 截图失败时恢复主窗口
+                                                if let Some(win) = handle.get_webview_window("main") {
+                                                    let _ = win.show();
+                                                }
+                                                let _ = handle.emit(
+                                                    "global-screenshot-error",
+                                                    e.to_string(),
+                                                );
+                                            }
+                                        }
+                                    });
+                                }
+                            }
+                        })
+                        .build();
+                if let Err(e) = app.handle().plugin(gs_plugin) {
+                    eprintln!("[GlobalShortcut] 全局快捷键注册失败（可能被其他程序占用）: {e}");
+                } else {
+                    println!("[GlobalShortcut] 全局快捷键注册成功: Ctrl+Shift+A, Ctrl+Shift+X");
+                }
+            }
 
             // Initialize TransferManager
             let transfer_manager = TransferManager::with_default_config();
@@ -233,6 +307,7 @@ pub fn run() {
             ssh::ssh_flow_ack,
             ssh::ssh_get_cwd,
             ssh::ssh_exec_command,
+            ssh::ssh_collect_metrics,
             ssh::ssh_test_connection,
             ssh::ssh_test_connection_params,
             // SFTP file transfer
@@ -490,6 +565,24 @@ pub fn run() {
             git_cmd::git_blame_file,
             git_cmd::git_file_history,
             git_cmd::git_get_contributors,
+            git_cmd::git_interactive_rebase_plan,
+            git_cmd::git_interactive_rebase_execute,
+            git_cmd::git_interactive_rebase_abort,
+            // Screenshot
+            screenshot_cmd::screenshot_list_monitors,
+            screenshot_cmd::screenshot_list_windows,
+            screenshot_cmd::screenshot_capture_fullscreen,
+            screenshot_cmd::screenshot_capture_region,
+            screenshot_cmd::screenshot_crop_region,
+            screenshot_cmd::screenshot_capture_window,
+            screenshot_cmd::screenshot_save_to_file,
+            screenshot_cmd::screenshot_save_annotated,
+            screenshot_cmd::screenshot_copy_to_clipboard,
+            screenshot_cmd::screenshot_copy_annotated_to_clipboard,
+            screenshot_cmd::screenshot_list_history,
+            screenshot_cmd::screenshot_delete,
+            screenshot_cmd::screenshot_cleanup,
+            screenshot_cmd::screenshot_translate,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

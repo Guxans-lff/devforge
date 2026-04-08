@@ -328,6 +328,19 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     addInnerTab(connectionId, tab)
   }
 
+  /** 打开 SQL Builder 标签页 */
+  function openSqlBuilder(connectionId: string, database: string): void {
+    const tabId = `${connectionId}-sql-builder-${database}`
+    const tab: InnerTab = {
+      id: tabId,
+      type: 'sql-builder',
+      title: `SQL Builder: ${database}`,
+      closable: true,
+      context: { type: 'sql-builder', database },
+    }
+    addInnerTab(connectionId, tab)
+  }
+
   /** 打开数据同步标签页 */
   function openDataSync(connectionId: string): void {
     const tabId = `${connectionId}-data-sync`
@@ -486,6 +499,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     openPerformance,
     openUserManagement,
     openErDiagram,
+    openSqlBuilder,
     openDataSync,
     openScheduler,
     reopenLastClosedTab,

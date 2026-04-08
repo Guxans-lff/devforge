@@ -1,6 +1,6 @@
 import type { QueryResult } from './database'
 
-export type InnerTabType = 'query' | 'table-editor' | 'import' | 'table-data' | 'schema-compare' | 'performance' | 'user-management' | 'er-diagram' | 'data-sync' | 'scheduler'
+export type InnerTabType = 'query' | 'table-editor' | 'import' | 'table-data' | 'schema-compare' | 'performance' | 'user-management' | 'er-diagram' | 'data-sync' | 'scheduler' | 'sql-builder'
 
 /** 查询结果标签页 */
 export interface ResultTab {
@@ -33,7 +33,7 @@ export interface InnerTab {
   title: string
   closable: boolean
   dirty?: boolean
-  context: QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext | UserManagementTabContext | ErDiagramTabContext | DataSyncTabContext | SchedulerTabContext
+  context: QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext | UserManagementTabContext | ErDiagramTabContext | DataSyncTabContext | SchedulerTabContext | SqlBuilderTabContext
 }
 
 export interface QueryTabContext {
@@ -117,6 +117,13 @@ export interface SchedulerTabContext {
     configJson: string
     name?: string
   }
+}
+
+/** SQL Builder 标签页上下文 */
+export interface SqlBuilderTabContext {
+  type: 'sql-builder'
+  /** 数据库名 */
+  database: string
 }
 
 export interface ConnectionWorkspace {

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
 import type { GitCommit } from '@/types/git'
-import { Loader2, Copy, Tag, GitBranch as GitBranchIcon } from 'lucide-vue-next'
+import { Loader2, Copy, Tag, GitBranch as GitBranchIcon, ArrowDownUp } from 'lucide-vue-next'
 
 const props = defineProps<{
   repoPath: string
@@ -18,6 +18,7 @@ const emit = defineEmits<{
   cherryPick: [hash: string]
   createBranch: [hash: string]
   createTag: [hash: string]
+  interactiveRebase: [hash: string]
 }>()
 
 const { t } = useI18n()
@@ -217,6 +218,12 @@ onMounted(() => {
           @click="emit('cherryPick', contextMenu!.commit.hash)"
         >
           {{ t('git.cherryPick') }}
+        </button>
+        <button
+          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          @click="emit('interactiveRebase', contextMenu!.commit.hash)"
+        >
+          <ArrowDownUp class="h-3.5 w-3.5" /> {{ t('git.rebaseToHere') }}
         </button>
       </div>
     </Teleport>

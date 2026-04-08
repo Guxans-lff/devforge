@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { parseBackendError } from '@/types/error'
 import {
   Dialog,
   DialogContent,
@@ -279,8 +280,8 @@ async function handleCreate() {
     await dbApi.dbExecuteQuery(props.connectionId, sql)
     emit('success', name)
     emit('update:open', false)
-  } catch (e: any) {
-    error.value = String(e)
+  } catch (e: unknown) {
+    error.value = parseBackendError(e).message
   } finally {
     isCreating.value = false
   }

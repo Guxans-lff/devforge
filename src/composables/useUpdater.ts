@@ -12,8 +12,8 @@
  */
 
 import { ref, readonly } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
 import { parseBackendError } from '@/types/error'
+import { downloadUpdate as apiDownloadUpdate, launchInstaller as apiLaunchInstaller, revealInFolder as apiRevealInFolder } from '@/api/system'
 import { getVersion } from '@tauri-apps/api/app'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 
@@ -212,10 +212,7 @@ async function downloadAndInstall(): Promise<void> {
 
   try {
     // 调用后端下载（后端自动使用固定的 updates 目录）
-    const result = await invoke<{ savedPath: string; fileSize: number }>('download_update', {
-      url: pendingDownloadUrl,
-      sha256: pendingSha256 || null,
-    })
+    const result = await apiDownloadUpdate(pendingDownloadUrl, pendingSha256 || null)
 
     downloadProgress.value = 100
     downloading.value = false
@@ -228,13 +225,13 @@ async function downloadAndInstall(): Promise<void> {
 
     // 启动安装器（后端会自动退出应用）
     try {
-      await invoke('launch_installer', { path: result.savedPath })
+      await apiLaunchInstaller(result.savedPath)
       // 后端调用 app.exit(0) 后应用会退出，正常不会执行到这里
     } catch (e) {
       // 安装器启动失败时，退而求其次：打开所在目录
       console.error('[Updater] 启动安装器失败，尝试打开目录:', e)
       try {
-        await invoke('reveal_in_folder', { path: result.savedPath })
+        await apiRevealInFolder(result.savedPath)
         error.value = `安装包已下载到 ${result.savedPath}，请手动双击安装`
       } catch {
         error.value = `安装包已下载到 ${result.savedPath}，请手动前往安装`
