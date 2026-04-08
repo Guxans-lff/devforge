@@ -140,7 +140,7 @@ export function setupGlobalErrorHandler(app: App): void {
   window.addEventListener('unhandledrejection', onUnhandledRejection)
 
   _cleanup = () => {
-    app.config.errorHandler = null
+    app.config.errorHandler = undefined
     window.removeEventListener('error', onError)
     window.removeEventListener('unhandledrejection', onUnhandledRejection)
     _cleanup = null
