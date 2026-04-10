@@ -133,7 +133,12 @@ impl DbEngine {
                 let batch = options.sql_batch_size.unwrap_or(1000) as usize;
                 let cols = columns.iter().map(|c| format!("`{}`", c.name)).collect::<Vec<_>>().join(", ");
                 for chunk in rows.chunks(batch) {
-                    let vals = chunk.iter().map(|row| format!("({})", row.iter().map(|v| self.clone().json_value_to_sql_literal(v)).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join(",\n");
+                    let vals = chunk.iter().map(|row| {
+                        format!("({})", row.iter().enumerate().map(|(i, v)| {
+                            let dt = columns.get(i).map(|c| c.data_type.as_str()).unwrap_or("");
+                            self.clone().json_value_to_sql_literal(v, dt)
+                        }).collect::<Vec<_>>().join(", "))
+                    }).collect::<Vec<_>>().join(",\n");
                     writeln!(writer, "INSERT INTO `{}` ({}) VALUES\n{};\n", table_name, cols, vals).map_err(|e| AppError::Other(e.to_string()))?;
                 }
             }
@@ -152,11 +157,24 @@ impl DbEngine {
         Ok(())
     }
 
-    fn json_value_to_sql_literal(self: Arc<Self>, value: &serde_json::Value) -> String {
+    fn json_value_to_sql_literal(self: Arc<Self>, value: &serde_json::Value, data_type: &str) -> String {
+        // BIT 类型需要特殊格式 b'0' / b'1'
+        let is_bit = data_type.starts_with("BIT");
         match value {
             serde_json::Value::Null => "NULL".to_string(),
-            serde_json::Value::Bool(b) => if *b { "1".to_string() } else { "0".to_string() },
-            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b) => {
+                if is_bit {
+                    if *b { "b'1'".to_string() } else { "b'0'".to_string() }
+                } else if *b { "1".to_string() } else { "0".to_string() }
+            }
+            serde_json::Value::Number(n) => {
+                if is_bit {
+                    let v = n.as_u64().unwrap_or(0);
+                    format!("b'{:b}'", v)
+                } else {
+                    n.to_string()
+                }
+            }
             serde_json::Value::String(s) => format!("'{}'", s.replace('\'', "''")),
             _ => format!("'{}'", value.to_string().replace('\'', "''")),
         }
