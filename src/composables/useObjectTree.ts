@@ -2,7 +2,7 @@
  * 对象树核心业务逻辑 composable
  * 从 ObjectTree.vue 提取，负责树节点加载/搜索/展开/虚拟滚动等
  */
-import { ref, computed, watch, onActivated, markRaw, type Ref } from 'vue'
+import { ref, computed, watch, onActivated, markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import * as dbApi from '@/api/database'
@@ -78,10 +78,29 @@ export function useObjectTree(options: UseObjectTreeOptions) {
     }
   }
 
-  /** 点击搜索结果项 */
+  /** 点击搜索结果项：关闭下拉面板 → 展开路径 → 滚动到目标节点 → 打开表数据 */
   function handleSearchResultClick(item: (typeof objectSearchResults.value)[number]) {
     showObjectSearchDropdown.value = false
     navigateToNode(item)
+
+    // 等待树节点展开、扁平化列表更新后，滚动到目标节点
+    nextTick(() => {
+      const targetId = item.node.id
+      const idx = flattenedNodes.value.findIndex(n => n.id === targetId)
+      if (idx >= 0) {
+        virtualizer.value.scrollToIndex(idx, { align: 'center' })
+      }
+    })
+
+    // 点击 table/view 时直接打开表数据
+    if (item.node.type === 'table' || item.node.type === 'view') {
+      const database = item.node.meta?.database
+      const table = item.node.meta?.table
+      if (database && table) onSelectTable(database, table)
+    } else if (item.node.type === 'database') {
+      const database = item.node.meta?.database
+      if (database) onSelectDatabase(database)
+    }
   }
 
   // ===== 统一搜索输入 =====

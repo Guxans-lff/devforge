@@ -5,6 +5,7 @@
  */
 import { ref, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { onClickOutside } from '@vueuse/core'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -97,6 +98,12 @@ const tree = useObjectTree({
   onSelectTable: (db, tbl) => emit('selectTable', db, tbl),
   onSelectDatabase: (db) => emit('selectDatabase', db),
   onSchemaUpdated: () => emit('schemaUpdated'),
+})
+
+// ===== 搜索下拉面板：点击外部关闭 =====
+const searchAreaRef = ref<HTMLElement | null>(null)
+onClickOutside(searchAreaRef, () => {
+  tree.showObjectSearchDropdown.value = false
 })
 
 // ===== 事件处理（从 node 提取 meta 后转发 emit） =====
@@ -226,7 +233,7 @@ defineExpose({
     </div>
 
     <!-- 统一智能搜索框 (Neu/Glass Pill Design) -->
-    <div class="px-3 pt-2 pb-2 relative border-b border-border/5">
+    <div ref="searchAreaRef" class="px-3 pt-2 pb-2 relative border-b border-border/5">
       <div class="relative group flex items-center h-8">
         <!-- Pill Background Container (拟物底座) -->
         <div class="absolute inset-0 rounded-full bg-zinc-100/50 dark:bg-black/20 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.04),inset_0_0_0_1px_rgba(0,0,0,0.03),0_0.5px_0_rgba(255,255,255,0.6)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(255,255,255,0.04),0_0.5px_0_rgba(255,255,255,0.02)] transform-gpu transition-[background-color,box-shadow] duration-300 group-focus-within:bg-white dark:group-focus-within:bg-[#1C1C1E] group-focus-within:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05),0_4px_10px_rgba(0,0,0,0.03),0_0_0_1.5px_rgba(var(--primary-rgb),0.15)] dark:group-focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1),0_4px_12px_rgba(0,0,0,0.4),0_0_0_1.5px_rgba(var(--primary-rgb),0.2)]" />

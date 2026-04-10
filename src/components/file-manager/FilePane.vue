@@ -332,6 +332,12 @@ let typeAheadBuffer = ''
 let typeAheadTimer: ReturnType<typeof setTimeout> | null = null
 
 function handleKeyDown(e: KeyboardEvent) {
+  // 如果焦点在输入框内，不拦截键盘事件（让输入框自身处理 Ctrl+A 等）
+  const target = e.target as HTMLElement
+  if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+    return
+  }
+
   if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
     e.preventDefault()
     selectAll()

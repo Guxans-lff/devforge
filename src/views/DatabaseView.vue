@@ -384,11 +384,32 @@ function handleSelectTable(database: string, table: string) {
   const q = quoteIdentifier
   const sql = `SELECT * FROM ${q(database)}.${q(table)};`
 
-  // 优先使用当前激活的 query tab，否则找第一个 query tab，都没有则创建新的
-  let queryTab = ws.tabs.find((t) => t.id === ws.activeTabId && t.type === 'query')
-  if (!queryTab) {
-    queryTab = ws.tabs.find((t) => t.type === 'query')
+  // 查找可复用的 query tab：
+  // 1. 当前激活的 query tab 如果为空或处于 browseTable 模式，则直接复用
+  // 2. 否则新建一个 tab，避免覆盖用户手写的 SQL
+  let queryTab: typeof ws.tabs[number] | undefined
+
+  const activeTab = ws.tabs.find((t) => t.id === ws.activeTabId && t.type === 'query')
+  if (activeTab) {
+    const ctx = activeTab.context as QueryTabContext | undefined
+    const existingSql = (ctx?.sql ?? '').trim()
+    const isReusable = !existingSql || ctx?.tableBrowse
+    if (isReusable) {
+      queryTab = activeTab
+    }
   }
+
+  // 如果当前 tab 有用户 SQL，尝试找其他空的 query tab
+  if (!queryTab) {
+    queryTab = ws.tabs.find((t) => {
+      if (t.type !== 'query') return false
+      const ctx = t.context as QueryTabContext | undefined
+      const existingSql = (ctx?.sql ?? '').trim()
+      return !existingSql || ctx?.tableBrowse
+    })
+  }
+
+  // 都没有可复用的，新建一个
   if (!queryTab) {
     queryTab = dbWorkspaceStore.addQueryTab(props.connectionId)
   }
@@ -399,9 +420,25 @@ function handleSelectTable(database: string, table: string) {
     sql,
     tableBrowse: { database, table, currentPage: 1, pageSize: 200 },
     currentDatabase: database,
+    // 切换表时清空所有旧的结果标签页和激活状态，
+    // 防止 displayResult 通过 activeResultTab 路径返回旧数据
+    resultTabs: [],
+    activeResultTabId: undefined,
+    // 立即清除旧结果，避免短暂显示上一个表的数据
+    result: null,
   })
+
+  // 等待 QueryPanel 渲染完成后执行 browseTable
+  // 使用双 nextTick 确保 KeepAlive activate / 新组件 mount 完成
   nextTick(() => {
-    queryPanelRef.value?.browseTable(database, table)
+    if (queryPanelRef.value) {
+      queryPanelRef.value.browseTable(database, table)
+    } else {
+      // QueryPanel 尚未挂载（新建 tab 或从其他 tab 类型切换），再等一个渲染周期
+      nextTick(() => {
+        queryPanelRef.value?.browseTable(database, table)
+      })
+    }
   })
 }
 

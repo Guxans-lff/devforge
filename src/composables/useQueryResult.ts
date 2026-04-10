@@ -140,6 +140,47 @@ export function useQueryResult(options: UseQueryResultOptions) {
   const serverSortCol = ref<string | null>(null)
   const serverSortDir = ref<'ASC' | 'DESC' | null>(null)
 
+  // 当表/数据库切换时，重置所有 UI 交互状态
+  watch(
+    [database, tableName],
+    () => {
+      // 清除过滤防抖定时器，防止旧表的过滤请求污染新表
+      if (filterDebounceTimer) {
+        clearTimeout(filterDebounceTimer)
+        filterDebounceTimer = null
+      }
+      // 重置排序
+      sorting.value = []
+      columnPinning.value = { left: [], right: [] }
+      // 重置过滤
+      columnFilters.value = {}
+      filterOperators.value = {}
+      showFilters.value = false
+      serverSortCol.value = null
+      serverSortDir.value = null
+      // 重置编辑
+      editingCell.value = null
+      editingValue.value = ''
+      // 重置选中
+      selectedRowIndex.value = null
+      rowDetailOpen.value = false
+      deleteConfirmOpen.value = false
+      pendingDeleteIndex.value = null
+      // 重置统计
+      selectedStatsColumn.value = null
+      columnStats.value = null
+      // 重置图表
+      showChart.value = false
+      // 重置可见行数
+      visibleCount.value = CHUNK_SIZE
+      // 重置滚动位置
+      if (tableScrollRef.value) {
+        tableScrollRef.value.scrollTop = 0
+        tableScrollRef.value.scrollLeft = 0
+      }
+    },
+  )
+
   // ===== 连接错误判断 =====
   const isConnectionError = computed(() => {
     const err = result.value?.error?.toLowerCase() ?? ''

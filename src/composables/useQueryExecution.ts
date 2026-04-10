@@ -81,6 +81,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   // ===== 状态 =====
   const pendingExecuteSql = ref<string | null>(null)
   const errorStrategy = ref<ErrorStrategy>('continueOnError')
+  /** 执行版本号，用于检测流式查询的 onChunk 是否已过时 */
+  let executeVersion = 0
 
   const queryTimeout = computed({
     get: () => tabContext.value?.queryTimeout ?? 30,
@@ -194,6 +196,9 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   async function doExecute(sql: string) {
     if (!sql.trim() || !isConnected.value || isExecuting.value) return
 
+    // 递增执行版本号，使正在进行的旧流式查询的 onChunk 失效
+    const currentExecVersion = ++executeVersion
+
     startExecutionTimer()
 
     // USE 语句特殊处理
@@ -222,7 +227,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     const startTime = Date.now()
 
     if (isMultiStatement(sql)) {
-      await handleMultiExecute(sql, startTime)
+      await handleMultiExecute(sql, startTime, currentExecVersion)
       return
     }
 
@@ -230,14 +235,14 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     const isSelectLike = ['SELECT', 'SHOW', 'DESCRIBE', 'EXPLAIN'].includes(firstWord)
 
     if (isSelectLike) {
-      await handleStreamExecute(sql, startTime)
+      await handleStreamExecute(sql, startTime, currentExecVersion)
     } else {
-      await handleNonStreamExecute(sql, startTime)
+      await handleNonStreamExecute(sql, startTime, currentExecVersion)
     }
   }
 
   // ===== 流式执行 =====
-  async function handleStreamExecute(sql: string, startTime: number) {
+  async function handleStreamExecute(sql: string, startTime: number, execVersion: number) {
     let allColumns: QueryResult['columns'] = []
     let allRows: unknown[][] = []
     let lastError: string | null = null
@@ -254,6 +259,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       })
 
       const onChunk = (chunk: QueryChunk) => {
+        // 版本号不匹配说明已有新的执行/browseTable，丢弃此 chunk
+        if (execVersion !== executeVersion) return
         if (chunk.columns && chunk.columns.length > 0) allColumns = chunk.columns
         if (chunk.rows && chunk.rows.length > 0) allRows = [...allRows, ...chunk.rows]
         if (chunk.error) lastError = chunk.error
@@ -293,6 +300,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       }
 
       stopExecutionTimer()
+      // 版本号不匹配说明已有新操作，丢弃此结果
+      if (execVersion !== executeVersion) return
       store.updateTabContext(connectionId.value, tabId.value, { result: finalResult, isExecuting: false })
 
       const executionTime = Date.now() - startTime
@@ -309,12 +318,12 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       saveHistory(sql, finalResult)
     } catch (_e) {
       console.warn('流式查询无法完成，降级到传统 API:', _e)
-      await handleNonStreamExecute(sql, startTime)
+      await handleNonStreamExecute(sql, startTime, execVersion)
     }
   }
 
   // ===== 非流式执行 =====
-  async function handleNonStreamExecute(sql: string, startTime: number) {
+  async function handleNonStreamExecute(sql: string, startTime: number, execVersion: number) {
     try {
       const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
       const currentDb = tabContext.value?.currentDatabase
@@ -324,6 +333,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       if (!result.isError) result.tableName = extractTableName(sql) || undefined
 
       stopExecutionTimer()
+      // 版本号不匹配说明已有新操作，丢弃此结果
+      if (execVersion !== executeVersion) return
       store.updateTabContext(connectionId.value, tabId.value, { result, isExecuting: false })
 
       const executionTime = Date.now() - startTime
@@ -347,6 +358,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         isError: true, error: errorStr, totalCount: null, truncated: false,
       }
       stopExecutionTimer()
+      if (execVersion !== executeVersion) return
       store.updateTabContext(connectionId.value, tabId.value, { result: errorResult, isExecuting: false })
       notification.error(t('database.queryFailed'), errorStr, true)
       saveHistory(sql, errorResult)
@@ -354,7 +366,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   }
 
   // ===== 多语句执行 =====
-  async function handleMultiExecute(sql: string, startTime: number) {
+  async function handleMultiExecute(sql: string, startTime: number, execVersion: number) {
     try {
       const currentDb = tabContext.value?.currentDatabase
       const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
@@ -399,8 +411,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       tabs.push(newTab)
 
       stopExecutionTimer()
+      if (execVersion !== executeVersion) return
       store.updateTabContext(connectionId.value, tabId.value, {
-        resultTabs: tabs, activeResultTabId: newTab.id,
         result: summaryResult, isExecuting: false,
       })
 
@@ -424,6 +436,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         isError: true, error: errorStr, totalCount: null, truncated: false,
       }
       stopExecutionTimer()
+      if (execVersion !== executeVersion) return
       store.updateTabContext(connectionId.value, tabId.value, { result: errorResult, isExecuting: false })
       notification.error(t('database.queryFailed'), errorStr, true)
       saveHistory(sql, errorResult)
@@ -524,7 +537,11 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     paramNames,
     paramValues,
     executeWithParams,
-    browseTable: tableBrowse.browseTable,
+    browseTable: (...args: Parameters<typeof tableBrowse.browseTable>) => {
+      // browseTable 时递增执行版本号，使旧的流式查询 onChunk 失效
+      ++executeVersion
+      return tableBrowse.browseTable(...args)
+    },
     loadMoreRows: tableBrowse.loadMoreRows,
     invalidateBrowseCache: tableBrowse.invalidateCache,
     handleRefresh,

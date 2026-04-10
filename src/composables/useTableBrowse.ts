@@ -23,23 +23,43 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
   const store = useDatabaseWorkspaceStore()
   const isLoadingMore = ref(false)
   const pageCache = new TablePageCache()
+  /** 请求版本号，防止快速切换表时旧响应覆盖新数据 */
+  let browseVersion = 0
 
   async function browseTable(database: string, table: string, whereClause?: string, orderBy?: string) {
-    if (!isConnected.value || isExecuting.value) return
+    if (!isConnected.value) return
 
-    // 参数变化时缓存自动清除（fingerprint 不同），第一页一般不命中
-    store.updateTabContext(connectionId.value, tabId.value, { isExecuting: true })
+    // 递增版本号，后续只有版本匹配时才写入结果
+    const currentVersion = ++browseVersion
+    console.log(`[browseTable] 开始 v${currentVersion}: ${database}.${table}`)
+
+    // 切换表时立即清除旧结果和结果标签页，防止新旧数据混杂
+    store.updateTabContext(connectionId.value, tabId.value, {
+      isExecuting: true,
+      result: null,
+      resultTabs: [],
+      activeResultTabId: undefined,
+    })
     try {
       const result = await dbApi.dbGetTableData(connectionId.value, database, table, 1, 200, whereClause, orderBy)
+      // 版本不匹配说明已有更新的请求，丢弃此结果
+      if (currentVersion !== browseVersion) {
+        console.log(`[browseTable] 版本过期 v${currentVersion} != v${browseVersion}，丢弃 ${database}.${table} 的结果`)
+        return
+      }
+      console.log(`[browseTable] 完成 v${currentVersion}: ${database}.${table}，列数=${result.columns.length}，行数=${result.rows.length}`)
       // 缓存第一页
       pageCache.set(database, table, 1, 200, result, whereClause, orderBy)
       store.updateTabContext(connectionId.value, tabId.value, {
         result,
         isExecuting: false,
         tableBrowse: { database, table, currentPage: 1, pageSize: 200, whereClause, orderBy },
+        resultTabs: [],
         activeResultTabId: undefined,
       })
     } catch (e: unknown) {
+      console.error(`[browseTable] 失败 v${currentVersion}: ${database}.${table}`, e)
+      if (currentVersion !== browseVersion) return
       const errorStr = parseBackendError(e).message
       store.updateTabContext(connectionId.value, tabId.value, {
         result: {
@@ -82,17 +102,21 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
     isLoadingMore.value = true
     try {
       const moreResult = await dbApi.dbGetTableData(connectionId.value, database, table, nextPage, pageSize, whereClause, orderBy)
+      // 请求完成后检查当前表是否已切换，防止旧数据污染新表
+      const currentCtx = tabContext.value
+      if (!currentCtx?.tableBrowse || currentCtx.tableBrowse.database !== database || currentCtx.tableBrowse.table !== table) return
+      if (!currentCtx.result) return
       if (moreResult.rows.length > 0) {
         // 写入缓存
         pageCache.set(database, table, nextPage, pageSize, moreResult, whereClause, orderBy)
-        const merged: typeof ctx.result = {
-          ...ctx.result,
-          rows: [...ctx.result.rows, ...moreResult.rows],
+        const merged: typeof currentCtx.result = {
+          ...currentCtx.result,
+          rows: [...currentCtx.result.rows, ...moreResult.rows],
           totalCount: moreResult.totalCount,
         }
         store.updateTabContext(connectionId.value, tabId.value, {
           result: merged,
-          tableBrowse: { ...ctx.tableBrowse, currentPage: nextPage },
+          tableBrowse: { ...currentCtx.tableBrowse, currentPage: nextPage },
         })
       }
     } catch (_e) {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount, toRef } from 'vue'
+import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, toRef } from 'vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import SqlEditor from '@/components/database/SqlEditorLazy.vue'
 import SqlSnippetPanel from '@/components/database/SqlSnippetPanel.vue'
@@ -202,7 +202,22 @@ onMounted(() => {
       console.warn('[Session] 获取 Session 连接失败，将降级到传统模式:', e)
     })
   }
+  // 挂载时检查：如果 context 中有 tableBrowse 但没有 result，说明需要执行 browseTable
+  checkPendingBrowse()
 })
+
+// KeepAlive 激活时也检查 pending browseTable
+onActivated(() => {
+  checkPendingBrowse()
+})
+
+/** 检查 context 中是否有待执行的 tableBrowse（result 为空说明还没执行） */
+function checkPendingBrowse() {
+  const ctx = tabContext.value
+  if (ctx?.tableBrowse && !ctx.result && !ctx.isExecuting) {
+    execution.browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, ctx.tableBrowse.whereClause, ctx.tableBrowse.orderBy)
+  }
+}
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', resultTabsManager.closeContextMenu)

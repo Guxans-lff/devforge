@@ -280,6 +280,7 @@ defineExpose({ gridSearch })
     />
     <QueryResultComponent
       v-else
+      :key="`qr-${currentBrowseDb}-${currentBrowseTable}-${activeResultTabId}`"
       :result="displayResult"
       :loading="isExecuting"
       :loading-more="isLoadingMore"
