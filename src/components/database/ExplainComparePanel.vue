@@ -134,6 +134,7 @@ onMounted(() => { loadPlans() })
           <div class="text-[10px] font-black uppercase text-muted-foreground/60 mb-2">基准计划 (Before)</div>
           <select
             v-model="leftPlanId"
+            aria-label="基准计划 (Before)"
             class="w-full h-8 rounded-lg border border-border/20 bg-muted/20 px-3 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary"
           >
             <option :value="null">选择计划...</option>
@@ -147,6 +148,7 @@ onMounted(() => { loadPlans() })
           <div class="text-[10px] font-black uppercase text-muted-foreground/60 mb-2">对比计划 (After)</div>
           <select
             v-model="rightPlanId"
+            aria-label="对比计划 (After)"
             class="w-full h-8 rounded-lg border border-border/20 bg-muted/20 px-3 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-primary"
           >
             <option :value="null">选择计划...</option>

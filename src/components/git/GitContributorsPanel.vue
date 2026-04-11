@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { gitGetContributors } from '@/api/git'
 import type { GitContributor } from '@/types/git'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import { Loader2, RefreshCw, Users } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -31,7 +32,7 @@ async function loadContributors() {
   try {
     contributors.value = await gitGetContributors(props.repoPath)
   } catch (e) {
-    toast.error(t('git.contributorsFailed'), String(e))
+    toast.error(t('git.contributorsFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }

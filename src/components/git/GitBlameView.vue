@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button'
 import { gitBlameFile } from '@/api/git'
 import type { GitBlameLine } from '@/types/git'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
+import { formatDate as formatTime } from '@/composables/useGitUtils'
 import { Loader2, X } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -33,7 +35,7 @@ onMounted(async () => {
   try {
     lines.value = await gitBlameFile(props.repoPath, props.filePath)
   } catch (e) {
-    toast.error(t('git.blameFailed'), String(e))
+    toast.error(t('git.blameFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -51,11 +53,6 @@ function blameGroupClass(index: number): string {
   return ''
 }
 
-function formatTime(ts: number) {
-  const d = new Date(ts * 1000)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
 function shortHash(hash: string) {
   return hash.substring(0, 7)
 }
@@ -68,7 +65,7 @@ function shortHash(hash: string) {
       <span class="text-xs font-medium">Blame</span>
       <span class="text-xs font-mono text-muted-foreground truncate">{{ fileName }}</span>
       <div class="flex-1" />
-      <Button variant="ghost" size="icon" class="h-6 w-6" @click="emit('close')">
+      <Button variant="ghost" size="icon" class="h-6 w-6" :aria-label="t('common.close')" @click="emit('close')">
         <X class="h-3.5 w-3.5" />
       </Button>
     </div>
@@ -86,7 +83,7 @@ function shortHash(hash: string) {
           :class="blameGroupClass(i)"
         >
           <!-- Blame 信息列 -->
-          <div class="w-[200px] shrink-0 flex items-start gap-1 px-2 py-1 text-muted-foreground/70 border-r border-border/30 bg-muted/10">
+          <div class="w-[200px] max-w-[40%] shrink-0 flex items-start gap-1 px-2 py-1 text-muted-foreground/70 border-r border-border/30 bg-muted/10">
             <span
               class="text-primary/70 cursor-pointer hover:underline"
               @click="emit('viewCommit', line.commitHash)"

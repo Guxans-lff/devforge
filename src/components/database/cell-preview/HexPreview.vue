@@ -54,7 +54,7 @@ const totalBytes = computed(() => bytes.value.length)
           <!-- 十六进制 -->
           <span class="flex-1 tabular-nums">
             <template v-for="(byte, j) in row.hex" :key="j">
-              <span class="text-blue-600 dark:text-blue-400">{{ byte }}</span>
+              <span class="text-primary">{{ byte }}</span>
               <span class="text-muted-foreground/20">{{ j === 7 ? '  ' : ' ' }}</span>
             </template>
           </span>

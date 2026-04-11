@@ -97,8 +97,8 @@ const metricGroups = computed(() => {
     {
       title: 'Redo Log',
       icon: HardDrive,
-      color: 'text-purple-500',
-      bg: 'bg-purple-500/10',
+      color: 'text-df-info',
+      bg: 'bg-df-info/10',
       items: [
         { label: '已写入日志', value: formatBytes(s.logBytesWritten) },
         { label: '挂起 fsync', value: String(s.logPendingFsyncs), warn: s.logPendingFsyncs > 5 },

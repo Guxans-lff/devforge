@@ -91,6 +91,7 @@ onMounted(() => { loadDatabases() })
       <div class="flex items-center gap-2">
         <select
           v-model="selectedDb"
+          aria-label="选择分析的数据库"
           class="h-8 rounded-lg border border-border/20 bg-muted/20 px-3 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary"
         >
           <option v-for="db in databases" :key="db" :value="db">{{ db }}</option>

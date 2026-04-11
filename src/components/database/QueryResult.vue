@@ -318,6 +318,7 @@ function isDateTimeColumn(colId: string): boolean {
               <div v-if="isTableBrowse" class="flex gap-0.5">
                 <select
                   :value="qr.filterOperators.value[header.column.id] || 'LIKE'"
+                  :aria-label="`${header.column.id} ${t('database.filterOperator')}`"
                   class="h-5 w-14 shrink-0 rounded-sm border border-border bg-background text-[9px] outline-none focus:border-primary focus-visible:ring-[2px] focus-visible:ring-ring/50"
                   @change="qr.handleOperatorChange(header.column.id, ($event.target as HTMLSelectElement).value)"
                 >
@@ -335,6 +336,7 @@ function isDateTimeColumn(colId: string): boolean {
                 <input
                   :value="qr.columnFilters.value[header.column.id] ?? ''"
                   :placeholder="t('database.filterPlaceholder')"
+                  :aria-label="`${header.column.id} ${t('database.filterPlaceholder')}`"
                   :disabled="(qr.filterOperators.value[header.column.id] === 'IS NULL' || qr.filterOperators.value[header.column.id] === 'IS NOT NULL')"
                   class="h-5 min-w-0 flex-1 rounded-sm border border-border bg-background px-1 text-[10px] outline-none focus:border-primary focus-visible:ring-[2px] focus-visible:ring-ring/50 disabled:opacity-40"
                   @input="qr.handleFilterChange(header.column.id, ($event.target as HTMLInputElement).value)"
@@ -344,6 +346,7 @@ function isDateTimeColumn(colId: string): boolean {
                 v-else
                 :value="qr.columnFilters.value[header.column.id] ?? ''"
                 :placeholder="t('database.filterPlaceholder')"
+                :aria-label="`${header.column.id} ${t('database.filterPlaceholder')}`"
                 class="h-5 w-full rounded-sm border border-border bg-background px-1.5 text-[10px] outline-none focus:border-primary focus-visible:ring-[2px] focus-visible:ring-ring/50"
                 @input="qr.columnFilters.value = { ...qr.columnFilters.value, [header.column.id]: ($event.target as HTMLInputElement).value }"
               />

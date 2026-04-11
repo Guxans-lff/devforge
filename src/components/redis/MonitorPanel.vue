@@ -10,6 +10,7 @@ import { redisMonitorStart, redisMonitorStop } from '@/api/redis'
 import { useConnectionStore } from '@/stores/connections'
 import { getCredential } from '@/api/connection'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import { useAdaptiveOverscan } from '@/composables/useAdaptiveOverscan'
 import type { RedisMonitorMessage } from '@/types/redis'
 
@@ -95,7 +96,7 @@ async function handleStart() {
     })
     monitoring.value = true
   } catch (e) {
-    toast.error(t('redis.monitor.startFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.monitor.startFailed'), parseBackendError(e).message)
   } finally {
     starting.value = false
   }
@@ -122,21 +123,21 @@ function formatTime(ts: number): string {
     '.' + String(d.getMilliseconds()).padStart(3, '0')
 }
 
-/** 命令颜色映射 */
+/** 命令语义着色 — 使用 design tokens 区分读/写/订阅/系统操作 */
 function commandColor(cmd: string): string {
   const verb = cmd.split(/\s+/)[0]?.toUpperCase() ?? ''
   // 写操作
   if (['SET', 'MSET', 'DEL', 'EXPIRE', 'HSET', 'HMSET', 'LPUSH', 'RPUSH', 'SADD', 'ZADD', 'XADD'].includes(verb))
-    return 'text-amber-400/80'
+    return 'text-df-warning'
   // 读操作
   if (['GET', 'MGET', 'HGET', 'HGETALL', 'LRANGE', 'SMEMBERS', 'ZRANGE', 'XRANGE', 'SCAN', 'KEYS', 'TYPE', 'TTL'].includes(verb))
-    return 'text-sky-400/80'
+    return 'text-df-info'
   // 订阅
   if (['SUBSCRIBE', 'PSUBSCRIBE', 'PUBLISH', 'UNSUBSCRIBE'].includes(verb))
-    return 'text-violet-400/80'
+    return 'text-primary'
   // 系统
   if (['PING', 'INFO', 'CONFIG', 'CLIENT', 'MONITOR', 'SLOWLOG', 'MEMORY', 'DEBUG'].includes(verb))
-    return 'text-emerald-400/60'
+    return 'text-df-success/70'
   return 'text-foreground/80'
 }
 
@@ -197,7 +198,7 @@ onBeforeUnmount(async () => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col border-l border-border/40 bg-zinc-950/50">
+  <div class="flex h-full flex-col border-l border-border/40 bg-background/50">
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <Eye class="h-3.5 w-3.5 text-muted-foreground/50" />

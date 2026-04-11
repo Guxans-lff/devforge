@@ -146,6 +146,7 @@ function handlePageSizeChange(e: Event) {
         v-model="pageInput"
         type="text"
         :placeholder="`${currentPage}/${totalPages}`"
+        :aria-label="t('database.goToPage')"
         class="ml-1 w-16 h-5 rounded border border-border bg-background px-1 text-[10px] text-center tabular-nums outline-none focus:border-primary"
         @keydown.enter="handlePageInputEnter"
       />
@@ -156,6 +157,7 @@ function handlePageSizeChange(e: Event) {
       <span>每页</span>
       <select
         :value="pageSize"
+        :aria-label="t('database.rowsPerPage')"
         class="h-5 rounded border border-border bg-background px-1 text-[10px] outline-none focus:border-primary"
         @change="handlePageSizeChange"
       >

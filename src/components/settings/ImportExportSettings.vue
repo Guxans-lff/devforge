@@ -55,10 +55,10 @@ async function handleExport() {
       t('importExport.exportSuccess'),
       t('importExport.exportSuccessDesc', { count: data.connections.length })
     )
-  } catch (error: any) {
+  } catch (error: unknown) {
     notification.error(
       t('importExport.exportFailed'),
-      error?.message ?? String(error)
+      error instanceof Error ? error.message : String(error)
     )
   } finally {
     isExporting.value = false
@@ -97,10 +97,10 @@ async function handleSelectFile() {
         existing: preview.conflicts.length,
       })
     )
-  } catch (error: any) {
+  } catch (error: unknown) {
     notification.error(
       t('importExport.previewFailed'),
-      error?.message ?? String(error)
+      error instanceof Error ? error.message : String(error)
     )
   }
 }
@@ -131,10 +131,10 @@ async function handleImport() {
     // 清除预览和数据
     importPreview.value = null
     importData.value = null
-  } catch (error: any) {
+  } catch (error: unknown) {
     notification.error(
       t('importExport.importFailed'),
-      error?.message ?? String(error)
+      error instanceof Error ? error.message : String(error)
     )
   } finally {
     isImporting.value = false

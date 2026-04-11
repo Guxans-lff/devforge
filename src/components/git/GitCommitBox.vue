@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import { Check, RotateCw } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -50,7 +51,7 @@ async function handleCommit() {
     const hash = await store.commit(props.repoPath)
     toast.success(t('git.commitSuccess', { hash: hash.substring(0, 7) }))
   } catch (e) {
-    toast.error(t('git.commitFailed'), String(e))
+    toast.error(t('git.commitFailed'), parseBackendError(e).message)
   }
 }
 </script>
@@ -61,6 +62,7 @@ async function handleCommit() {
     <textarea
       v-model="commitMessage"
       :placeholder="t('git.commitPlaceholder')"
+      :aria-label="t('git.commitPlaceholder')"
       class="w-full h-20 px-2 py-1.5 text-xs bg-background border border-border rounded resize-none focus:outline-none focus:ring-1 focus:ring-primary"
       @keydown.ctrl.enter="handleCommit"
     />

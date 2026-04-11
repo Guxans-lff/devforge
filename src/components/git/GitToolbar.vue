@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import {
   RefreshCw, FolderOpen, Upload, Download, RotateCw,
   GitBranch as GitBranchIcon, ArrowUpCircle, ArrowDownCircle,
@@ -37,7 +38,7 @@ async function handleRefresh() {
   try {
     await store.refresh(props.repoPath)
   } catch (e) {
-    toast.error(t('git.refreshFailed'), String(e))
+    toast.error(t('git.refreshFailed'), parseBackendError(e).message)
   }
 }
 
@@ -46,7 +47,7 @@ async function handlePush(force = false) {
     const msg = await store.push(props.repoPath, defaultRemote.value, currentBranch.value, force)
     toast.success(t('git.pushSuccess'), msg)
   } catch (e) {
-    toast.error(t('git.pushFailed'), String(e))
+    toast.error(t('git.pushFailed'), parseBackendError(e).message)
   }
 }
 
@@ -55,7 +56,7 @@ async function handlePull() {
     const msg = await store.pull(props.repoPath, defaultRemote.value, currentBranch.value)
     toast.success(t('git.pullSuccess'), msg)
   } catch (e) {
-    toast.error(t('git.pullFailed'), String(e))
+    toast.error(t('git.pullFailed'), parseBackendError(e).message)
   }
 }
 
@@ -64,7 +65,7 @@ async function handleFetch() {
     const msg = await store.fetch(props.repoPath, defaultRemote.value)
     toast.success(t('git.fetchSuccess'), msg)
   } catch (e) {
-    toast.error(t('git.fetchFailed'), String(e))
+    toast.error(t('git.fetchFailed'), parseBackendError(e).message)
   }
 }
 </script>
@@ -85,10 +86,10 @@ async function handleFetch() {
 
     <!-- Ahead / Behind -->
     <div v-if="workspace.status" class="flex items-center gap-2 ml-1 text-xs text-muted-foreground">
-      <span v-if="ahead > 0" class="flex items-center gap-0.5 text-green-500">
+      <span v-if="ahead > 0" class="flex items-center gap-0.5 text-df-success">
         <ArrowUpCircle class="h-3.5 w-3.5" /> {{ ahead }}
       </span>
-      <span v-if="behind > 0" class="flex items-center gap-0.5 text-orange-500">
+      <span v-if="behind > 0" class="flex items-center gap-0.5 text-df-warning">
         <ArrowDownCircle class="h-3.5 w-3.5" /> {{ behind }}
       </span>
     </div>
@@ -108,12 +109,13 @@ async function handleFetch() {
           <Button
             variant="ghost" size="icon" class="h-7 w-7"
             :disabled="!!operating"
+            :aria-label="t('git.fetch')"
             @click="handleFetch"
           >
             <RotateCw class="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent><p class="text-xs">Fetch</p></TooltipContent>
+        <TooltipContent><p class="text-xs">{{ t('git.fetch') }}</p></TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -121,16 +123,17 @@ async function handleFetch() {
           <Button
             variant="ghost" size="icon" class="h-7 w-7 relative"
             :disabled="!!operating"
+            :aria-label="t('git.pull')"
             @click="handlePull"
           >
             <Download class="h-3.5 w-3.5" />
             <span v-if="behind > 0"
-              class="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] px-0.5 rounded-full bg-orange-500 text-white text-[10px] flex items-center justify-center">
+              class="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] px-0.5 rounded-full bg-df-warning text-primary-foreground text-[10px] flex items-center justify-center">
               {{ behind }}
             </span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent><p class="text-xs">Pull</p></TooltipContent>
+        <TooltipContent><p class="text-xs">{{ t('git.pull') }}</p></TooltipContent>
       </Tooltip>
 
       <div class="h-4 w-px bg-border/30" />
@@ -140,16 +143,17 @@ async function handleFetch() {
           <Button
             variant="ghost" size="icon" class="h-7 w-7 relative"
             :disabled="!!operating"
+            :aria-label="t('git.push')"
             @click="handlePush()"
           >
             <Upload class="h-3.5 w-3.5" />
             <span v-if="ahead > 0"
-              class="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] px-0.5 rounded-full bg-green-500 text-white text-[10px] flex items-center justify-center">
+              class="absolute -top-0.5 -right-0.5 h-3.5 min-w-[14px] px-0.5 rounded-full bg-df-success text-primary-foreground text-[10px] flex items-center justify-center">
               {{ ahead }}
             </span>
           </Button>
         </TooltipTrigger>
-        <TooltipContent><p class="text-xs">Push</p></TooltipContent>
+        <TooltipContent><p class="text-xs">{{ t('git.push') }}</p></TooltipContent>
       </Tooltip>
 
       <div class="h-4 w-px bg-border/30" />
@@ -157,7 +161,7 @@ async function handleFetch() {
       <!-- 刷新 -->
       <Tooltip>
         <TooltipTrigger as-child>
-          <Button variant="ghost" size="icon" class="h-7 w-7" @click="handleRefresh" :disabled="isLoading">
+          <Button variant="ghost" size="icon" class="h-7 w-7" :aria-label="t('git.refresh')" @click="handleRefresh" :disabled="isLoading">
             <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': isLoading }" />
           </Button>
         </TooltipTrigger>

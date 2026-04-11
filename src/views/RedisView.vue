@@ -17,10 +17,12 @@ import MonitorPanel from '@/components/redis/MonitorPanel.vue'
 import LuaScriptPanel from '@/components/redis/LuaScriptPanel.vue'
 import { useConnectionStore } from '@/stores/connections'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import { redisConnect, redisDisconnect, redisDbsize, redisCurrentDb, redisSelectDb, redisPing, redisConnectCluster, redisConnectSentinel, redisMonitorStop } from '@/api/redis'
 import { tunnelOpen, tunnelClose } from '@/api/tunnel'
 import { getCredential } from '@/api/connection'
 import type { RedisKeyInfo } from '@/types/redis'
+import { AlertCircle, RefreshCw } from 'lucide-vue-next'
 
 const props = defineProps<{
   connectionId: string
@@ -185,7 +187,7 @@ async function connectRedis() {
       activeTunnelId.value = null
     }
     connectionStore.updateConnectionStatus(props.connectionId, 'error')
-    toast.error(t('redis.connectFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.connectFailed'), parseBackendError(e).message)
   } finally {
     connecting.value = false
   }
@@ -201,7 +203,7 @@ async function handleSelectDb(db: number) {
     selectedKeyInfo.value = null
     refreshTrigger.value++
   } catch (e) {
-    toast.error(t('redis.selectDbFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.selectDbFailed'), parseBackendError(e).message)
   }
 }
 
@@ -267,7 +269,7 @@ function scheduleNextHeartbeat() {
         if (isSentinel.value) {
           await attemptSentinelFailover()
         } else {
-          const msg = (e as any)?.message ?? String(e)
+          const msg = parseBackendError(e).message
           connected.value = false
           disconnectError.value = msg
           connectionStore.updateConnectionStatus(props.connectionId, 'disconnected', msg)
@@ -291,7 +293,7 @@ async function attemptSentinelFailover() {
 
     // 通过 Sentinel 重新发现 Master 并连接
     const conn = connectionStore.connections.get(props.connectionId)
-    if (!conn) throw new Error('连接记录不存在')
+    if (!conn) throw new Error(t('redis.connectionNotFound'))
     const config = JSON.parse(conn.record.configJson || '{}')
 
     let password: string | null = null
@@ -318,7 +320,7 @@ async function attemptSentinelFailover() {
     startHeartbeat()
   } catch (e) {
     // 故障转移失败，显示断开界面
-    const msg = (e as any)?.message ?? String(e)
+    const msg = parseBackendError(e).message
     connected.value = false
     connecting.value = false
     disconnectError.value = msg
@@ -411,11 +413,7 @@ onBeforeUnmount(() => {
         <div class="bg-card border border-border rounded-lg shadow-xl p-6 max-w-sm w-full mx-4">
           <div class="flex flex-col items-center gap-4">
             <div class="h-12 w-12 rounded-full bg-destructive/10 flex items-center justify-center">
-              <svg class="h-6 w-6 text-destructive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
+              <AlertCircle class="h-6 w-6 text-destructive" />
             </div>
             <div class="text-center space-y-1">
               <h3 class="text-base font-semibold text-foreground">{{ t('redis.connectionLost') }}</h3>
@@ -432,10 +430,7 @@ onBeforeUnmount(() => {
               :disabled="connecting"
               class="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm font-medium hover:bg-primary/90 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="23 4 23 10 17 10" />
-                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-              </svg>
+              <RefreshCw class="h-4 w-4" />
               {{ t('redis.reconnect') }}
             </button>
           </div>

@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select'
 import { redisSetString, redisHashSet, redisListPush, redisSetAdd, redisZsetAdd, redisStreamAdd } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 
 const props = defineProps<{
   open: boolean
@@ -80,9 +81,9 @@ async function handleCreate() {
     }
     emit('created', key)
     emit('update:open', false)
-    toast.success(`键 "${key}" 已创建`)
-  } catch (e) {
-    toast.error('创建失败', (e as any)?.message ?? String(e))
+    toast.success(t('redis.createSuccess'))
+  } catch (e: unknown) {
+    toast.error(t('redis.createFailed'), parseBackendError(e).message)
   } finally {
     saving.value = false
   }

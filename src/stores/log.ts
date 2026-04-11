@@ -40,10 +40,10 @@ export const useLogStore = defineStore('log', () => {
     /**
      * 快捷添加方法
      */
-    const info = (source: LogSource, message: string, details?: any) => addLog({ level: 'INFO', source, message, details })
-    const debug = (source: LogSource, message: string, details?: any) => addLog({ level: 'DEBUG', source, message, details })
-    const warn = (source: LogSource, message: string, details?: any) => addLog({ level: 'WARN', source, message, details })
-    const error = (source: LogSource, message: string, details?: any) => addLog({ level: 'ERROR', source, message, details })
+    const info = (source: LogSource, message: string, details?: string | object) => addLog({ level: 'INFO', source, message, details })
+    const debug = (source: LogSource, message: string, details?: string | object) => addLog({ level: 'DEBUG', source, message, details })
+    const warn = (source: LogSource, message: string, details?: string | object) => addLog({ level: 'WARN', source, message, details })
+    const error = (source: LogSource, message: string, details?: string | object) => addLog({ level: 'ERROR', source, message, details })
 
     function clearLogs() {
         logs.value = []

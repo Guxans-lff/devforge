@@ -12,6 +12,7 @@ import {
 } from '@/api/redis'
 import { useConnectionStore } from '@/stores/connections'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import type { PubSubMessage } from '@/types/redis'
 
 const props = defineProps<{
@@ -75,7 +76,7 @@ const hasSubscriptions = computed(() =>
 /** 获取带密码的完整 URL */
 async function getFullUrl(): Promise<string> {
   const conn = connectionStore.connections.get(props.connectionId)
-  if (!conn) throw new Error('连接记录不存在')
+  if (!conn) throw new Error(t('redis.connectionNotFound'))
   const record = conn.record
   const config = JSON.parse(record.configJson || '{}')
   const scheme = config.useTls ? 'rediss' : 'redis'
@@ -117,7 +118,7 @@ async function handleSubscribe(isPattern: boolean) {
 
     channelInput.value = ''
   } catch (e) {
-    toast.error(t('redis.pubsub.subscribeFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.pubsub.subscribeFailed'), parseBackendError(e).message)
   }
 }
 
@@ -141,7 +142,7 @@ async function handleUnsubscribe(name: string, isPattern: boolean) {
     subscribedChannels.value = remainingChannels
     subscribedPatterns.value = remainingPatterns
   } catch (e) {
-    toast.error(t('redis.pubsub.unsubscribeFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.pubsub.unsubscribeFailed'), parseBackendError(e).message)
   }
 }
 
@@ -152,7 +153,7 @@ async function handleStopAll() {
     subscribedChannels.value = []
     subscribedPatterns.value = []
   } catch (e) {
-    toast.error('停止失败', (e as any)?.message ?? String(e))
+    toast.error(t('redis.stopFailed'), parseBackendError(e).message)
   }
 }
 
@@ -189,7 +190,7 @@ async function handlePublish() {
     toast.success(t('redis.pubsub.published', { count: receivers }))
     publishMessage.value = ''
   } catch (e) {
-    toast.error(t('redis.pubsub.publishFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.pubsub.publishFailed'), parseBackendError(e).message)
   } finally {
     publishing.value = false
   }
@@ -260,7 +261,7 @@ onBeforeUnmount(async () => {
 </script>
 
 <template>
-  <div class="flex h-full flex-col border-l border-border/40 bg-zinc-950/50">
+  <div class="flex h-full flex-col border-l border-border/40 bg-background/50">
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <Radio class="h-3.5 w-3.5 text-muted-foreground/50" />
@@ -341,17 +342,17 @@ onBeforeUnmount(async () => {
         class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-primary/10 text-primary/70"
       >
         {{ ch }}
-        <button class="hover:text-destructive ml-0.5" @click="handleUnsubscribe(ch, false)">
+        <button class="p-1 hover:text-destructive ml-0.5 rounded" :aria-label="t('redis.pubsub.unsubscribe')" @click="handleUnsubscribe(ch, false)">
           <X class="h-2.5 w-2.5" />
         </button>
       </span>
       <span
         v-for="pat in subscribedPatterns"
         :key="'pat-' + pat"
-        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-500/70"
+        class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono bg-df-warning/10 text-df-warning/70"
       >
         {{ pat }}
-        <button class="hover:text-destructive ml-0.5" @click="handleUnsubscribe(pat, true)">
+        <button class="p-1 hover:text-destructive ml-0.5 rounded" :aria-label="t('redis.pubsub.unsubscribe')" @click="handleUnsubscribe(pat, true)">
           <X class="h-2.5 w-2.5" />
         </button>
       </span>
@@ -377,13 +378,13 @@ onBeforeUnmount(async () => {
           <!-- 方向标记 -->
           <span
             class="text-[10px] shrink-0 pt-0.5 w-[16px] text-center"
-            :class="msg.isSent ? 'text-amber-400' : 'text-emerald-400'"
+            :class="msg.isSent ? 'text-df-warning' : 'text-df-success'"
             :title="msg.isSent ? t('redis.pubsub.sent') : t('redis.pubsub.received')"
           >{{ msg.isSent ? '↑' : '↓' }}</span>
           <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-primary/10 text-primary/70 text-xs shrink-0 max-w-[140px] truncate" :title="msg.channel">
             {{ msg.channel }}
           </span>
-          <span v-if="msg.pattern" class="inline-flex items-center px-1 py-0.5 rounded bg-amber-500/10 text-amber-500/50 text-[10px] shrink-0">
+          <span v-if="msg.pattern" class="inline-flex items-center px-1 py-0.5 rounded bg-df-warning/10 text-df-warning/50 text-[10px] shrink-0">
             {{ msg.pattern }}
           </span>
           <span class="text-foreground/80 break-all leading-relaxed">"{{ msg.payload }}"</span>

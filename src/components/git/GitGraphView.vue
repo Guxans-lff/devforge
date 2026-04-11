@@ -8,6 +8,8 @@ import { useI18n } from 'vue-i18n'
 import { gitGetGraph } from '@/api/git'
 import type { GitGraph, GitGraphNode, GitRef } from '@/types/git'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
+import { formatRelativeTime as formatTime } from '@/composables/useGitUtils'
 import { Loader2, ZoomIn, ZoomOut, RotateCcw } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 
@@ -53,6 +55,7 @@ const hoverNode = ref<GitGraphNode | null>(null)
 const hoverPos = ref({ x: 0, y: 0 })
 const contextNode = ref<GitGraphNode | null>(null)
 const contextPos = ref({ x: 0, y: 0 })
+const contextMenuRef = ref<HTMLDivElement>()
 
 // ── 虚拟滚动 ───────────────────────────────────────────────────
 const scrollTop = ref(0)
@@ -67,15 +70,37 @@ const visibleNodes = computed(() => {
   return graph.value.nodes.slice(startIdx, endIdx)
 })
 
-// ── 列颜色 ──────────────────────────────────────────────────────
-const COLORS = [
+// ── 列颜色（从 CSS 变量读取，支持亮/暗主题切换） ─────────────────
+const LANE_COUNT = 16
+const FALLBACK_COLORS = [
   '#4f8ff7', '#e5534b', '#57ab5a', '#c69026',
   '#b083f0', '#e275ad', '#39c5cf', '#768390',
   '#6cb6ff', '#f47067', '#8ddb8c', '#f2cc60',
   '#dcbdfb', '#f69dab', '#76e3ea', '#adbac7',
 ]
+let _resolvedColors: string[] | null = null
+
+function resolveColors(): string[] {
+  if (_resolvedColors) return _resolvedColors
+  const el = containerRef.value
+  if (!el) return FALLBACK_COLORS
+  const style = getComputedStyle(el)
+  const colors: string[] = []
+  for (let i = 0; i < LANE_COUNT; i++) {
+    const raw = style.getPropertyValue(`--git-lane-${i}`).trim()
+    colors.push(raw ? `oklch(${raw})` : FALLBACK_COLORS[i]!)
+  }
+  _resolvedColors = colors
+  return colors
+}
+
+function invalidateColors() {
+  _resolvedColors = null
+}
+
 function colColor(col: number): string {
-  return COLORS[col % COLORS.length]!
+  const colors = resolveColors()
+  return colors[col % colors.length]!
 }
 
 // ── 计算属性 ────────────────────────────────────────────────────
@@ -111,7 +136,7 @@ async function loadGraph(skip: number) {
     }
     hasMore.value = data.nodes.length >= PAGE_SIZE
   } catch (e) {
-    toast.error(t('git.graphFailed'), String(e))
+    toast.error(t('git.graphFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -204,11 +229,12 @@ function drawGraph() {
     ctx.fillStyle = colColor(node.col)
     ctx.fill()
 
-    // 多 parent（merge commit）用空心圈
+    // 多 parent（merge commit）用空心圈 — 从 CSS 变量读取背景色
     if (node.parents.length > 1) {
       ctx.beginPath()
       ctx.arc(cx, cy, r * 0.5, 0, Math.PI * 2)
-      ctx.fillStyle = '#1c2128'
+      const bgColor = getComputedStyle(containerRef.value!).getPropertyValue('--background').trim()
+      ctx.fillStyle = bgColor ? `oklch(${bgColor})` : (document.documentElement.classList.contains('dark') ? '#1c2128' : '#ffffff')
       ctx.fill()
     }
   }
@@ -276,6 +302,7 @@ function onContextMenu(e: MouseEvent) {
   contextNode.value = node
   contextPos.value = { x: e.clientX, y: e.clientY }
   setTimeout(() => document.addEventListener('click', closeContextMenu), 0)
+  nextTick(() => contextMenuRef.value?.querySelector<HTMLElement>('button')?.focus())
 }
 
 // ── 缩放 ────────────────────────────────────────────────────────
@@ -298,22 +325,12 @@ watch(scale, () => nextTick(drawGraph))
 // ── Ref 标签渲染工具 ────────────────────────────────────────────
 function refBadgeClass(r: GitRef) {
   switch (r.refType) {
-    case 'HEAD': return 'bg-purple-500/20 text-purple-400 border-purple-500/30'
-    case 'branch': return 'bg-blue-500/20 text-blue-400 border-blue-500/30'
-    case 'remote': return 'bg-green-500/20 text-green-400 border-green-500/30'
-    case 'tag': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+    case 'HEAD': return 'bg-primary/20 text-primary border-primary/30'
+    case 'branch': return 'bg-df-info/20 text-df-info border-df-info/30'
+    case 'remote': return 'bg-df-success/20 text-df-success border-df-success/30'
+    case 'tag': return 'bg-df-warning/20 text-df-warning border-df-warning/30'
     default: return 'bg-muted text-muted-foreground border-border'
   }
-}
-
-function formatTime(ts: number) {
-  const d = new Date(ts * 1000)
-  const now = Date.now()
-  const diff = now - d.getTime()
-  if (diff < 3600000) return `${Math.floor(diff / 60000)}m`
-  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`
-  if (diff < 2592000000) return `${Math.floor(diff / 86400000)}d`
-  return d.toLocaleDateString()
 }
 
 function copyText(text: string) {
@@ -324,6 +341,7 @@ function copyText(text: string) {
 // ── 窗口 resize 重绘（防抖） ───────────────────────────────────
 let resizeObs: ResizeObserver | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | null = null
+let themeObs: MutationObserver | null = null
 
 onMounted(() => {
   if (containerRef.value) {
@@ -333,10 +351,17 @@ onMounted(() => {
     })
     resizeObs.observe(containerRef.value)
   }
+  // 监听主题切换（class 变化）→ 重新解析颜色
+  themeObs = new MutationObserver(() => {
+    invalidateColors()
+    drawGraph()
+  })
+  themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
 })
 
 onBeforeUnmount(() => {
   resizeObs?.disconnect()
+  themeObs?.disconnect()
   if (resizeTimer) clearTimeout(resizeTimer)
   document.removeEventListener('click', closeContextMenu)
 })
@@ -347,14 +372,14 @@ onBeforeUnmount(() => {
     <!-- 工具栏 -->
     <div class="flex items-center gap-1 px-2 py-1 border-b border-border bg-muted/20">
       <span class="text-xs font-medium text-muted-foreground mr-auto">{{ t('git.branchGraph') }}</span>
-      <Button variant="ghost" size="icon" class="h-7 w-7" @click="zoomOut" :title="t('git.zoomOut')">
+      <Button variant="ghost" size="icon" class="h-7 w-7" @click="zoomOut" :title="t('git.zoomOut')" :aria-label="t('git.zoomOut')">
         <ZoomOut class="h-3.5 w-3.5" />
       </Button>
       <span class="text-[10px] text-muted-foreground min-w-[36px] text-center">{{ Math.round(scale * 100) }}%</span>
-      <Button variant="ghost" size="icon" class="h-7 w-7" @click="zoomIn" :title="t('git.zoomIn')">
+      <Button variant="ghost" size="icon" class="h-7 w-7" @click="zoomIn" :title="t('git.zoomIn')" :aria-label="t('git.zoomIn')">
         <ZoomIn class="h-3.5 w-3.5" />
       </Button>
-      <Button variant="ghost" size="icon" class="h-7 w-7" @click="zoomReset" :title="t('git.zoomReset')">
+      <Button variant="ghost" size="icon" class="h-7 w-7" @click="zoomReset" :title="t('git.zoomReset')" :aria-label="t('git.zoomReset')">
         <RotateCcw class="h-3.5 w-3.5" />
       </Button>
     </div>
@@ -459,42 +484,45 @@ onBeforeUnmount(() => {
     <Teleport to="body">
       <div
         v-if="contextNode"
+        ref="contextMenuRef"
         class="fixed z-50 min-w-[160px] rounded-md border border-border bg-popover p-1 shadow-md"
+        role="menu"
+        @keydown.escape="closeContextMenu"
         :style="{ left: contextPos.x + 'px', top: contextPos.y + 'px' }"
       >
         <button
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="emit('viewCommitDiff', contextNode!.hash)"
         >
           {{ t('git.viewDiff') }}
         </button>
         <button
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="emit('cherryPick', contextNode!.hash)"
         >
           {{ t('git.cherryPick') }}
         </button>
         <button
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="emit('createBranch', contextNode!.hash)"
         >
           {{ t('git.createBranchHere') }}
         </button>
         <button
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="emit('createTag', contextNode!.hash)"
         >
           {{ t('git.createTagHere') }}
         </button>
         <div class="h-px bg-border my-1" />
         <button
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="copyText(contextNode!.hash)"
         >
           {{ t('git.copyHash') }}
         </button>
         <button
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="copyText(contextNode!.message)"
         >
           {{ t('git.copyMessage') }}

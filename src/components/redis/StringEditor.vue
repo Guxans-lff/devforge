@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Save } from 'lucide-vue-next'
 import { redisGetValue, redisSetString } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 
 const props = defineProps<{
   connectionId: string
@@ -30,8 +31,8 @@ async function loadValue() {
       originalValue.value = result.value
       isDirty.value = false
     }
-  } catch (e) {
-    toast.error('加载值失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.loadStringFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -43,9 +44,9 @@ async function handleSave() {
     await redisSetString(props.connectionId, props.redisKey, value.value)
     originalValue.value = value.value
     isDirty.value = false
-    toast.success('已保存')
-  } catch (e) {
-    toast.error('保存失败', (e as any)?.message ?? String(e))
+    toast.success(t('redis.saveSuccess'))
+  } catch (e: unknown) {
+    toast.error(t('redis.saveFailed'), parseBackendError(e).message)
   } finally {
     saving.value = false
   }

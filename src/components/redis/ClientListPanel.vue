@@ -2,9 +2,18 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Users, RefreshCw, Loader2, Copy, X } from 'lucide-vue-next'
 import { redisClientList, redisClientKill } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import type { RedisClientInfo } from '@/types/redis'
 
 const props = defineProps<{
@@ -16,6 +25,8 @@ const toast = useToast()
 
 const clients = ref<RedisClientInfo[]>([])
 const loading = ref(false)
+const showKillConfirm = ref(false)
+const killTarget = ref('')
 
 /** 加载客户端列表 */
 async function loadClients() {
@@ -23,21 +34,27 @@ async function loadClients() {
   try {
     clients.value = await redisClientList(props.connectionId)
   } catch (e) {
-    toast.error(t('redis.clients.loadFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.clients.loadFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
 }
 
-/** Kill 客户端 */
-async function handleKill(addr: string) {
-  if (!confirm(t('redis.clients.killConfirm', { addr }))) return
+/** Kill 客户端 — 打开确认弹窗 */
+function handleKill(addr: string) {
+  killTarget.value = addr
+  showKillConfirm.value = true
+}
+
+/** 确认 Kill */
+async function confirmKill() {
   try {
-    await redisClientKill(props.connectionId, addr)
+    await redisClientKill(props.connectionId, killTarget.value)
     toast.success(t('redis.clients.killed'))
+    showKillConfirm.value = false
     await loadClients()
   } catch (e) {
-    toast.error(t('redis.clients.killFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.clients.killFailed'), parseBackendError(e).message)
   }
 }
 
@@ -54,10 +71,10 @@ function formatDuration(seconds: number): string {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
 
-/** 标志 badge 颜色 */
+/** 标志 badge 语义着色 */
 function flagColor(flags: string): string {
   if (flags.includes('M')) return 'text-primary bg-primary/10'
-  if (flags.includes('S')) return 'text-amber-400 bg-amber-400/10'
+  if (flags.includes('S')) return 'text-df-warning bg-df-warning/10'
   if (flags.includes('N')) return 'text-muted-foreground bg-muted/20'
   return 'text-muted-foreground bg-muted/10'
 }
@@ -67,7 +84,7 @@ loadClients()
 </script>
 
 <template>
-  <div class="flex h-full flex-col border-l border-border/40 bg-zinc-950/50">
+  <div class="flex h-full flex-col border-l border-border/40 bg-background/50">
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <Users class="h-3.5 w-3.5 text-muted-foreground/50" />
@@ -121,5 +138,19 @@ loadClients()
         <Loader2 class="h-4 w-4 animate-spin text-muted-foreground/30" />
       </div>
     </div>
+
+    <!-- Kill 确认弹窗 -->
+    <Dialog :open="showKillConfirm" @update:open="showKillConfirm = $event">
+      <DialogContent class="sm:max-w-[360px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('redis.clients.kill') }}</DialogTitle>
+          <DialogDescription>{{ t('redis.clients.killConfirm', { addr: killTarget }) }}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="showKillConfirm = false">{{ t('common.cancel') }}</Button>
+          <Button variant="destructive" size="sm" @click="confirmKill">{{ t('common.confirm') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

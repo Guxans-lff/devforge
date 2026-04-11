@@ -10,6 +10,8 @@ import { Button } from '@/components/ui/button'
 import { gitFileHistory } from '@/api/git'
 import type { GitCommit } from '@/types/git'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
+import { formatTimestamp as formatTime } from '@/composables/useGitUtils'
 import { Loader2, X } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -47,7 +49,7 @@ async function loadHistory(skip: number) {
     }
     hasMore.value = data.length >= PAGE_SIZE
   } catch (e) {
-    toast.error(t('git.fileHistoryFailed'), String(e))
+    toast.error(t('git.fileHistoryFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -56,10 +58,6 @@ async function loadHistory(skip: number) {
 async function loadMore() {
   if (loading.value || !hasMore.value) return
   await loadHistory(commits.value.length)
-}
-
-function formatTime(ts: number) {
-  return new Date(ts * 1000).toLocaleString()
 }
 </script>
 
@@ -70,7 +68,7 @@ function formatTime(ts: number) {
       <span class="text-xs font-medium">{{ t('git.fileHistory') }}</span>
       <span class="text-xs font-mono text-muted-foreground truncate">{{ fileName }}</span>
       <div class="flex-1" />
-      <Button variant="ghost" size="icon" class="h-6 w-6" @click="emit('close')">
+      <Button variant="ghost" size="icon" class="h-6 w-6" :aria-label="t('common.close')" @click="emit('close')">
         <X class="h-3.5 w-3.5" />
       </Button>
     </div>

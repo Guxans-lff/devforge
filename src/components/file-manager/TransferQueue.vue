@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, watch, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useTransferStore } from '@/stores/transfer'
+import { useTransferStore, type TransferTask } from '@/stores/transfer'
 import { pauseTransfer, resumeTransfer, cancelTransfer, startUploadChunked, startDownloadChunked } from '@/api/sftp'
 import { useToast } from '@/composables/useToast'
 import { useNotification } from '@/composables/useNotification'
@@ -48,19 +48,19 @@ function formatTime(seconds: number): string {
   return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`
 }
 
-function getProgress(task: any): number {
+function getProgress(task: TransferTask): number {
   if (task.totalBytes === 0) return 0
   return Math.round((task.transferredBytes / task.totalBytes) * 100)
 }
 
-function getETA(task: any): string {
+function getETA(task: TransferTask): string {
   if (task.speed === 0 || task.status !== 'transferring') return '--'
   const remaining = task.totalBytes - task.transferredBytes
   const seconds = remaining / task.speed
   return formatTime(seconds)
 }
 
-function getElapsedTime(task: any): string {
+function getElapsedTime(task: TransferTask): string {
   if (!task.startTime) return '--'
   const end = task.endTime || Date.now()
   const seconds = (end - task.startTime) / 1000

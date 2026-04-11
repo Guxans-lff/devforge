@@ -7,7 +7,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus, Trash2 } from 'lucide-vue-next'
 import { redisZsetRange, redisZsetAdd, redisZsetRem } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import type { ZSetMember } from '@/types/redis'
+
 
 const props = defineProps<{
   connectionId: string
@@ -27,7 +29,7 @@ async function loadMembers() {
   try {
     members.value = await redisZsetRange(props.connectionId, props.redisKey, 0, -1)
   } catch (e) {
-    toast.error('加载 ZSet 失败', (e as any)?.message ?? String(e))
+    toast.error(t('redis.loadZSetFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -43,7 +45,7 @@ async function handleAdd() {
     newScore.value = '0'
     await loadMembers()
   } catch (e) {
-    toast.error('添加失败', (e as any)?.message ?? String(e))
+    toast.error(t('redis.addFailed'), parseBackendError(e).message)
   }
 }
 
@@ -52,7 +54,7 @@ async function handleDelete(member: string) {
     await redisZsetRem(props.connectionId, props.redisKey, [member])
     await loadMembers()
   } catch (e) {
-    toast.error('删除失败', (e as any)?.message ?? String(e))
+    toast.error(t('redis.deleteKeyFailed'), parseBackendError(e).message)
   }
 }
 

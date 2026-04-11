@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Trash2, Save } from 'lucide-vue-next'
 import { redisListRange, redisListPush, redisListSet, redisListRem } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 
 const props = defineProps<{
   connectionId: string
@@ -27,8 +28,8 @@ async function loadItems() {
   loading.value = true
   try {
     items.value = await redisListRange(props.connectionId, props.redisKey, 0, -1)
-  } catch (e) {
-    toast.error('加载 List 失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.loadListFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -41,8 +42,8 @@ async function handlePush(head: boolean) {
     await redisListPush(props.connectionId, props.redisKey, [val], head)
     newValue.value = ''
     await loadItems()
-  } catch (e) {
-    toast.error('添加失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.addFailed'), parseBackendError(e).message)
   }
 }
 
@@ -51,8 +52,8 @@ async function handleSaveEdit(index: number) {
     await redisListSet(props.connectionId, props.redisKey, index, editValue.value)
     editingIndex.value = null
     await loadItems()
-  } catch (e) {
-    toast.error('保存失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.saveFailed'), parseBackendError(e).message)
   }
 }
 
@@ -60,8 +61,8 @@ async function handleDelete(value: string) {
   try {
     await redisListRem(props.connectionId, props.redisKey, 1, value)
     await loadItems()
-  } catch (e) {
-    toast.error('删除失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.deleteKeyFailed'), parseBackendError(e).message)
   }
 }
 

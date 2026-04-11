@@ -9,7 +9,17 @@ import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import { useGitWorkspaceStore } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import { gitGetDiffCommit } from '@/api/git'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button as UiButton } from '@/components/ui/button'
+import { Input as UiInput } from '@/components/ui/input'
 
 // 子组件
 import GitToolbar from '@/components/git/GitToolbar.vue'
@@ -27,6 +37,7 @@ import GitBlameView from '@/components/git/GitBlameView.vue'
 import GitFileHistory from '@/components/git/GitFileHistory.vue'
 import GitGraphView from '@/components/git/GitGraphView.vue'
 import GitContributorsPanel from '@/components/git/GitContributorsPanel.vue'
+import { gitStatusColor as statusColor } from '@/composables/useGitUtils'
 import InteractiveRebasePanel from '@/components/git/InteractiveRebasePanel.vue'
 
 const props = defineProps<{
@@ -56,7 +67,7 @@ onMounted(async () => {
   try {
     await store.openRepo(props.repositoryPath)
   } catch (e) {
-    toast.error(t('git.openFailed'), String(e))
+    toast.error(t('git.openFailed'), parseBackendError(e).message)
   }
 })
 
@@ -102,7 +113,7 @@ async function handleViewCommitDiff(hash: string) {
     historyFileDiff.value = diff.files[0] ?? null
     historySelectedFile.value = historyFileDiff.value?.path ?? null
   } catch (e) {
-    toast.error(t('git.diffFailed'), String(e))
+    toast.error(t('git.diffFailed'), parseBackendError(e).message)
   }
 }
 
@@ -112,25 +123,44 @@ function selectHistoryFile(path: string) {
 }
 
 // ── 从提交历史创建分支/Tag ──────────────────────────────────────
+const showCreateBranchDialog = ref(false)
+const showCreateTagDialog = ref(false)
+const dialogCommitHash = ref('')
+const dialogInputName = ref('')
+
 async function handleCreateBranchFromCommit(hash: string) {
-  const name = prompt(t('git.newBranchName'))
+  dialogCommitHash.value = hash
+  dialogInputName.value = ''
+  showCreateBranchDialog.value = true
+}
+
+async function confirmCreateBranch() {
+  const name = dialogInputName.value.trim()
   if (!name) return
   try {
-    await store.createBranch(props.repositoryPath, name, hash)
+    await store.createBranch(props.repositoryPath, name, dialogCommitHash.value)
     toast.success(t('git.branchCreated', { name }))
+    showCreateBranchDialog.value = false
   } catch (e) {
-    toast.error(t('git.branchCreateFailed'), String(e))
+    toast.error(t('git.branchCreateFailed'), parseBackendError(e).message)
   }
 }
 
 async function handleCreateTagFromCommit(hash: string) {
-  const name = prompt(t('git.tagName'))
+  dialogCommitHash.value = hash
+  dialogInputName.value = ''
+  showCreateTagDialog.value = true
+}
+
+async function confirmCreateTag() {
+  const name = dialogInputName.value.trim()
   if (!name) return
   try {
-    await store.createTag(props.repositoryPath, name, undefined, hash)
+    await store.createTag(props.repositoryPath, name, undefined, dialogCommitHash.value)
     toast.success(t('git.tagCreated', { name }))
+    showCreateTagDialog.value = false
   } catch (e) {
-    toast.error(t('git.tagCreateFailed'), String(e))
+    toast.error(t('git.tagCreateFailed'), parseBackendError(e).message)
   }
 }
 
@@ -143,7 +173,7 @@ async function handleCherryPick(hash: string) {
       toast.warning(t('git.mergeConflicts', { count: result.conflicts.length }))
     }
   } catch (e) {
-    toast.error(t('git.cherryPickFailed'), String(e))
+    toast.error(t('git.cherryPickFailed'), parseBackendError(e).message)
   }
 }
 
@@ -183,15 +213,6 @@ function fileName(path: string) {
   return path.split('/').pop() ?? path
 }
 
-function statusColor(s: string) {
-  switch (s) {
-    case 'added': return 'text-green-500'
-    case 'deleted': return 'text-red-500'
-    case 'modified': return 'text-yellow-500'
-    case 'conflicted': return 'text-orange-500'
-    default: return 'text-muted-foreground'
-  }
-}
 </script>
 
 <template>
@@ -366,5 +387,37 @@ function statusColor(s: string) {
 
     <!-- 底部状态栏 -->
     <GitStatusBar :workspace="ws" />
+
+    <!-- 从提交创建分支 -->
+    <Dialog :open="showCreateBranchDialog" @update:open="showCreateBranchDialog = $event">
+      <DialogContent class="sm:max-w-[380px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('git.newBranchName') }}</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-1.5 py-2">
+          <UiInput v-model="dialogInputName" :placeholder="t('git.newBranchName')" class="h-8 text-xs font-mono" autofocus @keydown.enter="confirmCreateBranch" />
+        </div>
+        <DialogFooter>
+          <UiButton variant="outline" size="sm" @click="showCreateBranchDialog = false">{{ t('common.cancel') }}</UiButton>
+          <UiButton size="sm" :disabled="!dialogInputName.trim()" @click="confirmCreateBranch">{{ t('common.confirm') }}</UiButton>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 从提交创建 Tag -->
+    <Dialog :open="showCreateTagDialog" @update:open="showCreateTagDialog = $event">
+      <DialogContent class="sm:max-w-[380px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('git.tagName') }}</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-1.5 py-2">
+          <UiInput v-model="dialogInputName" :placeholder="t('git.tagName')" class="h-8 text-xs font-mono" autofocus @keydown.enter="confirmCreateTag" />
+        </div>
+        <DialogFooter>
+          <UiButton variant="outline" size="sm" @click="showCreateTagDialog = false">{{ t('common.cancel') }}</UiButton>
+          <UiButton size="sm" :disabled="!dialogInputName.trim()" @click="confirmCreateTag">{{ t('common.confirm') }}</UiButton>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

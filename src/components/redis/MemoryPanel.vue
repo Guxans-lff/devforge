@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { MemoryStick, RefreshCw, Loader2, AlertTriangle } from 'lucide-vue-next'
 import { redisMemoryStats, redisMemoryDoctor, redisTopKeysByMemory } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import type { RedisMemoryStats, RedisKeyMemory } from '@/types/redis'
 
 const props = defineProps<{
@@ -35,7 +36,7 @@ async function loadStats() {
   try {
     stats.value = await redisMemoryStats(props.connectionId)
   } catch (e) {
-    toast.error(t('redis.memory.loadFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.memory.loadFailed'), parseBackendError(e).message)
   } finally {
     loadingStats.value = false
   }
@@ -48,7 +49,7 @@ async function loadDoctor() {
     doctorAdvice.value = await redisMemoryDoctor(props.connectionId)
     showDoctor.value = true
   } catch (e) {
-    toast.error(t('redis.memory.loadFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.memory.loadFailed'), parseBackendError(e).message)
   } finally {
     loadingDoctor.value = false
   }
@@ -63,7 +64,7 @@ async function loadTopKeys() {
       count: topCount.value,
     })
   } catch (e) {
-    toast.error(t('redis.memory.loadFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.memory.loadFailed'), parseBackendError(e).message)
   } finally {
     loadingTopKeys.value = false
   }
@@ -82,7 +83,7 @@ loadStats()
 </script>
 
 <template>
-  <div class="flex h-full flex-col border-l border-border/40 bg-zinc-950/50">
+  <div class="flex h-full flex-col border-l border-border/40 bg-background/50">
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <MemoryStick class="h-3.5 w-3.5 text-muted-foreground/50" />
@@ -94,25 +95,25 @@ loadStats()
     </div>
 
     <div class="flex-1 overflow-auto p-3 space-y-4">
-      <!-- 统计卡片 -->
-      <div v-if="stats" class="grid grid-cols-2 gap-2">
-        <div class="rounded-lg border border-border/20 bg-muted/10 p-2.5">
-          <div class="text-[10px] text-muted-foreground/50 uppercase">{{ t('redis.memory.usedMemory') }}</div>
-          <div class="text-sm font-bold text-foreground mt-0.5">{{ stats.usedMemoryHuman }}</div>
+      <!-- 统计概览 -->
+      <div v-if="stats" class="grid grid-cols-2 gap-x-4 gap-y-2 px-1">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[10px] text-muted-foreground/50 uppercase">{{ t('redis.memory.usedMemory') }}</span>
+          <span class="text-sm font-bold text-foreground tabular-nums">{{ stats.usedMemoryHuman }}</span>
         </div>
-        <div class="rounded-lg border border-border/20 bg-muted/10 p-2.5">
-          <div class="text-[10px] text-muted-foreground/50 uppercase">{{ t('redis.memory.peakMemory') }}</div>
-          <div class="text-sm font-bold text-foreground mt-0.5">{{ stats.usedMemoryPeakHuman }}</div>
+        <div class="flex items-baseline justify-between">
+          <span class="text-[10px] text-muted-foreground/50 uppercase">{{ t('redis.memory.peakMemory') }}</span>
+          <span class="text-sm font-bold text-foreground tabular-nums">{{ stats.usedMemoryPeakHuman }}</span>
         </div>
-        <div class="rounded-lg border border-border/20 bg-muted/10 p-2.5">
-          <div class="text-[10px] text-muted-foreground/50 uppercase">{{ t('redis.memory.fragmentation') }}</div>
-          <div class="text-sm font-bold mt-0.5" :class="stats.memFragmentationRatio > 1.5 ? 'text-amber-400' : 'text-foreground'">
+        <div class="flex items-baseline justify-between">
+          <span class="text-[10px] text-muted-foreground/50 uppercase">{{ t('redis.memory.fragmentation') }}</span>
+          <span class="text-sm font-bold tabular-nums" :class="stats.memFragmentationRatio > 1.5 ? 'text-df-warning' : 'text-foreground'">
             {{ stats.memFragmentationRatio.toFixed(2) }}
-          </div>
+          </span>
         </div>
-        <div class="rounded-lg border border-border/20 bg-muted/10 p-2.5">
-          <div class="text-[10px] text-muted-foreground/50 uppercase">{{ t('redis.memory.evicted') }}</div>
-          <div class="text-sm font-bold text-foreground mt-0.5">{{ stats.evictedKeys }}</div>
+        <div class="flex items-baseline justify-between">
+          <span class="text-[10px] text-muted-foreground/50 uppercase">{{ t('redis.memory.evicted') }}</span>
+          <span class="text-sm font-bold text-foreground tabular-nums">{{ stats.evictedKeys }}</span>
         </div>
       </div>
 
@@ -144,7 +145,7 @@ loadStats()
             {{ t('redis.memory.calculate') }}
           </Button>
         </div>
-        <div class="flex items-center gap-1.5 text-[10px] text-amber-500/60 px-1">
+        <div class="flex items-center gap-1.5 text-[10px] text-df-warning/60 px-1">
           <AlertTriangle class="h-3.5 w-3.5 shrink-0" />
           <span>{{ t('redis.memory.warning') }}</span>
         </div>

@@ -6,6 +6,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
+import { formatTimestamp as formatTime } from '@/composables/useGitUtils'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -54,7 +56,7 @@ onMounted(async () => {
       toast.warning(t('git.rebasePlanEmpty'))
     }
   } catch (e) {
-    toast.error(t('git.rebaseLoadFailed'), String(e))
+    toast.error(t('git.rebaseLoadFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -145,7 +147,7 @@ async function executeRebase() {
       }))
     }
   } catch (e) {
-    toast.error(t('git.rebaseExecFailed'), String(e))
+    toast.error(t('git.rebaseExecFailed'), parseBackendError(e).message)
   } finally {
     executing.value = false
   }
@@ -158,13 +160,8 @@ async function abortRebase() {
     toast.success(t('git.rebaseAborted'))
     emit('close')
   } catch (e) {
-    toast.error(t('git.rebaseAbortFailed'), String(e))
+    toast.error(t('git.rebaseAbortFailed'), parseBackendError(e).message)
   }
-}
-
-/** 格式化时间 */
-function formatTime(ts: number) {
-  return new Date(ts * 1000).toLocaleString()
 }
 
 const canExecute = computed(() => plan.value.length > 0 && !executing.value)
@@ -173,11 +170,11 @@ const canExecute = computed(() => plan.value.length > 0 && !executing.value)
 function actionColor(action: RebaseAction): string {
   const key = actionKey(action)
   switch (key) {
-    case 'pick': return 'text-green-500'
-    case 'squash': return 'text-blue-500'
-    case 'fixup': return 'text-cyan-500'
-    case 'reword': return 'text-yellow-500'
-    case 'drop': return 'text-red-500 line-through'
+    case 'pick': return 'text-df-success'
+    case 'squash': return 'text-df-info'
+    case 'fixup': return 'text-df-info'
+    case 'reword': return 'text-df-warning'
+    case 'drop': return 'text-destructive line-through'
     default: return ''
   }
 }

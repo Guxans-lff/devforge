@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus, Trash2, Save } from 'lucide-vue-next'
 import { redisHashGetAll, redisHashSet, redisHashDel } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import type { HashField } from '@/types/redis'
 
 const props = defineProps<{
@@ -32,8 +33,8 @@ async function loadFields() {
   loading.value = true
   try {
     fields.value = await redisHashGetAll(props.connectionId, props.redisKey)
-  } catch (e) {
-    toast.error('加载 Hash 失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.loadHashFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -47,8 +48,8 @@ async function handleAdd() {
     newField.value = ''
     newValue.value = ''
     await loadFields()
-  } catch (e) {
-    toast.error('添加字段失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.addFieldFailed'), parseBackendError(e).message)
   }
 }
 
@@ -57,8 +58,8 @@ async function handleSaveEdit(field: string) {
     await redisHashSet(props.connectionId, props.redisKey, field, editValue.value)
     editingField.value = null
     await loadFields()
-  } catch (e) {
-    toast.error('保存失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.saveFailed'), parseBackendError(e).message)
   }
 }
 
@@ -66,8 +67,8 @@ async function handleDelete(field: string) {
   try {
     await redisHashDel(props.connectionId, props.redisKey, [field])
     await loadFields()
-  } catch (e) {
-    toast.error('删除失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.deleteKeyFailed'), parseBackendError(e).message)
   }
 }
 

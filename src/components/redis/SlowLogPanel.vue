@@ -20,6 +20,7 @@ import {
   redisSetSlowlogMaxLen,
 } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import type { RedisSlowLogEntry, RedisSlowLogConfig } from '@/types/redis'
 
 const props = defineProps<{
@@ -48,12 +49,12 @@ const sortedEntries = computed(() => {
   return [...entries.value].sort((a, b) => b.timestamp - a.timestamp)
 })
 
-/** 耗时颜色 */
+/** 耗时语义着色 */
 function getDurationClass(durationUs: number): string {
   const ms = durationUs / 1000
-  if (ms < 1) return 'text-emerald-400'
-  if (ms < 10) return 'text-amber-400'
-  return 'text-red-400'
+  if (ms < 1) return 'text-df-success'
+  if (ms < 10) return 'text-df-warning'
+  return 'text-destructive'
 }
 
 /** 格式化耗时 */
@@ -99,7 +100,7 @@ async function loadData() {
     newThreshold.value = c.thresholdUs
     newMaxLen.value = c.maxLen
   } catch (e) {
-    toast.error(t('redis.slowlog.loadFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.slowlog.loadFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -113,7 +114,7 @@ async function handleReset() {
     showResetConfirm.value = false
     await loadData()
   } catch (e) {
-    toast.error(t('redis.slowlog.resetFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.slowlog.resetFailed'), parseBackendError(e).message)
   }
 }
 
@@ -130,7 +131,7 @@ async function handleConfigSave() {
     showConfig.value = false
     await loadData()
   } catch (e) {
-    toast.error(t('redis.slowlog.configFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.slowlog.configFailed'), parseBackendError(e).message)
   }
 }
 
@@ -138,7 +139,7 @@ onMounted(() => { loadData() })
 </script>
 
 <template>
-  <div class="flex h-full flex-col border-l border-border/40 bg-zinc-950/30">
+  <div class="flex h-full flex-col border-l border-border/40 bg-background/30">
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <Activity class="h-3.5 w-3.5 text-muted-foreground/50" />
@@ -192,7 +193,7 @@ onMounted(() => { loadData() })
       <!-- 列表 -->
       <div v-else class="font-mono text-xs">
         <!-- 表头 -->
-        <div class="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold text-muted-foreground/40 border-b border-border/10 sticky top-0 bg-zinc-950/80 backdrop-blur-sm">
+        <div class="flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-bold text-muted-foreground/40 border-b border-border/10 sticky top-0 bg-background/90 backdrop-blur-sm">
           <span class="w-8 shrink-0">ID</span>
           <span class="w-24 shrink-0">{{ t('redis.slowlog.time') }}</span>
           <span class="w-14 shrink-0 text-right">{{ t('redis.slowlog.duration') }}</span>
@@ -235,7 +236,7 @@ onMounted(() => { loadData() })
             <div class="text-xs text-muted-foreground/50">
               <span class="font-bold">{{ t('redis.slowlog.fullCommand') }}:</span>
             </div>
-            <div class="bg-zinc-900/60 rounded px-2 py-1.5 text-xs text-foreground/60 overflow-x-auto max-h-20 whitespace-pre-wrap break-all">
+            <div class="bg-muted/30 rounded px-2 py-1.5 text-xs text-foreground/60 overflow-x-auto max-h-20 whitespace-pre-wrap break-all">
               {{ entry.commandArgs.join(' ') }}
             </div>
             <div class="flex gap-4 text-[10px] text-muted-foreground/30">

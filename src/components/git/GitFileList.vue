@@ -1,14 +1,13 @@
 <script setup lang="ts">
-import { computed, ref, onBeforeUnmount } from 'vue'
+import { computed, ref, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
-import {
-  Plus, Minus, ChevronDown, ChevronRight,
-  FilePlus, FileX, FileEdit, AlertTriangle, Undo2,
-} from 'lucide-vue-next'
+import { parseBackendError } from '@/types/error'
+import { Plus, Minus, ChevronDown, ChevronRight, FilePlus, Undo2 } from 'lucide-vue-next'
+import { gitStatusColor as statusColor, gitStatusIcon as statusIcon } from '@/composables/useGitUtils'
 
 const props = defineProps<{
   repoPath: string
@@ -38,6 +37,7 @@ const untrackedCount = computed(() => props.workspace.status?.untracked.length ?
 
 // ── 右键菜单 ──────────────────────────────────────────────────────
 const contextMenu = ref<{ x: number; y: number; file: string; source: 'working' | 'staged' | 'untracked' } | null>(null)
+const contextMenuRef = ref<HTMLDivElement>()
 
 function closeContextMenu() {
   contextMenu.value = null
@@ -46,10 +46,10 @@ function closeContextMenu() {
 
 function showContextMenu(e: MouseEvent, file: string, source: 'working' | 'staged' | 'untracked') {
   e.preventDefault()
-  // 先关闭旧的
   closeContextMenu()
   contextMenu.value = { x: e.clientX, y: e.clientY, file, source }
   setTimeout(() => document.addEventListener('click', closeContextMenu), 0)
+  nextTick(() => contextMenuRef.value?.querySelector<HTMLElement>('button')?.focus())
 }
 
 onBeforeUnmount(() => {
@@ -61,7 +61,7 @@ async function handleStageFile(filePath: string) {
   try {
     await store.stageFile(props.repoPath, filePath)
   } catch (e) {
-    toast.error(t('git.stageFailed'), String(e))
+    toast.error(t('git.stageFailed'), parseBackendError(e).message)
   }
 }
 
@@ -69,7 +69,7 @@ async function handleUnstageFile(filePath: string) {
   try {
     await store.unstageFile(props.repoPath, filePath)
   } catch (e) {
-    toast.error(t('git.unstageFailed'), String(e))
+    toast.error(t('git.unstageFailed'), parseBackendError(e).message)
   }
 }
 
@@ -77,7 +77,7 @@ async function handleStageAll() {
   try {
     await store.stageAll(props.repoPath)
   } catch (e) {
-    toast.error(t('git.stageFailed'), String(e))
+    toast.error(t('git.stageFailed'), parseBackendError(e).message)
   }
 }
 
@@ -85,7 +85,7 @@ async function handleUnstageAll() {
   try {
     await store.unstageAll(props.repoPath)
   } catch (e) {
-    toast.error(t('git.unstageFailed'), String(e))
+    toast.error(t('git.unstageFailed'), parseBackendError(e).message)
   }
 }
 
@@ -94,7 +94,7 @@ async function handleDiscardFile(filePath: string) {
     await store.discardFile(props.repoPath, filePath)
     toast.success(t('git.discardSuccess'))
   } catch (e) {
-    toast.error(t('git.discardFailed'), String(e))
+    toast.error(t('git.discardFailed'), parseBackendError(e).message)
   }
 }
 
@@ -111,26 +111,6 @@ function toggleSection(key: string) {
 function fileName(path: string) {
   return path.split('/').pop() ?? path
 }
-
-function statusIcon(s: string) {
-  switch (s) {
-    case 'added': return FilePlus
-    case 'deleted': return FileX
-    case 'modified': return FileEdit
-    case 'conflicted': return AlertTriangle
-    default: return FileEdit
-  }
-}
-
-function statusColor(s: string) {
-  switch (s) {
-    case 'added': return 'text-green-500'
-    case 'deleted': return 'text-red-500'
-    case 'modified': return 'text-yellow-500'
-    case 'conflicted': return 'text-orange-500'
-    default: return 'text-muted-foreground'
-  }
-}
 </script>
 
 <template>
@@ -144,7 +124,7 @@ function statusColor(s: string) {
         >
           <component :is="expandedSections.staged ? ChevronDown : ChevronRight" class="h-3.5 w-3.5 mr-1" />
           {{ t('git.staged') }} ({{ stagedCount }})
-          <Button v-if="stagedCount > 0" variant="ghost" size="icon" class="h-6 w-6 ml-auto" @click.stop="handleUnstageAll" :title="t('git.unstageAll')">
+          <Button v-if="stagedCount > 0" variant="ghost" size="icon" class="h-6 w-6 ml-auto" @click.stop="handleUnstageAll" :title="t('git.unstageAll')" :aria-label="t('git.unstageAll')">
             <Minus class="h-3.5 w-3.5" />
           </Button>
         </button>
@@ -158,7 +138,7 @@ function statusColor(s: string) {
           >
             <component :is="statusIcon(f.status)" class="h-3.5 w-3.5 shrink-0" :class="statusColor(f.status)" />
             <span class="truncate flex-1" :title="f.path">{{ fileName(f.path) }}</span>
-            <Button variant="ghost" size="icon" class="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100" @click.stop="handleUnstageFile(f.path)">
+            <Button variant="ghost" size="icon" class="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100" :aria-label="t('git.unstage')" @click.stop="handleUnstageFile(f.path)">
               <Minus class="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -173,7 +153,7 @@ function statusColor(s: string) {
         >
           <component :is="expandedSections.unstaged ? ChevronDown : ChevronRight" class="h-3.5 w-3.5 mr-1" />
           {{ t('git.unstaged') }} ({{ unstagedCount }})
-          <Button v-if="unstagedCount > 0 || untrackedCount > 0" variant="ghost" size="icon" class="h-6 w-6 ml-auto" @click.stop="handleStageAll" :title="t('git.stageAll')">
+          <Button v-if="unstagedCount > 0 || untrackedCount > 0" variant="ghost" size="icon" class="h-6 w-6 ml-auto" @click.stop="handleStageAll" :title="t('git.stageAll')" :aria-label="t('git.stageAll')">
             <Plus class="h-3.5 w-3.5" />
           </Button>
         </button>
@@ -188,10 +168,10 @@ function statusColor(s: string) {
             <component :is="statusIcon(f.status)" class="h-3.5 w-3.5 shrink-0" :class="statusColor(f.status)" />
             <span class="truncate flex-1" :title="f.path">{{ fileName(f.path) }}</span>
             <div class="flex shrink-0 opacity-0 group-hover:opacity-100">
-              <Button variant="ghost" size="icon" class="h-6 w-6" @click.stop="handleDiscardFile(f.path)" :title="t('git.discard')">
+              <Button variant="ghost" size="icon" class="h-6 w-6" @click.stop="handleDiscardFile(f.path)" :title="t('git.discard')" :aria-label="t('git.discard')">
                 <Undo2 class="h-3.5 w-3.5" />
               </Button>
-              <Button variant="ghost" size="icon" class="h-6 w-6" @click.stop="handleStageFile(f.path)" :title="t('git.stage')">
+              <Button variant="ghost" size="icon" class="h-6 w-6" @click.stop="handleStageFile(f.path)" :title="t('git.stage')" :aria-label="t('git.stage')">
                 <Plus class="h-3.5 w-3.5" />
               </Button>
             </div>
@@ -215,9 +195,9 @@ function statusColor(s: string) {
             @click="emit('selectUntracked', f)"
             @contextmenu="showContextMenu($event, f, 'untracked')"
           >
-            <FilePlus class="h-3.5 w-3.5 shrink-0 text-green-500" />
+            <FilePlus class="h-3.5 w-3.5 shrink-0 text-df-success" />
             <span class="truncate flex-1" :title="f">{{ fileName(f) }}</span>
-            <Button variant="ghost" size="icon" class="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100" @click.stop="handleStageFile(f)">
+            <Button variant="ghost" size="icon" class="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100" :aria-label="t('git.stage')" @click.stop="handleStageFile(f)">
               <Plus class="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -234,46 +214,49 @@ function statusColor(s: string) {
     <Teleport to="body">
       <div
         v-if="contextMenu"
+        ref="contextMenuRef"
         class="fixed z-50 min-w-[160px] rounded-md border border-border bg-popover p-1 shadow-md"
+        role="menu"
+        @keydown.escape="closeContextMenu"
         :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
       >
         <button
           v-if="contextMenu.source === 'working' || contextMenu.source === 'untracked'"
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="handleStageFile(contextMenu!.file)"
         >
           <Plus class="h-3 w-3" /> {{ t('git.stage') }}
         </button>
         <button
           v-if="contextMenu.source === 'staged'"
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="handleUnstageFile(contextMenu!.file)"
         >
           <Minus class="h-3 w-3" /> {{ t('git.unstage') }}
         </button>
         <button
           v-if="contextMenu.source === 'working'"
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent text-destructive"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent text-destructive"
           @click="handleDiscardFile(contextMenu!.file)"
         >
           <Undo2 class="h-3 w-3" /> {{ t('git.discardChanges') }}
         </button>
         <div class="h-px bg-border my-1" />
         <button
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="emit('viewBlame', contextMenu!.file)"
         >
           {{ t('git.viewBlame') }}
         </button>
         <button
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="emit('viewFileHistory', contextMenu!.file)"
         >
           {{ t('git.viewFileHistory') }}
         </button>
         <div class="h-px bg-border my-1" />
         <button
-          class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
+          role="menuitem" class="w-full flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs hover:bg-accent"
           @click="copyPath(contextMenu!.file)"
         >
           {{ t('git.copyPath') }}

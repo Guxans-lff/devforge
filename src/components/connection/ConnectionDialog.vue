@@ -45,6 +45,7 @@ const saving = ref(false)
 const showPassword = ref(false)
 const testing = ref(false)
 const testResult = ref<{ success: boolean; message: string } | null>(null)
+let testResultTimer: ReturnType<typeof setTimeout> | null = null
 const connectionType = ref<'database' | 'ssh' | 'sftp' | 'redis' | 'git'>('database')
 
 // Form fields
@@ -260,6 +261,14 @@ const gitFormData = computed({
   set: (value) => {
     form.value.repositoryPath = value.repositoryPath
   },
+})
+
+// 成功时自动消失
+watch(testResult, (val) => {
+  if (testResultTimer) clearTimeout(testResultTimer)
+  if (val?.success) {
+    testResultTimer = setTimeout(() => { testResult.value = null }, 3000)
+  }
 })
 
 watch(
@@ -774,28 +783,7 @@ async function handleTestConnection() {
           </div>
 
           <!-- Sidebar Footer Actions -->
-          <div class="relative z-20 p-4 border-t border-border/40 bg-muted/10 space-y-3">
-            <!-- New: Inline Test Result in Sidebar -->
-            <div
-              v-if="testResult"
-              role="alert"
-              aria-live="assertive"
-              class="rounded-lg p-3 text-[10px] font-medium border animate-in fade-in slide-in-from-bottom-2 duration-300 overflow-hidden relative group"
-              :class="testResult.success ? 'bg-df-success/5 border-df-success/20 text-df-success' : 'bg-destructive/5 border-destructive/20 text-destructive'"
-            >
-              <div class="flex items-start gap-2 relative z-10">
-                <CheckCircle2 v-if="testResult.success" class="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                <XCircle v-else class="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                <div class="flex-1 min-w-0">
-                  <div class="font-black uppercase tracking-wider mb-0.5">{{ testResult.success ? t('connection.testSuccessTitle') : t('connection.testFailedTitle') }}</div>
-                  <div class="opacity-80 break-words leading-tight">{{ testResult.message }}</div>
-                </div>
-                <button :aria-label="t('common.close')" @click="testResult = null" class="opacity-0 group-hover:opacity-40 hover:opacity-100 transition-opacity focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none rounded">
-                  <XCircle class="h-3 w-3" />
-                </button>
-              </div>
-            </div>
-
+          <div class="relative z-20 p-4 border-t border-border/40 bg-muted/10">
             <Button
               variant="outline"
               :disabled="testing || connectionType === 'git' || !form.host || (connectionType !== 'redis' && !form.username)"
@@ -813,7 +801,41 @@ async function handleTestConnection() {
         </aside>
 
         <!-- Detail Pane: Configuration Sub-Form -->
-        <main class="flex-1 flex flex-col min-w-0 bg-background/30">
+        <main class="flex-1 flex flex-col min-w-0 bg-background/30 relative">
+          <!-- 测试连接结果：浮动横条通知 -->
+          <Transition
+            enter-active-class="transition-all duration-300 ease-out"
+            enter-from-class="opacity-0 -translate-y-full"
+            enter-to-class="opacity-100 translate-y-0"
+            leave-active-class="transition-all duration-200 ease-in"
+            leave-from-class="opacity-100 translate-y-0"
+            leave-to-class="opacity-0 -translate-y-full"
+          >
+            <div
+              v-if="testResult"
+              role="alert"
+              aria-live="assertive"
+              class="absolute top-0 left-0 right-0 z-30 flex items-center gap-2.5 px-4 py-2.5 text-xs font-semibold border-b backdrop-blur-sm"
+              :class="testResult.success
+                ? 'bg-df-success/10 border-df-success/20 text-df-success'
+                : 'bg-destructive/10 border-destructive/20 text-destructive'"
+            >
+              <CheckCircle2 v-if="testResult.success" class="h-4 w-4 shrink-0" />
+              <XCircle v-else class="h-4 w-4 shrink-0" />
+              <span class="flex-1 min-w-0 truncate" :title="testResult.message">
+                {{ testResult.success ? t('connection.testSuccessTitle') : t('connection.testFailedTitle') }}
+                <span class="opacity-70 font-normal ml-1">{{ testResult.message }}</span>
+              </span>
+              <button
+                :aria-label="t('common.close')"
+                @click="testResult = null"
+                class="p-0.5 rounded opacity-50 hover:opacity-100 transition-opacity focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:outline-none shrink-0"
+              >
+                <XCircle class="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </Transition>
+
           <!-- Scrollable detail area -->
           <div class="flex-1 overflow-y-auto custom-scrollbar px-8 py-5">
             <div class="max-w-xl mx-auto space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">

@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Plus, Trash2 } from 'lucide-vue-next'
 import { redisSetMembers, redisSetAdd, redisSetRem } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 
 const props = defineProps<{
   connectionId: string
@@ -25,8 +26,8 @@ async function loadMembers() {
   try {
     members.value = await redisSetMembers(props.connectionId, props.redisKey)
     members.value.sort()
-  } catch (e) {
-    toast.error('加载 Set 失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.loadSetFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -39,8 +40,8 @@ async function handleAdd() {
     await redisSetAdd(props.connectionId, props.redisKey, [val])
     newMember.value = ''
     await loadMembers()
-  } catch (e) {
-    toast.error('添加失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.addFailed'), parseBackendError(e).message)
   }
 }
 
@@ -48,8 +49,8 @@ async function handleDelete(member: string) {
   try {
     await redisSetRem(props.connectionId, props.redisKey, [member])
     await loadMembers()
-  } catch (e) {
-    toast.error('删除失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.deleteKeyFailed'), parseBackendError(e).message)
   }
 }
 

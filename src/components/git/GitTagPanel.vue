@@ -7,6 +7,8 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
+import { formatTimestamp as formatTime } from '@/composables/useGitUtils'
 import { Tag, Plus, Check, Trash2 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -31,7 +33,7 @@ async function handleCreateTag() {
     newTagMessage.value = ''
     showTagInput.value = false
   } catch (e) {
-    toast.error(t('git.tagCreateFailed'), String(e))
+    toast.error(t('git.tagCreateFailed'), parseBackendError(e).message)
   }
 }
 
@@ -40,12 +42,8 @@ async function handleDeleteTag(name: string) {
     await store.deleteTag(props.repoPath, name)
     toast.success(t('git.tagDeleted', { name }))
   } catch (e) {
-    toast.error(t('git.tagDeleteFailed'), String(e))
+    toast.error(t('git.tagDeleteFailed'), parseBackendError(e).message)
   }
-}
-
-function formatTime(ts: number) {
-  return new Date(ts * 1000).toLocaleString()
 }
 </script>
 
@@ -59,6 +57,7 @@ function formatTime(ts: number) {
             <Input
               v-model="newTagName"
               :placeholder="t('git.tagName')"
+              :aria-label="t('git.tagName')"
               class="h-8 text-xs flex-1"
               @keydown.enter="handleCreateTag"
               @keydown.escape="showTagInput = false"
@@ -76,6 +75,7 @@ function formatTime(ts: number) {
           v-if="showTagInput"
           v-model="newTagMessage"
           :placeholder="t('git.tagMessage')"
+          :aria-label="t('git.tagMessage')"
           class="h-8 text-xs"
         />
       </div>
@@ -88,13 +88,13 @@ function formatTime(ts: number) {
         v-for="tag in workspace.tags" :key="tag.name"
         class="flex items-center gap-2 px-2 py-1.5 rounded border border-border/50 hover:bg-accent/50 text-xs"
       >
-        <Tag class="h-3.5 w-3.5 shrink-0 text-yellow-500" />
+        <Tag class="h-3.5 w-3.5 shrink-0 text-df-warning" />
         <div class="flex-1 min-w-0">
           <div class="truncate font-medium">{{ tag.name }}</div>
           <div class="flex items-center gap-2 text-[10px] text-muted-foreground">
             <span class="font-mono">{{ tag.hash.substring(0, 7) }}</span>
             <span>{{ formatTime(tag.timestamp) }}</span>
-            <span v-if="tag.isLightweight" class="text-muted-foreground/50">lightweight</span>
+            <span v-if="tag.isLightweight" class="text-muted-foreground/50">{{ t('git.lightweight') }}</span>
           </div>
           <div v-if="tag.message" class="text-[10px] text-muted-foreground truncate">{{ tag.message }}</div>
         </div>

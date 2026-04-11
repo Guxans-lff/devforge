@@ -4,7 +4,7 @@
  * 展示 MySQL 服务器关键性能指标（QPS/TPS/连接数/缓冲池/慢查询）
  * 使用 Canvas 2D API 绘制折线图，每 5 秒自动刷新
  */
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick, type Component } from 'vue'
 import { dbGetServerStatus, dbGetProcessList, dbKillProcess, dbGetServerVariables } from '@/api/database'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import type { ServerStatus, ProcessInfo, ServerVariable } from '@/types/database'
@@ -71,7 +71,7 @@ const activeSubTab = computed(() => {
 })
 
 /** 子标签页配置列表 */
-const subTabs: Array<{ key: PerformanceTabContext['activeSubTab']; label: string, icon: any }> = [
+const subTabs: Array<{ key: PerformanceTabContext['activeSubTab']; label: string; icon: Component }> = [
   { key: 'dashboard', label: '实时仪表盘', icon: Activity },
   { key: 'processes', label: '会话进程', icon: Terminal },
   { key: 'slow-queries', label: '慢查询分析', icon: Clock },
@@ -152,10 +152,10 @@ const metricCards = computed(() => {
       value: formatPercent(s.bufferPoolUsage), 
       subtitle: 'InnoDB Buffer Pool', 
       icon: Clock, 
-      color: 'text-purple-500', 
-      gradient: 'from-purple-500/10 via-purple-500/5 to-transparent',
-      border: 'border-purple-500/20',
-      glow: 'shadow-purple-500/10'
+      color: 'text-df-info',
+      gradient: 'from-df-info/10 via-df-info/5 to-transparent',
+      border: 'border-df-info/20',
+      glow: 'shadow-df-info/10'
     },
     { 
       label: '慢查询警告', 

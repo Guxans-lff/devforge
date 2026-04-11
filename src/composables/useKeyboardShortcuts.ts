@@ -70,7 +70,7 @@ export function useKeyboardShortcuts() {
 
   // 预解析快捷键缓存，避免每次按键都重新解析
   let parsedShortcutsCache: { id: string; keys: string; parsed: ReturnType<typeof parseShortcut> }[] = []
-  let lastShortcutsRef: any = null
+  let lastShortcutsRef: unknown = null
 
   function ensureParsedCache() {
     const shortcuts = settingsStore.settings.shortcuts

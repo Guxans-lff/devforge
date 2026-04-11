@@ -13,10 +13,8 @@ import { useSettingsStore } from '@/stores/settings'
 import type { GitDiff, GitFileDiff } from '@/types/git'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import {
-  FilePlus, FileX, FileEdit, AlertTriangle,
-  Columns2, AlignJustify,
-} from 'lucide-vue-next'
+import { Columns2, AlignJustify } from 'lucide-vue-next'
+import { gitStatusColor as statusColor, gitStatusIcon as statusIcon } from '@/composables/useGitUtils'
 
 const props = defineProps<{
   diff: GitDiff | null
@@ -182,25 +180,6 @@ onBeforeUnmount(() => {
 })
 
 // ── 工具函数 ──────────────────────────────────────────────────────
-function statusIcon(s: string) {
-  switch (s) {
-    case 'added': return FilePlus
-    case 'deleted': return FileX
-    case 'modified': return FileEdit
-    case 'conflicted': return AlertTriangle
-    default: return FileEdit
-  }
-}
-
-function statusColor(s: string) {
-  switch (s) {
-    case 'added': return 'text-green-500'
-    case 'deleted': return 'text-red-500'
-    case 'modified': return 'text-yellow-500'
-    case 'conflicted': return 'text-orange-500'
-    default: return 'text-muted-foreground'
-  }
-}
 
 const hasMonacoContent = computed(() => props.oldContent !== undefined || props.newContent !== undefined)
 </script>
@@ -215,8 +194,8 @@ const hasMonacoContent = computed(() => props.oldContent !== undefined || props.
         &larr; {{ fileDiff.oldPath }}
       </span>
       <div class="flex-1" />
-      <span class="text-xs text-green-500">+{{ diff?.stats.insertions ?? 0 }}</span>
-      <span class="text-xs text-red-500">-{{ diff?.stats.deletions ?? 0 }}</span>
+      <span class="text-xs text-df-success">+{{ fileDiff?.stats?.insertions ?? diff?.stats.insertions ?? 0 }}</span>
+      <span class="text-xs text-destructive">-{{ fileDiff?.stats?.deletions ?? diff?.stats.deletions ?? 0 }}</span>
 
       <!-- 模式切换 -->
       <div class="flex items-center gap-0.5 ml-2">
@@ -226,6 +205,7 @@ const hasMonacoContent = computed(() => props.oldContent !== undefined || props.
           :class="{ 'bg-accent': useMonaco }"
           @click="useMonaco = !useMonaco"
           :title="useMonaco ? t('git.textDiff') : t('git.monacoDiff')"
+          :aria-label="useMonaco ? t('git.textDiff') : t('git.monacoDiff')"
         >
           <Columns2 class="h-3 w-3" />
         </Button>
@@ -235,6 +215,7 @@ const hasMonacoContent = computed(() => props.oldContent !== undefined || props.
           :class="{ 'bg-accent': !sideBySide }"
           @click="sideBySide = !sideBySide"
           :title="sideBySide ? t('git.inlineMode') : t('git.sideBySideMode')"
+          :aria-label="sideBySide ? t('git.inlineMode') : t('git.sideBySideMode')"
         >
           <AlignJustify class="h-3 w-3" />
         </Button>
@@ -250,7 +231,7 @@ const hasMonacoContent = computed(() => props.oldContent !== undefined || props.
     <ScrollArea v-else class="flex-1">
       <div v-if="fileDiff && !fileDiff.isBinary" class="font-mono text-xs">
         <div v-for="(hunk, hi) in fileDiff.hunks" :key="hi">
-          <div class="px-3 py-0.5 bg-blue-500/10 text-blue-500 sticky top-0 z-10">
+          <div class="px-3 py-0.5 bg-df-info/10 text-df-info sticky top-0 z-10">
             {{ hunk.header }}
           </div>
           <div
@@ -258,8 +239,8 @@ const hasMonacoContent = computed(() => props.oldContent !== undefined || props.
             :key="`${hi}-${li}`"
             class="flex hover:bg-accent/30"
             :class="{
-              'bg-green-500/10': line.origin === '+',
-              'bg-red-500/10': line.origin === '-',
+              'bg-df-success/10': line.origin === '+',
+              'bg-destructive/10': line.origin === '-',
             }"
           >
             <span class="w-12 shrink-0 text-right pr-2 text-muted-foreground/60 select-none border-r border-border/30">
@@ -271,8 +252,8 @@ const hasMonacoContent = computed(() => props.oldContent !== undefined || props.
             <span
               class="w-5 shrink-0 text-center select-none"
               :class="{
-                'text-green-500': line.origin === '+',
-                'text-red-500': line.origin === '-',
+                'text-df-success': line.origin === '+',
+                'text-destructive': line.origin === '-',
               }"
             >
               {{ line.origin === ' ' ? '' : line.origin }}

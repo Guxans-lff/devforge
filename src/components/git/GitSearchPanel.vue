@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useGitWorkspaceStore } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
+import { formatTimestamp as formatTime } from '@/composables/useGitUtils'
 import type { GitCommit } from '@/types/git'
 import { Search, Loader2, X } from 'lucide-vue-next'
 
@@ -34,7 +36,7 @@ async function handleSearch() {
   try {
     results.value = await store.searchCommits(props.repoPath, query.value, field.value, 0, 50)
   } catch (e) {
-    toast.error(t('git.searchFailed'), String(e))
+    toast.error(t('git.searchFailed'), parseBackendError(e).message)
     results.value = []
   } finally {
     searching.value = false
@@ -45,10 +47,6 @@ function clearSearch() {
   query.value = ''
   results.value = []
   hasSearched.value = false
-}
-
-function formatTime(ts: number) {
-  return new Date(ts * 1000).toLocaleString()
 }
 </script>
 
@@ -61,11 +59,13 @@ function formatTime(ts: number) {
         <Input
           v-model="query"
           :placeholder="t('git.searchPlaceholder')"
+          :aria-label="t('git.searchPlaceholder')"
           class="h-8 text-xs pl-7 pr-7"
           @keydown.enter="handleSearch"
         />
         <button
           v-if="query"
+          :aria-label="t('git.clearSearch')"
           class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
           @click="clearSearch"
         >
@@ -75,6 +75,7 @@ function formatTime(ts: number) {
       <!-- 搜索字段切换 -->
       <select
         v-model="field"
+        :aria-label="t('git.searchField')"
         class="h-8 px-1.5 text-xs bg-background border border-border rounded focus:outline-none focus:ring-1 focus:ring-primary"
       >
         <option value="message">{{ t('git.searchByMessage') }}</option>

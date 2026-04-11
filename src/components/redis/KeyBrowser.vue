@@ -1,14 +1,23 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Search, CheckSquare, Trash2, Clock, Download, Upload, CheckCheck, XSquare, Database } from 'lucide-vue-next'
 import KeyTreeItem from './KeyTreeItem.vue'
 import type { TreeNode } from './KeyTreeItem.vue'
 import { redisScanKeys, redisGetKeyInfo, redisDeleteKeys, redisRenameKey, redisSetTtl, redisBatchDelete, redisBatchSetTtl, redisBatchExport, redisBatchImport } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import type { RedisKeyInfo } from '@/types/redis'
 
 const props = defineProps<{
@@ -32,6 +41,43 @@ const cursor = ref(0)
 const hasMore = ref(false)
 const treeData = ref<TreeNode[]>([])
 
+/** 扁平化版本号：展开/折叠时递增，触发 flatVisibleNodes 重算 */
+const flatVersion = ref(0)
+
+/** 将树扁平化为可见节点列表（用于虚拟滚动） */
+interface FlatNode {
+  node: TreeNode
+  depth: number
+}
+
+const flatVisibleNodes = computed<FlatNode[]>(() => {
+  // 依赖 flatVersion 确保展开/折叠时重算
+  void flatVersion.value
+  const result: FlatNode[] = []
+  function walk(nodes: TreeNode[], depth: number) {
+    for (const node of nodes) {
+      result.push({ node, depth })
+      if (!node.isLeaf && node.expanded) {
+        walk(node.children, depth + 1)
+      }
+    }
+  }
+  walk(treeData.value, 0)
+  return result
+})
+
+const ROW_HEIGHT = 32
+const scrollRef = ref<HTMLElement | null>(null)
+
+const virtualizer = useVirtualizer(computed(() => ({
+  count: flatVisibleNodes.value.length,
+  getScrollElement: () => scrollRef.value,
+  estimateSize: () => ROW_HEIGHT,
+  overscan: 20,
+})))
+
+const virtualRows = computed(() => virtualizer.value.getVirtualItems())
+const totalSize = computed(() => virtualizer.value.getTotalSize())
 /** SCAN 加载键 */
 async function loadKeys(reset = true) {
   loading.value = true
@@ -55,7 +101,7 @@ async function loadKeys(reset = true) {
     hasMore.value = result.cursor !== 0
     buildTree()
   } catch (e) {
-    toast.error(t('redis.loadKeysFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.loadKeysFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -123,6 +169,7 @@ function buildTree() {
 async function handleSelect(node: TreeNode) {
   if (!node.isLeaf) {
     node.expanded = !node.expanded
+    flatVersion.value++
     return
   }
   try {
@@ -130,7 +177,7 @@ async function handleSelect(node: TreeNode) {
     node.keyType = info.keyType
     emit('select', node.fullKey, info)
   } catch (e) {
-    toast.error(t('redis.getKeyInfoFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.getKeyInfoFailed'), parseBackendError(e).message)
   }
 }
 
@@ -144,7 +191,7 @@ async function handleDeleteKey(key: string, event: Event) {
     buildTree()
     emit('delete')
   } catch (e) {
-    toast.error(t('redis.deleteKeyFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.deleteKeyFailed'), parseBackendError(e).message)
   }
 }
 
@@ -154,6 +201,7 @@ const selectedKeys = ref<Set<string>>(new Set())
 const showTtlDialog = ref(false)
 const batchTtl = ref(3600)
 const batchLoading = ref(false)
+const showBatchDeleteConfirm = ref(false)
 
 /** 所有叶子键 */
 const allLeafKeys = computed(() => keys.value)
@@ -193,8 +241,12 @@ function deselectAll() {
 /** 批量删除（本地移除已删键，避免全量 SCAN 刷新） */
 async function handleBatchDelete() {
   if (selectedCount.value === 0) return
+  showBatchDeleteConfirm.value = true
+}
+
+/** 确认批量删除 */
+async function confirmBatchDelete() {
   const count = selectedCount.value
-  if (!confirm(t('redis.batch.deleteConfirm', { count }))) return
   batchLoading.value = true
   try {
     const deletedKeys = [...selectedKeys.value]
@@ -207,9 +259,10 @@ async function handleBatchDelete() {
     selectedKeys.value = new Set()
     emit('delete')
   } catch (e) {
-    toast.error(t('redis.batch.deleteFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.batch.deleteFailed'), parseBackendError(e).message)
   } finally {
     batchLoading.value = false
+    showBatchDeleteConfirm.value = false
   }
 }
 
@@ -228,7 +281,7 @@ async function confirmBatchSetTtl() {
     toast.success(t('redis.batch.ttlSuccess', { count }))
     showTtlDialog.value = false
   } catch (e) {
-    toast.error(t('redis.batch.ttlFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.batch.ttlFailed'), parseBackendError(e).message)
   } finally {
     batchLoading.value = false
   }
@@ -253,7 +306,7 @@ async function handleBatchExport() {
     URL.revokeObjectURL(url)
     toast.success(t('redis.batch.exportSuccess', { count: selectedCount.value }))
   } catch (e) {
-    toast.error(t('redis.batch.exportFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.batch.exportFailed'), parseBackendError(e).message)
   } finally {
     batchLoading.value = false
   }
@@ -285,7 +338,7 @@ async function handleBatchImport() {
       toast.success(t('redis.batch.importSuccess', { count }))
       emit('delete') // 触发刷新
     } catch (e) {
-      toast.error(t('redis.batch.importFailed'), (e as any)?.message ?? String(e))
+      toast.error(t('redis.batch.importFailed'), parseBackendError(e).message)
     } finally {
       batchLoading.value = false
     }
@@ -296,6 +349,7 @@ async function handleBatchImport() {
 // ========== 右键菜单 ==========
 const showRenameDialog = ref(false)
 const showKeyTtlDialog = ref(false)
+const showKeyDeleteConfirm = ref(false)
 const contextKey = ref('')
 const renameNewKey = ref('')
 const keyTtlValue = ref(3600)
@@ -317,16 +371,7 @@ async function handleContextAction(action: string, key: string) {
       showKeyTtlDialog.value = true
       break
     case 'delete':
-      if (!confirm(t('redis.contextMenu.deleteConfirm', { key }))) return
-      try {
-        await redisDeleteKeys(props.connectionId, [key])
-        toast.success(t('redis.keyDeleted'))
-        keys.value = keys.value.filter(k => k !== key)
-        buildTree()
-        emit('delete')
-      } catch (e) {
-        toast.error(t('redis.deleteKeyFailed'), (e as any)?.message ?? String(e))
-      }
+      showKeyDeleteConfirm.value = true
       break
   }
 }
@@ -343,7 +388,7 @@ async function confirmRename() {
     showRenameDialog.value = false
     emit('delete') // 触发刷新
   } catch (e) {
-    toast.error(t('redis.contextMenu.renameFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.contextMenu.renameFailed'), parseBackendError(e).message)
   }
 }
 
@@ -354,7 +399,22 @@ async function confirmKeyTtl() {
     toast.success(t('redis.contextMenu.ttlSuccess'))
     showKeyTtlDialog.value = false
   } catch (e) {
-    toast.error(t('redis.contextMenu.ttlFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.contextMenu.ttlFailed'), parseBackendError(e).message)
+  }
+}
+
+/** 确认删除单键 */
+async function confirmKeyDelete() {
+  try {
+    await redisDeleteKeys(props.connectionId, [contextKey.value])
+    toast.success(t('redis.keyDeleted'))
+    keys.value = keys.value.filter(k => k !== contextKey.value)
+    buildTree()
+    emit('delete')
+  } catch (e) {
+    toast.error(t('redis.deleteKeyFailed'), parseBackendError(e).message)
+  } finally {
+    showKeyDeleteConfirm.value = false
   }
 }
 
@@ -423,95 +483,129 @@ onMounted(() => {
       </Button>
     </div>
 
-    <!-- 键列表 -->
-    <ScrollArea class="flex-1">
-      <div class="py-1">
-        <KeyTreeItem
-          v-for="node in treeData"
-          :key="node.fullKey"
-          :node="node"
-          :depth="0"
-          :selected-key="selectedKey"
-          :batch-mode="batchMode"
-          :selected-keys="selectedKeys"
-          @select="handleSelect"
-          @delete="handleDeleteKey"
-          @toggle-check="toggleKeySelection"
-          @context-action="handleContextAction"
-        />
-
-        <!-- 加载更多 -->
-        <div v-if="hasMore" class="px-3 py-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            class="w-full h-8 text-xs text-muted-foreground"
-            :disabled="loading"
-            @click="loadMore"
-          >
-            {{ loading ? t('redis.loading') : t('redis.loadMore') }}
-          </Button>
-        </div>
-
-        <!-- 空状态 -->
-        <div v-if="!loading && keys.length === 0" class="px-3 py-12 text-center">
-          <Database class="h-8 w-8 mx-auto mb-3 text-muted-foreground/20" />
-          <p class="text-sm text-muted-foreground/50 font-medium">{{ t('redis.noKeys') }}</p>
-          <p class="text-xs text-muted-foreground/30 mt-1">{{ t('redis.noKeysHint') }}</p>
+    <!-- 键列表（虚拟滚动） -->
+    <div ref="scrollRef" class="flex-1 overflow-auto min-h-0">
+      <div v-if="flatVisibleNodes.length > 0" :style="{ height: `${totalSize}px`, width: '100%', position: 'relative' }">
+        <div
+          v-for="row in virtualRows"
+          :key="flatVisibleNodes[row.index]!.node.fullKey"
+          class="absolute left-0 w-full"
+          :style="{ height: `${row.size}px`, transform: `translateY(${row.start}px)` }"
+        >
+          <KeyTreeItem
+            :node="flatVisibleNodes[row.index]!.node"
+            :depth="flatVisibleNodes[row.index]!.depth"
+            :selected-key="selectedKey"
+            :batch-mode="batchMode"
+            :selected-keys="selectedKeys"
+            flat
+            @select="handleSelect"
+            @delete="handleDeleteKey"
+            @toggle-check="toggleKeySelection"
+            @context-action="handleContextAction"
+          />
         </div>
       </div>
-    </ScrollArea>
 
-    <!-- TTL 设置弹窗（批量） -->
-    <Teleport to="body">
-      <div v-if="showTtlDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="showTtlDialog = false">
-        <div class="bg-popover border border-border rounded-lg p-4 w-[300px] space-y-3 shadow-xl">
-          <div class="text-sm font-bold text-foreground">{{ t('redis.batch.setTtlTitle') }}</div>
-          <div class="space-y-1.5">
-            <label class="text-xs text-muted-foreground">{{ t('redis.batch.ttlSeconds') }}</label>
-            <Input v-model.number="batchTtl" type="number" class="h-8 text-xs" min="1" />
-          </div>
-          <div class="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" class="h-7 text-xs" @click="showTtlDialog = false">{{ t('common.cancel') }}</Button>
-            <Button size="sm" class="h-7 text-xs" :disabled="batchLoading" @click="confirmBatchSetTtl">{{ t('common.confirm') }}</Button>
-          </div>
-        </div>
+      <!-- 加载更多 -->
+      <div v-if="hasMore" class="px-3 py-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          class="w-full h-8 text-xs text-muted-foreground"
+          :disabled="loading"
+          @click="loadMore"
+        >
+          {{ loading ? t('redis.loading') : t('redis.loadMore') }}
+        </Button>
       </div>
-    </Teleport>
+
+      <!-- 空状态 -->
+      <div v-if="!loading && keys.length === 0" class="px-3 py-12 text-center">
+        <Database class="h-8 w-8 mx-auto mb-3 text-muted-foreground/20" />
+        <p class="text-sm text-muted-foreground/50 font-medium">{{ t('redis.noKeys') }}</p>
+        <p class="text-xs text-muted-foreground/30 mt-1">{{ t('redis.noKeysHint') }}</p>
+      </div>
+    </div>
+
+    <!-- 批量 TTL 设置弹窗 -->
+    <Dialog :open="showTtlDialog" @update:open="showTtlDialog = $event">
+      <DialogContent class="sm:max-w-[340px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('redis.batch.setTtlTitle') }}</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-1.5 py-2">
+          <label class="text-xs text-muted-foreground">{{ t('redis.batch.ttlSeconds') }}</label>
+          <Input v-model.number="batchTtl" type="number" class="h-8 text-xs" min="1" />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="showTtlDialog = false">{{ t('common.cancel') }}</Button>
+          <Button size="sm" :disabled="batchLoading" @click="confirmBatchSetTtl">{{ t('common.confirm') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 重命名弹窗 -->
-    <Teleport to="body">
-      <div v-if="showRenameDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="showRenameDialog = false">
-        <div class="bg-popover border border-border rounded-lg p-4 w-[340px] space-y-3 shadow-xl">
-          <div class="text-sm font-bold text-foreground">{{ t('redis.contextMenu.renameTitle') }}</div>
-          <div class="space-y-1.5">
-            <label class="text-xs text-muted-foreground">{{ t('redis.contextMenu.newKeyName') }}</label>
-            <Input v-model="renameNewKey" class="h-8 text-xs font-mono" @keydown.enter="confirmRename" />
-          </div>
-          <div class="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" class="h-7 text-xs" @click="showRenameDialog = false">{{ t('common.cancel') }}</Button>
-            <Button size="sm" class="h-7 text-xs" @click="confirmRename">{{ t('common.confirm') }}</Button>
-          </div>
+    <Dialog :open="showRenameDialog" @update:open="showRenameDialog = $event">
+      <DialogContent class="sm:max-w-[380px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('redis.contextMenu.renameTitle') }}</DialogTitle>
+        </DialogHeader>
+        <div class="space-y-1.5 py-2">
+          <label class="text-xs text-muted-foreground">{{ t('redis.contextMenu.newKeyName') }}</label>
+          <Input v-model="renameNewKey" class="h-8 text-xs font-mono" @keydown.enter="confirmRename" />
         </div>
-      </div>
-    </Teleport>
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="showRenameDialog = false">{{ t('common.cancel') }}</Button>
+          <Button size="sm" @click="confirmRename">{{ t('common.confirm') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 单键 TTL 弹窗 -->
-    <Teleport to="body">
-      <div v-if="showKeyTtlDialog" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="showKeyTtlDialog = false">
-        <div class="bg-popover border border-border rounded-lg p-4 w-[300px] space-y-3 shadow-xl">
-          <div class="text-sm font-bold text-foreground">{{ t('redis.contextMenu.setTtlTitle') }}</div>
-          <div class="text-xs text-muted-foreground/60 font-mono truncate">{{ contextKey }}</div>
-          <div class="space-y-1.5">
-            <label class="text-xs text-muted-foreground">{{ t('redis.batch.ttlSeconds') }}</label>
-            <Input v-model.number="keyTtlValue" type="number" class="h-8 text-xs" min="1" @keydown.enter="confirmKeyTtl" />
-          </div>
-          <div class="flex justify-end gap-2">
-            <Button variant="ghost" size="sm" class="h-7 text-xs" @click="showKeyTtlDialog = false">{{ t('common.cancel') }}</Button>
-            <Button size="sm" class="h-7 text-xs" @click="confirmKeyTtl">{{ t('common.confirm') }}</Button>
-          </div>
+    <Dialog :open="showKeyTtlDialog" @update:open="showKeyTtlDialog = $event">
+      <DialogContent class="sm:max-w-[340px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('redis.contextMenu.setTtlTitle') }}</DialogTitle>
+          <DialogDescription class="font-mono truncate">{{ contextKey }}</DialogDescription>
+        </DialogHeader>
+        <div class="space-y-1.5 py-2">
+          <label class="text-xs text-muted-foreground">{{ t('redis.batch.ttlSeconds') }}</label>
+          <Input v-model.number="keyTtlValue" type="number" class="h-8 text-xs" min="1" @keydown.enter="confirmKeyTtl" />
         </div>
-      </div>
-    </Teleport>
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="showKeyTtlDialog = false">{{ t('common.cancel') }}</Button>
+          <Button size="sm" @click="confirmKeyTtl">{{ t('common.confirm') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 单键删除确认弹窗 -->
+    <Dialog :open="showKeyDeleteConfirm" @update:open="showKeyDeleteConfirm = $event">
+      <DialogContent class="sm:max-w-[360px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('redis.contextMenu.delete') }}</DialogTitle>
+          <DialogDescription>{{ t('redis.contextMenu.deleteConfirm', { key: contextKey }) }}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="showKeyDeleteConfirm = false">{{ t('common.cancel') }}</Button>
+          <Button variant="destructive" size="sm" @click="confirmKeyDelete">{{ t('common.confirm') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 批量删除确认弹窗 -->
+    <Dialog :open="showBatchDeleteConfirm" @update:open="showBatchDeleteConfirm = $event">
+      <DialogContent class="sm:max-w-[360px]">
+        <DialogHeader>
+          <DialogTitle>{{ t('redis.batch.delete') }}</DialogTitle>
+          <DialogDescription>{{ t('redis.batch.deleteConfirm', { count: selectedCount }) }}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" size="sm" @click="showBatchDeleteConfirm = false">{{ t('common.cancel') }}</Button>
+          <Button variant="destructive" size="sm" :disabled="batchLoading" @click="confirmBatchDelete">{{ t('common.confirm') }}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

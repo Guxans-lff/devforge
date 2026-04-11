@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Input } from '@/components/ui/input'
 import { TerminalSquare } from 'lucide-vue-next'
 import { redisExecuteCommand } from '@/api/redis'
+import { parseBackendError } from '@/types/error'
 import type { RedisCliResult } from '@/types/redis'
 
 const props = defineProps<{
@@ -32,7 +33,7 @@ async function handleExecute() {
   } catch (e) {
     history.value.push({
       command: cmd,
-      result: (e as any)?.message ?? String(e),
+      result: parseBackendError(e).message,
       durationMs: 0,
       isError: true,
     })
@@ -69,7 +70,7 @@ function scrollToBottom() {
 </script>
 
 <template>
-  <div class="flex h-full flex-col border-l border-border/40 bg-zinc-950/50">
+  <div class="flex h-full flex-col border-l border-border/40 bg-background/50">
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <TerminalSquare class="h-3.5 w-3.5 text-muted-foreground/50" />
@@ -101,6 +102,7 @@ function scrollToBottom() {
       <Input
         v-model="command"
         placeholder="GET key"
+        :aria-label="t('redis.cliHint')"
         class="h-8 flex-1 text-xs font-mono bg-transparent border-0 focus-visible:ring-0 px-0"
         @keydown.enter="handleExecute"
         @keydown="handleKeyDown"

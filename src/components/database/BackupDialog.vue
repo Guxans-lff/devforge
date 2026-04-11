@@ -308,6 +308,7 @@ onBeforeUnmount(() => {
                   v-model="tableSearch"
                   type="text"
                   :placeholder="t('backup.searchTables')"
+                  :aria-label="t('backup.searchTables')"
                   class="w-full pl-6 pr-2 py-1 text-xs rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
                 />
               </div>

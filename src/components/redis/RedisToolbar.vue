@@ -97,7 +97,7 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
         <Plus class="h-3.5 w-3.5 mr-1" />
         {{ t('redis.newKey') }}
       </Button>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :title="t('redis.refresh')" @click="emit('refresh')">
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :title="t('redis.refresh')" :aria-label="t('redis.refresh')" @click="emit('refresh')">
         <RefreshCw class="h-3.5 w-3.5" />
       </Button>
 
@@ -109,6 +109,7 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
         class="h-7 w-7 p-0 transition-colors"
         :class="activeInfo ? 'bg-accent text-accent-foreground' : ''"
         :title="t('redis.serverInfo')"
+        :aria-label="t('redis.serverInfo')"
         @click="emit('toggleInfo')"
       >
         <Info class="h-3.5 w-3.5" />
@@ -118,6 +119,7 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
         class="h-7 w-7 p-0 transition-colors"
         :class="activeCli ? 'bg-accent text-accent-foreground' : ''"
         :title="t('redis.cli')"
+        :aria-label="t('redis.cli')"
         @click="emit('toggleCli')"
       >
         <TerminalSquare class="h-3.5 w-3.5" />
@@ -127,6 +129,7 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
         class="h-7 w-7 p-0 transition-colors"
         :class="activePubsub ? 'bg-accent text-accent-foreground' : ''"
         :title="t('redis.pubsub.title')"
+        :aria-label="t('redis.pubsub.title')"
         @click="emit('togglePubsub')"
       >
         <Radio class="h-3.5 w-3.5" />
@@ -139,6 +142,7 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
         class="h-7 w-7 p-0 transition-colors"
         :class="activeSlowlog ? 'bg-accent text-accent-foreground' : ''"
         :title="t('redis.slowlog.title')"
+        :aria-label="t('redis.slowlog.title')"
         @click="emit('toggleSlowlog')"
       >
         <Activity class="h-3.5 w-3.5" />
@@ -148,6 +152,7 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
         class="h-7 w-7 p-0 transition-colors"
         :class="activeMemory ? 'bg-accent text-accent-foreground' : ''"
         :title="t('redis.memory.title')"
+        :aria-label="t('redis.memory.title')"
         @click="emit('toggleMemory')"
       >
         <MemoryStick class="h-3.5 w-3.5" />
@@ -157,6 +162,7 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
         class="h-7 w-7 p-0 transition-colors"
         :class="activeClientList ? 'bg-accent text-accent-foreground' : ''"
         :title="t('redis.clients.title')"
+        :aria-label="t('redis.clients.title')"
         @click="emit('toggleClientList')"
       >
         <Users class="h-3.5 w-3.5" />
@@ -166,6 +172,7 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
         class="h-7 w-7 p-0 transition-colors"
         :class="activeMonitor ? 'bg-accent text-accent-foreground' : ''"
         :title="t('redis.monitor.title')"
+        :aria-label="t('redis.monitor.title')"
         @click="emit('toggleMonitor')"
       >
         <Eye class="h-3.5 w-3.5" />
@@ -175,6 +182,7 @@ const dbOptions = Array.from({ length: 16 }, (_, i) => i)
         class="h-7 w-7 p-0 transition-colors"
         :class="activeLua ? 'bg-accent text-accent-foreground' : ''"
         :title="t('redis.lua.title')"
+        :aria-label="t('redis.lua.title')"
         @click="emit('toggleLua')"
       >
         <Code class="h-3.5 w-3.5" />

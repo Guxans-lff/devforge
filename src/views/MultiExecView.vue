@@ -256,6 +256,7 @@ onBeforeUnmount(() => {
             <Button
               variant="ghost" size="icon" class="h-8 w-8 rounded-[10px] transition-[background-color,color,box-shadow]"
               :class="layout === 'grid' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'"
+              :aria-label="t('multiExec.gridLayout')"
               @click="layout = 'grid'"
             >
               <LayoutGrid class="h-4 w-4" />
@@ -263,6 +264,7 @@ onBeforeUnmount(() => {
             <Button
               variant="ghost" size="icon" class="h-8 w-8 rounded-[10px] transition-[background-color,color,box-shadow]"
               :class="layout === 'vertical' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'"
+              :aria-label="t('multiExec.verticalLayout')"
               @click="layout = 'vertical'"
             >
               <Columns2 class="h-4 w-4" />
@@ -270,6 +272,7 @@ onBeforeUnmount(() => {
             <Button
               variant="ghost" size="icon" class="h-8 w-8 rounded-[10px] transition-[background-color,color,box-shadow]"
               :class="layout === 'horizontal' ? 'bg-background text-foreground shadow-sm ring-1 ring-border/50' : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'"
+              :aria-label="t('multiExec.horizontalLayout')"
               @click="layout = 'horizontal'"
             >
               <Rows2 class="h-4 w-4" />

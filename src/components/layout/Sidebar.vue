@@ -401,7 +401,7 @@ const groupedNonFavorites = computed(() => {
 
 <template>
   <aside
-    class="flex h-full flex-col glass-sidebar transition-[width] duration-[var(--df-duration-normal)] ease-[var(--df-ease-out)] relative z-20 shadow-[1px_0_0_rgba(0,0,0,0.02)]"
+    class="flex h-full min-h-0 flex-col glass-sidebar transition-[width] duration-[var(--df-duration-normal)] ease-[var(--df-ease-out)] relative z-20 shadow-[1px_0_0_rgba(0,0,0,0.02)]"
     :class="[
       'bg-gradient-to-b from-df-sidebar-from via-df-sidebar-via to-df-sidebar-to'
     ]"
@@ -464,7 +464,7 @@ const groupedNonFavorites = computed(() => {
     <Separator class="opacity-50" />
 
     <!-- 连接列表 -->
-    <ScrollArea class="flex-1">
+    <ScrollArea class="flex-1 min-h-0">
       <div v-if="!isCollapsed" class="p-1" role="listbox" :aria-label="t('sidebar.connections')">
         <!-- 空状态 -->
         <div

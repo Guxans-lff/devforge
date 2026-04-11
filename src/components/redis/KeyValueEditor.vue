@@ -13,6 +13,7 @@ import ZSetEditor from './ZSetEditor.vue'
 import StreamEditor from './StreamEditor.vue'
 import { redisDeleteKeys, redisRenameKey, redisSetTtl, redisRemoveTtl } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import type { RedisKeyInfo } from '@/types/redis'
 
 const props = defineProps<{
@@ -53,23 +54,24 @@ const ttlDisplay = computed(() => {
   return `${ttl}s`
 })
 
+/** Redis 数据类型的语义着色 — 用于 Badge 标识不同数据结构 */
 const typeColors: Record<string, string> = {
-  string: 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-  hash: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
-  list: 'bg-green-500/15 text-green-400 border-green-500/30',
-  set: 'bg-purple-500/15 text-purple-400 border-purple-500/30',
-  zset: 'bg-pink-500/15 text-pink-400 border-pink-500/30',
-  stream: 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30',
+  string: 'bg-df-info/15 text-df-info border-df-info/30',
+  hash: 'bg-df-warning/15 text-df-warning border-df-warning/30',
+  list: 'bg-df-success/15 text-df-success border-df-success/30',
+  set: 'bg-primary/15 text-primary border-primary/30',
+  zset: 'bg-destructive/15 text-destructive border-destructive/30',
+  stream: 'bg-accent-foreground/15 text-accent-foreground border-accent-foreground/30',
 }
 
 /** 删除键 */
 async function handleDelete() {
   try {
     await redisDeleteKeys(props.connectionId, [props.redisKey])
-    toast.success('键已删除')
+    toast.success(t('redis.keyDeleted'))
     emit('deleted')
-  } catch (e) {
-    toast.error('删除失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.deleteKeyFailed'), parseBackendError(e).message)
   }
 }
 
@@ -83,10 +85,10 @@ async function handleRename() {
   try {
     await redisRenameKey(props.connectionId, props.redisKey, newKey)
     renaming.value = false
-    toast.success('重命名成功')
+    toast.success(t('redis.renameSuccess'))
     emit('renamed', newKey)
-  } catch (e) {
-    toast.error('重命名失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.renameFailed'), parseBackendError(e).message)
   }
 }
 
@@ -108,8 +110,8 @@ async function handleSetTtl() {
       localKeyInfo.value = { ...localKeyInfo.value, ttl: seconds }
     }
     ttlEditing.value = false
-  } catch (e) {
-    toast.error('设置 TTL 失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.ttlSetFailed'), parseBackendError(e).message)
   }
 }
 

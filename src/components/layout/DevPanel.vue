@@ -64,7 +64,7 @@ function toggleExpand(id: string) {
 
 function getStatusClass(log: LogEntry): string {
   const details = log.details as Record<string, unknown>
-  if (details.type === 'api-error') return 'text-red-400'
+  if (details.type === 'api-error') return 'text-destructive'
   return 'text-df-success'
 }
 
@@ -91,8 +91,8 @@ function getDurationClass(log: LogEntry): string {
   const details = log.details as Record<string, unknown>
   const ms = details.duration as number
   if (!ms) return 'text-muted-foreground'
-  if (ms > 3000) return 'text-red-400'
-  if (ms > 1000) return 'text-yellow-400'
+  if (ms > 3000) return 'text-destructive'
+  if (ms > 1000) return 'text-df-warning'
   return 'text-muted-foreground'
 }
 

@@ -78,11 +78,11 @@ function tokenizeLine(line: string): XmlSegment[] {
 /** 颜色映射 */
 function getSegmentClass(type: XmlSegment['type']): string {
   switch (type) {
-    case 'tag': return 'text-blue-600 dark:text-blue-400'
+    case 'tag': return 'text-primary'
     case 'attr-name': return 'text-df-warning'
     case 'attr-value': return 'text-df-success'
     case 'comment': return 'text-muted-foreground/50 italic'
-    case 'declaration': return 'text-purple-600 dark:text-purple-400'
+    case 'declaration': return 'text-df-info'
     default: return 'text-foreground'
   }
 }

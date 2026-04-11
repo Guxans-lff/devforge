@@ -233,7 +233,7 @@ onActivated(() => {
         <div class="grid grid-cols-3 gap-3">
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-1">
-              <Cable class="h-3.5 w-3.5 text-blue-500" />
+              <Cable class="h-3.5 w-3.5 text-primary" />
               <span class="text-[11px] font-medium">{{ t('tunnel.totalTunnels') }}</span>
             </div>
             <div class="text-2xl font-bold tabular-nums text-foreground">
@@ -242,7 +242,7 @@ onActivated(() => {
           </div>
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-1">
-              <Zap class="h-3.5 w-3.5 text-emerald-500" />
+              <Zap class="h-3.5 w-3.5 text-df-success" />
               <span class="text-[11px] font-medium">{{ t('tunnel.activeTunnels') }}</span>
             </div>
             <div class="text-2xl font-bold tabular-nums text-df-success">
@@ -251,7 +251,7 @@ onActivated(() => {
           </div>
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-1">
-              <Globe class="h-3.5 w-3.5 text-violet-500" />
+              <Globe class="h-3.5 w-3.5 text-df-info" />
               <span class="text-[11px] font-medium">{{ t('tunnel.portsForwarded') }}</span>
             </div>
             <div class="text-2xl font-bold tabular-nums text-foreground">
@@ -270,7 +270,7 @@ onActivated(() => {
               <Plus class="h-3.5 w-3.5" />
               {{ t('tunnel.newTunnel') }}
             </p>
-            <Button variant="ghost" size="icon" class="h-6 w-6 text-muted-foreground" @click="showForm = false">
+            <Button variant="ghost" size="icon" class="h-6 w-6 text-muted-foreground" :aria-label="t('common.close')" @click="showForm = false">
               <X class="h-3.5 w-3.5" />
             </Button>
           </div>
@@ -407,6 +407,7 @@ onActivated(() => {
                         variant="ghost"
                         size="icon"
                         class="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        :aria-label="t('tunnel.copyAddress')"
                         @click="copyLocalAddress(tunnel)"
                       >
                         <Check v-if="copiedId === tunnel.tunnelId" class="h-3.5 w-3.5 text-df-success" />
@@ -423,6 +424,7 @@ onActivated(() => {
                         variant="ghost"
                         size="icon"
                         class="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        :aria-label="t('tunnel.close')"
                         :disabled="closingId === tunnel.tunnelId"
                         @click="handleClose(tunnel.tunnelId)"
                       >
@@ -441,7 +443,7 @@ onActivated(() => {
             <!-- 端口映射可视化 -->
             <div class="mt-3 flex items-center gap-3 font-mono text-sm">
               <div class="flex items-center gap-1.5">
-                <div class="h-6 rounded bg-blue-500/10 border border-blue-500/20 px-2 flex items-center text-blue-400 text-xs">
+                <div class="h-6 rounded bg-primary/10 border border-primary/20 px-2 flex items-center text-primary text-xs">
                   :{{ tunnel.localPort }}
                 </div>
               </div>
@@ -449,7 +451,7 @@ onActivated(() => {
                 <ArrowRight class="h-3.5 w-3.5 text-muted-foreground/40 absolute left-1/2 -translate-x-1/2 -translate-y-1/2 bg-card/50" />
               </div>
               <div class="flex items-center gap-1.5">
-                <div class="h-6 rounded bg-emerald-500/10 border border-emerald-500/20 px-2 flex items-center text-emerald-400 text-xs">
+                <div class="h-6 rounded bg-df-success/10 border border-df-success/20 px-2 flex items-center text-df-success text-xs">
                   {{ tunnel.remoteHost }}:{{ tunnel.remotePort }}
                 </div>
               </div>

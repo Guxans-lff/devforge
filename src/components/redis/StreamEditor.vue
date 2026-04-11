@@ -14,6 +14,7 @@ import {
 import { Plus, Trash2, ChevronDown, ChevronRight, RefreshCw, X } from 'lucide-vue-next'
 import { redisStreamRange, redisStreamAdd, redisStreamDel, redisStreamLen } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import type { StreamEntry } from '@/types/redis'
 
 const props = defineProps<{
@@ -75,7 +76,7 @@ async function loadEntries(start = '-') {
 
     expandedIds.value.clear()
   } catch (e) {
-    toast.error(t('redis.stream.loadFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.stream.loadFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -133,7 +134,7 @@ async function handleDelete(id: string) {
     totalCount.value--
     emit('refresh')
   } catch (e) {
-    toast.error(t('redis.stream.deleteFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.stream.deleteFailed'), parseBackendError(e).message)
   }
 }
 
@@ -173,7 +174,7 @@ async function handleAdd() {
     await loadEntries()
     emit('refresh')
   } catch (e) {
-    toast.error(t('redis.stream.addFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.stream.addFailed'), parseBackendError(e).message)
   } finally {
     adding.value = false
   }

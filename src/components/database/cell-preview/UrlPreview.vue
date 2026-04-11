@@ -72,7 +72,7 @@ function copyUrl() {
           <div class="space-y-1.5 text-xs">
             <div class="flex items-baseline gap-3">
               <span class="w-16 shrink-0 text-muted-foreground font-medium">协议</span>
-              <span class="font-mono text-blue-600 dark:text-blue-400">{{ urlParts.protocol }}</span>
+              <span class="font-mono text-primary">{{ urlParts.protocol }}</span>
             </div>
             <div class="flex items-baseline gap-3">
               <span class="w-16 shrink-0 text-muted-foreground font-medium">主机</span>
@@ -98,7 +98,7 @@ function copyUrl() {
               :key="i"
               class="flex items-baseline gap-2 hover:bg-muted/20 rounded-sm px-1 py-0.5"
             >
-              <span class="text-purple-600 dark:text-purple-400 font-mono font-medium shrink-0">{{ key }}</span>
+              <span class="text-primary/80 font-mono font-medium shrink-0">{{ key }}</span>
               <span class="text-muted-foreground/50">=</span>
               <span class="font-mono text-df-success break-all select-text">{{ val }}</span>
             </div>

@@ -21,6 +21,7 @@ import {
   ArrowLeftRight, CalendarClock, Workflow,
 } from 'lucide-vue-next'
 import { useObjectTree } from '@/composables/useObjectTree'
+import type { DatabaseTreeNode } from '@/types/database'
 
 const props = defineProps<{
   connectionId: string
@@ -69,12 +70,12 @@ const DRAGGABLE_TYPES = new Set(['table', 'view', 'column', 'procedure', 'functi
 const SYSTEM_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys'])
 
 /** 判断节点是否可拖拽到 SQL 编辑器 */
-function isDraggableNode(node: import('@/types/database').DatabaseTreeNode): boolean {
+function isDraggableNode(node: DatabaseTreeNode): boolean {
   return DRAGGABLE_TYPES.has(node.type)
 }
 
 /** 拖拽开始时设置传输数据 */
-function handleDragStart(event: DragEvent, node: import('@/types/database').DatabaseTreeNode) {
+function handleDragStart(event: DragEvent, node: DatabaseTreeNode) {
   if (!event.dataTransfer) return
   const dragData = {
     type: node.type,
@@ -108,90 +109,90 @@ onClickOutside(searchAreaRef, () => {
 
 // ===== 事件处理（从 node 提取 meta 后转发 emit） =====
 
-function emitEditTable(node: any) {
+function emitEditTable(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   const tbl = tree.getNodeTable(node)
   if (db && tbl) emit('editTable', db, tbl)
 }
 
-function emitImportData(node: any) {
+function emitImportData(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   const tbl = tree.getNodeTable(node)
   if (db && tbl) emit('importData', db, tbl, tree.getNodeColumns(node))
 }
 
-function emitCreateTable(node: any) {
+function emitCreateTable(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   if (db) emit('createTable', db)
 }
 
-function emitDeleteTable(node: any) {
+function emitDeleteTable(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   const tbl = tree.getNodeTable(node)
   if (db && tbl) emit('deleteTable', db, tbl)
 }
 
-function emitTruncateTable(node: any) {
+function emitTruncateTable(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   const tbl = tree.getNodeTable(node)
   if (db && tbl) emit('truncateTable', db, tbl)
 }
 
-function emitShowCreateSql(node: any) {
+function emitShowCreateSql(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   const tbl = tree.getNodeTable(node)
   if (db && tbl) emit('showCreateSql', db, tbl)
 }
 
-function emitGenerateScript(node: any, scriptType: string) {
+function emitGenerateScript(node: DatabaseTreeNode, scriptType: string) {
   const db = tree.getNodeDatabase(node)
   const tbl = tree.getNodeTable(node)
   if (db && tbl) emit('generateScript', db, tbl, scriptType)
 }
 
-function emitExportDatabaseDdl(node: any) {
+function emitExportDatabaseDdl(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   if (db) emit('exportDatabaseDdl', db)
 }
 
-function emitShowDefinition(node: any) {
+function emitShowDefinition(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   const objectType = node.meta?.objectType
   if (db && objectType) emit('showObjectDefinition', db, node.label, objectType)
 }
 
-function emitExecuteRoutine(node: any) {
+function emitExecuteRoutine(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   const routineType = node.meta?.objectType // PROCEDURE 或 FUNCTION
   if (db && routineType) emit('executeRoutine', db, node.label, routineType)
 }
 
 /** 新建对象（从文件夹节点触发） */
-function emitCreateObject(node: any, objectType: string) {
+function emitCreateObject(node: DatabaseTreeNode, objectType: string) {
   const db = tree.getNodeDatabase(node)
   if (db) emit('createObject', db, objectType)
 }
 
 /** 编辑对象（从对象节点触发） */
-function emitEditObject(node: any) {
+function emitEditObject(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   const objectType = node.meta?.objectType
   if (db && objectType) emit('editObject', db, node.label, objectType)
 }
 
 /** 删除对象 */
-function emitDropObject(node: any) {
+function emitDropObject(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   const objectType = node.meta?.objectType
   if (db && objectType) emit('dropObject', db, node.label, objectType)
 }
 
-function emitBackupDatabase(node: any) {
+function emitBackupDatabase(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   if (db) emit('backupDatabase', db)
 }
 
-function emitRestoreDatabase(node: any) {
+function emitRestoreDatabase(node: DatabaseTreeNode) {
   const db = tree.getNodeDatabase(node)
   if (db) emit('restoreDatabase', db)
 }
@@ -236,19 +237,19 @@ defineExpose({
     <div ref="searchAreaRef" class="px-3 pt-2 pb-2 relative border-b border-border/5">
       <div class="relative group flex items-center h-8">
         <!-- Pill Background Container (拟物底座) -->
-        <div class="absolute inset-0 rounded-full bg-zinc-100/50 dark:bg-black/20 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.04),inset_0_0_0_1px_rgba(0,0,0,0.03),0_0.5px_0_rgba(255,255,255,0.6)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(255,255,255,0.04),0_0.5px_0_rgba(255,255,255,0.02)] transform-gpu transition-[background-color,box-shadow] duration-300 group-focus-within:bg-white dark:group-focus-within:bg-[#1C1C1E] group-focus-within:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05),0_4px_10px_rgba(0,0,0,0.03),0_0_0_1.5px_rgba(var(--primary-rgb),0.15)] dark:group-focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1),0_4px_12px_rgba(0,0,0,0.4),0_0_0_1.5px_rgba(var(--primary-rgb),0.2)]" />
+        <div class="absolute inset-0 rounded-full bg-muted/50 dark:bg-black/20 shadow-[inset_0_1.5px_3px_rgba(0,0,0,0.04),inset_0_0_0_1px_rgba(0,0,0,0.03),0_0.5px_0_rgba(255,255,255,0.6)] dark:shadow-[inset_0_2px_4px_rgba(0,0,0,0.3),inset_0_0_0_1px_rgba(255,255,255,0.04),0_0.5px_0_rgba(255,255,255,0.02)] transform-gpu transition-[background-color,box-shadow] duration-300 group-focus-within:bg-white dark:group-focus-within:bg-[#1C1C1E] group-focus-within:shadow-[inset_0_0_0_1px_rgba(0,0,0,0.05),0_4px_10px_rgba(0,0,0,0.03),0_0_0_1.5px_rgba(var(--primary-rgb),0.15)] dark:group-focus-within:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.1),0_4px_12px_rgba(0,0,0,0.4),0_0_0_1.5px_rgba(var(--primary-rgb),0.2)]" />
         
-        <Search class="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400 dark:text-zinc-500 transition-colors group-focus-within:text-primary z-10" />
+        <Search class="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground transition-colors group-focus-within:text-primary z-10" />
         <Input
           v-model="tree.combinedSearchQuery.value"
-          class="h-full w-full border-none bg-transparent pl-9 pr-8 text-[11px] font-medium text-zinc-700 dark:text-zinc-200 placeholder:text-zinc-400 dark:placeholder:text-zinc-500 shadow-none focus-visible:ring-0 z-10"
+          class="h-full w-full border-none bg-transparent pl-9 pr-8 text-[11px] font-medium text-foreground placeholder:text-muted-foreground shadow-none focus-visible:ring-0 z-10"
           :placeholder="t('objectTree.searchPlaceholder')"
           @keydown.escape="tree.combinedSearchQuery.value = ''; tree.showObjectSearchDropdown.value = false"
           @focus="tree.isObjectSearching.value && (tree.showObjectSearchDropdown.value = true)"
         />
         <button
           v-if="tree.combinedSearchQuery.value"
-          class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-zinc-400/60 hover:text-destructive hover:bg-destructive/5 transition-colors z-20"
+          class="absolute right-2 top-1/2 -translate-y-1/2 rounded-full p-1 text-muted-foreground/60 hover:text-destructive hover:bg-destructive/5 transition-colors z-20"
           @click="tree.combinedSearchQuery.value = ''; tree.showObjectSearchDropdown.value = false"
         >
           <X class="h-2.5 w-2.5" />
@@ -273,7 +274,7 @@ defineExpose({
             <div
               v-for="(item, idx) in tree.objectSearchResults.value"
               :key="item.node.id + '-' + idx"
-              class="group/item flex cursor-pointer items-center gap-2.5 px-3 py-2 text-xs transition-[background-color,border-color] duration-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] border-l-2 border-transparent hover:border-primary"
+              class="group/item flex cursor-pointer items-center gap-2.5 px-3 py-2 text-xs transition-[background-color,border-color] duration-200 hover:bg-accent/50 border-l-2 border-transparent hover:border-primary"
               @click="tree.handleSearchResultClick(item)"
             >
               <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-muted/40 text-muted-foreground">
@@ -332,7 +333,7 @@ defineExpose({
               <!-- 系统文件夹节点 -->
               <div
                 v-if="item.isSystemFolder"
-                class="group flex h-full grow cursor-pointer items-center gap-1 px-2 mx-1.5 rounded-[6px] text-xs transition-colors duration-300 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
+                class="group flex h-full grow cursor-pointer items-center gap-1 px-2 mx-1.5 rounded-[6px] text-xs transition-colors duration-300 hover:bg-accent/50"
                 role="treeitem"
                 :aria-expanded="tree.isSystemExpanded.value"
                 :aria-label="'系统管理'"
@@ -352,7 +353,7 @@ defineExpose({
               <!-- 系统子入口节点 -->
               <div
                 v-else-if="item.isSystem"
-                class="group flex h-full grow cursor-pointer items-center gap-1 mx-1.5 rounded-[6px] text-xs transition-colors duration-300 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
+                class="group flex h-full grow cursor-pointer items-center gap-1 mx-1.5 rounded-[6px] text-xs transition-colors duration-300 hover:bg-accent/50"
                 :style="{ paddingLeft: `${item.level * 12 + 12}px` }"
                 @click="item.systemAction === 'user' ? emit('openUserManagement') : emit('openPerformance')"
               >
@@ -369,7 +370,7 @@ defineExpose({
               <ContextMenu v-else-if="item.node">
                 <ContextMenuTrigger as-child>
                   <div
-                    class="group relative flex h-full grow cursor-pointer items-center gap-1 pr-2 mx-1.5 rounded-[6px] text-xs transition-[background-color,box-shadow] duration-300 transform-gpu hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
+                    class="group relative flex h-full grow cursor-pointer items-center gap-1 pr-2 mx-1.5 rounded-[6px] text-xs transition-[background-color,box-shadow] duration-300 transform-gpu hover:bg-accent/50"
                     :class="[
                       tree.highlightedNodeId.value === item.node.id
                         ? 'bg-primary/10 dark:bg-primary/20 shadow-[inset_0_0_0_1px_rgba(var(--primary-rgb),0.2)]'

@@ -45,9 +45,9 @@ function cycleJoinType() {
 const joinColor = computed(() => {
   switch (props.data.joinType) {
     case 'INNER': return 'bg-primary/10 text-primary border-primary/30'
-    case 'LEFT': return 'bg-blue-500/10 text-blue-600 border-blue-500/30'
-    case 'RIGHT': return 'bg-green-500/10 text-green-600 border-green-500/30'
-    case 'FULL': return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/30'
+    case 'LEFT': return 'bg-df-info/10 text-df-info border-df-info/30'
+    case 'RIGHT': return 'bg-df-success/10 text-df-success border-df-success/30'
+    case 'FULL': return 'bg-df-warning/10 text-df-warning border-df-warning/30'
     default: return 'bg-muted text-muted-foreground border-border'
   }
 })

@@ -57,7 +57,7 @@ const typeBadgeColors: Record<string, string> = {
   ssh: 'text-df-success',
   sftp: 'text-df-warning',
   redis: 'text-destructive',
-  git: 'text-purple-500',
+  git: 'text-df-info',
 }
 
 // 状态颜色 — connected 使用 df-success token

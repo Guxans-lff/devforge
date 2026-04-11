@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import { Archive, ArrowDownCircle, Trash2, ArrowUpFromDot } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -31,7 +32,7 @@ async function handleCreateStash() {
     toast.success(t('git.stashCreated'))
     stashMessage.value = ''
   } catch (e) {
-    toast.error(t('git.stashFailed'), String(e))
+    toast.error(t('git.stashFailed'), parseBackendError(e).message)
   }
 }
 
@@ -40,7 +41,7 @@ async function handleApplyStash(index: number) {
     await store.applyStash(props.repoPath, index)
     toast.success(t('git.stashApplied'))
   } catch (e) {
-    toast.error(t('git.stashApplyFailed'), String(e))
+    toast.error(t('git.stashApplyFailed'), parseBackendError(e).message)
   }
 }
 
@@ -49,7 +50,7 @@ async function handlePopStash(index: number) {
     await store.popStash(props.repoPath, index)
     toast.success(t('git.stashPopped'))
   } catch (e) {
-    toast.error(t('git.stashPopFailed'), String(e))
+    toast.error(t('git.stashPopFailed'), parseBackendError(e).message)
   }
 }
 
@@ -58,7 +59,7 @@ async function handleDropStash(index: number) {
     await store.dropStash(props.repoPath, index)
     toast.success(t('git.stashDropped'))
   } catch (e) {
-    toast.error(t('git.stashDropFailed'), String(e))
+    toast.error(t('git.stashDropFailed'), parseBackendError(e).message)
   }
 }
 </script>
@@ -95,7 +96,7 @@ async function handleDropStash(index: number) {
         <TooltipProvider :delay-duration="300">
           <Tooltip>
             <TooltipTrigger as-child>
-              <Button variant="ghost" size="icon" class="h-6 w-6" @click="handleApplyStash(s.index)">
+              <Button variant="ghost" size="icon" class="h-6 w-6" :aria-label="t('git.applyStash')" @click="handleApplyStash(s.index)">
                 <ArrowDownCircle class="h-3.5 w-3.5" />
               </Button>
             </TooltipTrigger>
@@ -103,7 +104,7 @@ async function handleDropStash(index: number) {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as-child>
-              <Button variant="ghost" size="icon" class="h-6 w-6" @click="handlePopStash(s.index)">
+              <Button variant="ghost" size="icon" class="h-6 w-6" :aria-label="t('git.popStash')" @click="handlePopStash(s.index)">
                 <ArrowUpFromDot class="h-3.5 w-3.5" />
               </Button>
             </TooltipTrigger>
@@ -111,7 +112,7 @@ async function handleDropStash(index: number) {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger as-child>
-              <Button variant="ghost" size="icon" class="h-6 w-6 text-destructive" @click="handleDropStash(s.index)">
+              <Button variant="ghost" size="icon" class="h-6 w-6 text-destructive" :aria-label="t('git.dropStash')" @click="handleDropStash(s.index)">
                 <Trash2 class="h-3.5 w-3.5" />
               </Button>
             </TooltipTrigger>

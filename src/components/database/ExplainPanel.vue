@@ -486,7 +486,7 @@ async function saveExplainPlan() {
 </template>
 
 <script lang="ts">
-import { defineComponent, h, type PropType } from 'vue'
+import { defineComponent, h, type PropType, type VNode } from 'vue'
 
 interface ExplainNodeType {
   id: string
@@ -533,10 +533,10 @@ const ExplainNodeItem = defineComponent({
       }
       const icon = n.level === 'bad' ? AlertTriangle : n.level === 'warn' ? AlertCircle : CheckCircle
 
-      const elements: any[] = []
+      const elements: VNode[] = []
 
       // 主行
-      const mainRowChildren: any[] = [
+      const mainRowChildren: VNode[] = [
         h(icon, { class: `h-3.5 w-3.5 shrink-0 ${levelColors[n.level]}` }),
         // 访问类型 badge
         h('span', {
@@ -561,7 +561,7 @@ const ExplainNodeItem = defineComponent({
       }
 
       // 右侧数据
-      const rightItems: any[] = []
+      const rightItems: VNode[] = []
       if (n.rows != null) {
         rightItems.push(h('span', { class: 'tabular-nums' }, `${n.rows.toLocaleString()} rows`))
       }
@@ -600,7 +600,7 @@ const ExplainNodeItem = defineComponent({
 
       // 展开的详情区域
       if (isExpanded && hasDetails) {
-        const detailItems: any[] = []
+        const detailItems: VNode[] = []
 
         if (n.possibleKeys?.length) {
           detailItems.push(

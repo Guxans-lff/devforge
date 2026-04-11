@@ -138,6 +138,23 @@
   --df-sidebar-from: oklch(0.99 0 0);
   --df-sidebar-via: oklch(0.977 0.001 264);
   --df-sidebar-to: oklch(0.955 0.001 264);
+  /* Git graph lane colors (light) */
+  --git-lane-0: oklch(0.55 0.2 250);
+  --git-lane-1: oklch(0.55 0.2 25);
+  --git-lane-2: oklch(0.55 0.17 145);
+  --git-lane-3: oklch(0.6 0.15 75);
+  --git-lane-4: oklch(0.55 0.2 300);
+  --git-lane-5: oklch(0.6 0.18 350);
+  --git-lane-6: oklch(0.55 0.15 195);
+  --git-lane-7: oklch(0.55 0.02 285);
+  --git-lane-8: oklch(0.6 0.18 250);
+  --git-lane-9: oklch(0.6 0.2 25);
+  --git-lane-10: oklch(0.6 0.15 145);
+  --git-lane-11: oklch(0.65 0.15 85);
+  --git-lane-12: oklch(0.6 0.18 300);
+  --git-lane-13: oklch(0.65 0.15 350);
+  --git-lane-14: oklch(0.6 0.12 195);
+  --git-lane-15: oklch(0.6 0.02 285);
 }
 
 .dark {
@@ -153,6 +170,23 @@
   --df-sidebar-from: oklch(0.08 0.005 285.8);
   --df-sidebar-via: oklch(0.08 0.005 285.8);
   --df-sidebar-to: oklch(0.08 0.005 285.8);
+  /* Git graph lane colors (dark) */
+  --git-lane-0: oklch(0.7 0.18 250);
+  --git-lane-1: oklch(0.7 0.18 25);
+  --git-lane-2: oklch(0.7 0.15 145);
+  --git-lane-3: oklch(0.75 0.13 75);
+  --git-lane-4: oklch(0.7 0.18 300);
+  --git-lane-5: oklch(0.75 0.15 350);
+  --git-lane-6: oklch(0.7 0.13 195);
+  --git-lane-7: oklch(0.65 0.02 285);
+  --git-lane-8: oklch(0.75 0.15 250);
+  --git-lane-9: oklch(0.75 0.18 25);
+  --git-lane-10: oklch(0.75 0.13 145);
+  --git-lane-11: oklch(0.8 0.13 85);
+  --git-lane-12: oklch(0.75 0.15 300);
+  --git-lane-13: oklch(0.8 0.13 350);
+  --git-lane-14: oklch(0.75 0.1 195);
+  --git-lane-15: oklch(0.75 0.02 285);
 }
 
 @layer base {

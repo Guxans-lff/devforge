@@ -26,6 +26,54 @@ use([
 /** 懒加载 vue-echarts 避免首次加载开销 */
 const VChart = defineAsyncComponent(() => import('vue-echarts'))
 
+/** ECharts tooltip 回调参数（精简版） */
+interface TooltipParam {
+  name: string
+  value: number
+  percent?: number
+}
+
+/** 从 CSS 变量读取 oklch 颜色并转为 hex（ECharts 需要） */
+function getCssColor(varName: string, fallback: string): string {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
+  if (!raw) return fallback
+  // 创建临时元素让浏览器解析 oklch → rgb
+  const el = document.createElement('div')
+  el.style.color = raw
+  document.body.appendChild(el)
+  const rgb = getComputedStyle(el).color
+  document.body.removeChild(el)
+  // rgb(r, g, b) → #rrggbb
+  const match = rgb.match(/(\d+)/g)
+  if (!match || match.length < 3) return fallback
+  return `#${match.slice(0, 3).map(n => Number(n).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** 从主题 CSS 变量获取 chart 配色 */
+function resolveChartColors(): [string, string][] {
+  const c1 = getCssColor('--chart-1', '#6366f1')
+  const c2 = getCssColor('--chart-2', '#3b82f6')
+  const c3 = getCssColor('--chart-3', '#f59e0b')
+  const c4 = getCssColor('--chart-4', '#10b981')
+  const c5 = getCssColor('--chart-5', '#8b5cf6')
+  // 每组渐变色使用相邻 chart 颜色
+  return [
+    [c1, c5],
+    [c2, c4],
+    [c3, c1],
+    [c4, c2],
+    [c5, c3],
+  ]
+}
+
+/** 主题感知 tooltip 样式 */
+function resolveTooltipStyle() {
+  const bg = getCssColor('--popover', '#ffffff')
+  const fg = getCssColor('--popover-foreground', '#333333')
+  const muted = getCssColor('--muted-foreground', '#666666')
+  return { bg, fg, muted }
+}
+
 const props = defineProps<{
   /** 行数据 */
   rows: unknown[][]
@@ -34,15 +82,6 @@ const props = defineProps<{
   /** 图表配置 */
   config: ChartConfig | null
 }>()
-
-/** 旗舰版配色方案 */
-const CHART_COLORS = [
-  ['#6366f1', '#a855f7'], // Indigo -> Purple
-  ['#3b82f6', '#2dd4bf'], // Blue -> Teal
-  ['#f59e0b', '#ef4444'], // Amber -> Red
-  ['#10b981', '#3b82f6'], // Emerald -> Blue
-  ['#8b5cf6', '#ec4899'], // Violet -> Pink
-]
 
 /** ECharts option */
 const chartOption = computed(() => {
@@ -97,23 +136,25 @@ function buildDirectOption(
 
     const total = finalData.reduce((sum, d) => sum + d.value, 0)
 
+    const ts = resolveTooltipStyle()
+
     return {
-      tooltip: { 
+      tooltip: {
         trigger: 'item',
-        backgroundColor: 'rgba(255,255,255,0.95)',
+        backgroundColor: ts.bg,
         borderRadius: 8,
         padding: [12, 16],
         shadowBlur: 10,
         shadowColor: 'rgba(0,0,0,0.1)',
-        textStyle: { color: '#333', fontSize: 12 },
-        formatter: (params: any) => {
+        textStyle: { color: ts.fg, fontSize: 12 },
+        formatter: (params: TooltipParam) => {
           return `<div style="font-weight:bold;margin-bottom:4px">${params.name}</div>
                   <div style="display:flex;justify-content:space-between;gap:20px">
-                    <span style="color:#666">数值:</span>
+                    <span style="color:${ts.muted}">数值:</span>
                     <span style="font-family:monospace">${params.value.toLocaleString()}</span>
                   </div>
                   <div style="display:flex;justify-content:space-between;gap:20px">
-                    <span style="color:#666">占比:</span>
+                    <span style="color:${ts.muted}">占比:</span>
                     <span style="font-family:monospace">${params.percent}%</span>
                   </div>`
         }
@@ -123,8 +164,8 @@ function buildDirectOption(
         subtext: total.toLocaleString(),
         left: 'center',
         top: 'middle',
-        textStyle: { fontSize: 14, color: '#888', fontWeight: 'normal' },
-        subtextStyle: { fontSize: 20, color: '#333', fontWeight: 'bold' }
+        textStyle: { fontSize: 14, color: ts.muted, fontWeight: 'normal' },
+        subtextStyle: { fontSize: 20, color: ts.fg, fontWeight: 'bold' }
       },
       series: [{
         type: 'pie',
@@ -132,7 +173,7 @@ function buildDirectOption(
         data: finalData,
         minAngle: 5,
         avoidLabelOverlap: true,
-        itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+        itemStyle: { borderRadius: 6, borderColor: ts.bg, borderWidth: 2 },
         label: { show: true, formatter: '{b}\n{d}%', fontSize: 11, minMargin: 5 },
         emphasis: { 
           scaleSize: 10,
@@ -143,8 +184,9 @@ function buildDirectOption(
   }
 
   // 柱状图/折线图/散点图
+  const chartColors = resolveChartColors()
   const series = yIdxList.map((yIdx, i) => {
-    const colors = CHART_COLORS[i % CHART_COLORS.length] as [string, string]
+    const colors = chartColors[i % chartColors.length] as [string, string]
     const baseStyle = {
       name: yColumnNames[i],
       smooth: chartType === 'line',
@@ -278,23 +320,25 @@ function buildAggregatedOption(
 
     const total = Math.round(finalData.reduce((sum, d) => sum + d.value, 0) * 100) / 100
 
+    const ts = resolveTooltipStyle()
+
     return {
-      tooltip: { 
+      tooltip: {
         trigger: 'item',
-        backgroundColor: 'rgba(255,255,255,0.95)',
+        backgroundColor: ts.bg,
         borderRadius: 8,
         padding: [12, 16],
         shadowBlur: 10,
         shadowColor: 'rgba(0,0,0,0.1)',
-        textStyle: { color: '#333', fontSize: 12 },
-        formatter: (params: any) => {
+        textStyle: { color: ts.fg, fontSize: 12 },
+        formatter: (params: TooltipParam) => {
           return `<div style="font-weight:bold;margin-bottom:4px">${params.name}</div>
                   <div style="display:flex;justify-content:space-between;gap:20px">
-                    <span style="color:#666">数值:</span>
+                    <span style="color:${ts.muted}">数值:</span>
                     <span style="font-family:monospace">${params.value.toLocaleString()}</span>
                   </div>
                   <div style="display:flex;justify-content:space-between;gap:20px">
-                    <span style="color:#666">占比:</span>
+                    <span style="color:${ts.muted}">占比:</span>
                     <span style="font-family:monospace">${params.percent}%</span>
                   </div>`
         }
@@ -304,8 +348,8 @@ function buildAggregatedOption(
         subtext: total.toLocaleString(),
         left: 'center',
         top: 'middle',
-        textStyle: { fontSize: 14, color: '#888', fontWeight: 'normal' },
-        subtextStyle: { fontSize: 20, color: '#333', fontWeight: 'bold' }
+        textStyle: { fontSize: 14, color: ts.muted, fontWeight: 'normal' },
+        subtextStyle: { fontSize: 20, color: ts.fg, fontWeight: 'bold' }
       },
       series: [{ 
         type: 'pie', 
@@ -313,7 +357,7 @@ function buildAggregatedOption(
         data: finalData,
         minAngle: 5,
         avoidLabelOverlap: true,
-        itemStyle: { borderRadius: 6, borderColor: '#fff', borderWidth: 2 },
+        itemStyle: { borderRadius: 6, borderColor: ts.bg, borderWidth: 2 },
         label: { show: true, formatter: '{b}\n{d}%', fontSize: 11, minMargin: 5 },
         emphasis: { 
           scaleSize: 10,
@@ -323,8 +367,9 @@ function buildAggregatedOption(
     }
   }
 
+  const chartColors = resolveChartColors()
   const series = yIdxList.map((yIdx, i) => {
-    const colors = CHART_COLORS[i % CHART_COLORS.length] as [string, string]
+    const colors = chartColors[i % chartColors.length] as [string, string]
     const data = categories.map(cat => {
       const catRows = groups.get(cat) ?? []
       if (aggregation === 'count') return catRows.length

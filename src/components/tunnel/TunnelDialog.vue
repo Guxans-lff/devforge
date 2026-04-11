@@ -186,47 +186,46 @@ onMounted(() => {
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="sm:max-w-[520px] bg-zinc-900 border-zinc-800 text-zinc-100">
+    <DialogContent class="sm:max-w-[520px] bg-background border-border text-foreground">
       <DialogHeader>
-        <DialogTitle class="flex items-center gap-2 text-zinc-100">
-          <Cable class="h-5 w-5 text-zinc-400" />
+        <DialogTitle class="flex items-center gap-2 text-foreground">
+          <Cable class="h-5 w-5 text-muted-foreground" />
           {{ t('tunnel.title') }}
         </DialogTitle>
-        <DialogDescription class="text-zinc-500">
+        <DialogDescription class="text-muted-foreground">
           {{ t('tunnel.noTunnelsHint') }}
         </DialogDescription>
       </DialogHeader>
 
       <!-- Active Tunnels -->
       <div class="space-y-2">
-        <p class="text-xs font-medium text-zinc-400 uppercase tracking-wide">
-          {{ t('tunnel.status') }}
+        <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide">
         </p>
-        <ScrollArea class="max-h-40 rounded-md border border-zinc-800 bg-zinc-950">
+        <ScrollArea class="max-h-40 rounded-md border border-border bg-muted">
           <div v-if="loadingTunnels" class="flex items-center justify-center py-6">
-            <Loader2 class="h-4 w-4 animate-spin text-zinc-500" />
+            <Loader2 class="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
           <div v-else-if="tunnels.length === 0" class="flex flex-col items-center justify-center py-6 gap-1">
-            <Cable class="h-6 w-6 text-zinc-700" />
-            <p class="text-xs text-zinc-600">{{ t('tunnel.noTunnels') }}</p>
+            <Cable class="h-6 w-6 text-muted-foreground/50" />
+            <p class="text-xs text-muted-foreground">{{ t('tunnel.noTunnels') }}</p>
           </div>
           <div v-else class="p-1 space-y-1">
             <div
               v-for="tunnel in tunnels"
               :key="tunnel.tunnelId"
-              class="flex items-center justify-between px-3 py-2 rounded-md hover:bg-zinc-800/60 group"
+              class="flex items-center justify-between px-3 py-2 rounded-md hover:bg-accent/60 group"
             >
               <div class="flex items-center gap-2 min-w-0">
                 <Badge
                   :variant="tunnel.status === 'active' ? 'default' : 'secondary'"
                   class="shrink-0 text-[10px] px-1.5 py-0"
-                  :class="tunnel.status === 'active' ? 'bg-df-success/20 text-df-success border-df-success/30' : 'bg-zinc-700 text-zinc-400'"
+                  :class="tunnel.status === 'active' ? 'bg-df-success/20 text-df-success border-df-success/30' : 'bg-muted text-muted-foreground'"
                 >
                   {{ t(`tunnel.${tunnel.status}`) }}
                 </Badge>
-                <span class="text-xs text-zinc-300 font-mono truncate flex items-center gap-1">
+                <span class="text-xs text-foreground/80 font-mono truncate flex items-center gap-1">
                   :{{ tunnel.localPort }}
-                  <ArrowRight class="h-3 w-3 text-zinc-600 shrink-0" />
+                  <ArrowRight class="h-3 w-3 text-muted-foreground shrink-0" />
                   {{ tunnel.remoteHost }}:{{ tunnel.remotePort }}
                 </span>
               </div>
@@ -234,7 +233,7 @@ onMounted(() => {
                 <Button
                   variant="ghost"
                   size="icon"
-                  class="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/50"
+                  class="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground hover:bg-accent/50"
                   :title="t('tunnel.copyAddress')"
                   @click="copyLocalAddress(tunnel)"
                 >
@@ -244,7 +243,7 @@ onMounted(() => {
                 <Button
                   variant="ghost"
                   size="icon"
-                  class="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 hover:bg-red-400/10"
+                  class="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                   :disabled="closingId === tunnel.tunnelId"
                   @click="handleClose(tunnel.tunnelId)"
                 >
@@ -257,11 +256,11 @@ onMounted(() => {
         </ScrollArea>
       </div>
 
-      <Separator class="bg-zinc-800" />
+      <Separator class="bg-border" />
 
       <!-- New Tunnel Form -->
       <div class="space-y-3">
-        <p class="text-xs font-medium text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
+        <p class="text-xs font-medium text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
           <Plus class="h-3.5 w-3.5" />
           {{ t('tunnel.newTunnel') }}
         </p>
@@ -269,18 +268,18 @@ onMounted(() => {
         <div class="grid grid-cols-2 gap-3">
           <!-- 从已有连接选择 -->
           <div class="col-span-2 space-y-1.5">
-            <Label class="text-xs text-zinc-400">{{ t('tunnel.selectConnection') }}</Label>
+            <Label class="text-xs text-muted-foreground">{{ t('tunnel.selectConnection') }}</Label>
             <Select :model-value="selectedConnectionId" @update:model-value="handleSelectConnection">
-              <SelectTrigger class="h-8 text-sm bg-zinc-950 border-zinc-700 text-zinc-100">
+              <SelectTrigger class="h-8 text-sm bg-background border-border text-foreground">
                 <SelectValue :placeholder="t('tunnel.manualInput')" />
               </SelectTrigger>
-              <SelectContent class="bg-zinc-900 border-zinc-700">
-                <SelectItem value="" class="text-zinc-300">{{ t('tunnel.manualInput') }}</SelectItem>
+              <SelectContent class="bg-popover border-border">
+                <SelectItem value="" class="text-foreground">{{ t('tunnel.manualInput') }}</SelectItem>
                 <SelectItem
                   v-for="conn in sshConnections"
                   :key="conn.record.id"
                   :value="conn.record.id"
-                  class="text-zinc-300"
+                  class="text-foreground"
                 >
                   {{ conn.record.name }} ({{ conn.record.host }})
                 </SelectItem>
@@ -290,101 +289,101 @@ onMounted(() => {
 
           <!-- SSH 主机 -->
           <div class="col-span-2 space-y-1.5">
-            <Label class="text-xs text-zinc-400">{{ t('tunnel.sshHost') }}</Label>
+            <Label class="text-xs text-muted-foreground">{{ t('tunnel.sshHost') }}</Label>
             <Input
               v-model="form.sshHost"
               placeholder="ssh.example.com"
-              class="h-8 text-sm bg-zinc-950 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+              class="h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
             />
           </div>
 
           <!-- SSH 用户名 + 端口 -->
           <div class="space-y-1.5">
-            <Label class="text-xs text-zinc-400">{{ t('tunnel.sshUsername') }}</Label>
+            <Label class="text-xs text-muted-foreground">{{ t('tunnel.sshUsername') }}</Label>
             <Input
               v-model="form.sshUsername"
               placeholder="root"
-              class="h-8 text-sm bg-zinc-950 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+              class="h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
             />
           </div>
 
           <div class="space-y-1.5">
-            <Label class="text-xs text-zinc-400">{{ t('tunnel.sshPort') }}</Label>
+            <Label class="text-xs text-muted-foreground">{{ t('tunnel.sshPort') }}</Label>
             <Input
               v-model.number="form.sshPort"
               type="number"
               placeholder="22"
-              class="h-8 text-sm bg-zinc-950 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+              class="h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
             />
           </div>
 
           <!-- 认证方式：密码 -->
           <div v-if="form.authMethod !== 'key'" class="col-span-2 space-y-1.5">
-            <Label class="text-xs text-zinc-400">{{ t('tunnel.sshPassword') }}</Label>
+            <Label class="text-xs text-muted-foreground">{{ t('tunnel.sshPassword') }}</Label>
             <Input
               v-model="form.sshPassword"
               type="password"
               placeholder="••••••••"
-              class="h-8 text-sm bg-zinc-950 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+              class="h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
             />
           </div>
 
           <!-- 认证方式：私钥 -->
           <template v-if="form.authMethod === 'key'">
             <div class="col-span-2 space-y-1.5">
-              <Label class="text-xs text-zinc-400">{{ t('connection.privateKey') }}</Label>
+              <Label class="text-xs text-muted-foreground">{{ t('connection.privateKey') }}</Label>
               <Input
                 v-model="form.privateKeyPath"
                 :placeholder="t('connection.privateKeyPlaceholder')"
-                class="h-8 text-sm bg-zinc-950 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+                class="h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
               />
             </div>
             <div class="col-span-2 space-y-1.5">
-              <Label class="text-xs text-zinc-400">{{ t('connection.passphrase') }}</Label>
+              <Label class="text-xs text-muted-foreground">{{ t('connection.passphrase') }}</Label>
               <Input
                 v-model="form.passphrase"
                 type="password"
                 :placeholder="t('connection.passphrasePlaceholder')"
-                class="h-8 text-sm bg-zinc-950 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+                class="h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
               />
             </div>
           </template>
 
           <!-- 远程主机 + 端口 -->
           <div class="space-y-1.5">
-            <Label class="text-xs text-zinc-400">{{ t('tunnel.remoteHost') }}</Label>
+            <Label class="text-xs text-muted-foreground">{{ t('tunnel.remoteHost') }}</Label>
             <Input
               v-model="form.remoteHost"
               placeholder="127.0.0.1"
-              class="h-8 text-sm bg-zinc-950 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+              class="h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
             />
           </div>
 
           <div class="space-y-1.5">
-            <Label class="text-xs text-zinc-400">{{ t('tunnel.remotePort') }}</Label>
+            <Label class="text-xs text-muted-foreground">{{ t('tunnel.remotePort') }}</Label>
             <Input
               v-model.number="form.remotePort"
               type="number"
               placeholder="3306"
-              class="h-8 text-sm bg-zinc-950 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+              class="h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
             />
           </div>
 
           <!-- 本地端口 + 提交按钮 -->
           <div class="space-y-1.5">
-            <Label class="text-xs text-zinc-400">{{ t('tunnel.localPort') }}</Label>
+            <Label class="text-xs text-muted-foreground">{{ t('tunnel.localPort') }}</Label>
             <Input
               v-model.number="form.localPort"
               type="number"
               placeholder="0"
-              class="h-8 text-sm bg-zinc-950 border-zinc-700 text-zinc-100 placeholder:text-zinc-600 focus-visible:ring-zinc-600"
+              class="h-8 text-sm bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
             />
-            <p class="text-[10px] text-zinc-600">{{ t('tunnel.localPortHint') }}</p>
+            <p class="text-[10px] text-muted-foreground">{{ t('tunnel.localPortHint') }}</p>
           </div>
 
           <div class="flex items-end">
             <Button
-              class="w-full h-8 text-sm bg-zinc-700 hover:bg-zinc-600 text-zinc-100"
+              class="w-full h-8 text-sm bg-muted hover:bg-accent text-foreground"
               :disabled="opening || !canSubmit"
               @click="handleOpen"
             >

@@ -83,7 +83,7 @@ const byteCount = computed(() => new TextEncoder().encode(props.value ?? '').len
       <pre
         class="text-xs font-mono leading-relaxed select-text"
         :class="wrapText ? 'whitespace-pre-wrap break-all' : 'whitespace-pre'"
-      ><template v-for="(seg, i) in segments" :key="i"><span :class="seg.highlight ? 'bg-yellow-300/50 text-yellow-900 dark:bg-yellow-500/30 dark:text-yellow-200 rounded-sm px-0.5' : ''">{{ seg.text }}</span></template></pre>
+      ><template v-for="(seg, i) in segments" :key="i"><span :class="seg.highlight ? 'bg-df-warning/20 text-df-warning rounded-sm px-0.5' : ''">{{ seg.text }}</span></template></pre>
     </div>
 
     <!-- 底部信息 -->

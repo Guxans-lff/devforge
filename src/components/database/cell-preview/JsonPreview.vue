@@ -134,7 +134,7 @@ const tree = computed(() => buildTree(parsed.value))
 function getValueClass(type: string): string {
   switch (type) {
     case 'string': return 'text-df-success'
-    case 'number': return 'text-blue-600 dark:text-blue-400'
+    case 'number': return 'text-primary'
     case 'boolean': return 'text-df-warning'
     case 'null': return 'text-muted-foreground/50 italic'
     default: return ''
@@ -214,7 +214,7 @@ function formatNodeValue(node: JsonNode): string {
                   <ChevronRight v-if="collapsedPaths.has(child.path)" class="h-3 w-3 text-muted-foreground" />
                   <ChevronDown v-else class="h-3 w-3 text-muted-foreground" />
                 </button>
-                <span class="text-purple-600 dark:text-purple-400 cursor-pointer" @click="copyPath(child.path)">{{ child.key }}</span>
+                <span class="text-primary/80 dark:text-primary/70 cursor-pointer" @click="copyPath(child.path)">{{ child.key }}</span>
                 <span class="text-muted-foreground/50 ml-1">
                   {{ formatBracketLabel(child.type, child.childCount) }}
                 </span>
@@ -232,7 +232,7 @@ function formatNodeValue(node: JsonNode): string {
                         <ChevronRight v-if="collapsedPaths.has(sub.path)" class="h-3 w-3 text-muted-foreground" />
                         <ChevronDown v-else class="h-3 w-3 text-muted-foreground" />
                       </button>
-                      <span class="text-purple-600 dark:text-purple-400 cursor-pointer" @click="copyPath(sub.path)">{{ sub.key }}</span>
+                      <span class="text-primary/80 dark:text-primary/70 cursor-pointer" @click="copyPath(sub.path)">{{ sub.key }}</span>
                       <span class="text-muted-foreground/50 ml-1">
                         {{ formatBracketLabel(sub.type, sub.childCount) }}
                       </span>
@@ -240,7 +240,7 @@ function formatNodeValue(node: JsonNode): string {
                     <div v-if="!collapsedPaths.has(sub.path)" class="ml-4 border-l border-border/30 pl-1">
                       <div v-for="leaf in sub.children" :key="leaf.path" class="flex items-start gap-0.5 hover:bg-muted/30 rounded-sm px-1 py-0.5">
                         <span class="w-3 shrink-0" />
-                        <span class="text-purple-600 dark:text-purple-400 cursor-pointer" @click="copyPath(leaf.path)">{{ leaf.key }}</span>
+                        <span class="text-primary/80 dark:text-primary/70 cursor-pointer" @click="copyPath(leaf.path)">{{ leaf.key }}</span>
                         <span class="text-muted-foreground/50 mx-0.5">:</span>
                         <span :class="getValueClass(leaf.type)" class="break-all">
                           {{ formatNodeValue(leaf) }}
@@ -251,7 +251,7 @@ function formatNodeValue(node: JsonNode): string {
                   <template v-else>
                     <div class="flex items-start gap-0.5 hover:bg-muted/30 rounded-sm px-1 py-0.5">
                       <span class="w-3 shrink-0" />
-                      <span class="text-purple-600 dark:text-purple-400 cursor-pointer" @click="copyPath(sub.path)">{{ sub.key }}</span>
+                      <span class="text-primary/80 dark:text-primary/70 cursor-pointer" @click="copyPath(sub.path)">{{ sub.key }}</span>
                       <span class="text-muted-foreground/50 mx-0.5">:</span>
                       <span :class="getValueClass(sub.type)" class="break-all">{{ formatPrimitive(sub.value, sub.type) }}</span>
                     </div>
@@ -263,7 +263,7 @@ function formatNodeValue(node: JsonNode): string {
             <template v-else>
               <div class="flex items-start gap-0.5 hover:bg-muted/30 rounded-sm px-1 py-0.5">
                 <span class="w-3 shrink-0" />
-                <span class="text-purple-600 dark:text-purple-400 cursor-pointer" @click="copyPath(child.path)">{{ child.key }}</span>
+                <span class="text-primary/80 dark:text-primary/70 cursor-pointer" @click="copyPath(child.path)">{{ child.key }}</span>
                 <span class="text-muted-foreground/50 mx-0.5">:</span>
                 <span :class="getValueClass(child.type)" class="break-all">{{ formatPrimitive(child.value, child.type) }}</span>
               </div>

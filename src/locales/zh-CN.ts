@@ -282,6 +282,7 @@ export default {
     searchTables: '搜索表...',
     noSearchResults: '未找到匹配项',
     rowsPerPage: '每页行数',
+    goToPage: '跳转到页码',
     reconnect: '重新连接',
     showMore: '显示更多 ({count} 项)',
     showCreateTable: '查看建表语句',
@@ -290,6 +291,7 @@ export default {
     loadingMore: '加载中',
     filter: '过滤',
     filterPlaceholder: '过滤...',
+    filterOperator: '过滤操作符',
     updateSuccess: '行已更新',
     deleteSuccess: '行已删除',
     deleteConfirm: '确定要删除这一行吗？',
@@ -1089,6 +1091,9 @@ export default {
     selectTarget: '选择目标主机',
     selectDesc: '点击顶部的选择器，勾选要同步执行指令的目标终端机。',
     noSshDesc: '当前资产库暂无 SSH 类型连接，请先去侧边栏添加。',
+    gridLayout: '网格布局',
+    verticalLayout: '垂直布局',
+    horizontalLayout: '水平布局',
   },
   recording: {
     start: '开始录制',
@@ -1623,6 +1628,23 @@ export default {
     size: '大小',
     deleteKey: '删除',
     unsupportedType: '不支持的类型',
+    renameSuccess: '重命名成功',
+    renameFailed: '重命名失败',
+    ttlSetFailed: '设置 TTL 失败',
+    saveSuccess: '已保存',
+    saveFailed: '保存失败',
+    createSuccess: '键 {key} 已创建',
+    createFailed: '创建失败',
+    // 类型编辑器通用
+    loadHashFailed: '加载 Hash 失败',
+    loadListFailed: '加载 List 失败',
+    loadSetFailed: '加载 Set 失败',
+    loadZSetFailed: '加载 ZSet 失败',
+    loadStringFailed: '加载值失败',
+    addFailed: '添加失败',
+    addFieldFailed: '添加字段失败',
+    serverInfoFailed: '获取服务器信息失败',
+    stopFailed: '停止失败',
     // 类型编辑器
     stringValue: 'String 值',
     fieldName: '字段名',
@@ -1917,6 +1939,9 @@ export default {
     stashPopped: '储藏已弹出',
     stashPopFailed: '弹出储藏失败',
     // Push / Pull / Fetch
+    fetch: '获取',
+    pull: '拉取',
+    push: '推送',
     refresh: '刷新',
     pushSuccess: '推送成功',
     pushFailed: '推送失败',
@@ -2001,6 +2026,8 @@ export default {
     rebaseDragHint: '拖拽调整提交顺序，选择操作后点击执行',
     // 搜索
     searchPlaceholder: '搜索提交…',
+    searchField: '搜索字段',
+    clearSearch: '清除搜索',
     searchByMessage: '按消息',
     searchByAuthor: '按作者',
     searchByHash: '按哈希',
@@ -2031,6 +2058,12 @@ export default {
     // 通用
     openFailed: '打开仓库失败',
     refreshFailed: '刷新状态失败',
+    // 状态栏
+    statusStaged: '已暂存',
+    statusModified: '已修改',
+    statusUntracked: '未跟踪',
+    statusClean: '工作区干净',
+    lightweight: '轻量标签',
   },
   screenshot: {
     // 模式

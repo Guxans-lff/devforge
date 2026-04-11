@@ -4,6 +4,7 @@
  * 9 个标注工具：箭头、矩形、椭圆、文字、马赛克、模糊、画笔、高亮、序号
  */
 import { useI18n } from 'vue-i18n'
+import type { Component } from 'vue'
 import {
   ArrowUpRight,
   Square,
@@ -27,7 +28,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const tools: { id: AnnotationTool; icon: any; labelKey: string }[] = [
+const tools: { id: AnnotationTool; icon: Component; labelKey: string }[] = [
   { id: 'arrow', icon: ArrowUpRight, labelKey: 'screenshot.toolbar.arrow' },
   { id: 'rectangle', icon: Square, labelKey: 'screenshot.toolbar.rectangle' },
   { id: 'ellipse', icon: Circle, labelKey: 'screenshot.toolbar.ellipse' },

@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Code, Play, Loader2, Trash2 } from 'lucide-vue-next'
 import { redisEvalLua, redisScriptFlush } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import { useTheme } from '@/composables/useTheme'
 import { useSettingsStore } from '@/stores/settings'
 
@@ -133,7 +134,7 @@ async function handleExecute() {
     durationMs.value = result.durationMs
     hasResult.value = true
   } catch (e) {
-    resultText.value = (e as any)?.message ?? String(e)
+    resultText.value = parseBackendError(e).message
     durationMs.value = 0
     hasResult.value = true
     isError.value = true
@@ -148,13 +149,13 @@ async function handleFlush() {
     await redisScriptFlush(props.connectionId)
     toast.success(t('redis.lua.flushed'))
   } catch (e) {
-    toast.error(t('redis.lua.flushFailed'), (e as any)?.message ?? String(e))
+    toast.error(t('redis.lua.flushFailed'), parseBackendError(e).message)
   }
 }
 </script>
 
 <template>
-  <div class="flex h-full flex-col border-l border-border/40 bg-zinc-950/50">
+  <div class="flex h-full flex-col border-l border-border/40 bg-background/50">
     <!-- 头部 -->
     <div class="flex items-center gap-2 px-3 py-1.5 border-b border-border/20 shrink-0">
       <Code class="h-3.5 w-3.5 text-muted-foreground/50" />

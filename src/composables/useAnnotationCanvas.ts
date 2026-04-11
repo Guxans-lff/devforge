@@ -24,9 +24,9 @@ function stackBlur(imageData: ImageData, radius: number) {
   const wm = width - 1
   const hm = height - 1
   const div = radius + radius + 1
-  const r: any[] = new Array(width * height)
-  const g: any[] = new Array(width * height)
-  const b: any[] = new Array(width * height)
+  const r: number[] = new Array(width * height)
+  const g: number[] = new Array(width * height)
+  const b: number[] = new Array(width * height)
 
   let rSum: number, gSum: number, bSum: number
   let p: number, p1: number, p2: number

@@ -5,6 +5,7 @@
  * 定位在选区下方（空间不足时移到上方）
  */
 import { useI18n } from 'vue-i18n'
+import type { Component } from 'vue'
 import {
   ArrowUpRight,
   Square,
@@ -46,7 +47,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
-const tools: { id: AnnotationTool; icon: any; labelKey: string }[] = [
+const tools: { id: AnnotationTool; icon: Component; labelKey: string }[] = [
   { id: 'arrow', icon: ArrowUpRight, labelKey: 'screenshot.toolbar.arrow' },
   { id: 'rectangle', icon: Square, labelKey: 'screenshot.toolbar.rectangle' },
   { id: 'ellipse', icon: Circle, labelKey: 'screenshot.toolbar.ellipse' },

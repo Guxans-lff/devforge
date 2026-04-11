@@ -109,10 +109,10 @@ export function highlightSql(sql: string): string {
   escaped = escaped.replace(SQL_KEYWORDS_PATTERN,
     (m) => { kwSpans.push(m); return `__KW${kwSpans.length - 1}__` })
   // 高亮数字
-  escaped = escaped.replace(/\b(\d+)\b/g, '<span class="text-amber-400">$1</span>')
+  escaped = escaped.replace(/\b(\d+)\b/g, '<span class="text-df-warning">$1</span>')
   // 还原关键字
-  escaped = escaped.replace(/__KW(\d+)__/g, (_, i) => `<span class="text-blue-400">${kwSpans[Number(i)]}</span>`)
+  escaped = escaped.replace(/__KW(\d+)__/g, (_, i) => `<span class="text-primary">${kwSpans[Number(i)]}</span>`)
   // 还原字符串字面量
-  escaped = escaped.replace(/__STR(\d+)__/g, (_, i) => `<span class="text-green-400">${strings[Number(i)]}</span>`)
+  escaped = escaped.replace(/__STR(\d+)__/g, (_, i) => `<span class="text-df-success">${strings[Number(i)]}</span>`)
   return escaped
 }

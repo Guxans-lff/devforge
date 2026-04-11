@@ -6,7 +6,7 @@
  * 建模模式：可编辑的数据建模工具
  */
 import { ref, onMounted, watch, computed, markRaw } from 'vue'
-import { VueFlow, useVueFlow } from '@vue-flow/core'
+import { VueFlow, useVueFlow, type NodeChange } from '@vue-flow/core'
 import { MiniMap } from '@vue-flow/minimap'
 import { Controls } from '@vue-flow/controls'
 import { Search, LayoutGrid, Download, Maximize, Loader2, AlertCircle, Pencil, Eye } from 'lucide-vue-next'
@@ -200,7 +200,7 @@ const directionLabel = computed(() =>
           :default-viewport="{ zoom: 0.8, x: 50, y: 50 }"
           fit-view-on-init
           class="h-full w-full bg-background"
-          @nodes-change="(changes: any) => {
+          @nodes-change="(changes: NodeChange[]) => {
             for (const change of changes) {
               if (change.type === 'position' && change.position) {
                 nodes = nodes.map(n =>

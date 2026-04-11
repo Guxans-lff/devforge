@@ -6,6 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { RefreshCw, ChevronRight } from 'lucide-vue-next'
 import { redisGetInfo, redisClusterNodes } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
+import { parseBackendError } from '@/types/error'
 import type { RedisServerInfo, ClusterNodeInfo } from '@/types/redis'
 
 const props = defineProps<{
@@ -31,8 +32,8 @@ async function loadInfo() {
         clusterNodeList.value = await redisClusterNodes(props.connectionId)
       } catch { /* 忽略 */ }
     }
-  } catch (e) {
-    toast.error('获取服务器信息失败', (e as any)?.message ?? String(e))
+  } catch (e: unknown) {
+    toast.error(t('redis.serverInfoFailed'), parseBackendError(e).message)
   } finally {
     loading.value = false
   }
@@ -135,7 +136,7 @@ onMounted(() => { loadInfo() })
                 :key="entry.key"
                 class="flex items-center px-8 py-1 text-xs hover:bg-muted/10"
               >
-                <span class="w-[200px] shrink-0 font-mono text-muted-foreground/60 truncate">{{ entry.key }}</span>
+                <span class="w-[200px] max-w-[40%] shrink-0 font-mono text-muted-foreground/60 truncate">{{ entry.key }}</span>
                 <span class="font-mono text-foreground/70 truncate">{{ entry.value }}</span>
               </div>
             </div>

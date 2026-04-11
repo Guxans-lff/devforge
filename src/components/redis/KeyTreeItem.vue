@@ -23,6 +23,8 @@ const props = defineProps<{
   selectedKey: string | null
   batchMode?: boolean
   selectedKeys?: Set<string>
+  /** 扁平模式：不渲染子节点（由外部虚拟滚动控制） */
+  flat?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -113,8 +115,8 @@ function countLeaves(node: TreeNode): number {
       </ContextMenuContent>
     </ContextMenu>
 
-    <!-- 子节点递归 -->
-    <template v-if="!node.isLeaf && node.expanded">
+    <!-- 子节点递归（扁平模式下跳过，由外部虚拟滚动控制） -->
+    <template v-if="!flat && !node.isLeaf && node.expanded">
       <KeyTreeItem
         v-for="child in node.children"
         :key="child.fullKey"

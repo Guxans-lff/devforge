@@ -38,12 +38,12 @@ const OP_STYLES: Record<string, { color: string; bg: string; label: string }> = 
   UPDATE: { color: 'text-df-warning', bg: 'bg-df-warning/10 border-df-warning/20', label: 'UPDATE' },
   DELETE: { color: 'text-destructive', bg: 'bg-destructive/10 border-destructive/20', label: 'DELETE' },
   CREATE: { color: 'text-primary', bg: 'bg-primary/10 border-primary/20', label: 'CREATE' },
-  ALTER: { color: 'text-purple-600', bg: 'bg-purple-500/10 border-purple-500/20', label: 'ALTER' },
-  DROP: { color: 'text-red-700', bg: 'bg-red-600/10 border-red-600/20', label: 'DROP' },
+  ALTER: { color: 'text-df-info', bg: 'bg-df-info/10 border-df-info/20', label: 'ALTER' },
+  DROP: { color: 'text-destructive', bg: 'bg-destructive/10 border-destructive/20', label: 'DROP' },
   TRUNCATE: { color: 'text-destructive', bg: 'bg-destructive/10 border-destructive/20', label: 'TRUNCATE' },
-  GRANT: { color: 'text-teal-600', bg: 'bg-teal-500/10 border-teal-500/20', label: 'GRANT' },
-  REVOKE: { color: 'text-orange-600', bg: 'bg-orange-500/10 border-orange-500/20', label: 'REVOKE' },
-  REPLACE: { color: 'text-cyan-600', bg: 'bg-cyan-500/10 border-cyan-500/20', label: 'REPLACE' },
+  GRANT: { color: 'text-df-success', bg: 'bg-df-success/10 border-df-success/20', label: 'GRANT' },
+  REVOKE: { color: 'text-df-warning', bg: 'bg-df-warning/10 border-df-warning/20', label: 'REVOKE' },
+  REPLACE: { color: 'text-primary', bg: 'bg-primary/10 border-primary/20', label: 'REPLACE' },
   CALL: { color: 'text-primary', bg: 'bg-primary/10 border-primary/20', label: 'CALL' },
 }
 const DEFAULT_STYLE = { color: 'text-muted-foreground', bg: 'bg-muted/20 border-border/30', label: '其他' }

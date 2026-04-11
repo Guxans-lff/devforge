@@ -316,7 +316,7 @@ const diskChartOption = computed(() => {
           <!-- CPU -->
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-1">
-              <Cpu class="h-3.5 w-3.5 text-blue-500" />
+              <Cpu class="h-3.5 w-3.5 text-primary" />
               <span class="text-[11px] font-medium">CPU</span>
             </div>
             <div class="text-xl font-bold tabular-nums" :class="monitor.latest.value.cpuUsage > 80 ? 'text-destructive' : 'text-foreground'">
@@ -330,7 +330,7 @@ const diskChartOption = computed(() => {
           <!-- 内存 -->
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-1">
-              <MemoryStick class="h-3.5 w-3.5 text-violet-500" />
+              <MemoryStick class="h-3.5 w-3.5 text-df-info" />
               <span class="text-[11px] font-medium">{{ t('monitor.memory') }}</span>
             </div>
             <div class="text-xl font-bold tabular-nums" :class="memPercent > 85 ? 'text-destructive' : 'text-foreground'">
@@ -344,7 +344,7 @@ const diskChartOption = computed(() => {
           <!-- 负载 -->
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-1">
-              <Activity class="h-3.5 w-3.5 text-emerald-500" />
+              <Activity class="h-3.5 w-3.5 text-df-success" />
               <span class="text-[11px] font-medium">{{ t('monitor.load') }}</span>
             </div>
             <div class="text-xl font-bold tabular-nums text-foreground">
@@ -358,7 +358,7 @@ const diskChartOption = computed(() => {
           <!-- 运行时间 -->
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-1">
-              <Clock class="h-3.5 w-3.5 text-amber-500" />
+              <Clock class="h-3.5 w-3.5 text-df-warning" />
               <span class="text-[11px] font-medium">{{ t('monitor.uptime') }}</span>
             </div>
             <div class="text-xl font-bold tabular-nums text-foreground">
@@ -375,7 +375,7 @@ const diskChartOption = computed(() => {
           <!-- CPU 曲线 -->
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-2">
-              <Cpu class="h-3 w-3 text-blue-500" />
+              <Cpu class="h-3 w-3 text-primary" />
               <span class="text-[11px] font-medium">{{ t('monitor.cpuUsage') }}</span>
             </div>
             <VChart :option="cpuChartOption" :autoresize="true" class="h-40" />
@@ -384,7 +384,7 @@ const diskChartOption = computed(() => {
           <!-- 内存曲线 -->
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-2">
-              <MemoryStick class="h-3 w-3 text-violet-500" />
+              <MemoryStick class="h-3 w-3 text-df-info" />
               <span class="text-[11px] font-medium">{{ t('monitor.memoryUsage') }}</span>
             </div>
             <VChart :option="memoryChartOption" :autoresize="true" class="h-40" />
@@ -393,7 +393,7 @@ const diskChartOption = computed(() => {
           <!-- 网络 IO -->
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-2">
-              <Network class="h-3 w-3 text-emerald-500" />
+              <Network class="h-3 w-3 text-df-success" />
               <span class="text-[11px] font-medium">{{ t('monitor.networkIo') }}</span>
               <span v-if="monitor.latest.value.networkRates.length > 0" class="ml-auto text-[10px] tabular-nums">
                 ↓ {{ formatBytesRate(monitor.latest.value.networkRates[0]!.rxRate) }}
@@ -406,7 +406,7 @@ const diskChartOption = computed(() => {
           <!-- 磁盘使用率 -->
           <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
             <div class="flex items-center gap-2 text-muted-foreground mb-2">
-              <HardDrive class="h-3 w-3 text-amber-500" />
+              <HardDrive class="h-3 w-3 text-df-warning" />
               <span class="text-[11px] font-medium">{{ t('monitor.diskUsage') }}</span>
             </div>
             <VChart :option="diskChartOption" :autoresize="true" class="h-40" />
@@ -447,7 +447,7 @@ const diskChartOption = computed(() => {
                       <div class="w-16 h-1.5 bg-muted rounded-full overflow-hidden">
                         <div
                           class="h-full rounded-full transition-all"
-                          :class="disk.usePercent > 90 ? 'bg-destructive' : disk.usePercent > 70 ? 'bg-amber-500' : 'bg-emerald-500'"
+                          :class="disk.usePercent > 90 ? 'bg-destructive' : disk.usePercent > 70 ? 'bg-df-warning' : 'bg-df-success'"
                           :style="{ width: `${Math.min(disk.usePercent, 100)}%` }"
                         />
                       </div>
@@ -478,7 +478,7 @@ const diskChartOption = computed(() => {
           {{ t('monitor.samplingInterval') }}: {{ (monitor.interval.value / 1000).toFixed(0) }}s
           · {{ t('monitor.samples') }}: {{ monitor.history.value.length }}
         </span>
-        <span v-if="!monitor.running.value" class="text-amber-500">
+        <span v-if="!monitor.running.value" class="text-df-warning">
           {{ t('monitor.stopped') }}
         </span>
       </div>

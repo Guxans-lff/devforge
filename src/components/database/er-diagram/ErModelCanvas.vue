@@ -6,7 +6,7 @@
  * 支持双击添加表、拖拽连线创建外键、快捷键撤销/重做等交互。
  */
 import { ref, computed, watch, markRaw, onMounted, onBeforeUnmount } from 'vue'
-import { VueFlow, useVueFlow } from '@vue-flow/core'
+import { VueFlow, useVueFlow, type NodeChange } from '@vue-flow/core'
 import { MiniMap } from '@vue-flow/minimap'
 import { Controls } from '@vue-flow/controls'
 import { save, open } from '@tauri-apps/plugin-dialog'
@@ -105,14 +105,14 @@ function handlePaneDoubleClick(event: { event: MouseEvent }) {
 }
 
 /** 节点拖拽结束 → 更新位置 */
-function handleNodesChange(changes: any[]) {
+function handleNodesChange(changes: NodeChange[]) {
   for (const change of changes) {
     if (change.type === 'position' && change.position && change.dragging === false) {
       updateTablePosition(change.id, change.position)
     }
     // 拖拽中也要实时更新节点位置
     if (change.type === 'position' && change.position) {
-      nodes.value = nodes.value.map((n: any) =>
+      nodes.value = nodes.value.map((n) =>
         n.id === change.id ? { ...n, position: change.position } : n,
       )
     }
@@ -148,12 +148,12 @@ function handleConnect(params: { source: string; target: string; sourceHandle?: 
 /** 删除选中的节点或边 */
 function handleDelete() {
   // 检查是否有选中的边
-  const selectedEdges = edges.value.filter((e: any) => e.selected)
+  const selectedEdges = edges.value.filter((e) => e.selected)
   for (const edge of selectedEdges) {
     removeRelation(edge.id)
   }
   // 检查选中的节点
-  const selectedNodes = nodes.value.filter((n: any) => n.selected)
+  const selectedNodes = nodes.value.filter((n) => n.selected)
   for (const node of selectedNodes) {
     if (confirm(`确定删除表「${project.value.tables.find(t => t.id === node.id)?.name}」？`)) {
       removeTable(node.id)

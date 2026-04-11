@@ -102,13 +102,13 @@ export function useOcr() {
       const ocrResult: OcrResult = {
         text: data.text,
         confidence: data.confidence,
-        lines: ((data as any).lines ?? []).map((line: any) => ({
-          text: line.text,
-          confidence: line.confidence,
-          words: (line.words ?? []).map((word: any) => ({
-            text: word.text,
-            confidence: word.confidence,
-            bbox: word.bbox,
+        lines: ((data as Record<string, unknown>).lines as Array<Record<string, unknown>> ?? []).map((line) => ({
+          text: line.text as string,
+          confidence: line.confidence as number,
+          words: ((line.words as Array<Record<string, unknown>>) ?? []).map((word) => ({
+            text: word.text as string,
+            confidence: word.confidence as number,
+            bbox: word.bbox as { x0: number; y0: number; x1: number; y1: number },
           })),
         })),
       }
