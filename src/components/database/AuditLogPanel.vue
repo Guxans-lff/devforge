@@ -3,7 +3,7 @@
  * AuditLogPanel - 操作审计日志面板
  * 时间线展示所有 DDL/DML 操作记录
  */
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -139,7 +139,8 @@ async function handleCleanup() {
 
 function copyToClipboard(text: string) {
   navigator.clipboard.writeText(text)
-  message.success('已复制到剪贴板')
+    .then(() => message.success('已复制到剪贴板'))
+    .catch(() => message.error('复制失败'))
 }
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
@@ -148,6 +149,10 @@ watch(searchQuery, () => {
   searchTimer = setTimeout(() => loadLogs(), 300)
 })
 watch(filterType, () => loadLogs())
+
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
 
 onMounted(() => {
   loadLogs()

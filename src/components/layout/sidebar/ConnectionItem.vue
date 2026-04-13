@@ -53,7 +53,7 @@ const typeIcons: Record<string, typeof Database> = {
 
 // 类型颜色 — 使用 design tokens
 const typeBadgeColors: Record<string, string> = {
-  database: 'text-primary',
+  database: 'text-blue-500',
   ssh: 'text-df-success',
   sftp: 'text-df-warning',
   redis: 'text-destructive',

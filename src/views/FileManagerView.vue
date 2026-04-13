@@ -296,7 +296,7 @@ async function handleUpload(entry: FileEntry) {
 
     if (entry.isDir) {
       // 文件夹：使用递归上传（后台执行，立即返回）
-      workspace.setBottomPanelTab('transfer')
+      workspace.setBottomPanelTab('transfer', true)
       sftpApi.uploadFolderRecursive(props.connectionId, entry.path, remoteTarget)
         .catch((e: unknown) => toast.error(t('toast.uploadFailed'), String(e)))
     } else {
@@ -313,7 +313,7 @@ async function handleUpload(entry: FileEntry) {
         totalBytes: entry.size ?? 0,
       })
 
-      workspace.setBottomPanelTab('transfer')
+      workspace.setBottomPanelTab('transfer', true)
       await sftpApi.startUploadChunked(transferId, props.connectionId, entry.path, remoteTarget)
     }
   } catch (e) {
@@ -331,7 +331,7 @@ async function handleDownload(entry: FileEntry) {
 
     if (entry.isDir) {
       // 文件夹：使用递归下载（后台执行，立即返回）
-      workspace.setBottomPanelTab('transfer')
+      workspace.setBottomPanelTab('transfer', true)
       sftpApi.downloadFolderRecursive(props.connectionId, entry.path, localTarget)
         .catch((e: unknown) => toast.error(t('toast.downloadFailed'), String(e)))
     } else {
@@ -348,7 +348,7 @@ async function handleDownload(entry: FileEntry) {
         totalBytes: entry.size ?? 0,
       })
 
-      workspace.setBottomPanelTab('transfer')
+      workspace.setBottomPanelTab('transfer', true)
       await sftpApi.startDownloadChunked(transferId, props.connectionId, entry.path, localTarget)
     }
   } catch (e) {
@@ -458,7 +458,7 @@ async function handleDropToRemote(entries: FileEntry[], targetPath: string) {
         connectionId: props.connectionId,
         totalBytes: entry.size ?? 0,
       })
-      workspace.setBottomPanelTab('transfer')
+      workspace.setBottomPanelTab('transfer', true)
       await sftpApi.startUploadChunked(transferId, props.connectionId, entry.path, remoteTarget)
     }
   }
@@ -487,7 +487,7 @@ async function handleDropToLocal(entries: FileEntry[], targetPath: string) {
         connectionId: props.connectionId,
         totalBytes: entry.size ?? 0,
       })
-      workspace.setBottomPanelTab('transfer')
+      workspace.setBottomPanelTab('transfer', true)
       try {
         await sftpApi.startDownloadChunked(transferId, props.connectionId, entry.path, localTarget)
       } catch (e: unknown) {

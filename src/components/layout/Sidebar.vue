@@ -131,7 +131,7 @@ const themeIcon = computed(() => {
 
 // 折叠态连接类型颜色 — 使用 design tokens
 const collapsedTypeBadgeColors: Record<string, string> = {
-  database: 'text-primary',
+  database: 'text-blue-500',
   ssh: 'text-df-success',
   sftp: 'text-df-warning',
   redis: 'text-destructive',

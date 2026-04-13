@@ -32,6 +32,7 @@ import { FileDown, FolderOpen, Loader2 } from 'lucide-vue-next'
 import { dbExportData } from '@/api/database'
 import { useNotification } from '@/composables/useNotification'
 import type { ExportFormat, ExportProgress } from '@/types/export'
+import { ensureErrorString } from '@/types/error'
 
 // ===== Props & Emits =====
 
@@ -278,7 +279,7 @@ async function handleExport() {
       emit('exported', { rowCount: result.rowCount, fileSize: result.fileSize })
       emit('update:open', false)
     } else {
-      notification.error('导出失败', result.error ?? '未知错误')
+      notification.error('导出失败', ensureErrorString(result.error) || '未知错误')
     }
   } catch (e) {
     notification.error('导出失败', String(e))

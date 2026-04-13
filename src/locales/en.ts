@@ -854,6 +854,9 @@ export default {
     copyFieldName: 'Copy Field Name',
     copyFieldDdl: 'Copy Field DDL',
     deleteField: 'Delete Field',
+    moveUp: 'Move Up',
+    moveDown: 'Move Down',
+    validationReservedKeyword: 'Column name is a MySQL reserved keyword, consider renaming',
     // Index editor
     indexColName: 'Name',
     indexColType: 'Type',

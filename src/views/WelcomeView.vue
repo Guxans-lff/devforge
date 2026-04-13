@@ -14,6 +14,8 @@ import {
   Plus,
   ArrowRight,
   Zap,
+  GitBranch,
+  Container,
 } from 'lucide-vue-next'
 import type { TabType } from '@/types/workspace'
 import ConnectionDialog from '@/components/connection/ConnectionDialog.vue'
@@ -162,6 +164,19 @@ const statusColorMap = Object.freeze<Record<string, string>>({
   connecting: 'bg-df-warning animate-pulse',
   error: 'bg-destructive',
 })
+
+/** 连接类型 → 图标映射 */
+const connectionIconMap: Record<string, typeof Database> = {
+  database: Database,
+  ssh: Terminal,
+  sftp: FolderOpen,
+  redis: Container,
+  git: GitBranch,
+}
+
+function getConnectionIcon(type: string) {
+  return connectionIconMap[type] ?? Database
+}
 </script>
 
 <template>
@@ -270,9 +285,9 @@ const statusColorMap = Object.freeze<Record<string, string>>({
                 @click="openConnection(conn)"
               >
                 <div class="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border/50 bg-muted/20 group-hover:bg-background group-hover:border-primary/20 group-hover:shadow-sm transition-[background-color,border-color,box-shadow] duration-300">
-                  <component 
-                    :is="conn.record.type === 'database' ? Database : (conn.record.type === 'ssh' ? Terminal : FolderOpen)" 
-                    class="h-5 w-5 text-muted-foreground/50 transition-colors group-hover:text-primary" 
+                  <component
+                    :is="getConnectionIcon(conn.record.type)"
+                    class="h-5 w-5 text-muted-foreground/50 transition-colors group-hover:text-primary"
                   />
                   <div class="absolute -bottom-1 -right-1 h-3 w-3 rounded-full border-2 border-background shadow-sm" :class="statusColorMap[conn.status] ?? 'bg-muted-foreground/40'" />
                 </div>

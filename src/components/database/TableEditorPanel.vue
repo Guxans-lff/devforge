@@ -7,7 +7,7 @@ import { ref, computed, onMounted, onUnmounted, nextTick, toRef, watch } from 'v
 import { useI18n } from 'vue-i18n'
 import {
   Plus, X, Loader2, Code, Play, ChevronRight, Table2, Key, FileCode,
-  Columns3, Copy, Check, Link2, Search, Trash2, Zap,
+  Columns3, Copy, Check, Link2, Search, Trash2, Zap, ArrowUp, ArrowDown,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -468,6 +468,17 @@ onUnmounted(() => {
         <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2" @click="editor.contextCopyDdl">
           <Code class="size-3 text-muted-foreground/50" />
           {{ t('tableEditor.copyFieldDdl') }}
+        </button>
+        <div role="separator" class="my-1 border-t border-border" />
+        <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2" :disabled="editor.contextMenuIdx.value <= 0" :class="{ 'opacity-40 cursor-not-allowed': editor.contextMenuIdx.value <= 0 }" @click="editor.contextMenuIdx.value > 0 && (editor.moveColumn(editor.contextMenuIdx.value, -1), editor.closeContextMenu())">
+          <ArrowUp class="size-3 text-muted-foreground/50" />
+          {{ t('tableEditor.moveUp') }}
+          <span class="ml-auto text-[10px] text-muted-foreground/40">Alt+↑</span>
+        </button>
+        <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2" :disabled="editor.contextMenuIdx.value >= editor.columns.value.length - 1" :class="{ 'opacity-40 cursor-not-allowed': editor.contextMenuIdx.value >= editor.columns.value.length - 1 }" @click="editor.contextMenuIdx.value < editor.columns.value.length - 1 && (editor.moveColumn(editor.contextMenuIdx.value, 1), editor.closeContextMenu())">
+          <ArrowDown class="size-3 text-muted-foreground/50" />
+          {{ t('tableEditor.moveDown') }}
+          <span class="ml-auto text-[10px] text-muted-foreground/40">Alt+↓</span>
         </button>
         <div role="separator" class="my-1 border-t border-border" />
         <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2 text-destructive" @click="editor.contextDelete">

@@ -184,7 +184,7 @@ async function handleDownload(entry: FileEntry) {
       connectionId: props.connectionId,
       totalBytes: entry.size ?? 0,
     })
-    workspace.setBottomPanelTab('transfer')
+    workspace.setBottomPanelTab('transfer', true)
     await sftpApi.startDownloadChunked(transferId, props.connectionId, entry.path, localTarget)
   } catch (e) {
     toast.error(t('toast.downloadFailed'), String(e))

@@ -18,7 +18,7 @@ import type { QueryResult, QueryChunk, ErrorStrategy } from '@/types/database'
 import type { QueryTabContext, ResultTab, SubStatementResult } from '@/types/database-workspace'
 import { isMultiStatement, extractTableName } from '@/utils/sqlParser'
 import type { EnvironmentType } from '@/types/environment'
-import { parseBackendError } from '@/types/error'
+import { parseBackendError, ensureErrorString } from '@/types/error'
 
 /** useQueryExecution 入参 */
 export interface UseQueryExecutionOptions {
@@ -126,31 +126,51 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   }
 
   // ===== 长耗时通知 =====
-  let longRunningNotifyId: ReturnType<typeof setTimeout> | null = null
+  let longRunningDelayTimer: ReturnType<typeof setTimeout> | null = null
+  let longRunningUpdateTimer: ReturnType<typeof setInterval> | null = null
+  let longRunningMsgId: string | null = null
 
   function startExecutionTimer() {
     executionTimer.start()
     clearLongRunningNotify()
-    longRunningNotifyId = setTimeout(() => {
-      if (isExecuting.value) {
-        notification.warning(
-          t('database.longRunningTitle'),
-          t('database.longRunningDesc', { time: executionTimer.elapsed.value }),
-          0,
-        )
-      }
+    longRunningDelayTimer = setTimeout(() => {
+      if (!isExecuting.value) return
+      // 首次通知（不自动关闭）
+      longRunningMsgId = notification.warning(
+        t('database.longRunningTitle'),
+        t('database.longRunningDesc', { time: executionTimer.elapsed.value }),
+        0,
+      )
+      // 每 5 秒更新耗时
+      longRunningUpdateTimer = setInterval(() => {
+        if (!isExecuting.value || !longRunningMsgId) {
+          clearLongRunningNotify()
+          return
+        }
+        notification.updateMessage(longRunningMsgId, {
+          description: t('database.longRunningDesc', { time: executionTimer.elapsed.value }),
+        })
+      }, 5000)
     }, 5000)
   }
 
   function stopExecutionTimer() {
     executionTimer.stop()
+    if (longRunningMsgId) {
+      notification.dismiss(longRunningMsgId)
+      longRunningMsgId = null
+    }
     clearLongRunningNotify()
   }
 
   function clearLongRunningNotify() {
-    if (longRunningNotifyId) {
-      clearTimeout(longRunningNotifyId)
-      longRunningNotifyId = null
+    if (longRunningDelayTimer) {
+      clearTimeout(longRunningDelayTimer)
+      longRunningDelayTimer = null
+    }
+    if (longRunningUpdateTimer) {
+      clearInterval(longRunningUpdateTimer)
+      longRunningUpdateTimer = null
     }
   }
 
@@ -263,7 +283,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         if (execVersion !== executeVersion) return
         if (chunk.columns && chunk.columns.length > 0) allColumns = chunk.columns
         if (chunk.rows && chunk.rows.length > 0) allRows = [...allRows, ...chunk.rows]
-        if (chunk.error) lastError = chunk.error
+        if (chunk.error) lastError = ensureErrorString(chunk.error)
         if (chunk.totalTimeMs !== null && chunk.totalTimeMs !== undefined) totalTimeMs = chunk.totalTimeMs
 
         store.updateTabContext(connectionId.value, tabId.value, {
@@ -282,8 +302,10 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         connectionId.value, tabId.value, sql, onChunk, currentDb, timeoutSecs,
       ).catch(e => { rejectStream!(e) })
 
+      // 流式响应初始化超时：取用户查询超时的一半，至少 10 秒
+      const streamInitTimeoutMs = Math.max(10_000, (queryTimeout.value * 1000) / 2)
       const waitTimeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('流式查询响应超时')), 5000),
+        setTimeout(() => reject(new Error('流式查询响应超时')), streamInitTimeoutMs),
       )
 
       await Promise.race([
@@ -335,11 +357,15 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       stopExecutionTimer()
       // 版本号不匹配说明已有新操作，丢弃此结果
       if (execVersion !== executeVersion) return
+      // 防御性处理：后端可能返回对象类型的 error，需确保为字符串
+      if (result.error !== null && result.error !== undefined) {
+        result.error = ensureErrorString(result.error)
+      }
       store.updateTabContext(connectionId.value, tabId.value, { result, isExecuting: false })
 
       const executionTime = Date.now() - startTime
       if (result.isError) {
-        notification.error(t('database.queryFailed'), result.error ?? undefined, true)
+        notification.error(t('database.queryFailed'), ensureErrorString(result.error), true)
       } else {
         addResultTab(sql, result)
         const rowCount = result.totalCount ?? result.rows.length

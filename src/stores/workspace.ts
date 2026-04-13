@@ -4,6 +4,7 @@ import { usePersistence } from '@/plugins/persistence'
 import type { Tab, PanelState, WorkspaceSnapshot } from '@/types/workspace'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useConnectionStore } from '@/stores/connections'
+import { useTransferStore } from '@/stores/transfer'
 
 /** localStorage 遗留 key（仅用于一次性迁移） */
 const LEGACY_SNAPSHOT_KEY = 'devforge-workspace-snapshot'
@@ -31,6 +32,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeTab = computed(() =>
     tabs.value.find((t) => t.id === activeTabId.value),
   )
+
+  /** 底部面板是否由程序自动打开（非用户手动操作），用于切换页面时自动关闭 */
+  let _bottomPanelAutoOpened = false
 
   function addTab(tab: Tab) {
     const existing = tabs.value.find((t) => t.id === tab.id)
@@ -115,6 +119,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   function setActiveTab(tabId: string) {
     activeTabId.value = tabId
+    // 切换页面时：如果底部面板是程序自动打开的（如传输），且无活跃传输任务，自动收起
+    if (_bottomPanelAutoOpened && !panelState.value.bottomPanelCollapsed) {
+      try {
+        const transferStore = useTransferStore()
+        const hasActive = Array.from(transferStore.tasks.values()).some(
+          t => t.status === 'pending' || t.status === 'transferring',
+        )
+        if (!hasActive) {
+          panelState.value = { ...panelState.value, bottomPanelCollapsed: true }
+          _bottomPanelAutoOpened = false
+        }
+      } catch {
+        // transferStore 尚未初始化时静默忽略
+      }
+    }
   }
 
   function toggleSidebar() {
@@ -125,6 +144,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function toggleBottomPanel() {
+    _bottomPanelAutoOpened = false  // 用户手动操作，清除自动标记
     panelState.value = {
       ...panelState.value,
       bottomPanelCollapsed: !panelState.value.bottomPanelCollapsed,
@@ -139,7 +159,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panelState.value = { ...panelState.value, bottomPanelHeight: height }
   }
 
-  function setBottomPanelTab(tab: PanelState['bottomPanelTab']) {
+  function setBottomPanelTab(tab: PanelState['bottomPanelTab'], autoOpen = false) {
+    _bottomPanelAutoOpened = autoOpen  // 仅程序触发时标记为自动打开
     panelState.value = {
       ...panelState.value,
       bottomPanelTab: tab,

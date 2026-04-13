@@ -102,7 +102,7 @@ function handleExecute() {
 }
 
 function handleCopySql() {
-  navigator.clipboard.writeText(generatedSql.value)
+  navigator.clipboard.writeText(generatedSql.value).catch(() => { /* 静默 */ })
 }
 
 function close() {

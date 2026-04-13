@@ -878,6 +878,9 @@ export default {
     copyFieldName: '复制字段名',
     copyFieldDdl: '复制字段 DDL',
     deleteField: '删除字段',
+    moveUp: '上移字段',
+    moveDown: '下移字段',
+    validationReservedKeyword: '字段名是 MySQL 保留关键字，建议避免使用',
     // 索引编辑器
     indexColName: '名称',
     indexColType: '类型',
@@ -978,6 +981,7 @@ export default {
     searchPlaceholder: '搜索表、视图、函数...',
     viewDefinition: '查看定义',
     viewData: '查看数据',
+    loadFailed: '对象加载失败',
   },
   explain: {
     title: '执行计划',

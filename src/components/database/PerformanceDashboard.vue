@@ -250,10 +250,10 @@ function startAutoRefresh() {
   stopAutoRefresh()
   if (activeSubTab.value === 'dashboard') {
     fetchServerStatus()
-    refreshTimer = setInterval(fetchServerStatus, 5000)
+    refreshTimer = setInterval(() => { fetchServerStatus().catch(() => {}) }, 5000)
   } else if (activeSubTab.value === 'processes') {
     fetchProcesses()
-    refreshTimer = setInterval(fetchProcesses, 5000)
+    refreshTimer = setInterval(() => { fetchProcesses().catch(() => {}) }, 5000)
   } else if (activeSubTab.value === 'variables') {
     fetchVariables()
   }

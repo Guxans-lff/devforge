@@ -60,6 +60,24 @@ function isBackendError(obj: unknown): obj is BackendError {
   return typeof o.kind === 'string' && typeof o.message === 'string'
 }
 
+/**
+ * 确保错误信息为可展示的字符串，防止 [object Object] 展示
+ * 适用于后端 API 返回的 result.error 字段（运行时可能为对象）
+ */
+export function ensureErrorString(err: unknown): string {
+  if (err === null || err === undefined) return ''
+  if (typeof err === 'string') return err
+  if (err instanceof Error) return err.message
+  if (typeof err === 'object') {
+    const e = err as Record<string, unknown>
+    if (typeof e.message === 'string') return e.message
+    if (typeof e.msg === 'string') return e.msg
+    if (typeof e.error === 'string') return e.error
+    return JSON.stringify(err)
+  }
+  return String(err)
+}
+
 /** 判断错误是否可重试 */
 export function isRetryable(err: unknown): boolean {
   return parseBackendError(err).retryable

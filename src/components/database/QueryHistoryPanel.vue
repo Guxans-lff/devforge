@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -68,6 +68,8 @@ async function handleClearAll() {
 
 function handleCopy(sql: string) {
   navigator.clipboard.writeText(sql)
+    .then(() => { /* 复制成功 */ })
+    .catch(() => { /* 复制失败 */ })
   emit('copy', sql)
 }
 
@@ -130,6 +132,7 @@ const groupedRecords = computed(() => {
   return groups
 })
 
+/** SQL 语法高亮（安全：先转义 HTML 实体再插入 span 标签，防止 XSS） */
 function highlightSql(sql: string) {
   const keywords = ['SELECT', 'FROM', 'WHERE', 'UPDATE', 'DELETE', 'INSERT', 'INTO', 'VALUES', 'SET', 'ORDER', 'BY', 'GROUP', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'ON', 'LIMIT', 'OFFSET', 'UNION', 'ALL', 'DISTINCT', 'AS']
   let escaped = sql.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -153,6 +156,10 @@ watch(searchText, () => {
 })
 
 onMounted(() => loadHistory(true))
+
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
 </script>
 
 <template>

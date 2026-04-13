@@ -5,6 +5,7 @@
  */
 import { ref, computed, watch } from 'vue'
 import { dbGetObjectDefinition, dbExecuteQueryInDatabase } from '@/api/database'
+import { ensureErrorString } from '@/types/error'
 import { Button } from '@/components/ui/button'
 import { useMessage } from '@/stores/message-center'
 import { Play, X, Loader2 } from 'lucide-vue-next'
@@ -119,7 +120,7 @@ async function executeSql() {
 
     const result = await dbExecuteQueryInDatabase(props.connectionId, props.database, sql)
     if (result.isError) {
-      executionError.value = result.error ?? '执行失败'
+      executionError.value = ensureErrorString(result.error) || '执行失败'
     } else {
       message.success(`${isEditMode.value ? '修改' : '创建'}成功`)
       emit('saved')

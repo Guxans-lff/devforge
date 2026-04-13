@@ -459,13 +459,12 @@ const activeSessionInfo = computed(() => {
     </div>
 
     <!-- 主展示区 -->
-    <div class="flex-1 flex overflow-hidden bg-background relative">
+    <div class="min-h-0 flex-1 flex overflow-hidden bg-background relative">
       <!-- 服务器监控仪表盘 -->
       <ServerDashboard
         v-if="viewMode === 'dashboard'"
         :connection-id="connectionId"
         :active="viewMode === 'dashboard'"
-        class="flex-1"
       />
 
       <div v-show="viewMode === 'terminal'" class="flex-1 flex overflow-hidden">

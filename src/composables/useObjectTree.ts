@@ -4,6 +4,7 @@
  */
 import { ref, computed, watch, onActivated, markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useToast } from '@/composables/useToast'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import * as dbApi from '@/api/database'
 import { fetchWithCache, invalidateByPrefix } from '@/composables/useMetadataCache'
@@ -42,6 +43,7 @@ export function useObjectTree(options: UseObjectTreeOptions) {
   } = options
 
   const { t } = useI18n()
+  const toast = useToast()
   const treeNodes = ref<DatabaseTreeNode[]>([])
   const loading = ref(false)
   const searchQuery = ref('')
@@ -327,6 +329,8 @@ export function useObjectTree(options: UseObjectTreeOptions) {
       }
     } catch (e) {
       node.children = []
+      const msg = e instanceof Error ? e.message : String(e)
+      toast.error(t('objectTree.loadFailed'), msg)
       console.error(`[ObjectTree] 加载 ${node.folderType} 失败:`, e)
     } finally {
       node.isLoading = false
@@ -350,6 +354,8 @@ export function useObjectTree(options: UseObjectTreeOptions) {
       }))
     } catch (e) {
       node.children = []
+      const msg = e instanceof Error ? e.message : String(e)
+      toast.error(t('objectTree.loadFailed'), msg)
       console.error(`[ObjectTree] 加载列信息失败:`, e)
     } finally {
       node.isLoading = false

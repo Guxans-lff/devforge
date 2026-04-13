@@ -41,7 +41,7 @@ import { useToast } from '@/composables/useToast'
 import { useSchemaCache } from '@/composables/useSchemaCache'
 import { useNotification } from '@/composables/useNotification'
 import { parseEnvironment, parseReadOnly, parseConfirmDanger } from '@/api/connection'
-import { parseBackendError } from '@/types/error'
+import { parseBackendError, ensureErrorString } from '@/types/error'
 import type { EnvironmentType } from '@/types/environment'
 
 const props = defineProps<{
@@ -483,7 +483,7 @@ async function handleConfirmDeleteTable() {
     const sql = `DROP TABLE ${q(database)}.${q(table)};`
     const result = await dbApi.dbExecuteQueryInDatabase(props.connectionId, database, sql)
     if (result.isError) {
-      notification.error(t('database.queryFailed'), result.error ?? undefined, true)
+      notification.error(t('database.queryFailed'), ensureErrorString(result.error), true)
     } else {
       notification.success(t('database.querySuccess'), t('database.tableDeleted', { table }), 3000)
       getObjectTree()?.silentRefresh()
@@ -509,7 +509,7 @@ async function handleConfirmTruncateTable() {
     const sql = `TRUNCATE TABLE ${q(database)}.${q(table)};`
     const result = await dbApi.dbExecuteQueryInDatabase(props.connectionId, database, sql)
     if (result.isError) {
-      notification.error(t('database.queryFailed'), result.error ?? undefined, true)
+      notification.error(t('database.queryFailed'), ensureErrorString(result.error), true)
     } else {
       notification.success(t('database.querySuccess'), t('database.tableTruncated', { table }), 3000)
     }
@@ -557,7 +557,7 @@ async function handleConfirmDropObject() {
     const sql = `DROP ${objectType} IF EXISTS ${q(database)}.${q(objectName)};`
     const result = await dbApi.dbExecuteQueryInDatabase(props.connectionId, database, sql)
     if (result.isError) {
-      notification.error(t('database.deleteFailed'), result.error ?? undefined, true)
+      notification.error(t('database.deleteFailed'), ensureErrorString(result.error), true)
     } else {
       const typeLabel: Record<string, string> = { VIEW: t('database.objectTypeView'), PROCEDURE: t('database.objectTypeProcedure'), FUNCTION: t('database.objectTypeFunction'), TRIGGER: t('database.objectTypeTrigger') }
       notification.success(t('database.deleteObjectSuccess'), t('database.objectDeleted', { type: typeLabel[objectType] ?? objectType, name: objectName }), 3000)

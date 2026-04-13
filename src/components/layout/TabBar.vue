@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connections'
 import { useMessageCenterStore } from '@/stores/message-center'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Database,
@@ -19,6 +18,7 @@ import {
   GitBranch,
   Camera,
   Cable,
+  Container,
 } from 'lucide-vue-next'
 import type { TabType } from '@/types/workspace'
 import { parseEnvironment } from '@/api/connection'
@@ -38,7 +38,7 @@ const iconMap: Record<TabType, typeof Database> = {
   welcome: Home,
   'terminal-player': Play,
   'multi-exec': TerminalSquare,
-  redis: Database,
+  redis: Container,
   git: GitBranch,
   screenshot: Camera,
   tunnel: Cable,
@@ -125,13 +125,74 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
   if (!env) return null
   return ENV_PRESETS[env]?.color ?? null
 }
+
+// ===== Tab 滚动溢出处理 =====
+const tabScrollRef = ref<HTMLDivElement | null>(null)
+const canScrollLeft = ref(false)
+const canScrollRight = ref(false)
+
+/** 检测是否存在溢出 */
+function updateScrollState() {
+  const el = tabScrollRef.value
+  if (!el) return
+  canScrollLeft.value = el.scrollLeft > 1
+  canScrollRight.value = el.scrollLeft + el.clientWidth < el.scrollWidth - 1
+}
+
+/** 鼠标滚轮转换为水平滚动 */
+function handleTabWheel(e: WheelEvent) {
+  const el = tabScrollRef.value
+  if (!el) return
+  if (el.scrollWidth <= el.clientWidth) return
+  e.preventDefault()
+  el.scrollLeft += e.deltaY !== 0 ? e.deltaY : e.deltaX
+}
+
+/** 确保活跃 tab 可见 */
+function scrollActiveTabIntoView() {
+  nextTick(() => {
+    const el = tabScrollRef.value
+    if (!el) return
+    const activeEl = el.querySelector('[aria-selected="true"]') as HTMLElement | null
+    if (activeEl) {
+      activeEl.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+    }
+    updateScrollState()
+  })
+}
+
+// 标签变化时更新滚动状态 + 滚动到活跃标签
+watch(() => workspace.tabs.length, scrollActiveTabIntoView)
+watch(() => workspace.activeTabId, scrollActiveTabIntoView)
+
+onMounted(() => {
+  updateScrollState()
+  const el = tabScrollRef.value
+  if (el) el.addEventListener('scroll', updateScrollState, { passive: true })
+})
+
+onBeforeUnmount(() => {
+  const el = tabScrollRef.value
+  if (el) el.removeEventListener('scroll', updateScrollState)
+})
 </script>
 
 <template>
   <nav :aria-label="t('tab.navigation')" class="relative z-[35] flex h-11 items-center bg-df-tabbar-bg select-none transition-colors duration-200">
     <!-- 底部固态基准线 (Base Foundation Line) -->
     <div class="absolute bottom-0 left-0 right-0 h-[1px] bg-foreground/5 dark:bg-white/5 z-0" />
-    <ScrollArea orientation="horizontal" class="flex-1 h-11 relative z-10">
+
+    <!-- 左侧溢出渐变指示器 -->
+    <div
+      v-if="canScrollLeft"
+      class="absolute left-0 top-0 bottom-0 w-8 z-20 pointer-events-none bg-gradient-to-r from-df-tabbar-bg to-transparent"
+    />
+
+    <div
+      ref="tabScrollRef"
+      class="flex-1 h-11 relative z-10 overflow-x-auto overflow-y-hidden tab-scroll-container"
+      @wheel="handleTabWheel"
+    >
       <div class="flex h-11 items-end px-2 pb-[1px]" role="tablist">
         <TooltipProvider :delay-duration="500">
           <Tooltip v-for="tab in workspace.tabs" :key="tab.id">
@@ -197,7 +258,13 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
           </Tooltip>
         </TooltipProvider>
       </div>
-    </ScrollArea>
+    </div>
+
+    <!-- 右侧溢出渐变指示器 -->
+    <div
+      v-if="canScrollRight"
+      class="absolute right-[52px] top-0 bottom-0 w-8 z-20 pointer-events-none bg-gradient-to-l from-df-tabbar-bg to-transparent"
+    />
 
     <!-- 右侧功能区 (Elevated for interaction) -->
     <div class="relative z-[100] flex h-full items-center gap-1 px-2 border-l border-black/[0.04] dark:border-white/5 shrink-0 bg-df-tabbar-action-bg">
@@ -410,18 +477,13 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
   @apply opacity-100 scale-100;
 }
 
-/* 滚动条静音 */
-:deep([data-slot="scroll-area-scrollbar"]) {
-  display: none !important;
-}
-
-:deep([data-slot="scroll-area-viewport"]) {
-  overflow-y: hidden !important;
-  height: 100% !important;
-}
-
-.scrollbar-none {
-  -ms-overflow-style: none;
+/* 滚动条：完全隐藏，依靠鼠标滚轮横滚 + 两侧渐变指示器导航 */
+.tab-scroll-container {
   scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.tab-scroll-container::-webkit-scrollbar {
+  display: none;
 }
 </style>

@@ -263,6 +263,7 @@ watch(open, (val) => {
 onBeforeUnmount(() => {
   stopTimer()
   progressUnlisten?.()
+  progressUnlisten = null
 })
 </script>
 

@@ -19,7 +19,7 @@ import type { HistorySnapshot, TriggerDefinition, FieldTemplate } from '@/types/
 import {
   COMMON_TYPES, TYPE_DEFAULT_LENGTH, INDEX_TYPES, FK_ACTIONS,
   TRIGGER_TIMINGS, TRIGGER_EVENTS, FIELD_TEMPLATES, MAX_HISTORY,
-  highlightSql,
+  highlightSql, MYSQL_RESERVED_KEYWORDS,
 } from '@/types/table-editor-constants'
 import { parseBackendError } from '@/types/error'
 
@@ -226,6 +226,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
     columns.value.forEach((col, idx) => {
       if (!col.name.trim()) errors.push({ row: idx, field: 'name', message: t('tableEditor.validationNameRequired') })
       else if (names.has(col.name.toLowerCase())) errors.push({ row: idx, field: 'name', message: t('tableEditor.validationNameDuplicate') })
+      else if (MYSQL_RESERVED_KEYWORDS.has(col.name.toUpperCase())) errors.push({ row: idx, field: 'name', message: t('tableEditor.validationReservedKeyword') })
       names.add(col.name.toLowerCase())
       if (!col.dataType) errors.push({ row: idx, field: 'dataType', message: t('tableEditor.validationTypeRequired') })
     })
@@ -431,7 +432,11 @@ export function useTableEditor(options: UseTableEditorOptions) {
   }
   function contextCopyName() {
     const name = columns.value[contextMenuIdx.value]?.name
-    if (name) navigator.clipboard.writeText(name)
+    if (name) {
+      navigator.clipboard.writeText(name)
+        .then(() => toast.success(t('common.copied')))
+        .catch(() => toast.error(t('tableEditor.copyFailed')))
+    }
     closeContextMenu()
   }
   /** 复制字段的 ADD COLUMN DDL 语句 */
@@ -439,12 +444,16 @@ export function useTableEditor(options: UseTableEditorOptions) {
     const col = columns.value[contextMenuIdx.value]
     if (!col) { closeContextMenu(); return }
     const parts: string[] = [`ALTER TABLE \`${tableName.value}\` ADD COLUMN \`${col.name}\``]
-    // 类型 + 长度
+    // 拆分类型和修饰符（UNSIGNED, ZEROFILL），确保 TYPE(length) UNSIGNED 顺序正确
+    const typeUpper = col.dataType.toUpperCase()
+    const modifiers = ['UNSIGNED', 'ZEROFILL'].filter(m => typeUpper.includes(m))
+    const baseType = typeUpper.replace(/\s*(UNSIGNED|ZEROFILL)\s*/g, '').trim()
     if (col.length) {
-      parts.push(`${col.dataType.toUpperCase()}(${col.length})`)
+      parts.push(`${baseType}(${col.length})`)
     } else {
-      parts.push(col.dataType.toUpperCase())
+      parts.push(baseType)
     }
+    if (modifiers.length > 0) parts.push(modifiers.join(' '))
     // NOT NULL / NULL
     parts.push(col.nullable ? 'NULL' : 'NOT NULL')
     // 默认值
@@ -470,6 +479,8 @@ export function useTableEditor(options: UseTableEditorOptions) {
       parts.push(`COMMENT '${col.comment.replace(/'/g, "''")}'`)
     }
     navigator.clipboard.writeText(parts.join(' ') + ';')
+      .then(() => toast.success(t('common.copied')))
+      .catch(() => toast.error(t('tableEditor.copyFailed')))
     closeContextMenu()
   }
 

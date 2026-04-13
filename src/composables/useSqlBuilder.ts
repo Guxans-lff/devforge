@@ -332,7 +332,16 @@ export function useSqlBuilder() {
         } else if (c.operator === 'IS NOT NULL') {
           expr = `${c.tableAlias}.${c.column} IS NOT NULL`
         } else if (c.operator === 'IN') {
-          expr = `${c.tableAlias}.${c.column} IN (${c.value})`
+          // 逗号分割后逐个转义，防止 SQL 注入
+          const items = c.value.split(',').map(v => {
+            const trimmed = v.trim()
+            if (trimmed === '') return null
+            if (!isNaN(Number(trimmed))) return trimmed
+            return `'${esc(trimmed)}'`
+          }).filter(Boolean)
+          expr = items.length > 0
+            ? `${c.tableAlias}.${c.column} IN (${items.join(', ')})`
+            : `${c.tableAlias}.${c.column} IN (NULL)`
         } else if (c.operator === 'LIKE') {
           expr = `${c.tableAlias}.${c.column} LIKE '${esc(c.value)}'`
         } else {

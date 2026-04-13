@@ -2,7 +2,7 @@
  * 事务管理 composable
  * 从 useQueryExecution 提取，负责 BEGIN/COMMIT/ROLLBACK 操作
  */
-import { type Ref } from 'vue'
+import { watch, type Ref } from 'vue'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useNotification } from '@/composables/useNotification'
 import * as dbApi from '@/api/database'
@@ -54,6 +54,15 @@ export function useTransactionControl(options: UseTransactionControlOptions) {
       notification.error('回滚事务失败', parseBackendError(e).message, true)
     }
   }
+
+  // 连接断开时自动清除事务状态
+  watch(isConnected, (connected) => {
+    if (!connected) {
+      store.updateTabContext(connectionId.value, tabId.value, {
+        isInTransaction: false,
+      })
+    }
+  })
 
   return {
     handleBeginTransaction,

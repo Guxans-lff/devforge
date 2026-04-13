@@ -8,7 +8,6 @@ import { useI18n } from 'vue-i18n'
 import { useServerMonitor } from '@/composables/useServerMonitor'
 import { Cpu, MemoryStick, HardDrive, Network, Activity, Clock, RefreshCw, AlertTriangle } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
-import { ScrollArea } from '@/components/ui/scroll-area'
 
 /** ECharts 按需引入 */
 import { use } from 'echarts/core'
@@ -292,8 +291,8 @@ const diskChartOption = computed(() => {
 </script>
 
 <template>
-  <ScrollArea class="h-full">
-    <div class="p-4 space-y-4">
+  <div class="absolute inset-0 overflow-hidden">
+    <div class="h-full overflow-y-auto p-4 space-y-4">
       <!-- 加载状态 -->
       <div v-if="monitor.loading.value" class="flex items-center justify-center h-48 text-muted-foreground">
         <RefreshCw class="h-4 w-4 animate-spin mr-2" />
@@ -371,27 +370,27 @@ const diskChartOption = computed(() => {
         </div>
 
         <!-- 图表网格 -->
-        <div class="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div class="grid grid-cols-1 gap-3 lg:grid-cols-2 overflow-hidden">
           <!-- CPU 曲线 -->
-          <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
+          <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm overflow-hidden">
             <div class="flex items-center gap-2 text-muted-foreground mb-2">
               <Cpu class="h-3 w-3 text-primary" />
               <span class="text-[11px] font-medium">{{ t('monitor.cpuUsage') }}</span>
             </div>
-            <VChart :option="cpuChartOption" :autoresize="true" class="h-40" />
+            <VChart :option="cpuChartOption" class="h-52 w-full" />
           </div>
 
           <!-- 内存曲线 -->
-          <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
+          <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm overflow-hidden">
             <div class="flex items-center gap-2 text-muted-foreground mb-2">
               <MemoryStick class="h-3 w-3 text-df-info" />
               <span class="text-[11px] font-medium">{{ t('monitor.memoryUsage') }}</span>
             </div>
-            <VChart :option="memoryChartOption" :autoresize="true" class="h-40" />
+            <VChart :option="memoryChartOption" class="h-52 w-full" />
           </div>
 
           <!-- 网络 IO -->
-          <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
+          <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm overflow-hidden">
             <div class="flex items-center gap-2 text-muted-foreground mb-2">
               <Network class="h-3 w-3 text-df-success" />
               <span class="text-[11px] font-medium">{{ t('monitor.networkIo') }}</span>
@@ -400,16 +399,16 @@ const diskChartOption = computed(() => {
                 ↑ {{ formatBytesRate(monitor.latest.value.networkRates[0]!.txRate) }}
               </span>
             </div>
-            <VChart :option="networkChartOption" :autoresize="true" class="h-40" />
+            <VChart :option="networkChartOption" class="h-52 w-full" />
           </div>
 
           <!-- 磁盘使用率 -->
-          <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm">
+          <div class="rounded-lg border border-border/50 bg-card/50 p-3 backdrop-blur-sm overflow-hidden">
             <div class="flex items-center gap-2 text-muted-foreground mb-2">
               <HardDrive class="h-3 w-3 text-df-warning" />
               <span class="text-[11px] font-medium">{{ t('monitor.diskUsage') }}</span>
             </div>
-            <VChart :option="diskChartOption" :autoresize="true" class="h-40" />
+            <VChart :option="diskChartOption" class="h-52 w-full" />
           </div>
         </div>
 
@@ -483,5 +482,5 @@ const diskChartOption = computed(() => {
         </span>
       </div>
     </div>
-  </ScrollArea>
+  </div>
 </template>

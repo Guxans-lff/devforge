@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import { parseBackendError } from '@/types/error'
+import { parseBackendError, ensureErrorString } from '@/types/error'
 import { useI18n } from 'vue-i18n'
 import { open } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
@@ -171,13 +171,13 @@ async function startImport() {
     importDone.value = true
     importSuccess.value = result.success
     importedRows.value = result.importedRows
-    importError.value = result.error
+    importError.value = ensureErrorString(result.error)
 
     if (result.success) {
       toast.success(t('dataImport.importSuccess'), t('dataImport.rowsImported', { count: result.importedRows }))
       emit('success')
     } else {
-      toast.error(t('dataImport.importFailed'), result.error ?? '')
+      toast.error(t('dataImport.importFailed'), ensureErrorString(result.error))
     }
   } catch (e: unknown) {
     importDone.value = true
