@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { ChevronFirst, ChevronLast, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
 
@@ -18,6 +19,8 @@ const emit = defineEmits<{
   'update:currentPage': [page: number]
   'update:pageSize': [size: number]
 }>()
+
+const { t } = useI18n()
 
 /** 总页数 */
 const totalPages = computed(() => Math.max(1, Math.ceil(props.totalRows / props.pageSize)))

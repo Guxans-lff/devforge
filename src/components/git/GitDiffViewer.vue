@@ -194,8 +194,8 @@ const hasMonacoContent = computed(() => props.oldContent !== undefined || props.
         &larr; {{ fileDiff.oldPath }}
       </span>
       <div class="flex-1" />
-      <span class="text-xs text-df-success">+{{ fileDiff?.stats?.insertions ?? diff?.stats.insertions ?? 0 }}</span>
-      <span class="text-xs text-destructive">-{{ fileDiff?.stats?.deletions ?? diff?.stats.deletions ?? 0 }}</span>
+      <span class="text-xs text-df-success">+{{ diff?.stats?.insertions ?? 0 }}</span>
+      <span class="text-xs text-destructive">-{{ diff?.stats?.deletions ?? 0 }}</span>
 
       <!-- 模式切换 -->
       <div class="flex items-center gap-0.5 ml-2">

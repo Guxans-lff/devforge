@@ -4,7 +4,7 @@
  * 支持中文(chi_sim) + 英文(eng)，可框选区域识别
  */
 import { ref, shallowRef } from 'vue'
-import { createWorker, type Worker } from 'tesseract.js'
+import { createWorker, type Worker, type LoggerMessage } from 'tesseract.js'
 
 export interface OcrWord {
   text: string
@@ -61,7 +61,7 @@ export function useOcr() {
     initPromise = (async () => {
       try {
         const w = await createWorker(languages, undefined, {
-          logger: (m) => {
+          logger: (m: LoggerMessage) => {
             if (m.status === 'recognizing text') {
               progress.value = m.progress
             }
@@ -102,7 +102,7 @@ export function useOcr() {
       const ocrResult: OcrResult = {
         text: data.text,
         confidence: data.confidence,
-        lines: ((data as Record<string, unknown>).lines as Array<Record<string, unknown>> ?? []).map((line) => ({
+        lines: ((data as unknown as Record<string, unknown>).lines as Array<Record<string, unknown>> ?? []).map((line) => ({
           text: line.text as string,
           confidence: line.confidence as number,
           words: ((line.words as Array<Record<string, unknown>>) ?? []).map((word) => ({

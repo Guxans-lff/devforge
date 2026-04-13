@@ -19,7 +19,7 @@ export interface UseTableBrowseOptions {
 }
 
 export function useTableBrowse(options: UseTableBrowseOptions) {
-  const { connectionId, tabId, isConnected, tabContext, isExecuting } = options
+  const { connectionId, tabId, isConnected, tabContext } = options
   const store = useDatabaseWorkspaceStore()
   const isLoadingMore = ref(false)
   const pageCache = new TablePageCache()

@@ -24,9 +24,9 @@ function stackBlur(imageData: ImageData, radius: number) {
   const wm = width - 1
   const hm = height - 1
   const div = radius + radius + 1
-  const r: number[] = new Array(width * height)
-  const g: number[] = new Array(width * height)
-  const b: number[] = new Array(width * height)
+  const r: number[] = new Array<number>(width * height).fill(0)
+  const g: number[] = new Array<number>(width * height).fill(0)
+  const b: number[] = new Array<number>(width * height).fill(0)
 
   let rSum: number, gSum: number, bSum: number
   let p: number, p1: number, p2: number
@@ -57,9 +57,9 @@ function stackBlur(imageData: ImageData, radius: number) {
     rSum = gSum = bSum = 0
     for (let i = -radius; i <= radius; i++) {
       yi = Math.max(0, Math.min(hm, i)) * width + x
-      rSum += r[yi]
-      gSum += g[yi]
-      bSum += b[yi]
+      rSum += r[yi]!
+      gSum += g[yi]!
+      bSum += b[yi]!
     }
     for (let y = 0; y < height; y++) {
       p = (y * width + x) * 4
@@ -69,9 +69,9 @@ function stackBlur(imageData: ImageData, radius: number) {
 
       p1 = (Math.min(hm, y + radius + 1) * width + x)
       p2 = (Math.max(0, y - radius) * width + x)
-      rSum += r[p1] - r[p2]
-      gSum += g[p1] - g[p2]
-      bSum += b[p1] - b[p2]
+      rSum += r[p1]! - r[p2]!
+      gSum += g[p1]! - g[p2]!
+      bSum += b[p1]! - b[p2]!
     }
   }
 }
