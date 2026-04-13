@@ -876,6 +876,7 @@ export default {
     duplicateField: '复制字段',
     togglePrimaryKey: '切换主键',
     copyFieldName: '复制字段名',
+    copyFieldDdl: '复制字段 DDL',
     deleteField: '删除字段',
     // 索引编辑器
     indexColName: '名称',

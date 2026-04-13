@@ -852,6 +852,7 @@ export default {
     duplicateField: 'Duplicate Field',
     togglePrimaryKey: 'Toggle Primary Key',
     copyFieldName: 'Copy Field Name',
+    copyFieldDdl: 'Copy Field DDL',
     deleteField: 'Delete Field',
     // Index editor
     indexColName: 'Name',

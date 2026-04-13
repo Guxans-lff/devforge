@@ -465,6 +465,10 @@ onUnmounted(() => {
           <Copy class="size-3 text-muted-foreground/50" />
           {{ t('tableEditor.copyFieldName') }}
         </button>
+        <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2" @click="editor.contextCopyDdl">
+          <Code class="size-3 text-muted-foreground/50" />
+          {{ t('tableEditor.copyFieldDdl') }}
+        </button>
         <div role="separator" class="my-1 border-t border-border" />
         <button role="menuitem" tabindex="-1" class="w-full px-3 py-1.5 text-left hover:bg-accent focus:bg-accent focus:outline-none flex items-center gap-2 text-destructive" @click="editor.contextDelete">
           <X class="size-3" />

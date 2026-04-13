@@ -434,6 +434,44 @@ export function useTableEditor(options: UseTableEditorOptions) {
     if (name) navigator.clipboard.writeText(name)
     closeContextMenu()
   }
+  /** 复制字段的 ADD COLUMN DDL 语句 */
+  function contextCopyDdl() {
+    const col = columns.value[contextMenuIdx.value]
+    if (!col) { closeContextMenu(); return }
+    const parts: string[] = [`ALTER TABLE \`${tableName.value}\` ADD COLUMN \`${col.name}\``]
+    // 类型 + 长度
+    if (col.length) {
+      parts.push(`${col.dataType.toUpperCase()}(${col.length})`)
+    } else {
+      parts.push(col.dataType.toUpperCase())
+    }
+    // NOT NULL / NULL
+    parts.push(col.nullable ? 'NULL' : 'NOT NULL')
+    // 默认值
+    if (col.defaultValue !== null && col.defaultValue !== '') {
+      const val = col.defaultValue
+      // 函数/表达式类的默认值不加引号
+      if (/^(CURRENT_TIMESTAMP|NULL|TRUE|FALSE|\d+(\.\d+)?)$/i.test(val) || val.startsWith('(')) {
+        parts.push(`DEFAULT ${val}`)
+      } else {
+        parts.push(`DEFAULT '${val.replace(/'/g, "''")}'`)
+      }
+    }
+    // ON UPDATE
+    if (col.onUpdate) {
+      parts.push(`ON UPDATE ${col.onUpdate}`)
+    }
+    // 自增
+    if (col.autoIncrement) {
+      parts.push('AUTO_INCREMENT')
+    }
+    // 注释
+    if (col.comment) {
+      parts.push(`COMMENT '${col.comment.replace(/'/g, "''")}'`)
+    }
+    navigator.clipboard.writeText(parts.join(' ') + ';')
+    closeContextMenu()
+  }
 
   // — 拖拽排序（自定义 mouse 实现，避免 HTML5 DnD 在 table 中的兼容问题）—
   function onGripMouseDown(e: MouseEvent, idx: number) {
@@ -651,7 +689,7 @@ export function useTableEditor(options: UseTableEditorOptions) {
     insertTemplate,
     // 右键菜单
     onColumnContextMenu, closeContextMenu, contextInsertAbove, contextInsertBelow,
-    contextDuplicate, contextDelete, contextTogglePK, contextCopyName,
+    contextDuplicate, contextDelete, contextTogglePK, contextCopyName, contextCopyDdl,
     // 拖拽
     onGripMouseDown,
     // DDL & SQL
