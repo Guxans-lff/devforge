@@ -1,84 +1,105 @@
 # DevForge
 
-DevForge 是一款基于 Tauri 和 Vue 3 构建的现代化开发者工具箱，致力于为开发者提供一体化的服务器运维、数据库管理、文件传输以及多终端执行环境。
+DevForge 是一款基于 **Tauri 2 + Vue 3** 构建的现代化开发者工具箱，致力于为开发者提供一体化的服务器运维、数据库管理、文件传输以及多终端执行环境。
+
+**一个工具替代** Navicat + DataGrip + FileZilla + Redis Desktop + SourceTree，减少工具切换，提升工作效率。
 
 ## ✨ 核心特性
 
-- **💻 强大的终端管理 (Terminal)**：集成原生级 Xterm.js，支持全功能 SSH 终端、字体设置、快速输入等流畅的命令行体验。
-- **🗄️ 数据库客户端 (Database)**：支持多种类型数据库连接与管理，内置支持高级语法高亮的 SQL 查询面板 (QueryPanel)。
-- **📁 可视化文件管理 (File Manager)**：直观清晰的文件浏览器，支持基于传输队列 (Transfer Queue) 的多任务安全传输。
-- **⚡ 批量执行 (Multi Exec)**：应对多服务器管理难题，提供在多个目标实例中并发执行指令的功能。
-- **📝 代码编辑与格式化**：深度集成 Monaco Editor 应对各类代码与脚本编写场景，并提供开箱即用的 SQL 格式化工具。
-- **🎨 现代化交互界面**：采用 Tailwind CSS 和 Reka UI 构建无障碍、兼顾暗/亮色彩模式（Dark Mode）与舒适度的高度定制 UI。
-- **🌍 多语言支持 (i18n)**：自带中英文等多语言国际化支持方案。
+- **🗄️ 数据库管理**：支持 MySQL / PostgreSQL / SQLite，内置查询面板、表编辑器、ER 图、备份恢复、导入导出、性能分析、索引建议、Schema 对比迁移、SQL Builder
+- **💻 SSH 终端**：集成 Xterm.js WebGL 终端，全功能 SSH 远程终端、终端录制回放、命令片段
+- **📁 SFTP 文件管理**：双栏文件浏览器，分块传输队列、书签、权限管理、远程文件编辑
+- **⚡ 批量执行**：多主机并发命令执行，适用于批量运维场景
+- **🔴 Redis 客户端**：全数据类型编辑、PubSub、Cluster 集群、Sentinel 哨兵、Monitor 实时监控、Lua 脚本、内存分析
+- **📦 Git 客户端**：提交、分支、合并、Rebase、Blame、图形化提交历史
+- **🔗 SSH 隧道**：本地/远程端口转发
+- **⏰ 定时任务**：Cron 表达式调度执行
+- **🖥️ 本地终端**：Windows ConPTY 本地 Shell
+- **📸 截图标注**：屏幕/区域截图、标注工具、OCR 文字识别
+- **🎨 现代化 UI**：Tailwind CSS + Reka UI，暗色主题优先，信息密度高
+- **🌍 多语言支持**：中文 / English 双语
 
 ## 🛠️ 技术栈
 
-- **桌面应用框架**：[Tauri](https://tauri.app/) 
-- **核心前端框架**：[Vue 3](https://vuejs.org/) (Composition API / `<script setup>`) + [TypeScript](https://www.typescriptlang.org/)
-- **构建工具**：[Vite](https://vitejs.dev/)
-- **样式方案**：[Tailwind CSS v4](https://tailwindcss.com/)
-- **状态管理 & 路由**：[Pinia](https://pinia.vuejs.org/) + [Vue Router](https://router.vuejs.org/)
-- **重要库/组件**: 
-  - `reka-ui` (无头组件库)
-  - `@xterm/xterm` (终端引擎)
-  - `monaco-editor` (编辑器基石)
-  - `@tanstack/vue-table` (数据/分析表格)
-  - `splitpanes` (自定义调整面板)
-  - `lucide-vue-next` (图标库)
+### 前端
+- **Vue 3** (Composition API / `<script setup>`) + **TypeScript**
+- **Vite** 构建 + **Tailwind CSS v4** 样式
+- **Pinia** 状态管理 + **Vue Router** 路由
+- **Monaco Editor** 代码编辑器
+- **@xterm/xterm** WebGL 终端引擎
+- **@tanstack/vue-table** 数据表格（含虚拟滚动）
+- **@vue-flow/core** 可视化流程图（ER 图、SQL Builder）
+- **ECharts** 数据可视化
+- **Reka UI** 无头组件库（shadcn/vue 底层）
+
+### 后端 (Rust)
+- **Tauri 2** 桌面应用框架
+- **SQLx** 数据库驱动（MySQL/PostgreSQL/SQLite）
+- **Russh** SSH/SFTP 异步协议
+- **Redis** 客户端（含集群支持）
+- **Git2** Git 操作（libgit2 绑定）
+- **Tokio** 异步运行时
 
 ## 🚀 快速开始
 
 ### 环境依赖
 
-在运行启动本机开发前，请确保您已安装并配置好以下环境：
+- [Node.js](https://nodejs.org/) >= 18
+- [pnpm](https://pnpm.io/)（推荐）或 npm
+- [Rust](https://www.rust-lang.org/) >= 1.77.2
 
-- 现代浏览器 或 [Node.js](https://nodejs.org/) 开发环境
-- 您偏好的包管理器 (`npm` / `yarn` / `pnpm` / `bun`)
-- [Rust 与 Cargo](https://www.rust-lang.org/) (打包和运行 Tauri 后端系统必需)
-
-### 开发部署
+### 开发
 
 ```bash
-# 1. 安装所有项目依赖
-npm install
+# 安装依赖
+pnpm install
 
-# 2. 纯前端浏览器式开发预览 (无 Tauri 桥接功能)
-npm run dev
+# Tauri 开发模式（前后端联调）
+pnpm tauri:dev
 
-# 3. 🕸️ 启动 Tauri 桌面应用进行完整环境无缝调试
-npm run tauri:dev
+# 仅前端开发预览（无 Tauri 桥接）
+pnpm dev
 ```
 
-### 项目构建发布
+### 构建
 
 ```bash
-# 运行生产级构建，自动打包输出主流操作系统桌面客户端文件 (如 .dmg, .exe, .AppImage)
-npm run tauri:build
+# 生产构建，输出安装包（.exe / .msi）
+pnpm tauri:build
 ```
 
-## 📁 主要目录结构
+## 📁 项目结构
 
 ```text
 devforge/
-├── src/                  # 前端层 (Vue 3 / TypeScript) 源码
-│   ├── components/       # 功能模块及核心组件 (涵盖终端面板、数据库视图、文件管理器等)
-│   ├── locales/          # i18n 多语言翻译文件包 (例如 en.ts / zh.ts 等)
-│   ├── views/            # 核心业务主视图 (Terminal, Database, FileManager 等页面)
-│   ├── router/           # 页面路由配置
-│   ├── store/            # 全局 Pinia 模块定义
-│   └── main.ts           # 核心装载入口
-├── src-tauri/            # Tauri 桌面端底层支撑层代码 (Rust 语言编写后端及系统功能 API)
-├── public/               # 无需构建的公共静态资源
-├── package.json          # Node 依赖与预置脚本
-├── tailwind.config.ts    # (可能存在) Tailwind 样式自定义变量与规范
-└── tsconfig.json         # TS 根约束规则配置
+├── src/                        # 前端 Vue 源码
+│   ├── api/                    # Tauri invoke 封装（27 个模块）
+│   ├── components/             # 功能组件（~260 个）
+│   │   ├── database/           # 数据库（查询、表编辑、ER 图、Schema 对比、性能分析等）
+│   │   ├── terminal/           # 终端 + 服务器监控
+│   │   ├── file-manager/       # SFTP 文件管理
+│   │   ├── redis/              # Redis 数据编辑器
+│   │   ├── git/                # Git 操作组件
+│   │   ├── screenshot/         # 截图标注 OCR
+│   │   └── ui/                 # shadcn/vue 基础 UI
+│   ├── composables/            # Vue composables（45 个）
+│   ├── stores/                 # Pinia 状态管理（11 个 store）
+│   ├── views/                  # 页面视图（14 个）
+│   ├── types/                  # TypeScript 类型定义（29 个）
+│   └── locales/                # i18n 语言包（中/英）
+├── src-tauri/
+│   └── src/
+│       ├── commands/           # Tauri 命令（32 个模块）
+│       ├── services/           # 核心业务服务（40 个）
+│       ├── models/             # 数据模型
+│       └── utils/              # 工具函数
+└── public/                     # 静态资源
 ```
 
 ## 🤝 参与贡献
 
-我们欢迎社区力量共同成长！如果您有任何使用反馈、改进意见，或发现了潜在故障，请随时提交 **Issues** 或创建 **Pull Requests** 参与到代码建设中来。
+欢迎提交 **Issues** 或创建 **Pull Requests** 参与贡献。
 
 ---
 
-_💡 **DevForge** - 引领高效工作流，为您锻造卓越的代码开发体验。_
+_**DevForge** — 引领高效工作流，为您锻造卓越的代码开发体验。_
