@@ -150,7 +150,7 @@ const breadcrumbTable = computed(() => {
 // 错误边界
 const panelError = ref<string | null>(null)
 onErrorCaptured((err) => {
-  panelError.value = String(err)
+  panelError.value = ensureErrorString(err)
   return false
 })
 
@@ -352,7 +352,7 @@ async function connectAndLoad() {
     await objectTreeRef.value?.loadDatabases(preloaded)
   } catch (e) {
     isConnected.value = false
-    connectionStore.updateConnectionStatus(props.connectionId, 'error', String(e))
+    connectionStore.updateConnectionStatus(props.connectionId, 'error', ensureErrorString(e))
     // 将错误显示在当前活动的 query tab 中
     const ws = workspace.value
     const activeQueryTab = ws.tabs.find((t) => t.id === ws.activeTabId)
@@ -364,7 +364,7 @@ async function connectAndLoad() {
           affectedRows: 0,
           executionTimeMs: 0,
           isError: true,
-          error: String(e),
+          error: ensureErrorString(e),
           totalCount: null,
           truncated: false,
         },
@@ -728,7 +728,7 @@ async function handleExportDatabaseDdl(database: string) {
     dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, { sql })
     toast.success(t('database.exportStructureSuccess', { db: database }))
   } catch (e) {
-    toast.error(t('database.exportStructureFailed'), String(e))
+    toast.error(t('database.exportStructureFailed'), ensureErrorString(e))
   } finally {
     exportingDb.value = ''
   }

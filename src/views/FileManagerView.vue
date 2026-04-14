@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, onActivated, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { listen } from '@tauri-apps/api/event'
+import { ensureErrorString } from '@/types/error'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTransferStore } from '@/stores/transfer'
 import { useConnectionStore } from '@/stores/connections'
@@ -116,8 +117,8 @@ async function connect() {
     await Promise.all([loadLocal(), loadRemote()])
   } catch (e) {
     status.value = 'error'
-    connectionStore.updateConnectionStatus(props.connectionId, 'error', String(e))
-    errorMessage.value = String(e)
+    connectionStore.updateConnectionStatus(props.connectionId, 'error', ensureErrorString(e))
+    errorMessage.value = ensureErrorString(e)
   }
 }
 
@@ -143,7 +144,7 @@ async function loadLocal(path?: string) {
     localEntries.value = entries
     localPath.value = target
   } catch (e) {
-    toast.error(t('toast.operationFailed'), String(e))
+    toast.error(t('toast.operationFailed'), ensureErrorString(e))
   } finally {
     localLoading.value = false
   }
@@ -158,7 +159,7 @@ async function loadRemote(path?: string) {
     remoteEntries.value = entries
     remotePath.value = target
   } catch (e) {
-    toast.error(t('toast.operationFailed'), String(e))
+    toast.error(t('toast.operationFailed'), ensureErrorString(e))
   } finally {
     remoteLoading.value = false
   }
@@ -181,7 +182,7 @@ async function handleLocalMkdir(name: string) {
     await sftpApi.localMkdir(newPath)
     await loadLocal()
   } catch (e) {
-    toast.error(t('toast.operationFailed'), String(e))
+    toast.error(t('toast.operationFailed'), ensureErrorString(e))
   }
 }
 
@@ -193,7 +194,7 @@ async function handleRemoteMkdir(name: string) {
     await sftpApi.sftpMkdir(props.connectionId, newPath)
     await loadRemote()
   } catch (e) {
-    toast.error(t('toast.operationFailed'), String(e))
+    toast.error(t('toast.operationFailed'), ensureErrorString(e))
   }
 }
 
@@ -206,7 +207,7 @@ async function handleLocalNewFile(name: string) {
     await sftpApi.localTouch(newPath)
     await loadLocal()
   } catch (e) {
-    toast.error(t('toast.operationFailed'), String(e))
+    toast.error(t('toast.operationFailed'), ensureErrorString(e))
   }
 }
 
@@ -218,7 +219,7 @@ async function handleRemoteNewFile(name: string) {
     await sftpApi.sftpTouch(props.connectionId, newPath)
     await loadRemote()
   } catch (e) {
-    toast.error(t('toast.operationFailed'), String(e))
+    toast.error(t('toast.operationFailed'), ensureErrorString(e))
   }
 }
 
@@ -231,7 +232,7 @@ function handleLocalDelete(entry: FileEntry) {
         await sftpApi.localDelete(entry.path)
         await loadLocal()
       } catch (e) {
-        toast.error(t('toast.deleteFailed'), String(e))
+        toast.error(t('toast.deleteFailed'), ensureErrorString(e))
       }
     },
   )
@@ -258,7 +259,7 @@ function handleRemoteDelete(entry: FileEntry) {
         }
         await loadRemote()
       } catch (e) {
-        toast.error(t('toast.deleteFailed'), String(e))
+        toast.error(t('toast.deleteFailed'), ensureErrorString(e))
       }
     },
   )
@@ -272,7 +273,7 @@ async function handleLocalRename(entry: FileEntry, newName: string) {
     await sftpApi.localRename(entry.path, newPath)
     await loadLocal()
   } catch (e) {
-    toast.error(t('toast.operationFailed'), String(e))
+    toast.error(t('toast.operationFailed'), ensureErrorString(e))
   }
 }
 
@@ -283,7 +284,7 @@ async function handleRemoteRename(entry: FileEntry, newName: string) {
     await sftpApi.sftpRename(props.connectionId, entry.path, newPath)
     await loadRemote()
   } catch (e) {
-    toast.error(t('toast.operationFailed'), String(e))
+    toast.error(t('toast.operationFailed'), ensureErrorString(e))
   }
 }
 
@@ -298,7 +299,7 @@ async function handleUpload(entry: FileEntry) {
       // 文件夹：使用递归上传（后台执行，立即返回）
       workspace.setBottomPanelTab('transfer', true)
       sftpApi.uploadFolderRecursive(props.connectionId, entry.path, remoteTarget)
-        .catch((e: unknown) => toast.error(t('toast.uploadFailed'), String(e)))
+        .catch((e: unknown) => toast.error(t('toast.uploadFailed'), ensureErrorString(e)))
     } else {
       // 单文件：分块上传
       const transferId = crypto.randomUUID()
@@ -317,7 +318,7 @@ async function handleUpload(entry: FileEntry) {
       await sftpApi.startUploadChunked(transferId, props.connectionId, entry.path, remoteTarget)
     }
   } catch (e) {
-    toast.error(t('toast.uploadFailed'), String(e))
+    toast.error(t('toast.uploadFailed'), ensureErrorString(e))
   }
 }
 
@@ -333,7 +334,7 @@ async function handleDownload(entry: FileEntry) {
       // 文件夹：使用递归下载（后台执行，立即返回）
       workspace.setBottomPanelTab('transfer', true)
       sftpApi.downloadFolderRecursive(props.connectionId, entry.path, localTarget)
-        .catch((e: unknown) => toast.error(t('toast.downloadFailed'), String(e)))
+        .catch((e: unknown) => toast.error(t('toast.downloadFailed'), ensureErrorString(e)))
     } else {
       // 单文件：分块下载
       const transferId = crypto.randomUUID()
@@ -352,7 +353,7 @@ async function handleDownload(entry: FileEntry) {
       await sftpApi.startDownloadChunked(transferId, props.connectionId, entry.path, localTarget)
     }
   } catch (e) {
-    toast.error(t('toast.downloadFailed'), String(e))
+    toast.error(t('toast.downloadFailed'), ensureErrorString(e))
   }
 }
 
@@ -392,7 +393,7 @@ function handleLocalBatchDelete(entries: FileEntry[]) {
         }
         await loadLocal()
       } catch (e) {
-        toast.error(t('toast.deleteFailed'), String(e))
+        toast.error(t('toast.deleteFailed'), ensureErrorString(e))
       }
     },
   )
@@ -425,7 +426,7 @@ function handleRemoteBatchDelete(entries: FileEntry[]) {
         }
         await loadRemote()
       } catch (e) {
-        toast.error(t('toast.deleteFailed'), String(e))
+        toast.error(t('toast.deleteFailed'), ensureErrorString(e))
       }
     },
   )
@@ -491,7 +492,7 @@ async function handleDropToLocal(entries: FileEntry[], targetPath: string) {
       try {
         await sftpApi.startDownloadChunked(transferId, props.connectionId, entry.path, localTarget)
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e)
+        const msg = e instanceof Error ? e.message : ensureErrorString(e)
         transferStore.failTask(transferId, msg)
       }
     }
@@ -521,7 +522,7 @@ async function handleEditFile(entry: FileEntry) {
     showEditorPanel.value = true
     await fileEditorStore.openFile(props.connectionId, entry.path)
   } catch (e) {
-    toast.error(t('toast.operationFailed'), String(e))
+    toast.error(t('toast.operationFailed'), ensureErrorString(e))
   }
 }
 
@@ -541,7 +542,7 @@ async function handleChmod(mode: number) {
     permissionTarget.value = null
     await loadRemote()
   } catch (e) {
-    toast.error(t('toast.operationFailed'), String(e))
+    toast.error(t('toast.operationFailed'), ensureErrorString(e))
   }
 }
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ensureErrorString } from '@/types/error'
 import { listen } from '@tauri-apps/api/event'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
@@ -208,7 +209,7 @@ async function connect() {
     emit('statusChange', 'connected')
   } catch (e) {
     status.value = 'error'
-    errorMessage.value = String(e)
+    errorMessage.value = ensureErrorString(e)
     emit('statusChange', 'error')
   }
 }
