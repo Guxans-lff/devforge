@@ -720,6 +720,11 @@ pub async fn download_folder_recursive(
     )
     .await?;
 
+    // 即使文件列表为空，也要创建本地根目录（空文件夹也应下载）
+    tokio::fs::create_dir_all(&local_folder)
+        .await
+        .map_err(|e| format!("Failed to create directory: {}", e))?;
+
     if files.is_empty() {
         return Ok(vec![]);
     }
@@ -759,6 +764,24 @@ pub async fn download_folder_recursive(
 
     for (remote_path, local_path, size) in batch_files {
         let id = uuid::Uuid::new_v4().to_string();
+
+        // 提取文件名用于前端显示
+        let file_name = std::path::Path::new(&remote_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| remote_path.clone());
+
+        // 通知前端注册任务到传输面板
+        let _ = app.emit("transfer://task-added", serde_json::json!({
+            "id": &id,
+            "type": "download",
+            "fileName": file_name,
+            "localPath": &local_path,
+            "remotePath": &remote_path,
+            "connectionId": &connection_id,
+            "totalBytes": size,
+        }));
+
         mgr.enqueue_transfer(
             id.clone(),
             TransferType::Download {
