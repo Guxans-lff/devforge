@@ -177,6 +177,7 @@ fn compare_table_columns(
 }
 
 /// 对比单列的差异
+/// 注释格式："目标端当前值 → 源端目标值"，表示迁移方向
 fn diff_column(source: &ColumnInfo, target: &ColumnInfo) -> Vec<String> {
     let mut changes = Vec::new();
 
@@ -184,33 +185,33 @@ fn diff_column(source: &ColumnInfo, target: &ColumnInfo) -> Vec<String> {
     if source.data_type.to_lowercase() != target.data_type.to_lowercase() {
         changes.push(format!(
             "类型: {} → {}",
-            source.data_type, target.data_type
+            target.data_type, source.data_type
         ));
     }
 
     if source.nullable != target.nullable {
         let s = if source.nullable { "YES" } else { "NO" };
         let t = if target.nullable { "YES" } else { "NO" };
-        changes.push(format!("可空: {} → {}", s, t));
+        changes.push(format!("可空: {} → {}", t, s));
     }
 
     if source.default_value != target.default_value {
         let s = source.default_value.as_deref().unwrap_or("NULL");
         let t = target.default_value.as_deref().unwrap_or("NULL");
-        changes.push(format!("默认值: {} → {}", s, t));
+        changes.push(format!("默认值: {} → {}", t, s));
     }
 
     if source.is_primary_key != target.is_primary_key {
         let s = if source.is_primary_key { "是" } else { "否" };
         let t = if target.is_primary_key { "是" } else { "否" };
-        changes.push(format!("主键: {} → {}", s, t));
+        changes.push(format!("主键: {} → {}", t, s));
     }
 
     if source.comment != target.comment {
         let s = source.comment.as_deref().unwrap_or("");
         let t = target.comment.as_deref().unwrap_or("");
         if s != t {
-            changes.push(format!("注释: '{}' → '{}'", s, t));
+            changes.push(format!("注释: '{}' → '{}'", t, s));
         }
     }
 

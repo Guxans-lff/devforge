@@ -31,8 +31,8 @@ const emit = defineEmits<{
 }>()
 
 const databaseName = ref('')
-const charset = ref('default')
-const collation = ref('default')
+const charset = ref('utf8mb4')
+const collation = ref('utf8mb4_general_ci')
 const isCreating = ref(false)
 const error = ref('')
 
@@ -244,15 +244,16 @@ const collationMap: Record<string, { label: string, value: string }[]> = {
   ]
 }
 
-watch(charset, () => {
-  collation.value = 'default'
+watch(charset, (val) => {
+  // 切换字符集时重置排序规则为该字符集的推荐默认值
+  collation.value = val === 'utf8mb4' ? 'utf8mb4_general_ci' : 'default'
 })
 
 watch(() => props.open, (val) => {
   if (val) {
     databaseName.value = ''
-    charset.value = 'default'
-    collation.value = 'default'
+    charset.value = 'utf8mb4'
+    collation.value = 'utf8mb4_general_ci'
     error.value = ''
     isCreating.value = false
   }

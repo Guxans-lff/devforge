@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
 import {
   ArrowLeftRight,
   Loader2,
@@ -23,7 +24,7 @@ import {
   Play,
 } from 'lucide-vue-next'
 import { useConnectionStore } from '@/stores/connections'
-import { useNotification } from '@/composables/useNotification'
+import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import * as dbApi from '@/api/database'
 import * as schemaCompareApi from '@/api/schema-compare'
 import type { SchemaDiff } from '@/types/schema-compare'
@@ -35,7 +36,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const connectionStore = useConnectionStore()
-const notification = useNotification()
+const dbWorkspaceStore = useDatabaseWorkspaceStore()
 
 // 源和目标选择
 const sourceConnectionId = ref(props.connectionId)
@@ -61,6 +62,23 @@ const copied = ref(false)
 
 // 展开的表
 const expandedTables = ref(new Set<string>())
+
+// 勾选的表（参与 SQL 生成），对比完成时初始化为全部表名
+const checkedTables = ref<Record<string, boolean>>({})
+
+/** 切换单个表的勾选状态 */
+function toggleTableCheck(tableName: string) {
+  checkedTables.value = { ...checkedTables.value, [tableName]: !checkedTables.value[tableName] }
+  autoRegenerateSql()
+}
+
+/** 筛选条件变化时，如果已有 SQL 则自动重新生成 */
+async function autoRegenerateSql() {
+  if (!migrationSql.value) return
+  // 等下一个 tick 让 filteredDiff computed 更新
+  await nextTick()
+  handleGenerateSql()
+}
 
 // 可用的数据库连接（仅数据库类型）
 const availableConnections = computed(() =>
@@ -165,6 +183,7 @@ async function handleCompare() {
   diffResult.value = null
   migrationSql.value = ''
   expandedTables.value = new Set()
+  checkedTables.value = {}
 
   try {
     const result = await schemaCompareApi.schemaCompare(
@@ -174,6 +193,12 @@ async function handleCompare() {
       targetDatabase.value,
     )
     diffResult.value = result
+    // 初始化所有表为勾选状态
+    const allChecked: Record<string, boolean> = {}
+    result.tablesOnlyInSource.forEach(t => { allChecked[t] = true })
+    result.tablesOnlyInTarget.forEach(t => { allChecked[t] = true })
+    result.tableDiffs.forEach(d => { allChecked[d.tableName] = true })
+    checkedTables.value = allChecked
   } catch (e) {
     compareError.value = String(e)
   } finally {
@@ -216,48 +241,20 @@ async function handleCopySql() {
   }
 }
 
-// ===== 执行迁移 =====
-const isExecutingMigration = ref(false)
+// ===== 在查询标签页中打开迁移 SQL =====
 
-/** 执行迁移 SQL：调用 dbExecuteMultiV2，默认遇错停止 */
-async function handleExecuteMigration() {
-  if (!migrationSql.value || isExecutingMigration.value) return
+/** 打开新 Query Tab，填入迁移 SQL 并切换到目标数据库 */
+function handleOpenMigrationInQuery() {
+  if (!migrationSql.value) return
+  const connId = targetConnectionId.value
+  if (!connId) return
 
-  if (!confirm(t('database.multiStatement.migrationConfirm'))) return
-
-  isExecutingMigration.value = true
-  try {
-    const results = await dbApi.dbExecuteMultiV2(
-      targetConnectionId.value,
-      migrationSql.value,
-      targetDatabase.value,
-      'stopOnError',
-    )
-
-    const successCount = results.filter(r => !r.result.isError).length
-    const failCount = results.length - successCount
-    const totalTimeMs = results.reduce((sum, r) => sum + r.result.executionTimeMs, 0)
-
-    const summaryMsg = t('database.multiStatement.executionSummary', {
-      total: results.length,
-      success: successCount,
-      fail: failCount,
-      time: `${(totalTimeMs / 1000).toFixed(1)}s`,
-    })
-
-    if (failCount > 0) {
-      // 找到第一个失败的语句，展示错误详情
-      const firstError = results.find(r => r.result.isError)
-      const errorDetail = firstError ? `\n语句 ${firstError.index}: ${firstError.result.error}` : ''
-      notification.warning(t('database.multiStatement.migrationFailed'), summaryMsg + errorDetail, 0)
-    } else {
-      notification.success(t('database.multiStatement.migrationSuccess'), summaryMsg, 5000)
-    }
-  } catch (e) {
-    notification.error(t('database.multiStatement.migrationFailed'), String(e), true)
-  } finally {
-    isExecutingMigration.value = false
-  }
+  const tab = dbWorkspaceStore.addQueryTab(connId)
+  dbWorkspaceStore.updateTabContext(connId, tab.id, {
+    type: 'query',
+    sql: migrationSql.value,
+    currentDatabase: targetDatabase.value,
+  })
 }
 
 function toggleTable(name: string) {
@@ -285,24 +282,49 @@ const summary = computed(() => {
   }
 })
 
-// 过滤类型: 'all' | 'added' | 'removed' | 'modified'
-type DiffFilter = 'all' | 'added' | 'removed' | 'modified'
-const activeFilter = ref<DiffFilter>('all')
+// 过滤类型：默认全选，用 Set 存储当前激活的筛选项
+type DiffFilterType = 'added' | 'removed' | 'modified'
+const ALL_FILTERS: DiffFilterType[] = ['added', 'removed', 'modified']
+const activeFilters = ref(new Set<DiffFilterType>(ALL_FILTERS))
 
-function toggleFilter(filter: DiffFilter) {
-  activeFilter.value = activeFilter.value === filter ? 'all' : filter
-  migrationSql.value = ''
+/** 切换筛选项：点击亮着的取消，点击暗的激活 */
+function toggleFilter(filter: DiffFilterType) {
+  const next = new Set(activeFilters.value)
+  if (next.has(filter)) {
+    next.delete(filter)
+  } else {
+    next.add(filter)
+  }
+  activeFilters.value = next
+  autoRegenerateSql()
 }
 
+/** 根据激活的筛选项过滤差异（仅类型筛选，用于列表显示） */
+const typeFilteredDiff = computed(() => {
+  if (!diffResult.value) return null
+  const f = activeFilters.value
+  return {
+    tablesOnlyInSource: f.has('added') ? diffResult.value.tablesOnlyInSource : [],
+    tablesOnlyInTarget: f.has('removed') ? diffResult.value.tablesOnlyInTarget : [],
+    tableDiffs: f.has('modified') ? diffResult.value.tableDiffs : [],
+  }
+})
+
+/** 根据激活的筛选项和勾选的表过滤差异（用于 SQL 生成） */
 const filteredDiff = computed(() => {
   if (!diffResult.value) return null
-  const f = activeFilter.value
+  const f = activeFilters.value
+  const ck = checkedTables.value
   return {
-    // added = 源端有目标端没有 → 需新增
-    tablesOnlyInSource: f === 'all' || f === 'added' ? diffResult.value.tablesOnlyInSource : [],
-    // removed = 目标端有源端没有 → 需删除
-    tablesOnlyInTarget: f === 'all' || f === 'removed' ? diffResult.value.tablesOnlyInTarget : [],
-    tableDiffs: f === 'all' || f === 'modified' ? diffResult.value.tableDiffs : [],
+    tablesOnlyInSource: f.has('added')
+      ? diffResult.value.tablesOnlyInSource.filter(t => ck[t])
+      : [],
+    tablesOnlyInTarget: f.has('removed')
+      ? diffResult.value.tablesOnlyInTarget.filter(t => ck[t])
+      : [],
+    tableDiffs: f.has('modified')
+      ? diffResult.value.tableDiffs.filter(t => ck[t.tableName])
+      : [],
   }
 })
 
@@ -422,7 +444,7 @@ loadDatabases(props.connectionId, 'source')
           <button
             v-if="summary.added > 0"
             class="inline-flex items-center gap-1 rounded-md px-1.5 h-5 text-[10px] font-medium transition-colors"
-            :class="activeFilter === 'added'
+            :class="activeFilters.has('added')
               ? 'bg-df-success text-white ring-1 ring-df-success/80'
               : 'bg-df-success/20 text-df-success hover:bg-df-success/30'"
             @click="toggleFilter('added')"
@@ -433,7 +455,7 @@ loadDatabases(props.connectionId, 'source')
           <button
             v-if="summary.removed > 0"
             class="inline-flex items-center gap-1 rounded-md px-1.5 h-5 text-[10px] font-medium transition-colors"
-            :class="activeFilter === 'removed'
+            :class="activeFilters.has('removed')
               ? 'bg-destructive text-destructive-foreground ring-1 ring-destructive/60'
               : 'bg-destructive/20 text-destructive hover:bg-destructive/30'"
             @click="toggleFilter('removed')"
@@ -444,7 +466,7 @@ loadDatabases(props.connectionId, 'source')
           <button
             v-if="summary.modified > 0"
             class="inline-flex items-center gap-1 rounded-md px-1.5 h-5 text-[10px] font-medium transition-colors"
-            :class="activeFilter === 'modified'
+            :class="activeFilters.has('modified')
               ? 'bg-df-warning text-white ring-1 ring-df-warning/80'
               : 'bg-df-warning/20 text-df-warning hover:bg-df-warning/30'"
             @click="toggleFilter('modified')"
@@ -471,35 +493,61 @@ loadDatabases(props.connectionId, 'source')
           <ScrollArea class="flex-1 min-h-0 border-r border-border">
             <div class="p-2">
               <!-- 仅在源端的表（目标端需新增） -->
-              <div v-for="table in filteredDiff?.tablesOnlyInSource" :key="`add-${table}`" class="flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-muted/50">
+              <div v-for="table in typeFilteredDiff?.tablesOnlyInSource" :key="`add-${table}`"
+                class="flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-muted/50"
+                :class="{ 'opacity-40': !checkedTables[table] }"
+              >
+                <Switch
+                  :model-value="checkedTables[table]"
+                  class="h-3.5 w-7 shrink-0 [&_[data-slot=switch-thumb]]:size-3"
+                  @update:model-value="toggleTableCheck(table)"
+                />
                 <Plus class="h-3 w-3 text-df-success shrink-0" />
                 <span class="font-mono">{{ table }}</span>
                 <Badge variant="default" class="ml-auto bg-df-success text-[10px] h-4">{{ t('schemaCompare.onlyInSource') }}</Badge>
               </div>
 
               <!-- 仅在目标端的表（目标端多余） -->
-              <div v-for="table in filteredDiff?.tablesOnlyInTarget" :key="`rm-${table}`" class="flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-muted/50">
+              <div v-for="table in typeFilteredDiff?.tablesOnlyInTarget" :key="`rm-${table}`"
+                class="flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-muted/50"
+                :class="{ 'opacity-40': !checkedTables[table] }"
+              >
+                <Switch
+                  :model-value="checkedTables[table]"
+                  class="h-3.5 w-7 shrink-0 [&_[data-slot=switch-thumb]]:size-3"
+                  @update:model-value="toggleTableCheck(table)"
+                />
                 <Minus class="h-3 w-3 text-destructive shrink-0" />
                 <span class="font-mono">{{ table }}</span>
                 <Badge variant="destructive" class="ml-auto text-[10px] h-4">{{ t('schemaCompare.onlyInTarget') }}</Badge>
               </div>
 
               <!-- 有差异的表 -->
-              <div v-for="td in filteredDiff?.tableDiffs" :key="`diff-${td.tableName}`">
-                <button
+              <div v-for="td in typeFilteredDiff?.tableDiffs" :key="`diff-${td.tableName}`">
+                <div
                   class="flex w-full items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-muted/50"
-                  @click="toggleTable(td.tableName)"
+                  :class="{ 'opacity-40': !checkedTables[td.tableName] }"
                 >
-                  <ChevronRight
-                    class="h-3 w-3 shrink-0 transition-transform"
-                    :class="{ 'rotate-90': expandedTables.has(td.tableName) }"
+                  <Switch
+                    :model-value="checkedTables[td.tableName]"
+                    class="h-3.5 w-7 shrink-0 [&_[data-slot=switch-thumb]]:size-3"
+                    @update:model-value="toggleTableCheck(td.tableName)"
                   />
-                  <PenLine class="h-3 w-3 text-df-warning shrink-0" />
-                  <span class="font-mono">{{ td.tableName }}</span>
-                  <span class="ml-auto text-[10px] text-muted-foreground">
-                    {{ td.columnsAdded.length + td.columnsRemoved.length + td.columnsModified.length }} {{ t('schemaCompare.changes') }}
-                  </span>
-                </button>
+                  <button
+                    class="flex flex-1 items-center gap-2"
+                    @click="toggleTable(td.tableName)"
+                  >
+                    <ChevronRight
+                      class="h-3 w-3 shrink-0 transition-transform"
+                      :class="{ 'rotate-90': expandedTables.has(td.tableName) }"
+                    />
+                    <PenLine class="h-3 w-3 text-df-warning shrink-0" />
+                    <span class="font-mono">{{ td.tableName }}</span>
+                    <span class="ml-auto text-[10px] text-muted-foreground">
+                      {{ td.columnsAdded.length + td.columnsRemoved.length + td.columnsModified.length }} {{ t('schemaCompare.changes') }}
+                    </span>
+                  </button>
+                </div>
 
                 <!-- 展开详情 -->
                 <div v-if="expandedTables.has(td.tableName)" class="ml-6 mb-1 border-l border-border pl-3">
@@ -544,11 +592,10 @@ loadDatabases(props.connectionId, 'source')
                 variant="default"
                 size="sm"
                 class="h-5 gap-1 text-[10px]"
-                :disabled="isExecutingMigration || !migrationSql"
-                @click="handleExecuteMigration"
+                :disabled="!migrationSql"
+                @click="handleOpenMigrationInQuery"
               >
-                <Loader2 v-if="isExecutingMigration" class="h-3 w-3 animate-spin" />
-                <Play v-else class="h-3 w-3" />
+                <Play class="h-3 w-3" />
                 {{ t('database.multiStatement.executeMigration') }}
               </Button>
             </div>
