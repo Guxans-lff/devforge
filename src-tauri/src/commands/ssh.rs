@@ -208,7 +208,7 @@ pub async fn ssh_exec_command(
 }
 
 /// 采集服务器指标的合并命令
-const METRICS_COMMAND: &str = r#"echo "===CPU===" && top -bn1 | head -5 && echo "===MEM===" && free -m && echo "===DISK===" && df -m --output=source,target,size,used,avail,pcent -x tmpfs -x devtmpfs 2>/dev/null || df -m && echo "===NET===" && cat /proc/net/dev 2>/dev/null && echo "===LOAD===" && cat /proc/loadavg && echo "===UPTIME===" && cat /proc/uptime"#;
+const METRICS_COMMAND: &str = r#"echo "===CPU===" && top -bn1 | head -5 && echo "===MEM===" && free -m && echo "===DISK===" && LANG=C df -m --output=source,target,size,used,avail,pcent -x tmpfs -x devtmpfs 2>/dev/null || LANG=C df -m && echo "===NET===" && cat /proc/net/dev 2>/dev/null && echo "===LOAD===" && cat /proc/loadavg && echo "===UPTIME===" && cat /proc/uptime"#;
 
 /// 采集远程服务器系统指标
 #[tauri::command]
@@ -374,44 +374,75 @@ fn parse_memory(section: &str) -> (u64, u64, u64, u64, u64) {
 }
 
 /// 从 df 输出解析磁盘信息
+/// --output 格式：source target size used avail pcent（标题含 "Avail" 不含 "Available"）
+/// 回退格式：Filesystem 1M-blocks Used Available Use% Mounted on（标题含 "Available"）
 fn parse_disks(section: &str) -> Vec<crate::models::ssh::DiskInfo> {
     let mut disks = Vec::new();
 
+    // 通过标题行区分格式：回退格式含 "Available"，--output 格式只有 "Avail"
+    let header_line = section
+        .lines()
+        .find(|l| {
+            let trimmed = l.trim_start();
+            trimmed.starts_with("Filesystem") || trimmed.starts_with("文件系统")
+        })
+        .unwrap_or("");
+    let is_output_format = !header_line.contains("Available");
+
     for line in section.lines() {
-        // 跳过标题行
-        if line.starts_with("Filesystem") || line.starts_with("文件系统") || line.is_empty() {
+        let trimmed = line.trim_start();
+        // 跳过标题行和空行
+        if trimmed.starts_with("Filesystem")
+            || trimmed.starts_with("文件系统")
+            || trimmed.is_empty()
+        {
             continue;
         }
         let parts: Vec<&str> = line.split_whitespace().collect();
-        if parts.len() >= 6 {
-            let filesystem = parts[0].to_string();
-            // 跳过伪文件系统
-            if filesystem.starts_with("tmpfs")
-                || filesystem.starts_with("devtmpfs")
-                || filesystem == "none"
-                || filesystem == "udev"
-            {
-                continue;
-            }
-
-            let mount_or_target = parts[parts.len() - 1].to_string();
-            let use_str = parts[parts.len() - 2].replace('%', "");
-            let use_percent = use_str.parse::<f64>().unwrap_or(0.0);
-
-            // df -m 输出：Size Used Avail
-            let total_mb = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
-            let used_mb = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
-            let available_mb = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
-
-            disks.push(crate::models::ssh::DiskInfo {
-                filesystem,
-                mount_point: mount_or_target,
-                total_mb,
-                used_mb,
-                available_mb,
-                use_percent,
-            });
+        if parts.len() < 6 {
+            continue;
         }
+
+        let filesystem = parts[0].to_string();
+        // 跳过伪文件系统
+        if filesystem.starts_with("tmpfs")
+            || filesystem.starts_with("devtmpfs")
+            || filesystem == "none"
+            || filesystem == "udev"
+        {
+            continue;
+        }
+
+        let (mount_point, total_mb, used_mb, available_mb, use_percent) = if is_output_format {
+            // --output=source,target,size,used,avail,pcent
+            // [0]=source [1]=target [2]=size [3]=used [4]=avail [5]=pcent
+            let mount = parts[1].to_string();
+            let total = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let used = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let avail = parts.get(4).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let pct_str = parts.get(5).map(|s| s.replace('%', "")).unwrap_or_default();
+            let pct = pct_str.parse::<f64>().unwrap_or(0.0);
+            (mount, total, used, avail, pct)
+        } else {
+            // 回退格式：Filesystem 1M-blocks Used Available Use% Mounted_on
+            // [0]=fs [1]=size [2]=used [3]=avail [倒2]=pct [倒1]=mount
+            let mount = parts[parts.len() - 1].to_string();
+            let total = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let used = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let avail = parts.get(3).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let pct_str = parts[parts.len() - 2].replace('%', "");
+            let pct = pct_str.parse::<f64>().unwrap_or(0.0);
+            (mount, total, used, avail, pct)
+        };
+
+        disks.push(crate::models::ssh::DiskInfo {
+            filesystem,
+            mount_point,
+            total_mb,
+            used_mb,
+            available_mb,
+            use_percent,
+        });
     }
 
     disks

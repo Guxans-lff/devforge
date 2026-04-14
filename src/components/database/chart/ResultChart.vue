@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue'
 import type { ChartConfig } from '@/components/database/chart/ChartConfigPanel.vue'
+import { getCssColor } from '@/composables/useChartTheme'
 
 /** 注册 ECharts 渲染器和图表组件（按需加载） */
 import { use } from 'echarts/core'
@@ -31,22 +32,6 @@ interface TooltipParam {
   name: string
   value: number
   percent?: number
-}
-
-/** 从 CSS 变量读取 oklch 颜色并转为 hex（ECharts 需要） */
-function getCssColor(varName: string, fallback: string): string {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim()
-  if (!raw) return fallback
-  // 创建临时元素让浏览器解析 oklch → rgb
-  const el = document.createElement('div')
-  el.style.color = raw
-  document.body.appendChild(el)
-  const rgb = getComputedStyle(el).color
-  document.body.removeChild(el)
-  // rgb(r, g, b) → #rrggbb
-  const match = rgb.match(/(\d+)/g)
-  if (!match || match.length < 3) return fallback
-  return `#${match.slice(0, 3).map(n => Number(n).toString(16).padStart(2, '0')).join('')}`
 }
 
 /** 从主题 CSS 变量获取 chart 配色 */

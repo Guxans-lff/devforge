@@ -416,6 +416,7 @@ export default {
     samplingInterval: 'Interval',
     samples: 'Samples',
     stopped: 'Stopped',
+    noData: 'No disk data available',
   },
   settings: {
     title: 'Settings',

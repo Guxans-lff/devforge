@@ -434,6 +434,7 @@ export default {
     samplingInterval: '采样间隔',
     samples: '采样数',
     stopped: '已暂停',
+    noData: '暂无磁盘数据',
   },
   settings: {
     title: '设置',
