@@ -28,7 +28,7 @@
   - 直接使用 `toolCall.parsedArgs.content` 作为预览内容（无需额外读文件，内容已在工具参数中）
   - 用 `AiCodeBlock` 组件渲染代码高亮预览，传入 `:show-actions="false"` 隐藏保存/复制按钮（文件已写入，这些按钮多余）
   - 大文件截断：预览内容超过 200 行时只显示前 100 行 + `... 共 N 行，已截断`
-- **"打开文件"按钮**：调用 Tauri `shell.open(filePath)` 用系统默认程序打开。DevForge 当前不支持本地文件编辑 Tab，不做强行扩展。
+- **"打开文件"按钮**：调用 `@tauri-apps/plugin-opener` 的 `openPath(filePath)` 用系统默认程序打开。需新增安装此插件（见文件改动清单）。DevForge 当前不支持本地文件编辑 Tab，不做强行扩展。
 
 #### read_file 专属展示
 
@@ -144,14 +144,25 @@ const EXT_LANG: Record<string, string> = {
 
 ## 文件改动清单
 
-### 修改 4 个文件
+### 修改 4 个前端文件
 
 | 文件 | 改动 |
 |------|------|
-| `src/components/ai/AiToolCallBlock.vue` | write_file/read_file 专属高亮展示；watch status 自动展开；打开文件按钮（shell.open）；read_file 结果剥离元数据头；大文件截断 |
+| `src/components/ai/AiToolCallBlock.vue` | write_file/read_file 专属高亮展示；watch status 自动展开；打开文件按钮（openPath）；read_file 结果剥离元数据头；大文件截断 |
 | `src/components/ai/AiCodeBlock.vue` | 新增 `showActions` prop（默认 true），控制是否显示顶栏复制/保存按钮 |
 | `src/views/AiChatView.vue` | effectiveSystemPrompt 拼接工具行为指引；顶栏新增工作目录选择器；workDir 数据流绑定 |
 | `src/utils/file-markers.ts` | 新增 `inferLanguageFromPath()` 函数 + EXT_LANG 映射表 |
+
+### 新增依赖：tauri-plugin-opener
+
+"打开文件"按钮需要 Tauri opener 插件，涉及 4 个配置文件：
+
+| 文件 | 改动 |
+|------|------|
+| `src-tauri/Cargo.toml` | 添加 `tauri-plugin-opener` 依赖 |
+| `package.json` | 添加 `@tauri-apps/plugin-opener` 依赖 |
+| `src-tauri/src/lib.rs` | 注册 `.plugin(tauri_plugin_opener::init())` |
+| `src-tauri/capabilities/default.json` | 添加 `"opener:default"` 权限 |
 
 ### 不改的文件
 
@@ -159,7 +170,7 @@ const EXT_LANG: Record<string, string> = {
 |------|------|
 | `AiMessageBubble.vue` | 无需改动，工具调用展示已有 |
 | `useAiChat.ts` | Tool Use 循环已完善，workDir 已暴露 |
-| `src-tauri/` (后端) | ai_tools.rs 和 commands/ai.rs 无需改动 |
+| `src-tauri/services/ai/` (后端 AI 模块) | ai_tools.rs 和 commands/ai.rs 无需改动 |
 
 ## 验证方式
 
