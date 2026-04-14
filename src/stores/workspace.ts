@@ -27,6 +27,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     bottomPanelHeight: 200,
     bottomPanelCollapsed: true,
     bottomPanelTab: 'query-history',
+    immersiveMode: false,
   })
 
   const activeTab = computed(() =>
@@ -117,6 +118,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  /** 更新指定 Tab 的 meta（不可变更新） */
+  function updateTabMeta(tabId: string, meta: Record<string, unknown>) {
+    tabs.value = tabs.value.map(t =>
+      t.id === tabId ? { ...t, meta: { ...t.meta, ...meta } } : t,
+    )
+  }
+
   function setActiveTab(tabId: string) {
     activeTabId.value = tabId
     // 切换页面时：如果底部面板是程序自动打开的（如传输），且无活跃传输任务，自动收起
@@ -166,6 +174,50 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       bottomPanelTab: tab,
       bottomPanelCollapsed: false,
     }
+  }
+
+  // ===== 沉浸式模式 =====
+
+  /** 进入沉浸式前保存的面板状态快照 */
+  let _panelSnapshot: { sidebarCollapsed: boolean; bottomPanelCollapsed: boolean } | null = null
+
+  /** 用户是否手动退出了沉浸式（防止 watch 自动重新进入） */
+  let _immersiveManuallyExited = false
+
+  /** 进入沉浸式模式（隐藏 Sidebar + BottomPanel） */
+  function enterImmersive(): void {
+    if (panelState.value.immersiveMode) return
+    if (_immersiveManuallyExited) return  // 用户主动退出后不自动重新进入
+    // 保存当前面板状态
+    _panelSnapshot = {
+      sidebarCollapsed: panelState.value.sidebarCollapsed,
+      bottomPanelCollapsed: panelState.value.bottomPanelCollapsed,
+    }
+    panelState.value = {
+      ...panelState.value,
+      sidebarCollapsed: true,
+      bottomPanelCollapsed: true,
+      immersiveMode: true,
+    }
+  }
+
+  /** 退出沉浸式模式（恢复面板状态） */
+  function exitImmersive(): void {
+    if (!panelState.value.immersiveMode) return
+    _immersiveManuallyExited = true  // 标记用户主动退出
+    const snapshot = _panelSnapshot ?? { sidebarCollapsed: false, bottomPanelCollapsed: true }
+    _panelSnapshot = null
+    panelState.value = {
+      ...panelState.value,
+      sidebarCollapsed: snapshot.sidebarCollapsed,
+      bottomPanelCollapsed: snapshot.bottomPanelCollapsed,
+      immersiveMode: false,
+    }
+  }
+
+  /** 重置沉浸式手动退出标记（离开 AI tab 时调用） */
+  function resetImmersiveFlag(): void {
+    _immersiveManuallyExited = false
   }
 
   // ===== SQLite 持久化 =====
@@ -286,12 +338,16 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panelState,
     addTab,
     closeTab,
+    updateTabMeta,
     setActiveTab,
     toggleSidebar,
     toggleBottomPanel,
     setSidebarWidth,
     setBottomPanelHeight,
     setBottomPanelTab,
+    enterImmersive,
+    exitImmersive,
+    resetImmersiveFlag,
     // 持久化方法
     restoreState,
     enableAutoSave,

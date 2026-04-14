@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR'
-export type LogSource = 'SSH' | 'SFTP' | 'DATABASE' | 'SYSTEM' | 'GIT'
+export type LogSource = 'SSH' | 'SFTP' | 'DATABASE' | 'SYSTEM' | 'GIT' | 'AI'
 
 export interface LogEntry {
     id: string

@@ -1,4 +1,4 @@
-export type TabType = 'database' | 'terminal' | 'file-manager' | 'settings' | 'welcome' | 'multi-exec' | 'terminal-player' | 'redis' | 'git' | 'screenshot' | 'tunnel'
+export type TabType = 'database' | 'terminal' | 'file-manager' | 'settings' | 'welcome' | 'multi-exec' | 'terminal-player' | 'redis' | 'git' | 'screenshot' | 'tunnel' | 'ai-chat'
 
 export interface Tab {
   id: string
@@ -17,6 +17,8 @@ export interface PanelState {
   bottomPanelHeight: number
   bottomPanelCollapsed: boolean
   bottomPanelTab: 'query-history' | 'log' | 'transfer' | 'history' | 'dev'
+  /** 沉浸式模式（AI 对话等场景，隐藏 Sidebar/BottomPanel） */
+  immersiveMode: boolean
 }
 
 // 工作区快照 - 用于持久化

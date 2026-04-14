@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted } from 'vue'
+import { computed, defineAsyncComponent, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTransferStore } from '@/stores/transfer'
@@ -23,6 +23,7 @@ const RedisView = defineAsyncComponent(() => import('@/views/RedisView.vue'))
 const GitView = defineAsyncComponent(() => import('@/views/GitView.vue'))
 const ScreenshotView = defineAsyncComponent(() => import('@/views/ScreenshotView.vue'))
 const TunnelView = defineAsyncComponent(() => import('@/views/TunnelView.vue'))
+const AiChatView = defineAsyncComponent(() => import('@/views/AiChatView.vue'))
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
@@ -58,6 +59,8 @@ const activeTabComponent = computed(() => {
       return ScreenshotView
     case 'tunnel':
       return TunnelView
+    case 'ai-chat':
+      return AiChatView
     default:
       return null
   }
@@ -105,6 +108,18 @@ const activeTabPlaceholder = computed(() => {
 onMounted(() => {
   transferStore.setupListeners()
 })
+
+// ===== 沉浸式模式：AI Tab 激活时自动进入/退出 =====
+const isImmersive = computed(() => workspace.panelState.immersiveMode)
+
+watch(() => workspace.activeTab?.type, (tabType, oldType) => {
+  if (tabType === 'ai-chat' && oldType !== 'ai-chat') {
+    workspace.enterImmersive()
+  } else if (tabType !== 'ai-chat' && oldType === 'ai-chat') {
+    workspace.exitImmersive()
+    workspace.resetImmersiveFlag()  // 离开 AI tab 时重置标记，下次进入可以再自动沉浸
+  }
+})
 </script>
 
 <template>
@@ -113,13 +128,13 @@ onMounted(() => {
     <TitleBar />
 
     <div class="flex flex-1 min-h-0">
-    <!-- Sidebar -->
-    <Sidebar />
+    <!-- Sidebar（沉浸式下隐藏） -->
+    <Sidebar v-show="!isImmersive" />
 
     <!-- Main Content Area: Floating and elevated -->
-    <div class="flex flex-1 flex-col overflow-hidden bg-background sm:rounded-tl-xl border-t border-l border-border/40 shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.15)] dark:shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.6)] relative z-10 transition-[box-shadow,border-color] duration-300">
-      <!-- Tab Bar -->
-      <TabBar />
+    <div class="flex flex-1 flex-col overflow-hidden bg-background transition-[border-radius] duration-300" :class="isImmersive ? '' : 'sm:rounded-tl-xl border-t border-l border-border/40 shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.15)] dark:shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.6)]'" :style="{ position: 'relative', zIndex: 10 }">
+      <!-- Tab Bar（沉浸式下隐藏） -->
+      <TabBar v-show="!isImmersive" />
 
       <!-- Workspace -->
       <main class="flex-1 overflow-hidden">
@@ -140,8 +155,8 @@ onMounted(() => {
         </div>
       </main>
 
-      <!-- Bottom Panel -->
-      <BottomPanel />
+      <!-- Bottom Panel（沉浸式下隐藏） -->
+      <BottomPanel v-show="!isImmersive" />
     </div>
     </div>
 

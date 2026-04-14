@@ -1,3 +1,4 @@
+pub mod ai;
 pub mod audit_log;
 pub mod credential;
 pub mod crash_reporter;

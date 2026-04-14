@@ -3,6 +3,7 @@ mod models;
 mod services;
 mod utils;
 
+use commands::ai::{self as ai_cmd, AiEngineState};
 use commands::connection::{self, StorageState};
 use commands::db::{self, DbEngineState};
 use commands::data_sync;
@@ -41,6 +42,7 @@ use services::ssh_tunnel::SshTunnelEngine;
 use services::git_engine::GitEngine;
 use services::screenshot_engine::ScreenshotEngine;
 use services::terminal_recorder::TerminalRecorder;
+use services::ai::AiEngine;
 use services::storage::Storage;
 use services::transfer_manager::{TransferManager, TransferManagerState};
 use tauri::Manager;
@@ -61,6 +63,10 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             log::info!("App setup started");
+
+            // Initialize AiEngine — Provider 注册表 + 中断控制
+            let ai_engine_state: AiEngineState = Arc::new(AiEngine::new());
+            app.manage(ai_engine_state);
 
             // Initialize DbEngine — 不再需要 Mutex，内部使用 RwLock
             let db_engine_state: DbEngineState = Arc::new(DbEngine::new());
@@ -196,8 +202,19 @@ pub fn run() {
             match tauri::async_runtime::block_on(Storage::new()) {
                 Ok(storage) => {
                     let state: StorageState = Arc::new(storage);
-                    handle.manage(state);
+                    handle.manage(state.clone());
                     log::info!("Storage initialized successfully");
+
+                    // 初始化 AI 相关表
+                    let ai_init_state = state.clone();
+                    tauri::async_runtime::block_on(async {
+                        let pool = ai_init_state.get_pool().await;
+                        if let Err(e) = services::ai::session_store::init_tables(&pool).await {
+                            log::error!("AI 表初始化失败: {}", e);
+                        } else {
+                            log::info!("AI tables initialized");
+                        }
+                    });
 
                     // 启动定时调度器（需在 Tokio 运行时上下文中 spawn）
                     let scheduler_handle = handle.clone();
@@ -583,6 +600,18 @@ pub fn run() {
             screenshot_cmd::screenshot_delete,
             screenshot_cmd::screenshot_cleanup,
             screenshot_cmd::screenshot_translate,
+            // AI
+            ai_cmd::ai_chat_stream,
+            ai_cmd::ai_abort_stream,
+            ai_cmd::ai_list_providers,
+            ai_cmd::ai_save_provider,
+            ai_cmd::ai_delete_provider,
+            ai_cmd::ai_save_session,
+            ai_cmd::ai_list_sessions,
+            ai_cmd::ai_get_session,
+            ai_cmd::ai_delete_session,
+            ai_cmd::ai_save_message,
+            ai_cmd::ai_get_usage_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -19,6 +19,7 @@ import {
   Camera,
   Cable,
   Container,
+  Bot,
 } from 'lucide-vue-next'
 import type { TabType } from '@/types/workspace'
 import { parseEnvironment } from '@/api/connection'
@@ -42,6 +43,7 @@ const iconMap: Record<TabType, typeof Database> = {
   git: GitBranch,
   screenshot: Camera,
   tunnel: Cable,
+  'ai-chat': Bot,
 }
 
 function getTabIcon(type: TabType) {

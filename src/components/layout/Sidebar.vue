@@ -41,6 +41,7 @@ import {
   Camera,
   Cable,
   MoreHorizontal,
+  Bot,
 } from 'lucide-vue-next'
 import type { ConnectionRecord } from '@/api/connection'
 import type { TabType } from '@/types/workspace'
@@ -682,6 +683,10 @@ const groupedNonFavorites = computed(() => {
               <DropdownMenuItem @click="workspace.addTab({ id: 'tunnel', type: 'tunnel', title: t('tunnel.title'), closable: true })">
                 <Cable class="mr-2 h-4 w-4" />
                 {{ t('tunnel.title') }}
+              </DropdownMenuItem>
+              <DropdownMenuItem @click="workspace.addTab({ id: `ai-chat-${Date.now()}`, type: 'ai-chat', title: 'AI 对话', closable: true, meta: { sessionId: `session-${Date.now()}` } })">
+                <Bot class="mr-2 h-4 w-4" />
+                AI 对话
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
