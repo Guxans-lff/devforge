@@ -114,7 +114,11 @@ export function useAiChat(options: UseAiChatOptions) {
         return
       }
 
-      const [, records] = result
+      const [session, records] = result
+      // 恢复工作目录
+      if (session.workDir) {
+        workDir.value = session.workDir
+      }
       messages.value = records.map(r => ({
         id: r.id,
         role: r.role as AiMessage['role'],
@@ -243,6 +247,7 @@ export function useAiChat(options: UseAiChatOptions) {
         estimatedCost: 0,
         createdAt: messages.value[0]?.timestamp ?? now,
         updatedAt: now,
+        workDir: workDir.value || undefined,
       }
       aiStore.saveSession(session).catch(e => console.warn('[AI] 保存会话失败:', e))
     }

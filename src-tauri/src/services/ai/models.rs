@@ -248,6 +248,8 @@ pub struct AiSession {
     pub tags: Option<Vec<String>>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// 工作目录（Tool Use 安全边界）
+    pub work_dir: Option<String>,
 }
 
 /// AI 消息（持久化）

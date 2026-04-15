@@ -65,6 +65,12 @@ pub async fn init_tables(pool: &SqlitePool) -> Result<(), AppError> {
     .await
     .map_err(|e| AppError::Other(format!("初始化 AI 表失败: {e}")))?;
 
+    // 迁移：为旧数据库添加 work_dir 列（忽略"列已存在"错误）
+    sqlx::query("ALTER TABLE ai_sessions ADD COLUMN work_dir TEXT")
+        .execute(pool)
+        .await
+        .ok();
+
     Ok(())
 }
 
@@ -151,8 +157,8 @@ pub async fn save_session(pool: &SqlitePool, session: &AiSession) -> Result<(), 
     sqlx::query(
         r#"
         INSERT OR REPLACE INTO ai_sessions
-        (id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags, created_at, updated_at, work_dir)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(&session.id)
@@ -166,6 +172,7 @@ pub async fn save_session(pool: &SqlitePool, session: &AiSession) -> Result<(), 
     .bind(&tags_json)
     .bind(session.created_at)
     .bind(session.updated_at)
+    .bind(&session.work_dir)
     .execute(pool)
     .await
     .map_err(|e| AppError::Other(format!("保存会话失败: {e}")))?;
@@ -175,9 +182,9 @@ pub async fn save_session(pool: &SqlitePool, session: &AiSession) -> Result<(), 
 
 /// 获取会话列表
 pub async fn list_sessions(pool: &SqlitePool) -> Result<Vec<AiSession>, AppError> {
-    let rows: Vec<(String, String, String, String, Option<String>, u32, u32, f64, Option<String>, i64, i64)> =
+    let rows: Vec<(String, String, String, String, Option<String>, u32, u32, f64, Option<String>, i64, i64, Option<String>)> =
         sqlx::query_as(
-            "SELECT id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags, created_at, updated_at FROM ai_sessions ORDER BY updated_at DESC"
+            "SELECT id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags, created_at, updated_at, work_dir FROM ai_sessions ORDER BY updated_at DESC"
         )
         .fetch_all(pool)
         .await
@@ -185,12 +192,12 @@ pub async fn list_sessions(pool: &SqlitePool) -> Result<Vec<AiSession>, AppError
 
     let sessions = rows
         .into_iter()
-        .map(|(id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags_json, created_at, updated_at)| {
+        .map(|(id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags_json, created_at, updated_at, work_dir)| {
             let tags = tags_json.and_then(|j| serde_json::from_str(&j).ok());
             AiSession {
                 id, title, provider_id, model, system_prompt,
                 message_count, total_tokens, estimated_cost, tags,
-                created_at, updated_at,
+                created_at, updated_at, work_dir,
             }
         })
         .collect();
@@ -200,21 +207,21 @@ pub async fn list_sessions(pool: &SqlitePool) -> Result<Vec<AiSession>, AppError
 
 /// 获取单个会话
 pub async fn get_session(pool: &SqlitePool, id: &str) -> Result<Option<AiSession>, AppError> {
-    let row: Option<(String, String, String, String, Option<String>, u32, u32, f64, Option<String>, i64, i64)> =
+    let row: Option<(String, String, String, String, Option<String>, u32, u32, f64, Option<String>, i64, i64, Option<String>)> =
         sqlx::query_as(
-            "SELECT id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags, created_at, updated_at FROM ai_sessions WHERE id = ?"
+            "SELECT id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags, created_at, updated_at, work_dir FROM ai_sessions WHERE id = ?"
         )
         .bind(id)
         .fetch_optional(pool)
         .await
         .map_err(|e| AppError::Other(format!("查询会话失败: {e}")))?;
 
-    Ok(row.map(|(id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags_json, created_at, updated_at)| {
+    Ok(row.map(|(id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags_json, created_at, updated_at, work_dir)| {
         let tags = tags_json.and_then(|j| serde_json::from_str(&j).ok());
         AiSession {
             id, title, provider_id, model, system_prompt,
             message_count, total_tokens, estimated_cost, tags,
-            created_at, updated_at,
+            created_at, updated_at, work_dir,
         }
     }))
 }

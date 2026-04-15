@@ -12,7 +12,7 @@ import { useFileAttachment } from '@/composables/useFileAttachment'
 import { checkTokenLimit } from '@/utils/file-markers'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { getCredential } from '@/api/connection'
-import type { ProviderConfig, ModelConfig } from '@/types/ai'
+import type { ProviderConfig, ModelConfig, AiSession } from '@/types/ai'
 import type { ChatMode } from '@/components/ai/AiInputArea.vue'
 import AiMessageBubble from '@/components/ai/AiMessageBubble.vue'
 import AiInputArea from '@/components/ai/AiInputArea.vue'
@@ -201,6 +201,7 @@ function handleCreateSession() {
   }
   store.setActiveSession(newSessionId)
   chat.clearMessages()
+  chat.workDir.value = ''
   currentView.value = 'chat'
 }
 
@@ -266,6 +267,24 @@ async function handleSelectWorkDir() {
   const dir = await openDialog({ directory: true, multiple: false })
   if (dir) {
     chat.workDir.value = dir as string
+    // 立即持久化到当前 session
+    const sid = currentSessionId.value
+    if (sid && currentProvider.value && currentModel.value) {
+      const session: AiSession = {
+        id: sid,
+        title: '新对话',
+        providerId: currentProvider.value.id,
+        model: currentModel.value.id,
+        systemPrompt: systemPrompt.value,
+        messageCount: chat.messages.value.filter(m => m.role !== 'error').length,
+        totalTokens: chat.totalTokens.value,
+        estimatedCost: 0,
+        createdAt: chat.messages.value[0]?.timestamp ?? Date.now(),
+        updatedAt: Date.now(),
+        workDir: dir as string,
+      }
+      store.saveSession(session).catch(e => console.warn('[AI] 保存工作目录失败:', e))
+    }
   }
 }
 

@@ -91,6 +91,7 @@ export interface AiSession {
   tags?: string[]
   createdAt: number
   updatedAt: number
+  workDir?: string
 }
 
 /** AI 消息（持久化记录） */
