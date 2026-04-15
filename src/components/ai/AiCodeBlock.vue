@@ -5,15 +5,32 @@
  * 支持语法高亮（shiki）、复制、语言标签、行号。
  */
 import { computed, ref, onMounted, watch } from 'vue'
-import { Copy, Check } from 'lucide-vue-next'
+import { Copy, Check, Download } from 'lucide-vue-next'
+import { save } from '@tauri-apps/plugin-dialog'
+import { writeTextFile } from '@/api/database'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   language: string
   code: string
-}>()
+  /** 是否显示顶栏操作按钮（复制/保存），默认 true */
+  showActions?: boolean
+}>(), {
+  showActions: true,
+})
 
 const copied = ref(false)
 const highlightedHtml = ref('')
+
+/** 语言 → 文件扩展名映射 */
+const LANG_EXT: Record<string, string> = {
+  javascript: 'js', js: 'js', typescript: 'ts', ts: 'ts',
+  tsx: 'tsx', jsx: 'jsx', python: 'py', py: 'py',
+  rust: 'rs', rs: 'rs', go: 'go', sql: 'sql',
+  shell: 'sh', sh: 'sh', bash: 'sh', json: 'json',
+  yaml: 'yaml', yml: 'yaml', html: 'html', css: 'css',
+  vue: 'vue', markdown: 'md', md: 'md', java: 'java',
+  kotlin: 'kt', swift: 'swift', dart: 'dart', text: 'txt',
+}
 
 /** 语言显示名称 */
 const displayLang = computed(() => {
@@ -51,6 +68,24 @@ async function copyCode() {
   }
 }
 
+/** 保存代码到文件 */
+async function saveCode() {
+  const ext = LANG_EXT[props.language.toLowerCase()] ?? 'txt'
+  const defaultName = `code-${Date.now()}.${ext}`
+
+  const filePath = await save({
+    defaultPath: defaultName,
+    filters: [{ name: `${displayLang.value} 文件`, extensions: [ext] }],
+  })
+  if (!filePath) return
+
+  try {
+    await writeTextFile(filePath, props.code)
+  } catch (e) {
+    console.error('[AI] 保存代码失败:', e)
+  }
+}
+
 /** 异步加载 shiki 高亮 */
 async function highlight() {
   try {
@@ -79,14 +114,24 @@ watch(() => [props.code, props.language], highlight)
       <span class="text-[10px] font-mono font-medium text-muted-foreground">
         {{ displayLang }}
       </span>
-      <button
-        class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-        :title="copied ? '已复制' : '复制代码'"
-        @click="copyCode"
-      >
-        <component :is="copied ? Check : Copy" class="h-3 w-3" />
-        <span>{{ copied ? '已复制' : '复制' }}</span>
-      </button>
+      <div v-if="showActions" class="flex items-center gap-1">
+        <button
+          class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          title="保存为文件"
+          @click="saveCode"
+        >
+          <Download class="h-3 w-3" />
+          <span>保存</span>
+        </button>
+        <button
+          class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          :title="copied ? '已复制' : '复制代码'"
+          @click="copyCode"
+        >
+          <component :is="copied ? Check : Copy" class="h-3 w-3" />
+          <span>{{ copied ? '已复制' : '复制' }}</span>
+        </button>
+      </div>
     </div>
     <!-- 代码内容 -->
     <div class="overflow-x-auto">
