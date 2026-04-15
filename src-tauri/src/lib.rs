@@ -58,6 +58,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         // .plugin(tauri_plugin_updater::Builder::new().build()) // 暂时禁用：当前 endpoint 为 HTTP，Tauri updater 要求 HTTPS，启动时会 panic
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
@@ -612,6 +613,8 @@ pub fn run() {
             ai_cmd::ai_delete_session,
             ai_cmd::ai_save_message,
             ai_cmd::ai_get_usage_stats,
+            ai_cmd::ai_get_tools,
+            ai_cmd::ai_execute_tool,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -45,6 +45,9 @@ anyhow = "1"
 # App data directory
 directories = "6"
 
+# Windows-friendly path canonicalization
+dunce = "1"
+
 # Logging
 log = "0.4"
 
@@ -85,6 +88,7 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-global-shortcut = "2"
 base64 = "0.22.1"
+tauri-plugin-opener = "2"
 
 # Local terminal PTY (ConPTY on Windows)
 portable-pty = "0.8"
