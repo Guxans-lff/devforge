@@ -38,6 +38,53 @@ function tryParseJson(str: string): Record<string, unknown> | undefined {
   }
 }
 
+/**
+ * 从 AiMessage 列表构建完整的 ChatMessage 链
+ *
+ * 包含 user / assistant（携带 toolCalls）/ tool 消息，
+ * 确保 API 看到完整的工具调用上下文。
+ */
+function buildChatMessages(msgs: AiMessage[]): ChatMessage[] {
+  const result: ChatMessage[] = []
+
+  for (const msg of msgs) {
+    if (msg.role === 'error') continue
+
+    if (msg.role === 'user') {
+      result.push({ role: 'user', content: msg.content })
+    } else if (msg.role === 'assistant') {
+      const chatMsg: ChatMessage = {
+        role: 'assistant',
+        content: msg.content || null,
+      }
+
+      // 携带 toolCalls（如果有）
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        chatMsg.toolCalls = msg.toolCalls.map(tc => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.arguments },
+        }))
+      }
+
+      result.push(chatMsg)
+
+      // 展开 toolResults 为独立的 tool 消息
+      if (msg.toolResults && msg.toolResults.length > 0) {
+        for (const tr of msg.toolResults) {
+          result.push({
+            role: 'tool',
+            content: tr.content,
+            toolCallId: tr.toolCallId,
+          })
+        }
+      }
+    }
+  }
+
+  return result
+}
+
 export interface UseAiChatOptions {
   /** 会话 ID（支持响应式） */
   sessionId: MaybeRef<string>
@@ -202,10 +249,8 @@ export function useAiChat(options: UseAiChatOptions) {
     }
     aiSaveMessage(userRecord).catch(e => console.warn('[AI] 保存用户消息失败:', e))
 
-    // 2. 构建发送给 API 的消息列表
-    const chatMessages: ChatMessage[] = messages.value
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+    // 2. 构建发送给 API 的消息列表（包含 tool 消息链）
+    const chatMessages: ChatMessage[] = buildChatMessages(messages.value)
 
     // 3. 开始流式对话（可能包含 Tool Use 循环）
     isStreaming.value = true
