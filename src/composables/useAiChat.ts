@@ -166,13 +166,60 @@ export function useAiChat(options: UseAiChatOptions) {
       if (session.workDir) {
         workDir.value = session.workDir
       }
-      messages.value = records.map(r => ({
-        id: r.id,
-        role: r.role as AiMessage['role'],
-        content: r.content,
-        timestamp: r.createdAt,
-        tokens: r.tokens,
-      }))
+
+      // 还原消息链（处理 tool_calls / tool_result 类型）
+      const restored: AiMessage[] = []
+      for (const r of records) {
+        if (r.role === 'assistant' && r.contentType === 'tool_calls') {
+          // assistant 消息携带 tool_calls，content 是 ToolCallInfo[] JSON
+          const toolCalls: ToolCallInfo[] = tryParseJson(r.content) as ToolCallInfo[] ?? []
+          restored.push({
+            id: r.id,
+            role: 'assistant',
+            content: '',
+            timestamp: r.createdAt,
+            tokens: r.tokens,
+            toolCalls,
+            toolResults: [],
+          })
+        } else if (r.role === 'tool' && r.contentType === 'tool_result') {
+          // tool 结果消息 → 附加到最近的 assistant 消息的 toolResults
+          const lastAssistant = [...restored].reverse().find(
+            m => m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0,
+          )
+          if (lastAssistant) {
+            // 找到对应的 toolCall 获取 toolCallId
+            const matchedTc = lastAssistant.toolCalls?.find(tc => {
+              // 按名称和顺序匹配（tool 消息无 toolCallId 字段存储）
+              return !lastAssistant.toolResults?.some(tr => tr.toolCallId === tc.id)
+            })
+            if (!lastAssistant.toolResults) lastAssistant.toolResults = []
+            lastAssistant.toolResults.push({
+              toolCallId: matchedTc?.id ?? r.id,
+              toolName: matchedTc?.name ?? 'unknown',
+              success: !r.content.startsWith('工具执行异常'),
+              content: r.content,
+            })
+            // 更新对应 toolCall 的状态和结果
+            if (matchedTc) {
+              matchedTc.status = r.content.startsWith('工具执行异常') ? 'error' : 'success'
+              matchedTc.result = r.content
+              matchedTc.parsedArgs = matchedTc.parsedArgs ?? tryParseJson(matchedTc.arguments)
+            }
+          }
+          // tool 消息不单独显示在列表中（已内嵌到 assistant）
+        } else {
+          // 普通 user / assistant / error 消息
+          restored.push({
+            id: r.id,
+            role: r.role as AiMessage['role'],
+            content: r.content,
+            timestamp: r.createdAt,
+            tokens: r.tokens,
+          })
+        }
+      }
+      messages.value = restored
     } catch (e) {
       error.value = ensureErrorString(e)
     } finally {
