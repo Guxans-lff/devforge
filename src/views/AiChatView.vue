@@ -8,6 +8,8 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiChat } from '@/composables/useAiChat'
+import { useFileAttachment } from '@/composables/useFileAttachment'
+import { checkTokenLimit } from '@/utils/file-markers'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { getCredential } from '@/api/connection'
 import type { ProviderConfig, ModelConfig } from '@/types/ai'
@@ -26,12 +28,15 @@ import {
   Sparkles,
   Zap,
   MessageSquareText,
+  FolderOpen,
 } from 'lucide-vue-next'
+import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 const store = useAiChatStore()
 const workspace = useWorkspaceStore()
+const fileAttachment = useFileAttachment()
 
 // ─────────────────────── 视图状态 ───────────────────────
 
@@ -130,12 +135,25 @@ watch(() => store.providers, (providers) => {
 
 // ─────────────────────── 操作 ───────────────────────
 
-/** 计算实际的 system prompt（拼接模式后缀） */
+/** 计算实际的 system prompt（拼接模式后缀 + 工具行为指引） */
 const effectiveSystemPrompt = computed(() => {
   const base = systemPrompt.value ?? ''
   const suffix = MODE_SUFFIXES[chatMode.value]
-  if (!suffix) return base || undefined
-  return base + suffix
+
+  // 工具行为指引（模型支持 Tool Use + 有工作目录时追加）
+  const enableTools = currentModel.value?.capabilities.toolUse && !!chat.workDir.value
+  let toolGuide = ''
+  if (enableTools) {
+    toolGuide = `\n\n【工具使用指引】\n你可以通过工具调用来操作用户的工作目录中的文件。\n工作目录: ${chat.workDir.value}\n\n使用原则：\n- 需要了解文件内容时，调用工具读取，不要凭记忆猜测\n- 需要创建或修改文件时，调用 write_file 工具直接写入\n- 搜索代码时优先使用 search_files 工具`
+
+    // 全自动模式额外追加
+    if (chatMode.value === 'auto') {
+      toolGuide += `\n\n当用户要求修改或创建文件时，直接调用 write_file 工具写入，不要在回复中输出完整代码块让用户手动保存。`
+    }
+  }
+
+  const result = base + (suffix || '') + toolGuide
+  return result || undefined
 })
 
 /** 发送消息 */
@@ -149,13 +167,28 @@ async function handleSend(content: string) {
     return
   }
 
+  // Token 超限检查
+  const attachments = fileAttachment.getReadyAttachments()
+  if (currentModel.value.capabilities.maxContext > 0) {
+    const totalText = content + attachments.map(f => f.content ?? '').join('')
+    const check = checkTokenLimit(totalText, chat.totalTokens.value, currentModel.value.capabilities.maxContext)
+    if (check.warn) {
+      console.warn(`[AI] Token 接近上限: 预估 ${check.usage} / 上限 ${check.limit}`)
+      // 仅警告，不阻止发送
+    }
+  }
+
   await chat.send(
     content,
     currentProvider.value,
     currentModel.value,
     apiKey,
     effectiveSystemPrompt.value,
+    attachments,
   )
+
+  // 发送后清空附件
+  fileAttachment.clearAttachments()
 }
 
 /** 新建会话（在当前 Tab 内新建） */
@@ -228,6 +261,23 @@ function exitImmersive() {
   workspace.exitImmersive()
 }
 
+/** 选择工作目录 */
+async function handleSelectWorkDir() {
+  const dir = await openDialog({ directory: true, multiple: false })
+  if (dir) {
+    chat.workDir.value = dir as string
+  }
+}
+
+/** 截取工作目录显示名（最后两级） */
+const workDirDisplay = computed(() => {
+  const dir = chat.workDir.value
+  if (!dir) return ''
+  const parts = dir.replace(/\\/g, '/').split('/').filter(Boolean)
+  if (parts.length <= 2) return parts.join('/')
+  return '…/' + parts.slice(-2).join('/')
+})
+
 /** 模式配置（用于空状态显示） */
 const CHAT_MODE_CONFIG = {
   normal: { label: '普通对话', desc: '标准问答交互', icon: MessageSquareText, color: 'text-blue-500', bg: 'bg-blue-500/10' },
@@ -291,6 +341,20 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
               <TooltipContent side="bottom" class="text-[11px]">服务商配置</TooltipContent>
             </Tooltip>
           </TooltipProvider>
+
+          <!-- 工作目录选择器 -->
+          <button
+            class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors"
+            :class="chat.workDir.value
+              ? 'text-muted-foreground hover:text-foreground hover:bg-muted'
+              : 'text-muted-foreground/40 hover:text-muted-foreground/60 hover:bg-muted/50'"
+            :title="chat.workDir.value || '设置工作目录（启用 AI 文件操作）'"
+            @click="handleSelectWorkDir"
+          >
+            <FolderOpen class="h-3.5 w-3.5" />
+            <span v-if="chat.workDir.value">{{ workDirDisplay }}</span>
+            <span v-else>设置工作目录</span>
+          </button>
         </div>
 
         <div class="flex items-center gap-2">
@@ -405,6 +469,7 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
           :selected-provider-id="selectedProviderId"
           :selected-model-id="selectedModelId"
           :chat-mode="chatMode"
+          :attachments="fileAttachment.attachments.value"
           :placeholder="chatMode === 'plan' ? '描述你的需求，AI 将先给出规划方案…' : chatMode === 'auto' ? '描述任务，AI 将自动分析并给出完整方案…' : '发送消息…'"
           @send="handleSend"
           @abort="chat.abort"
@@ -412,6 +477,9 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
           @update:selected-model-id="selectedModelId = $event"
           @update:chat-mode="chatMode = $event"
           @open-config="openProviderConfig"
+          @select-files="fileAttachment.selectFiles"
+          @drop-files="fileAttachment.handleDrop"
+          @remove-attachment="fileAttachment.removeAttachment"
         />
       </div>
     </template>
