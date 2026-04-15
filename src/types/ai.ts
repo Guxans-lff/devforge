@@ -97,7 +97,7 @@ export interface AiSession {
 export interface AiMessageRecord {
   id: string
   sessionId: string
-  role: 'user' | 'assistant' | 'system'
+  role: 'user' | 'assistant' | 'system' | 'tool'
   content: string
   contentType: string
   tokens: number
@@ -115,6 +115,51 @@ export interface AiMessage {
   timestamp: number
   tokens?: number
   isStreaming?: boolean
+  /** 工具调用列表（assistant 消息携带） */
+  toolCalls?: ToolCallInfo[]
+  /** 工具执行结果（内嵌到 assistant 消息中展示） */
+  toolResults?: ToolResultInfo[]
+}
+
+// ─────────────────────────────────── Tool Use ───────────────────────────────────
+
+/** 工具调用信息（前端运行时） */
+export interface ToolCallInfo {
+  id: string
+  name: string
+  arguments: string
+  /** 解析后的参数对象 */
+  parsedArgs?: Record<string, unknown>
+  /** 执行状态 */
+  status: 'pending' | 'running' | 'success' | 'error'
+  /** 执行结果 */
+  result?: string
+  /** 错误信息 */
+  error?: string
+}
+
+/** 工具执行结果（用于展示） */
+export interface ToolResultInfo {
+  toolCallId: string
+  toolName: string
+  success: boolean
+  content: string
+}
+
+/** 工具定义（后端返回） */
+export interface ToolDefinition {
+  type: string
+  function: {
+    name: string
+    description: string
+    parameters: Record<string, unknown>
+  }
+}
+
+/** 工具执行结果（后端返回） */
+export interface ToolExecResult {
+  success: boolean
+  content: string
 }
 
 // ─────────────────────────────────── 用量统计 ───────────────────────────────────
@@ -128,6 +173,28 @@ export interface DailyUsage {
   promptTokens: number
   completionTokens: number
   estimatedCost: number
+}
+
+// ─────────────────────────────────── 文件附件 ───────────────────────────────────
+
+/** 文件附件（用户选文件 → 读取 → 附带发送） */
+export interface FileAttachment {
+  /** 唯一 ID */
+  id: string
+  /** 文件名 */
+  name: string
+  /** 本地绝对路径 */
+  path: string
+  /** 文件大小（字节） */
+  size: number
+  /** 文件文本内容（读取后填充） */
+  content?: string
+  /** 行数 */
+  lines?: number
+  /** 读取状态 */
+  status: 'pending' | 'reading' | 'ready' | 'error'
+  /** 错误信息 */
+  error?: string
 }
 
 // ─────────────────────────────────── 旧版兼容（截图翻译使用） ───────────────────────────────────

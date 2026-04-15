@@ -14,15 +14,28 @@ import type {
   AiSession,
   ModelConfig,
   ProviderConfig,
+  FileAttachment,
+  ToolCallInfo,
+  ToolResultInfo,
 } from '@/types/ai'
-import { aiChatStream, aiAbortStream, aiSaveMessage, aiGetSession } from '@/api/ai'
+import { aiChatStream, aiAbortStream, aiSaveMessage, aiGetSession, aiExecuteTool } from '@/api/ai'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { ensureErrorString } from '@/types/error'
+import { buildFileMarkedContent } from '@/utils/file-markers'
 import type { ChatMessage } from '@/api/ai'
 
 /** 生成唯一 ID */
 function genId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+/** 安全解析 JSON */
+function tryParseJson(str: string): Record<string, unknown> | undefined {
+  try {
+    return JSON.parse(str)
+  } catch {
+    return undefined
+  }
 }
 
 export interface UseAiChatOptions {
@@ -53,6 +66,17 @@ export function useAiChat(options: UseAiChatOptions) {
 
   /** 当前流式助手消息的 ID */
   let streamingMessageId = ''
+
+  /** 工作目录（Tool Use 安全边界） */
+  const workDir = ref('')
+
+  /** Tool Use 循环最大次数 */
+  const MAX_TOOL_LOOPS = 10
+
+  /** 流式期间收集的 ToolCall 事件 */
+  let pendingToolCalls: ToolCallInfo[] = []
+  /** 流式结束原因 */
+  let lastFinishReason = ''
 
   // ─────────────────────── 计算属性 ───────────────────────
 
@@ -109,6 +133,13 @@ export function useAiChat(options: UseAiChatOptions) {
 
   /**
    * 发送消息并开始流式接收
+   *
+   * @param content 用户输入文本
+   * @param provider Provider 配置
+   * @param model 模型配置
+   * @param apiKey API Key
+   * @param systemPrompt 系统提示词
+   * @param attachments 文件附件列表（可选）
    */
   async function send(
     content: string,
@@ -116,6 +147,7 @@ export function useAiChat(options: UseAiChatOptions) {
     model: ModelConfig,
     apiKey: string,
     systemPrompt?: string,
+    attachments?: FileAttachment[],
   ): Promise<void> {
     if (!canSend.value || !content.trim()) return
 
@@ -126,11 +158,29 @@ export function useAiChat(options: UseAiChatOptions) {
     }
     error.value = null
 
+    // 构建最终消息内容（拼接文件标签）
+    const readyFiles = (attachments ?? []).filter(f => f.status === 'ready' && f.content)
+    const finalContent = readyFiles.length > 0
+      ? buildFileMarkedContent(content.trim(), readyFiles.map(f => ({
+          name: f.name,
+          path: f.path,
+          size: f.size,
+          content: f.content!,
+          lines: f.lines ?? 0,
+        })))
+      : content.trim()
+
+    // 判断 contentType
+    const contentType = readyFiles.length > 0 ? 'text_with_files' : 'text'
+
+    // 是否启用 Tool Use（模型支持 + 有工作目录）
+    const enableTools = model.capabilities.toolUse && !!workDir.value
+
     // 1. 添加用户消息到列表
     const userMsg: AiMessage = {
       id: genId(),
       role: 'user',
-      content: content.trim(),
+      content: finalContent,
       timestamp: Date.now(),
     }
     messages.value = [...messages.value, userMsg]
@@ -140,83 +190,43 @@ export function useAiChat(options: UseAiChatOptions) {
       id: userMsg.id,
       sessionId: sid,
       role: 'user',
-      content: userMsg.content,
-      contentType: 'text',
+      content: finalContent,
+      contentType,
       tokens: 0,
       cost: 0,
       createdAt: userMsg.timestamp,
     }
     aiSaveMessage(userRecord).catch(e => console.warn('[AI] 保存用户消息失败:', e))
 
-    // 2. 创建助手占位消息
-    streamingMessageId = genId()
-    const assistantMsg: AiMessage = {
-      id: streamingMessageId,
-      role: 'assistant',
-      content: '',
-      thinking: '',
-      timestamp: Date.now(),
-      isStreaming: true,
-    }
-    messages.value = [...messages.value, assistantMsg]
+    // 2. 构建发送给 API 的消息列表
+    const chatMessages: ChatMessage[] = messages.value
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+
+    // 3. 开始流式对话（可能包含 Tool Use 循环）
     isStreaming.value = true
     userScrolled.value = false
 
-    // 3. 构建发送给 API 的消息列表
-    const chatMessages: ChatMessage[] = messages.value
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .filter(m => m.id !== streamingMessageId)
-      .map(m => ({ role: m.role as 'user' | 'assistant', content: m.content }))
-
-    // 4. 流式对话
     try {
-      await aiChatStream(
-        {
-          sessionId: sid,
-          messages: chatMessages,
-          providerType: provider.providerType,
-          model: model.id,
-          apiKey,
-          endpoint: provider.endpoint,
-          maxTokens: model.capabilities.maxOutput > 0 ? model.capabilities.maxOutput : undefined,
-          systemPrompt,
-        },
-        (event: AiStreamEvent) => handleStreamEvent(event),
+      await streamWithToolLoop(
+        sid, chatMessages, provider, model, apiKey, systemPrompt, enableTools,
       )
-
-      // 流结束后刷新最后的缓冲
-      flushPendingDelta()
-
-      // 持久化助手消息
-      const finalMsg = messages.value.find(m => m.id === streamingMessageId)
-      if (finalMsg) {
-        const assistantRecord: AiMessageRecord = {
-          id: finalMsg.id,
-          sessionId: sid,
-          role: 'assistant',
-          content: finalMsg.content,
-          contentType: 'text',
-          tokens: finalMsg.tokens ?? 0,
-          cost: 0,
-          createdAt: finalMsg.timestamp,
-        }
-        aiSaveMessage(assistantRecord).catch(e => console.warn('[AI] 保存助手消息失败:', e))
-      }
     } catch (e) {
       const errMsg = ensureErrorString(e)
       error.value = errMsg
-
-      updateStreamingMessage(msg => ({
-        ...msg,
-        role: 'error' as const,
-        content: errMsg,
-        isStreaming: false,
-      }))
+      // 如果有正在流式的消息，标记为错误
+      if (streamingMessageId) {
+        updateStreamingMessage(msg => ({
+          ...msg,
+          role: 'error' as const,
+          content: errMsg,
+          isStreaming: false,
+        }))
+      }
     } finally {
-      updateStreamingMessage(msg => ({
-        ...msg,
-        isStreaming: false,
-      }))
+      if (streamingMessageId) {
+        updateStreamingMessage(msg => ({ ...msg, isStreaming: false }))
+      }
       isStreaming.value = false
       streamingMessageId = ''
 
@@ -236,6 +246,201 @@ export function useAiChat(options: UseAiChatOptions) {
       }
       aiStore.saveSession(session).catch(e => console.warn('[AI] 保存会话失败:', e))
     }
+  }
+
+  // ─────────────────────── Tool Use 循环 ───────────────────────
+
+  /**
+   * 流式对话 + Tool Use 自动循环
+   *
+   * 当 AI 返回 finish_reason === 'tool_calls' 时，执行工具并将结果追加到消息链，重新调用 AI。
+   * 最多循环 MAX_TOOL_LOOPS 次。
+   */
+  async function streamWithToolLoop(
+    sid: string,
+    chatMessages: ChatMessage[],
+    provider: ProviderConfig,
+    model: ModelConfig,
+    apiKey: string,
+    systemPrompt: string | undefined,
+    enableTools: boolean,
+  ): Promise<void> {
+    let loopCount = 0
+
+    while (loopCount <= MAX_TOOL_LOOPS) {
+      // 创建助手占位消息
+      streamingMessageId = genId()
+      pendingToolCalls = []
+      lastFinishReason = ''
+      pendingTextDelta = ''
+      pendingThinkingDelta = ''
+
+      const assistantMsg: AiMessage = {
+        id: streamingMessageId,
+        role: 'assistant',
+        content: '',
+        thinking: '',
+        timestamp: Date.now(),
+        isStreaming: true,
+        toolCalls: [],
+      }
+      messages.value = [...messages.value, assistantMsg]
+
+      // 流式对话
+      await aiChatStream(
+        {
+          sessionId: sid,
+          messages: chatMessages,
+          providerType: provider.providerType,
+          model: model.id,
+          apiKey,
+          endpoint: provider.endpoint,
+          maxTokens: model.capabilities.maxOutput > 0 ? model.capabilities.maxOutput : undefined,
+          systemPrompt,
+          enableTools,
+        },
+        (event: AiStreamEvent) => handleStreamEvent(event),
+      )
+
+      // 刷新最后的缓冲
+      flushPendingDelta()
+
+      // 持久化助手消息
+      const finalMsg = messages.value.find(m => m.id === streamingMessageId)
+      if (finalMsg) {
+        const hasToolCalls = pendingToolCalls.length > 0
+        const assistantRecord: AiMessageRecord = {
+          id: finalMsg.id,
+          sessionId: sid,
+          role: 'assistant',
+          content: hasToolCalls ? JSON.stringify(pendingToolCalls) : finalMsg.content,
+          contentType: hasToolCalls ? 'tool_calls' : 'text',
+          tokens: finalMsg.tokens ?? 0,
+          cost: 0,
+          createdAt: finalMsg.timestamp,
+        }
+        aiSaveMessage(assistantRecord).catch(e => console.warn('[AI] 保存助手消息失败:', e))
+      }
+
+      // 检查是否需要 Tool Use 循环
+      if (lastFinishReason !== 'tool_calls' || pendingToolCalls.length === 0) {
+        // 正常结束
+        break
+      }
+
+      // ── 进入 Tool Use 循环 ──
+      loopCount++
+      if (loopCount > MAX_TOOL_LOOPS) {
+        updateStreamingMessage(msg => ({
+          ...msg,
+          content: msg.content + '\n\n[AI 工具调用次数超限，已停止]',
+          isStreaming: false,
+        }))
+        break
+      }
+
+      // 如果被中断，退出循环
+      if (!isStreaming.value) break
+
+      // 标记当前助手消息结束流式
+      updateStreamingMessage(msg => ({ ...msg, isStreaming: false }))
+
+      // 执行所有工具调用
+      const toolResults = await executeToolCalls(pendingToolCalls)
+
+      // 更新 UI 中的工具调用状态
+      updateStreamingMessage(msg => ({
+        ...msg,
+        toolCalls: pendingToolCalls,
+        toolResults,
+      }))
+
+      // 构建下一轮的消息链：追加 assistant(tool_calls) + tool(results)
+      // assistant 消息（携带 tool_calls）
+      chatMessages.push({
+        role: 'assistant',
+        content: finalMsg?.content || null,
+        toolCalls: pendingToolCalls.map(tc => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: tc.arguments },
+        })),
+      })
+
+      // 每个工具调用对应一条 tool 消息
+      for (const result of toolResults) {
+        const toolMessage: ChatMessage = {
+          role: 'tool',
+          content: result.content,
+          toolCallId: result.toolCallId,
+        }
+        chatMessages.push(toolMessage)
+
+        // 持久化 tool 消息
+        const toolRecord: AiMessageRecord = {
+          id: genId(),
+          sessionId: sid,
+          role: 'tool',
+          content: result.content,
+          contentType: 'tool_result',
+          tokens: 0,
+          cost: 0,
+          createdAt: Date.now(),
+        }
+        aiSaveMessage(toolRecord).catch(e => console.warn('[AI] 保存工具消息失败:', e))
+      }
+
+      // 重置 streamingMessageId 以便下一轮创建新的助手消息
+      streamingMessageId = ''
+    }
+  }
+
+  /**
+   * 并行执行一组工具调用
+   */
+  async function executeToolCalls(toolCalls: ToolCallInfo[]): Promise<ToolResultInfo[]> {
+    // 更新状态为 running
+    for (const tc of toolCalls) {
+      tc.status = 'running'
+    }
+    updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
+
+    const results: ToolResultInfo[] = []
+
+    // 并行执行
+    const promises = toolCalls.map(async (tc) => {
+      try {
+        const result = await aiExecuteTool(tc.name, tc.arguments, workDir.value)
+        tc.status = result.success ? 'success' : 'error'
+        tc.result = result.content
+        if (!result.success) tc.error = result.content
+
+        results.push({
+          toolCallId: tc.id,
+          toolName: tc.name,
+          success: result.success,
+          content: result.content,
+        })
+      } catch (e) {
+        const errMsg = ensureErrorString(e)
+        tc.status = 'error'
+        tc.error = errMsg
+
+        results.push({
+          toolCallId: tc.id,
+          toolName: tc.name,
+          success: false,
+          content: `工具执行异常: ${errMsg}`,
+        })
+      }
+    })
+
+    await Promise.all(promises)
+
+    // 更新 UI
+    updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
+
+    return results
   }
 
   // ─────────────────────── 流事件处理 ───────────────────────
@@ -262,6 +467,7 @@ export function useAiChat(options: UseAiChatOptions) {
 
       case 'Done':
         flushPendingDelta()
+        lastFinishReason = event.finish_reason
         break
 
       case 'Error':
@@ -276,7 +482,19 @@ export function useAiChat(options: UseAiChatOptions) {
         break
 
       case 'ToolCall':
-        // V4 再实现
+        // 收集工具调用（后端已完成增量拼接，这里收到的是完整的 ToolCall）
+        pendingToolCalls.push({
+          id: event.id,
+          name: event.name,
+          arguments: event.arguments,
+          parsedArgs: tryParseJson(event.arguments),
+          status: 'pending',
+        })
+        // 更新 UI
+        updateStreamingMessage(msg => ({
+          ...msg,
+          toolCalls: [...pendingToolCalls],
+        }))
         break
     }
   }
@@ -439,6 +657,8 @@ export function useAiChat(options: UseAiChatOptions) {
     error,
     totalTokens,
     canSend,
+    /** 工作目录（Tool Use 安全边界） */
+    workDir,
     // 操作
     loadHistory,
     send,

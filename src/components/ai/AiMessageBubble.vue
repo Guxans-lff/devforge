@@ -9,8 +9,13 @@
  */
 import { computed, ref } from 'vue'
 import type { AiMessage } from '@/types/ai'
-import { ChevronRight, Copy, Check, AlertCircle } from 'lucide-vue-next'
+import { parseFileMarkers } from '@/utils/file-markers'
+import { ChevronRight, Copy, Check, AlertCircle, Download } from 'lucide-vue-next'
+import { save } from '@tauri-apps/plugin-dialog'
+import { writeTextFile } from '@/api/database'
 import AiCodeBlock from './AiCodeBlock.vue'
+import AiFileCard from './AiFileCard.vue'
+import AiToolCallBlock from './AiToolCallBlock.vue'
 
 const props = defineProps<{
   message: AiMessage
@@ -22,6 +27,7 @@ const copied = ref(false)
 const hasThinking = computed(() => !!props.message.thinking?.trim())
 const isUser = computed(() => props.message.role === 'user')
 const isError = computed(() => props.message.role === 'error')
+const hasToolCalls = computed(() => (props.message.toolCalls?.length ?? 0) > 0)
 
 async function copyContent() {
   try {
@@ -31,39 +37,25 @@ async function copyContent() {
   } catch { /* 静默失败 */ }
 }
 
-/** 解析 Markdown 文本为段落列表（代码块 vs 文本） */
+/** 导出消息为 .md 文件 */
+async function exportMarkdown() {
+  const filePath = await save({
+    defaultPath: `ai-reply-${Date.now()}.md`,
+    filters: [{ name: 'Markdown', extensions: ['md'] }],
+  })
+  if (!filePath) return
+  try {
+    await writeTextFile(filePath, props.message.content)
+  } catch (e) {
+    console.error('[AI] 导出 Markdown 失败:', e)
+  }
+}
+
+/** 解析消息文本为段落列表（文本 / 代码块 / 文件卡片） */
 const contentSegments = computed(() => {
   const text = props.message.content
   if (!text) return []
-
-  const segments: Array<
-    | { type: 'text'; content: string }
-    | { type: 'code'; language: string; content: string }
-  > = []
-
-  const codeBlockRegex = /```(\w*)\n([\s\S]*?)```/g
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-
-  while ((match = codeBlockRegex.exec(text)) !== null) {
-    if (match.index > lastIndex) {
-      const textPart = text.slice(lastIndex, match.index).trim()
-      if (textPart) segments.push({ type: 'text', content: textPart })
-    }
-    segments.push({
-      type: 'code',
-      language: match[1] || 'text',
-      content: match[2]?.trimEnd() ?? '',
-    })
-    lastIndex = match.index + match[0].length
-  }
-
-  if (lastIndex < text.length) {
-    const remaining = text.slice(lastIndex).trim()
-    if (remaining) segments.push({ type: 'text', content: remaining })
-  }
-
-  return segments.length > 0 ? segments : [{ type: 'text' as const, content: text }]
+  return parseFileMarkers(text)
 })
 
 /** 转义 HTML */
@@ -147,7 +139,21 @@ function renderBlock(text: string): string {
         </div>
         <span class="text-[11px] font-medium text-muted-foreground">You</span>
       </div>
-      <div class="text-[13px] text-foreground leading-relaxed select-text whitespace-pre-wrap">{{ message.content }}</div>
+      <!-- 解析用户消息中的文件标签 -->
+      <div class="text-[13px] text-foreground leading-relaxed select-text">
+        <template v-for="(seg, i) in contentSegments" :key="i">
+          <div v-if="seg.type === 'text'" class="whitespace-pre-wrap">{{ seg.content }}</div>
+          <AiFileCard
+            v-else-if="seg.type === 'file'"
+            :name="seg.name"
+            :path="seg.path"
+            :size="seg.size"
+            :lines="seg.lines"
+            :content="seg.content"
+            class="my-1.5"
+          />
+        </template>
+      </div>
     </div>
   </div>
 
@@ -170,14 +176,24 @@ function renderBlock(text: string): string {
         <span class="text-[11px] font-medium text-muted-foreground">Assistant</span>
         <span v-if="message.tokens" class="text-[10px] text-muted-foreground/30 font-mono">{{ message.tokens }} tokens</span>
       </div>
-      <button
-        v-if="!message.isStreaming && message.content"
-        class="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted text-muted-foreground/30 hover:text-muted-foreground"
-        :title="copied ? '已复制' : '复制'"
-        @click="copyContent"
-      >
-        <component :is="copied ? Check : Copy" class="h-3.5 w-3.5" />
-      </button>
+      <div class="flex items-center gap-0.5">
+        <button
+          v-if="!message.isStreaming && message.content"
+          class="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted text-muted-foreground/30 hover:text-muted-foreground"
+          title="导出 .md"
+          @click="exportMarkdown"
+        >
+          <Download class="h-3.5 w-3.5" />
+        </button>
+        <button
+          v-if="!message.isStreaming && message.content"
+          class="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-muted text-muted-foreground/30 hover:text-muted-foreground"
+          :title="copied ? '已复制' : '复制'"
+          @click="copyContent"
+        >
+          <component :is="copied ? Check : Copy" class="h-3.5 w-3.5" />
+        </button>
+      </div>
     </div>
 
     <!-- 内容区 -->
@@ -213,11 +229,29 @@ function renderBlock(text: string): string {
       <div v-if="message.content" class="text-[13px] leading-[1.65] text-foreground/90 select-text">
         <template v-for="(seg, i) in contentSegments" :key="i">
           <div v-if="seg.type === 'text'" v-html="renderBlock(seg.content)" />
-          <AiCodeBlock v-else :language="seg.language" :code="seg.content" class="my-1.5" />
+          <AiCodeBlock v-else-if="seg.type === 'code'" :language="seg.language" :code="seg.content" class="my-1.5" />
+          <AiFileCard
+            v-else-if="seg.type === 'file'"
+            :name="seg.name"
+            :path="seg.path"
+            :size="seg.size"
+            :lines="seg.lines"
+            :content="seg.content"
+            class="my-1.5"
+          />
         </template>
         <span
           v-if="message.isStreaming"
           class="inline-block h-3 w-[2px] animate-pulse rounded-full bg-emerald-500/60 ml-0.5 align-text-bottom"
+        />
+      </div>
+
+      <!-- 工具调用块 -->
+      <div v-if="hasToolCalls" class="mt-1.5 space-y-1">
+        <AiToolCallBlock
+          v-for="tc in message.toolCalls"
+          :key="tc.id"
+          :tool-call="tc"
         />
       </div>
     </div>

@@ -28,8 +28,8 @@ pub struct OpenAiCompatProvider {
 impl OpenAiCompatProvider {
     pub fn new() -> Self {
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
             .connect_timeout(std::time::Duration::from_secs(30))
+            .read_timeout(std::time::Duration::from_secs(120))
             .build()
             .expect("创建 HTTP 客户端失败");
 
@@ -60,21 +60,66 @@ impl OpenAiCompatProvider {
                 MessageRole::System => "system",
                 MessageRole::User => "user",
                 MessageRole::Assistant => "assistant",
+                MessageRole::Tool => "tool",
             };
-            api_messages.push(serde_json::json!({
-                "role": role,
-                "content": msg.content
-            }));
+
+            match msg.role {
+                // Tool 角色：必须携带 tool_call_id
+                MessageRole::Tool => {
+                    let mut obj = serde_json::json!({
+                        "role": "tool",
+                        "content": msg.content.as_deref().unwrap_or("")
+                    });
+                    if let Some(ref id) = msg.tool_call_id {
+                        obj["tool_call_id"] = serde_json::json!(id);
+                    }
+                    api_messages.push(obj);
+                }
+                // Assistant 可能携带 tool_calls（此时 content 可能为 null）
+                MessageRole::Assistant => {
+                    let mut obj = serde_json::json!({ "role": role });
+                    // content 字段：有值则填，无值填 null（OpenAI 要求 assistant 消息必须有 content 字段）
+                    match &msg.content {
+                        Some(c) => obj["content"] = serde_json::json!(c),
+                        None => obj["content"] = serde_json::Value::Null,
+                    }
+                    if let Some(ref tool_calls) = msg.tool_calls {
+                        obj["tool_calls"] = serde_json::to_value(tool_calls)
+                            .unwrap_or(serde_json::Value::Array(vec![]));
+                    }
+                    api_messages.push(obj);
+                }
+                // System / User：普通消息
+                _ => {
+                    api_messages.push(serde_json::json!({
+                        "role": role,
+                        "content": msg.content.as_deref().unwrap_or("")
+                    }));
+                }
+            }
         }
 
-        serde_json::json!({
+        let mut body = serde_json::json!({
             "model": config.model,
             "messages": api_messages,
             "max_tokens": config.max_tokens,
             "temperature": config.temperature,
             "stream": true,
             "stream_options": { "include_usage": true }
-        })
+        });
+
+        // 工具定义
+        if let Some(ref tools) = config.tools {
+            if !tools.is_empty() {
+                body["tools"] = serde_json::to_value(tools)
+                    .unwrap_or(serde_json::Value::Array(vec![]));
+            }
+        }
+        if let Some(ref choice) = config.tool_choice {
+            body["tool_choice"] = serde_json::json!(choice);
+        }
+
+        body
     }
 }
 

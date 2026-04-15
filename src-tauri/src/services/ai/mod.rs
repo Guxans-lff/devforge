@@ -6,6 +6,7 @@
 //! - SSE 流解析
 //! - 会话持久化存储
 
+pub mod ai_tools;
 pub mod models;
 pub mod openai_compat;
 pub mod provider;

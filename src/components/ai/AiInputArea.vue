@@ -6,7 +6,7 @@
  * 支持 Shift+Enter 换行、Enter 发送、自动增高。
  */
 import { ref, computed, nextTick } from 'vue'
-import type { ProviderConfig, ModelConfig } from '@/types/ai'
+import type { ProviderConfig, ModelConfig, FileAttachment } from '@/types/ai'
 import {
   Send,
   Square,
@@ -17,7 +17,9 @@ import {
   Zap,
   MessageSquareText,
   AtSign,
+  Paperclip,
 } from 'lucide-vue-next'
+import AiFilePreviewBar from './AiFilePreviewBar.vue'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -44,6 +46,8 @@ const props = withDefaults(defineProps<{
   selectedModelId?: string | null
   /** 当前对话模式 */
   chatMode?: ChatMode
+  /** 文件附件列表 */
+  attachments?: FileAttachment[]
 }>(), {
   isStreaming: false,
   disabled: false,
@@ -53,6 +57,7 @@ const props = withDefaults(defineProps<{
   selectedProviderId: null,
   selectedModelId: null,
   chatMode: 'normal',
+  attachments: () => [],
 })
 
 const emit = defineEmits<{
@@ -62,10 +67,14 @@ const emit = defineEmits<{
   'update:selectedModelId': [id: string]
   'update:chatMode': [mode: ChatMode]
   openConfig: []
+  selectFiles: []
+  dropFiles: [paths: string[]]
+  removeAttachment: [id: string]
 }>()
 
 const inputText = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>()
+const isDragOver = ref(false)
 
 const canSend = computed(() => inputText.value.trim().length > 0 && !props.disabled && !props.isStreaming)
 
@@ -141,6 +150,35 @@ function adjustHeight() {
   el.style.height = `${Math.min(el.scrollHeight, 200)}px`
 }
 
+/** 拖拽进入 */
+function handleDragOver(e: DragEvent) {
+  e.preventDefault()
+  isDragOver.value = true
+}
+
+/** 拖拽离开 */
+function handleDragLeave() {
+  isDragOver.value = false
+}
+
+/** 拖拽放入 */
+function handleDrop(e: DragEvent) {
+  e.preventDefault()
+  isDragOver.value = false
+  // Tauri 拖拽事件中文件路径在 dataTransfer.files 或自定义字段
+  const files = e.dataTransfer?.files
+  if (files && files.length > 0) {
+    const paths: string[] = []
+    for (let i = 0; i < files.length; i++) {
+      // Tauri webview 中 File 对象的 path 属性包含绝对路径
+      const file = files[i]!
+      const path = (file as unknown as { path?: string }).path ?? file.name
+      paths.push(path)
+    }
+    emit('dropFiles', paths)
+  }
+}
+
 /** 切换 Provider 时自动选中第一个模型 */
 function selectProvider(providerId: string) {
   emit('update:selectedProviderId', providerId)
@@ -173,7 +211,26 @@ defineExpose({ focus })
   <div class="border-t border-border/50 bg-background">
     <!-- 输入框区域 -->
     <div class="px-4 pt-3 pb-2">
-      <div class="relative rounded-xl border border-border/50 bg-muted/20 transition-colors focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20">
+      <div
+        class="relative rounded-xl border bg-muted/20 transition-colors focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20"
+        :class="isDragOver ? 'border-primary/60 ring-2 ring-primary/30 bg-primary/5' : 'border-border/50'"
+        @dragover="handleDragOver"
+        @dragleave="handleDragLeave"
+        @drop="handleDrop"
+      >
+        <!-- 拖拽提示蒙层 -->
+        <div
+          v-if="isDragOver"
+          class="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-primary/5 pointer-events-none"
+        >
+          <span class="text-xs text-primary font-medium">松开以添加文件</span>
+        </div>
+
+        <!-- 文件预览条 -->
+        <AiFilePreviewBar
+          :attachments="attachments"
+          @remove="emit('removeAttachment', $event)"
+        />
         <!-- 文本输入 -->
         <textarea
           ref="textareaRef"
@@ -269,6 +326,16 @@ defineExpose({ focus })
 
           <!-- 发送/中断按钮 -->
           <div class="flex items-center gap-1">
+            <!-- 回形针按钮 -->
+            <button
+              class="flex items-center justify-center h-7 w-7 rounded-lg text-muted-foreground/60 hover:text-foreground hover:bg-muted/50 transition-colors"
+              :disabled="disabled"
+              title="添加文件"
+              @click="emit('selectFiles')"
+            >
+              <Paperclip class="h-3.5 w-3.5" />
+            </button>
+
             <Button
               v-if="isStreaming"
               variant="destructive"

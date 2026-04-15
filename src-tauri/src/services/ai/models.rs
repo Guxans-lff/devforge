@@ -103,6 +103,7 @@ pub enum MessageRole {
     System,
     User,
     Assistant,
+    Tool,
 }
 
 /// 对话消息（发送给 API）
@@ -110,7 +111,46 @@ pub enum MessageRole {
 #[serde(rename_all = "camelCase")]
 pub struct ChatMessage {
     pub role: MessageRole,
-    pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    /// 工具调用列表（assistant 角色携带）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCallRecord>>,
+    /// 工具调用 ID（tool 角色必须）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+/// 工具调用记录（完整）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallRecord {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub call_type: String,
+    pub function: ToolCallFunction,
+}
+
+/// 工具调用函数信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallFunction {
+    pub name: String,
+    pub arguments: String,
+}
+
+/// 工具定义（发送给 API）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolDefinition {
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: ToolFunctionDef,
+}
+
+/// 工具函数定义
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolFunctionDef {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
 }
 
 /// 对话配置参数
@@ -125,6 +165,10 @@ pub struct ChatConfig {
     pub temperature: f64,
     /// 系统提示词（可选）
     pub system_prompt: Option<String>,
+    /// 工具定义列表（可选）
+    pub tools: Option<Vec<ToolDefinition>>,
+    /// 工具选择策略（"auto" | "none"）
+    pub tool_choice: Option<String>,
 }
 
 impl Default for ChatConfig {
@@ -134,6 +178,8 @@ impl Default for ChatConfig {
             max_tokens: 4096,
             temperature: 0.7,
             system_prompt: None,
+            tools: None,
+            tool_choice: None,
         }
     }
 }
@@ -256,6 +302,23 @@ pub struct ChunkDelta {
     pub content: Option<String>,
     /// DeepSeek reasoning_content 字段（V2 思考过程）
     pub reasoning_content: Option<String>,
+    /// 工具调用增量（流式 SSE）
+    pub tool_calls: Option<Vec<ChunkToolCall>>,
+}
+
+/// SSE 流式 chunk 中的增量工具调用
+#[derive(Debug, Deserialize)]
+pub struct ChunkToolCall {
+    pub index: u32,
+    pub id: Option<String>,
+    pub function: Option<ChunkToolCallFunction>,
+}
+
+/// SSE chunk 中的增量工具调用函数
+#[derive(Debug, Deserialize)]
+pub struct ChunkToolCallFunction {
+    pub name: Option<String>,
+    pub arguments: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

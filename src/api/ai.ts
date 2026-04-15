@@ -18,12 +18,22 @@ import type {
   AiSession,
   AiMessageRecord,
   DailyUsage,
+  ToolDefinition,
+  ToolExecResult,
 } from '@/types/ai'
 
 /** ChatMessage 结构（对应 Rust ChatMessage） */
 export interface ChatMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string | null
+  /** 工具调用列表（assistant 角色携带） */
+  toolCalls?: Array<{
+    id: string
+    type: string
+    function: { name: string; arguments: string }
+  }>
+  /** 工具调用 ID（tool 角色必须） */
+  toolCallId?: string
 }
 
 /** 流式对话参数 */
@@ -37,6 +47,8 @@ export interface ChatStreamParams {
   maxTokens?: number
   temperature?: number
   systemPrompt?: string
+  /** 是否启用工具调用 */
+  enableTools?: boolean
 }
 
 // ─────────────────────────────────── 流式对话 ───────────────────────────────────
@@ -67,6 +79,7 @@ export function aiChatStream(
     maxTokens: params.maxTokens ?? null,
     temperature: params.temperature ?? null,
     systemPrompt: params.systemPrompt ?? null,
+    enableTools: params.enableTools ?? null,
     onEvent: channel,
   }, { source: 'AI' })
 }
@@ -154,4 +167,24 @@ export function aiSaveMessage(message: AiMessageRecord): Promise<void> {
  */
 export function aiGetUsageStats(startDate: string, endDate: string): Promise<DailyUsage[]> {
   return invokeCommand('ai_get_usage_stats', { startDate, endDate }, { source: 'AI' })
+}
+
+// ─────────────────────────────────── Tool Use ───────────────────────────────────
+
+/**
+ * 获取可用工具定义列表
+ */
+export function aiGetTools(): Promise<ToolDefinition[]> {
+  return invokeCommand('ai_get_tools', undefined, { source: 'AI' })
+}
+
+/**
+ * 执行指定工具
+ *
+ * @param name 工具名称
+ * @param args JSON 字符串参数
+ * @param workDir 工作目录（安全边界）
+ */
+export function aiExecuteTool(name: string, args: string, workDir: string): Promise<ToolExecResult> {
+  return invokeCommand('ai_execute_tool', { name, arguments: args, workDir }, { source: 'AI' })
 }

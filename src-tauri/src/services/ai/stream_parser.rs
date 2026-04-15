@@ -2,22 +2,31 @@
 //!
 //! 解析 OpenAI 兼容 API 的 Server-Sent Events 流，
 //! 将原始字节流转换为结构化的 AiStreamEvent。
+//!
+//! 关键设计：
+//! - 使用原始字节缓冲区处理跨 chunk 的 UTF-8 多字节字符（如中文）
+//! - 流错误时立即终止并发送 Error + Done 事件，防止卡死
+//! - ToolCallAccumulator 在后端完成增量拼接，前端无需处理碎片
 
+use std::collections::HashMap;
 use tokio_util::bytes::Bytes;
 use futures::StreamExt;
 
-use super::models::{AiStreamEvent, ChatCompletionChunk};
+use super::models::{AiStreamEvent, ChatCompletionChunk, ChunkToolCall, ToolCallRecord, ToolCallFunction};
 
 /// SSE 行解析状态
+///
+/// 使用原始字节缓冲区，避免 `String::from_utf8_lossy` 在 chunk 边界
+/// 截断多字节 UTF-8 字符（如中文被拆到两个 chunk 中间）。
 pub struct SseParser {
-    /// 未处理完的缓冲区
-    buffer: String,
+    /// 原始字节缓冲区
+    byte_buf: Vec<u8>,
 }
 
 impl SseParser {
     pub fn new() -> Self {
         Self {
-            buffer: String::new(),
+            byte_buf: Vec::with_capacity(4096),
         }
     }
 
@@ -30,21 +39,42 @@ impl SseParser {
     /// data: [DONE]\n
     /// ```
     pub fn feed(&mut self, chunk: &Bytes) -> Vec<SseEvent> {
-        let text = String::from_utf8_lossy(chunk);
-        self.buffer.push_str(&text);
+        self.byte_buf.extend_from_slice(chunk);
 
         let mut events = Vec::new();
 
-        // 按行处理
-        while let Some(line_end) = self.buffer.find('\n') {
-            let line = self.buffer[..line_end].trim_end_matches('\r').to_string();
-            self.buffer = self.buffer[line_end + 1..].to_string();
+        // 按 \n 分行处理，但只消费完整行（有 \n 结尾的）
+        loop {
+            let newline_pos = match self.byte_buf.iter().position(|&b| b == b'\n') {
+                Some(pos) => pos,
+                None => break, // 没有完整行，等待更多数据
+            };
 
-            if line.is_empty() {
-                // 空行 = 事件分隔符，忽略
+            // 取出这一行（不含 \n）
+            let line_bytes: Vec<u8> = self.byte_buf.drain(..=newline_pos).collect();
+            // 去掉尾部 \n 和可能的 \r
+            let line_end = if line_bytes.len() >= 2 && line_bytes[line_bytes.len() - 2] == b'\r' {
+                line_bytes.len() - 2
+            } else {
+                line_bytes.len() - 1
+            };
+            let line_slice = &line_bytes[..line_end];
+
+            // 空行 = SSE 事件分隔符
+            if line_slice.is_empty() {
                 continue;
             }
 
+            // 尝试转为 UTF-8 字符串
+            let line = match std::str::from_utf8(line_slice) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("SSE 行 UTF-8 解码失败: {e}");
+                    continue;
+                }
+            };
+
+            // 解析 data: 前缀
             if let Some(data) = line.strip_prefix("data: ") {
                 if data == "[DONE]" {
                     events.push(SseEvent::Done);
@@ -52,7 +82,7 @@ impl SseParser {
                     match serde_json::from_str::<ChatCompletionChunk>(data) {
                         Ok(chunk) => events.push(SseEvent::Chunk(chunk)),
                         Err(e) => {
-                            log::warn!("SSE JSON 解析失败: {e}, 原文: {data}");
+                            log::warn!("SSE JSON 解析失败: {e}, 原文长度: {}", data.len());
                         }
                     }
                 }
@@ -72,8 +102,71 @@ pub enum SseEvent {
     Done,
 }
 
+// ─────────────────────── 工具调用增量拼接器 ───────────────────────
+
+/// 按 index 拼接碎片化的 tool_calls delta
+pub struct ToolCallAccumulator {
+    /// index → (id, name, arguments)
+    calls: HashMap<u32, (String, String, String)>,
+}
+
+impl ToolCallAccumulator {
+    pub fn new() -> Self {
+        Self {
+            calls: HashMap::new(),
+        }
+    }
+
+    /// 累积一个增量 tool_call chunk
+    pub fn accumulate(&mut self, chunk: &ChunkToolCall) {
+        let entry = self
+            .calls
+            .entry(chunk.index)
+            .or_insert_with(|| (String::new(), String::new(), String::new()));
+
+        if let Some(ref id) = chunk.id {
+            entry.0 = id.clone();
+        }
+        if let Some(ref f) = chunk.function {
+            if let Some(ref name) = f.name {
+                entry.1 = name.clone();
+            }
+            if let Some(ref args) = f.arguments {
+                entry.2.push_str(args);
+            }
+        }
+    }
+
+    /// 是否有累积的工具调用
+    pub fn has_calls(&self) -> bool {
+        !self.calls.is_empty()
+    }
+
+    /// 完成拼接，返回完整的 ToolCallRecord 列表
+    pub fn finish(&mut self) -> Vec<ToolCallRecord> {
+        let result: Vec<ToolCallRecord> = self
+            .calls
+            .drain()
+            .map(|(_, (id, name, args))| ToolCallRecord {
+                id,
+                call_type: "function".to_string(),
+                function: ToolCallFunction {
+                    name,
+                    arguments: args,
+                },
+            })
+            .collect();
+        result
+    }
+}
+
 /// 将 ChatCompletionChunk 转换为 AiStreamEvent 列表
-pub fn chunk_to_events(chunk: &ChatCompletionChunk) -> Vec<AiStreamEvent> {
+///
+/// `accumulator` 用于拼接增量 tool_calls，在 finish_reason == "tool_calls" 时输出完整的 ToolCall 事件
+pub fn chunk_to_events(
+    chunk: &ChatCompletionChunk,
+    accumulator: &mut ToolCallAccumulator,
+) -> Vec<AiStreamEvent> {
     let mut events = Vec::new();
 
     for choice in &chunk.choices {
@@ -95,8 +188,26 @@ pub fn chunk_to_events(chunk: &ChatCompletionChunk) -> Vec<AiStreamEvent> {
             }
         }
 
+        // 工具调用增量 → 累积到 accumulator
+        if let Some(ref tool_calls) = choice.delta.tool_calls {
+            for tc in tool_calls {
+                accumulator.accumulate(tc);
+            }
+        }
+
         // 结束信号
         if let Some(ref reason) = choice.finish_reason {
+            // 如果 finish_reason == "tool_calls"，先输出完整的 ToolCall 事件
+            if reason == "tool_calls" && accumulator.has_calls() {
+                let records = accumulator.finish();
+                for record in records {
+                    events.push(AiStreamEvent::ToolCall {
+                        id: record.id,
+                        name: record.function.name,
+                        arguments: record.function.arguments,
+                    });
+                }
+            }
             events.push(AiStreamEvent::Done {
                 finish_reason: reason.clone(),
             });
@@ -116,14 +227,21 @@ pub fn chunk_to_events(chunk: &ChatCompletionChunk) -> Vec<AiStreamEvent> {
 
 /// 从 reqwest 响应流中解析 SSE 事件
 ///
-/// 这是一个异步流处理器，返回 AiStreamEvent 的迭代器。
+/// 关键：流错误时立即终止并发送 Error + Done，防止卡死。
 pub async fn parse_sse_stream(
     response: reqwest::Response,
 ) -> impl futures::Stream<Item = Vec<AiStreamEvent>> {
     let mut parser = SseParser::new();
+    let mut accumulator = ToolCallAccumulator::new();
+    let mut errored = false; // 标记流是否已出错
     let byte_stream = response.bytes_stream();
 
     byte_stream.filter_map(move |result| {
+        // 流已出错，后续 chunk 全部忽略
+        if errored {
+            return std::future::ready(None);
+        }
+
         let events = match result {
             Ok(bytes) => {
                 let sse_events = parser.feed(&bytes);
@@ -132,7 +250,7 @@ pub async fn parse_sse_stream(
                 for sse_event in sse_events {
                     match sse_event {
                         SseEvent::Chunk(chunk) => {
-                            ai_events.extend(chunk_to_events(&chunk));
+                            ai_events.extend(chunk_to_events(&chunk, &mut accumulator));
                         }
                         SseEvent::Done => {
                             // 如果还没有发送 Done 事件，补发一个
@@ -151,10 +269,21 @@ pub async fn parse_sse_stream(
                     Some(ai_events)
                 }
             }
-            Err(e) => Some(vec![AiStreamEvent::Error {
-                message: format!("流读取失败: {e}"),
-                retryable: true,
-            }]),
+            Err(e) => {
+                // 标记出错，终止流
+                errored = true;
+                log::error!("SSE 流读取失败: {e}");
+                Some(vec![
+                    AiStreamEvent::Error {
+                        message: format!("流读取失败: {e}"),
+                        retryable: true,
+                    },
+                    // 立即发送 Done 事件，让前端正确结束流式状态
+                    AiStreamEvent::Done {
+                        finish_reason: "error".to_string(),
+                    },
+                ])
+            }
         };
 
         std::future::ready(events)

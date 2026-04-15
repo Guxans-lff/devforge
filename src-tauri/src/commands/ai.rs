@@ -7,7 +7,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::services::ai::models::*;
-use crate::services::ai::session_store;
+use crate::services::ai::{ai_tools, session_store};
 use crate::services::ai::AiEngine;
 use crate::services::storage::Storage;
 use crate::utils::error::AppError;
@@ -31,15 +31,25 @@ pub async fn ai_chat_stream(
     max_tokens: Option<u32>,
     temperature: Option<f64>,
     system_prompt: Option<String>,
+    enable_tools: Option<bool>,
     on_event: Channel<AiStreamEvent>,
     engine: State<'_, AiEngineState>,
     storage: State<'_, Arc<Storage>>,
 ) -> Result<ChatResult, AppError> {
+    // 工具定义
+    let (tools, tool_choice) = if enable_tools.unwrap_or(false) {
+        (Some(ai_tools::get_tool_definitions()), Some("auto".to_string()))
+    } else {
+        (None, None)
+    };
+
     let config = ChatConfig {
         model: model.clone(),
         max_tokens: max_tokens.unwrap_or(4096),
         temperature: temperature.unwrap_or(0.7),
         system_prompt,
+        tools,
+        tool_choice,
     };
 
     // 查找 Provider
@@ -194,4 +204,41 @@ pub async fn ai_get_usage_stats(
 ) -> Result<Vec<DailyUsage>, AppError> {
     let pool = storage.get_pool().await;
     session_store::get_usage_stats(&pool, &start_date, &end_date).await
+}
+
+// ─────────────────────────────────── Tool Use ───────────────────────────────────
+
+/// 获取可用工具定义列表
+///
+/// 前端用于判断是否启用 Tool Use 和构建 UI。
+#[tauri::command]
+pub async fn ai_get_tools() -> Vec<ToolDefinition> {
+    ai_tools::get_tool_definitions()
+}
+
+/// 执行指定工具
+///
+/// 前端在 AI 返回 tool_calls 后调用此命令执行工具。
+#[tauri::command]
+pub async fn ai_execute_tool(
+    name: String,
+    arguments: String,
+    work_dir: String,
+) -> Result<ai_tools::ToolExecResult, AppError> {
+    log::info!("AI 工具调用: {} | 工作目录: {}", name, work_dir);
+
+    // 超时 30 秒
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        ai_tools::execute_tool(&name, &arguments, &work_dir),
+    )
+    .await;
+
+    match result {
+        Ok(exec_result) => Ok(exec_result),
+        Err(_) => Ok(ai_tools::ToolExecResult {
+            success: false,
+            content: format!("工具执行超时（30秒限制）: {}", name),
+        }),
+    }
 }
