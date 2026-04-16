@@ -8,6 +8,7 @@ use tauri::State;
 
 use crate::services::ai::models::*;
 use crate::services::ai::{ai_tools, session_store};
+use crate::services::ai::{memory_models, memory_store};
 use crate::services::ai::AiEngine;
 use crate::services::storage::Storage;
 use crate::utils::error::AppError;
@@ -241,4 +242,61 @@ pub async fn ai_execute_tool(
             content: format!("工具执行超时（30秒限制）: {}", name),
         }),
     }
+}
+
+// ─────────────────────────────────── 记忆系统 ───────────────────────────────────
+
+#[tauri::command]
+pub async fn ai_list_memories(
+    storage: State<'_, Arc<Storage>>,
+    workspace_id: String,
+) -> Result<Vec<memory_models::AiMemory>, AppError> {
+    let pool = storage.get_pool().await;
+    memory_store::list_memories(&pool, &workspace_id).await
+}
+
+#[tauri::command]
+pub async fn ai_save_memory(
+    storage: State<'_, Arc<Storage>>,
+    memory: memory_models::AiMemory,
+) -> Result<(), AppError> {
+    let pool = storage.get_pool().await;
+    memory_store::save_memory(&pool, &memory).await
+}
+
+#[tauri::command]
+pub async fn ai_delete_memory(
+    storage: State<'_, Arc<Storage>>,
+    id: String,
+) -> Result<(), AppError> {
+    let pool = storage.get_pool().await;
+    memory_store::delete_memory(&pool, &id).await
+}
+
+#[tauri::command]
+pub async fn ai_search_memories(
+    storage: State<'_, Arc<Storage>>,
+    workspace_id: String,
+    keywords: Vec<String>,
+) -> Result<Vec<memory_models::AiMemory>, AppError> {
+    let pool = storage.get_pool().await;
+    memory_store::search_memories(&pool, &workspace_id, &keywords).await
+}
+
+#[tauri::command]
+pub async fn ai_save_compaction(
+    storage: State<'_, Arc<Storage>>,
+    compaction: memory_models::AiCompaction,
+) -> Result<(), AppError> {
+    let pool = storage.get_pool().await;
+    memory_store::save_compaction(&pool, &compaction).await
+}
+
+#[tauri::command]
+pub async fn ai_list_compactions(
+    storage: State<'_, Arc<Storage>>,
+    session_id: String,
+) -> Result<Vec<memory_models::AiCompaction>, AppError> {
+    let pool = storage.get_pool().await;
+    memory_store::list_compactions(&pool, &session_id).await
 }

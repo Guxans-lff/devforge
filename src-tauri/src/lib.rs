@@ -621,6 +621,12 @@ pub fn run() {
             ai_cmd::ai_get_usage_stats,
             ai_cmd::ai_get_tools,
             ai_cmd::ai_execute_tool,
+            ai_cmd::ai_list_memories,
+            ai_cmd::ai_save_memory,
+            ai_cmd::ai_delete_memory,
+            ai_cmd::ai_search_memories,
+            ai_cmd::ai_save_compaction,
+            ai_cmd::ai_list_compactions,
             // Workspace filesystem
             workspace_fs::ws_read_directory,
             workspace_fs::ws_read_directory_recursive,
