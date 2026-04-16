@@ -21,6 +21,8 @@ import type {
 } from '@/types/ai'
 import { aiChatStream, aiAbortStream, aiSaveMessage, aiGetSession, aiExecuteTool } from '@/api/ai'
 import { useAiChatStore } from '@/stores/ai-chat'
+import { useAiMemoryStore } from '@/stores/ai-memory'
+import { useAutoCompact } from '@/composables/useAutoCompact'
 import { ensureErrorString } from '@/types/error'
 import { buildFileMarkedContent } from '@/utils/file-markers'
 import type { ChatMessage } from '@/api/ai'
@@ -96,6 +98,8 @@ export interface UseAiChatOptions {
 export function useAiChat(options: UseAiChatOptions) {
   const sessionIdRef = toRef(options.sessionId)
   const aiStore = useAiChatStore()
+  const memoryStore = useAiMemoryStore()
+  const autoCompact = useAutoCompact()
 
   // ─────────────────────── 状态 ───────────────────────
 
@@ -289,6 +293,16 @@ export function useAiChat(options: UseAiChatOptions) {
     // 是否启用 Tool Use（模型支持 + 有工作目录）
     const enableTools = model.capabilities.toolUse && !!workDir.value
 
+    // 智能召回：检索相关记忆注入 system prompt
+    let enrichedSystemPrompt = systemPrompt
+    if (memoryStore.currentWorkspaceId !== '_global') {
+      const tokenBudget = Math.floor(model.capabilities.maxContext * 0.05)
+      const recalled = await memoryStore.recall(content, tokenBudget)
+      if (recalled) {
+        enrichedSystemPrompt = (systemPrompt ?? '') + '\n\n' + recalled
+      }
+    }
+
     // 1. 添加用户消息到列表
     const userMsg: AiMessage = {
       id: genId(),
@@ -320,7 +334,7 @@ export function useAiChat(options: UseAiChatOptions) {
 
     try {
       await streamWithToolLoop(
-        sid, chatMessages, provider, model, apiKey, systemPrompt, enableTools,
+        sid, chatMessages, provider, model, apiKey, enrichedSystemPrompt, enableTools,
       )
     } catch (e) {
       const errMsg = ensureErrorString(e)
@@ -357,6 +371,22 @@ export function useAiChat(options: UseAiChatOptions) {
         workDir: workDir.value || undefined,
       }
       aiStore.saveSession(session).catch(e => console.warn('[AI] 保存会话失败:', e))
+
+      // 自动压缩检测
+      if (model.capabilities.maxContext > 0) {
+        const compacted = await autoCompact.checkAndCompact(
+          messages.value,
+          totalTokens.value,
+          model.capabilities.maxContext,
+          sid,
+          provider,
+          model,
+          apiKey,
+        )
+        if (compacted) {
+          messages.value = compacted
+        }
+      }
     }
   }
 
@@ -729,6 +759,7 @@ export function useAiChat(options: UseAiChatOptions) {
       clearTimeout(throttleTimer)
       throttleTimer = null
     }
+    autoCompact.resetCircuitBreaker()
   }
 
   // ─────────────────────── 自动滚动 ───────────────────────
@@ -771,6 +802,8 @@ export function useAiChat(options: UseAiChatOptions) {
     canSend,
     /** 工作目录（Tool Use 安全边界） */
     workDir,
+    /** 自动压缩状态 */
+    isCompacting: autoCompact.isCompacting,
     /** 可用的工作目录列表（工作区根） */
     availableWorkDirs,
     /** 校验路径是否在工作区内 */
