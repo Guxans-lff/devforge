@@ -71,6 +71,51 @@ pub async fn init_tables(pool: &SqlitePool) -> Result<(), AppError> {
         .await
         .ok();
 
+    // 迁移：创建 ai_memories 表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS ai_memories (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL,
+            type TEXT NOT NULL,
+            title TEXT DEFAULT '',
+            content TEXT NOT NULL,
+            tags TEXT DEFAULT '',
+            source_session_id TEXT,
+            weight REAL DEFAULT 1.0,
+            embedding BLOB,
+            last_used_at INTEGER,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("创建 ai_memories 表失败: {e}")))?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_ai_mem_ws_type ON ai_memories(workspace_id, type)")
+        .execute(pool).await.ok();
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_ai_mem_ws_tags ON ai_memories(workspace_id, tags)")
+        .execute(pool).await.ok();
+
+    // 迁移：创建 ai_compactions 表
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS ai_compactions (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            original_count INTEGER DEFAULT 0,
+            original_tokens INTEGER DEFAULT 0,
+            created_at INTEGER NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("创建 ai_compactions 表失败: {e}")))?;
+
     Ok(())
 }
 
