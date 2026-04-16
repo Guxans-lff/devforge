@@ -17,10 +17,6 @@ pub async fn ws_read_directory(path: String) -> Result<Vec<DirEntry>, AppError> 
     while let Some(entry) = read_dir.next_entry().await
         .map_err(|e| AppError::Other(format!("读取条目失败: {}", e)))? {
         let name = entry.file_name().to_string_lossy().to_string();
-        // 跳过隐藏文件（以 . 开头）
-        if name.starts_with('.') {
-            continue;
-        }
         let metadata = entry.metadata().await.ok();
         let is_dir = metadata.as_ref().map_or(false, |m| m.is_dir());
         let size = metadata.as_ref().and_then(|m| if !m.is_dir() { Some(m.len()) } else { None });
@@ -60,12 +56,6 @@ pub async fn ws_read_directory_recursive(
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.path() != base_path)
-        .filter(|e| {
-            // 跳过隐藏目录及其内容
-            !e.path().components().any(|c| {
-                c.as_os_str().to_string_lossy().starts_with('.')
-            })
-        })
         .map(|e| {
             let relative = e.path().strip_prefix(&path).unwrap_or(e.path());
             RecursiveDirEntry {
