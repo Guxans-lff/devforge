@@ -139,6 +139,26 @@ export interface ToolCallInfo {
   error?: string
 }
 
+/** AI 文件操作信息 */
+export interface FileOperation {
+  /** 操作类型 */
+  op: 'create' | 'modify' | 'delete'
+  /** 文件路径 */
+  path: string
+  /** 文件名 */
+  fileName: string
+  /** 旧内容（modify 时存在） */
+  oldContent?: string
+  /** 新内容（create/modify 时存在） */
+  newContent?: string
+  /** 操作状态 */
+  status: 'pending' | 'applied' | 'rejected' | 'error'
+  /** 错误信息 */
+  errorMessage?: string
+  /** 关联的 toolCall ID */
+  toolCallId: string
+}
+
 /** 工具执行结果（用于展示） */
 export interface ToolResultInfo {
   toolCallId: string
