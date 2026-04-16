@@ -14,11 +14,19 @@
 
 ### 1. 窗口创建（后端）
 
-新增 Tauri 命令 `create_ai_window`：
+新增 Tauri 命令 `create_ai_window`，上限 5 个独立 AI 窗口：
 
 ```rust
 #[tauri::command]
 async fn create_ai_window(app: tauri::AppHandle) -> Result<String, String> {
+    // 上限检查：通过 app.webview_windows() 枚举 "ai-" 前缀窗口
+    let ai_count = app.webview_windows().keys()
+        .filter(|k| k.starts_with("ai-"))
+        .count();
+    if ai_count >= 5 {
+        return Err("最多同时打开 5 个 AI 窗口".into());
+    }
+
     let window_id = format!("ai-{}", chrono::Utc::now().timestamp_millis());
     let url = format!("/ai-standalone?windowId={}", window_id);
 
@@ -48,13 +56,15 @@ async fn create_ai_window(app: tauri::AppHandle) -> Result<String, String> {
 
 - 复用：`useAiChat`、`useFileAttachment`、`useAiMemoryStore`、`AiInputArea`、`AiMessageBubble`、`AiUsageBadge`、`AiProviderConfig`、`AiSessionDrawer`、`AiMemoryDrawer`、`AiCompactBanner`
 - 去掉：退出沉浸式按钮（`Minimize2`）、Tab 相关逻辑（`workspace.addTab`、`workspace.activeTab`）
-- 新增：从 URL query 解析 `windowId`，用 `windowId` 生成独立 `sessionId`
+- 新增：从 URL query 解析 `windowId`，sessionId 格式为 `session-{windowId}`（如 `session-ai-1713300000000`），与主窗口 `session-default-*` 命名空间隔离
 - 新增：窗口标题动态更新为 "AI - {工作目录名}"
-- 新增：`onBeforeUnmount` 自动保存当前会话
+- 新增：通过 Tauri `window.onCloseRequested` 拦截关闭事件，先保存会话再放行（避免 Vue 生命周期不可靠导致数据丢失）
+- 新增：workDir 未设置时允许正常对话（作为通用 AI 助手），仅文件操作类工具不可用
+- 记忆隔离：`useAiMemoryStore` 现有机制已按 workDir SHA-256 自动隔离，无需改动
 
 ### 4. 状态隔离
 
-每个 Tauri Webview 窗口加载独立的 Vue app 实例，Pinia store 天然隔离：
+每个 Tauri WebviewWindow 加载独立的 Vue app 实例（Tauri 2 的 WebviewWindow 每个窗口有独立的 JS context），Pinia store 天然隔离：
 
 | 状态 | 隔离方式 |
 |------|----------|
@@ -69,15 +79,7 @@ async fn create_ai_window(app: tauri::AppHandle) -> Result<String, String> {
 
 ### 5. 窗口管理
 
-后端维护活跃窗口注册表：
-
-```rust
-type AiWindowRegistry = Arc<RwLock<HashMap<String, String>>>; // windowId → workDir
-```
-
-- 窗口创建时注册
-- 窗口关闭时（通过 `on_window_event` 监听 `CloseRequested`）移除
-- 主窗口可查询当前活跃 AI 窗口数量
+不额外维护注册表，直接使用 Tauri 的 `app.webview_windows()` API 枚举 `ai-` 前缀窗口即可获取活跃 AI 窗口信息。
 
 ### 6. 全局快捷键
 
@@ -94,9 +96,7 @@ app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+A", move |app, _| {
 
 ### 7. 主窗口入口改造
 
-现有 `AiChatView.vue` 顶栏的 `Bot` 按钮（原 `handleNewAiTab`）改为调用 `invoke('create_ai_window')`，创建独立窗口而非新 Tab。
-
-保留 `Plus` 按钮的"新建对话"功能不变（在当前窗口/Tab 内新建 session）。
+现有 `AiChatView.vue` 顶栏的 `Bot` 按钮（原 `handleNewAiTab`）改为调用 `invoke('create_ai_window')`，创建独立窗口。主窗口内的 Tab 多开能力移除（独立窗口替代），保留 `Plus` 按钮的"新建对话"功能不变（在当前窗口内新建 session）。
 
 ### 8. 窗口生命周期
 
@@ -105,8 +105,12 @@ app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+A", move |app, _| {
   → 前端加载 /ai-standalone?windowId=ai-xxx
   → onMounted: 解析 windowId, 初始化 session, 加载 Provider
   → 用户使用（选工作目录、对话、切模型…）
-  → 窗口关闭: onBeforeUnmount 保存 session → Rust 从注册表移除
+  → 窗口关闭: onCloseRequested 拦截 → 保存 session → 放行关闭
 ```
+
+### 9. 快捷键注册失败处理
+
+全局快捷键注册失败时（系统冲突）静默降级：仅 log 警告，不影响其他功能。用户仍可通过主窗口按钮创建 AI 窗口。
 
 ## 不做的事
 
@@ -120,7 +124,7 @@ app.global_shortcut().on_shortcut("CmdOrCtrl+Shift+A", move |app, _| {
 | 文件 | 操作 | 说明 |
 |------|------|------|
 | `src-tauri/src/commands/ai.rs` | 修改 | 新增 `create_ai_window` 命令 |
-| `src-tauri/src/lib.rs` | 修改 | 注册命令 + 全局快捷键 + 窗口注册表 |
+| `src-tauri/src/lib.rs` | 修改 | 注册命令 + 全局快捷键 |
 | `src/views/AiStandaloneView.vue` | 新建 | 独立 AI 窗口视图 |
 | `src/main.ts` | 修改 | 新增 `/ai-standalone` 路由 |
 | `src/views/AiChatView.vue` | 修改 | Bot 按钮改为打开独立窗口 |
