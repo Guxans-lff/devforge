@@ -26,6 +26,8 @@ use commands::audit_log;
 use commands::ssh::{self, SshEngineState};
 use commands::git::{self as git_cmd, GitEngineState};
 use commands::screenshot::{self as screenshot_cmd, ScreenshotEngineState};
+use commands::workspace_fs::{self, FileWatcherState};
+use services::file_watcher::FileWatcher;
 use commands::table_editor;
 use commands::terminal_recorder::{self, TerminalRecorderState};
 use commands::tunnel::{self, SshTunnelEngineState};
@@ -117,6 +119,10 @@ pub fn run() {
             let screenshot_engine_state: ScreenshotEngineState =
                 Arc::new(ScreenshotEngine::new(app_data_dir));
             app.manage(screenshot_engine_state);
+
+            // Initialize FileWatcher — 文件系统监听引擎
+            let file_watcher_state: FileWatcherState = Arc::new(FileWatcher::new());
+            app.manage(file_watcher_state);
 
             // 全局快捷键注册 — 截图功能
             {
@@ -615,6 +621,17 @@ pub fn run() {
             ai_cmd::ai_get_usage_stats,
             ai_cmd::ai_get_tools,
             ai_cmd::ai_execute_tool,
+            // Workspace filesystem
+            workspace_fs::ws_read_directory,
+            workspace_fs::ws_read_directory_recursive,
+            workspace_fs::ws_create_file,
+            workspace_fs::ws_create_directory,
+            workspace_fs::ws_rename_entry,
+            workspace_fs::ws_delete_entry,
+            workspace_fs::ws_move_entry,
+            workspace_fs::ws_watch_directory,
+            workspace_fs::ws_unwatch_directory,
+            workspace_fs::ws_get_git_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

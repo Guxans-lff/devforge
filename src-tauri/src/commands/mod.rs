@@ -26,3 +26,4 @@ pub mod tunnel;
 pub mod updater;
 pub mod git;
 pub mod screenshot;
+pub mod workspace_fs;
