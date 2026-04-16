@@ -19,6 +19,8 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
   const nodeCache = ref<Map<string, FileNode[]>>(new Map())
   const decorations = shallowRef<Map<string, FileDecoration>>(new Map())
   const renamingNodeId = ref<string | null>(null)
+  /** 多选节点 ID 集合 */
+  const selectedNodes = ref<Set<string>>(new Set())
 
   // ─── 持久化（仅 roots） ───
   const persistence = usePersistence({
@@ -395,9 +397,80 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     })
   }
 
+  // ─── 多选操作 ───
+
+  /** 切换节点选中（Ctrl+Click） */
+  function toggleSelect(nodeId: string): void {
+    const s = new Set(selectedNodes.value)
+    if (s.has(nodeId)) s.delete(nodeId)
+    else s.add(nodeId)
+    selectedNodes.value = s
+  }
+
+  /** 范围选中（Shift+Click） */
+  function rangeSelect(fromIndex: number, toIndex: number): void {
+    const start = Math.min(fromIndex, toIndex)
+    const end = Math.max(fromIndex, toIndex)
+    const nodes = flatNodes.value.slice(start, end + 1)
+    const s = new Set(selectedNodes.value)
+    for (const n of nodes) {
+      if (!n.isRootHeader) s.add(n.id)
+    }
+    selectedNodes.value = s
+  }
+
+  /** 清空多选 */
+  function clearSelection(): void {
+    selectedNodes.value = new Set()
+  }
+
+  /** 全选当前目录下的所有文件 */
+  function selectAllInDir(dirPath: string, _rootId: string): void {
+    const children = nodeCache.value.get(dirPath)
+    if (!children) return
+    const s = new Set(selectedNodes.value)
+    for (const child of children) {
+      s.add(child.id)
+    }
+    selectedNodes.value = s
+  }
+
+  /** 批量删除选中节点 */
+  async function batchDelete(): Promise<{ success: number; failed: number }> {
+    let success = 0, failed = 0
+    // 记录受影响的 rootId（在删除前收集，避免清选后拿不到）
+    const rootIds = new Set([...selectedNodes.value].map(id => id.split(':')[0]))
+
+    for (const id of selectedNodes.value) {
+      const node = findNodeById(id)
+      if (!node) { failed++; continue }
+      try {
+        await invoke('ws_delete_entry', { path: node.absolutePath, permanent: false })
+        success++
+      } catch { failed++ }
+    }
+
+    clearSelection()
+
+    // 刷新所有受影响的根目录
+    for (const rid of rootIds) {
+      await refreshRoot(rid)
+    }
+    return { success, failed }
+  }
+
+  /** 批量复制路径 */
+  function batchCopyPaths(relative = false): string[] {
+    const paths: string[] = []
+    for (const id of selectedNodes.value) {
+      const node = findNodeById(id)
+      if (node) paths.push(relative ? node.path : node.absolutePath)
+    }
+    return paths
+  }
+
   /** 刷新指定 root 的文件树（清缓存 + 重载第一层 + Git 状态） */
   async function refreshRoot(rootId: string): Promise<void> {
-    const root = roots.value.find(r => r.id === rootId)
     if (!root) return
 
     // 清缓存
@@ -419,6 +492,7 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     nodeCache,
     decorations,
     renamingNodeId,
+    selectedNodes,
     flatNodes,
     addRoot,
     removeRoot,
@@ -434,6 +508,12 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     findNodeById,
     refreshGitDecorations,
     refreshRoot,
+    toggleSelect,
+    rangeSelect,
+    clearSelection,
+    selectAllInDir,
+    batchDelete,
+    batchCopyPaths,
     init,
   }
 })
