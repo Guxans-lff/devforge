@@ -8,25 +8,23 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
-import { useWorkspaceStore } from '@/stores/workspace'
 import { useFileTree } from '@/composables/useFileTree'
 import type { FileNode } from '@/types/workspace-files'
 import WorkspaceRootHeader from './files/WorkspaceRootHeader.vue'
 import FileTreeRow from './files/FileTreeRow.vue'
 import FileSearchDialog from './files/FileSearchDialog.vue'
+import FileContextMenu from './files/FileContextMenu.vue'
 import {
   FolderPlus,
   FilePlus,
   FolderOpen,
   Search,
   ChevronsDownUp,
-  Terminal,
-  ExternalLink,
-  Bot,
 } from 'lucide-vue-next'
 
+
+
 const store = useWorkspaceFilesStore()
-const workspace = useWorkspaceStore()
 const scrollContainerRef = ref<HTMLElement | null>(null)
 const showSearch = ref(false)
 
@@ -42,6 +40,7 @@ const {
   handleDragOver,
   handleDragLeave,
   handleDrop,
+  handleRowClick: treeHandleRowClick,
 } = useFileTree(scrollContainerRef)
 
 // ─── 初始化 ───
@@ -70,9 +69,8 @@ function collapseAll() {
 }
 
 // ─── 行交互 ───
-function handleRowClick(node: FileNode) {
-  selectedNodeId.value = node.id
-  focusedIndex.value = store.flatNodes.indexOf(node)
+function handleRowClick(e: MouseEvent, node: FileNode) {
+  treeHandleRowClick(e, node, store.flatNodes.indexOf(node))
 }
 
 function handleRowDblClick(node: FileNode) {
@@ -93,66 +91,32 @@ function handleContextMenu(e: MouseEvent, node: FileNode) {
   showContextMenu.value = true
 }
 
-async function contextNewFile() {
-  if (!contextNode.value) return
-  const parent = contextNode.value.isDirectory
-    ? contextNode.value.absolutePath
-    : contextNode.value.absolutePath.split('/').slice(0, -1).join('/')
+// ─── FileContextMenu 事件处理 ───
+async function handleNewFile(parentPath: string) {
+  const parent = parentPath || (store.roots[0]?.path ?? '')
   await store.createFile(parent, '新建文件')
+  showContextMenu.value = false
 }
 
-async function contextNewFolder() {
-  if (!contextNode.value) return
-  const parent = contextNode.value.isDirectory
-    ? contextNode.value.absolutePath
-    : contextNode.value.absolutePath.split('/').slice(0, -1).join('/')
+async function handleNewFolder(parentPath: string) {
+  const parent = parentPath || (store.roots[0]?.path ?? '')
   await store.createDirectory(parent, '新建文件夹')
+  showContextMenu.value = false
 }
 
-function contextRename() {
-  if (contextNode.value) {
-    store.renamingNodeId = contextNode.value.id
-  }
+function handleRename(node: FileNode) {
+  store.renamingNodeId = node.id
+  showContextMenu.value = false
 }
 
-function contextDelete() {
-  if (contextNode.value) {
-    store.deleteEntry(contextNode.value.absolutePath)
-  }
+function handleDelete(node: FileNode) {
+  store.deleteEntry(node.absolutePath)
+  showContextMenu.value = false
 }
 
-async function contextCopyPath() {
-  if (contextNode.value) {
-    await navigator.clipboard.writeText(contextNode.value.absolutePath)
-  }
-}
-
-function contextOpenInTerminal() {
-  if (!contextNode.value) return
-  const dir = contextNode.value.isDirectory
-    ? contextNode.value.absolutePath
-    : contextNode.value.absolutePath.split('/').slice(0, -1).join('/')
-  workspace.addTab({
-    id: `terminal-${Date.now()}`,
-    type: 'local-terminal',
-    title: dir.split('/').pop() || 'Terminal',
-    closable: true,
-    meta: { cwd: dir },
-  })
-}
-
-async function contextRevealInExplorer() {
-  if (!contextNode.value) return
-  const { revealItemInDir } = await import('@tauri-apps/plugin-opener')
-  await revealItemInDir(contextNode.value.absolutePath)
-}
-
-function contextSetAiWorkDir() {
-  if (!contextNode.value) return
-  const dir = contextNode.value.isDirectory
-    ? contextNode.value.absolutePath
-    : contextNode.value.absolutePath.split('/').slice(0, -1).join('/')
-  console.log('[workspace-fs] 设置 AI workDir:', dir)
+async function handleBatchDelete() {
+  await store.batchDelete()
+  showContextMenu.value = false
 }
 
 /** 工具栏：在第一个 root 下新建文件 */
@@ -218,6 +182,13 @@ function handleSearchSelect(node: FileNode) {
       >
         <ChevronsDownUp class="h-3.5 w-3.5 text-muted-foreground" />
       </button>
+      <!-- 多选 badge -->
+      <span
+        v-if="store.selectedNodes.size > 0"
+        class="ml-1 text-[10px] bg-primary/10 text-primary px-2 py-0.5 rounded-full"
+      >
+        {{ store.selectedNodes.size }} 个选中
+      </span>
     </div>
 
     <!-- 空状态 -->
@@ -268,7 +239,8 @@ function handleSearchSelect(node: FileNode) {
             :focused="focusedIndex === item.index"
             :selected="selectedNodeId === store.flatNodes[item.index]?.id"
             :drag-over="dragOverNodeId === store.flatNodes[item.index]?.id"
-            @click="handleRowClick(store.flatNodes[item.index])"
+            :multi-selected="store.selectedNodes.size > 0 ? store.selectedNodes.has(store.flatNodes[item.index]?.id) : undefined"
+            @click="(node: FileNode) => handleRowClick($event, node)"
             @dblclick="handleRowDblClick(store.flatNodes[item.index])"
             @contextmenu="handleContextMenu"
             @dragstart="handleDragStart"
@@ -281,47 +253,18 @@ function handleSearchSelect(node: FileNode) {
     </div>
 
     <!-- 右键菜单 -->
-    <Teleport to="body">
-      <div
-        v-if="showContextMenu"
-        class="fixed inset-0 z-50"
-        @click="showContextMenu = false"
-        @contextmenu.prevent="showContextMenu = false"
-      >
-        <div
-          class="absolute z-50 min-w-[180px] rounded-md border bg-popover p-1 shadow-md"
-          :style="{ left: `${contextPos.x}px`, top: `${contextPos.y}px` }"
-        >
-          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextNewFile(); showContextMenu = false">
-            <FilePlus class="h-3.5 w-3.5" /> 新建文件
-          </button>
-          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextNewFolder(); showContextMenu = false">
-            <FolderPlus class="h-3.5 w-3.5" /> 新建文件夹
-          </button>
-          <div class="my-1 h-px bg-border" />
-          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextRename(); showContextMenu = false">
-            重命名 <span class="ml-auto text-[10px] text-muted-foreground">F2</span>
-          </button>
-          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer text-destructive" @click="contextDelete(); showContextMenu = false">
-            删除 <span class="ml-auto text-[10px] text-muted-foreground">Del</span>
-          </button>
-          <div class="my-1 h-px bg-border" />
-          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextCopyPath(); showContextMenu = false">
-            复制路径
-          </button>
-          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextOpenInTerminal(); showContextMenu = false">
-            <Terminal class="h-3.5 w-3.5" /> 在终端中打开
-          </button>
-          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextRevealInExplorer(); showContextMenu = false">
-            <ExternalLink class="h-3.5 w-3.5" /> 在系统资源管理器中显示
-          </button>
-          <div class="my-1 h-px bg-border" />
-          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextSetAiWorkDir(); showContextMenu = false">
-            <Bot class="h-3.5 w-3.5" /> 作为 AI 工作目录
-          </button>
-        </div>
-      </div>
-    </Teleport>
+    <FileContextMenu
+      v-if="showContextMenu"
+      :node="contextNode"
+      :position="contextPos"
+      :multi-selected-count="store.selectedNodes.size"
+      @close="showContextMenu = false"
+      @new-file="handleNewFile"
+      @new-folder="handleNewFolder"
+      @rename="handleRename"
+      @delete="handleDelete"
+      @batch-delete="handleBatchDelete"
+    />
 
     <!-- Ctrl+P 搜索 -->
     <Teleport to="body">
