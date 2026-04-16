@@ -5,9 +5,10 @@
  * 折叠卡片样式，显示工具名 + 参数摘要 + 执行状态 + 结果预览。
  */
 import { ref, computed, watch } from 'vue'
-import type { ToolCallInfo } from '@/types/ai'
+import type { ToolCallInfo, FileOperation } from '@/types/ai'
 import { ChevronRight, Loader2, CheckCircle2, XCircle, Wrench, ExternalLink } from 'lucide-vue-next'
 import AiCodeBlock from './AiCodeBlock.vue'
+import AiFileOpCard from './AiFileOpCard.vue'
 import { inferLanguageFromPath } from '@/utils/file-markers'
 import { openPath } from '@tauri-apps/plugin-opener'
 
@@ -120,6 +121,24 @@ const filePreviewContent = computed(() => {
 })
 
 /**
+ * 将 write_file 成功态的 toolCall 转为 FileOperation 对象，供 AiFileOpCard 渲染
+ * 仅在 write_file 成功时有值，其他工具或执行中时返回 null
+ */
+const fileOperation = computed<FileOperation | null>(() => {
+  if (!isFileOp.value || props.toolCall.name !== 'write_file') return null
+  if (props.toolCall.status !== 'success') return null
+  const args = props.toolCall.parsedArgs
+  return {
+    op: 'modify',
+    path: (args?.path as string) ?? '',
+    fileName: ((args?.path as string) ?? '').split(/[/\\]/).pop() ?? '',
+    newContent: (args?.content as string) ?? '',
+    status: 'pending',
+    toolCallId: props.toolCall.id,
+  }
+})
+
+/**
  * 截断后的预览内容（大文件只显示前 100 行）
  */
 const truncatedPreview = computed(() => {
@@ -210,8 +229,20 @@ async function handleOpenFile() {
 
     <!-- 展开内容 -->
     <div v-if="expanded" class="border-t border-border/20">
-      <!-- ===== write_file / read_file 专属展示 ===== -->
-      <template v-if="isFileOp && toolCall.status === 'success'">
+      <!-- ===== write_file 成功态：毛玻璃文件操作卡片 ===== -->
+      <template v-if="toolCall.name === 'write_file' && toolCall.status === 'success' && fileOperation">
+        <div class="px-1 pb-1 pt-1">
+          <AiFileOpCard
+            :op="fileOperation"
+            :auto-expand="true"
+            @apply="() => {}"
+            @reject="() => {}"
+          />
+        </div>
+      </template>
+
+      <!-- ===== read_file 成功态：代码高亮预览 ===== -->
+      <template v-else-if="toolCall.name === 'read_file' && toolCall.status === 'success'">
         <!-- 打开文件按钮（仅 write_file 且有绝对路径） -->
         <div v-if="toolCall.name === 'write_file' && absoluteFilePath" class="flex items-center justify-end px-3 py-1.5">
           <button
