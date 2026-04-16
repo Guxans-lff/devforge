@@ -8,6 +8,8 @@ export function useFileTree(scrollContainerRef: Ref<HTMLElement | null>) {
   const store = useWorkspaceFilesStore()
   const focusedIndex = ref(-1)
   const selectedNodeId = ref<string | null>(null)
+  /** 最后一次单击的索引（用于 Shift 范围选） */
+  const lastClickIndex = ref<number | null>(null)
 
   // ─── 虚拟滚动 ───
   const { overscan, attach } = useAdaptiveOverscan(scrollContainerRef, {
@@ -88,6 +90,49 @@ export function useFileTree(scrollContainerRef: Ref<HTMLElement | null>) {
           }
         }
         break
+      default:
+        // Ctrl+A 全选
+        if ((e.ctrlKey || e.metaKey) && e.key === 'a') {
+          e.preventDefault()
+          const flat = store.flatNodes
+          const s = new Set<string>()
+          for (const n of flat) {
+            if (!n.isRootHeader) s.add(n.id)
+          }
+          store.selectedNodes = s
+        }
+        break
+    }
+  }
+
+  // ─── 多选点击处理 ───
+
+  /**
+   * 处理行点击，支持 Ctrl/Shift 多选
+   * @param e 鼠标事件
+   * @param node 被点击的文件节点
+   * @param index 节点在 flatNodes 中的索引
+   */
+  function handleRowClick(e: MouseEvent, node: FileNode, index: number): void {
+    if (node.isRootHeader) return
+
+    if (e.ctrlKey || e.metaKey) {
+      // Ctrl+Click：切换单个节点选中状态
+      store.toggleSelect(node.id)
+      lastClickIndex.value = index
+    } else if (e.shiftKey && lastClickIndex.value !== null) {
+      // Shift+Click：范围选中
+      store.rangeSelect(lastClickIndex.value, index)
+    } else {
+      // 普通点击：清空多选，选中当前节点
+      store.clearSelection()
+      selectedNodeId.value = node.id
+      focusedIndex.value = index
+      lastClickIndex.value = index
+
+      if (node.isDirectory) {
+        store.toggleDir(node.id)
+      }
     }
   }
 
@@ -148,7 +193,9 @@ export function useFileTree(scrollContainerRef: Ref<HTMLElement | null>) {
     attachOverscan: attach,
     focusedIndex,
     selectedNodeId,
+    lastClickIndex,
     handleKeyDown,
+    handleRowClick,
     dragOverNodeId,
     handleDragStart,
     handleDragOver,
