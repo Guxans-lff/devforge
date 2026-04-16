@@ -12,6 +12,8 @@ pub mod openai_compat;
 pub mod provider;
 pub mod session_store;
 pub mod stream_parser;
+pub mod memory_models;
+pub mod memory_store;
 
 use std::collections::HashMap;
 use std::sync::Arc;

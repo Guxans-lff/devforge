@@ -215,3 +215,45 @@ export interface AiResult {
   promptTokens: number
   completionTokens: number
 }
+
+// ─────────────────────────────────── 记忆系统 ───────────────────────────────────
+
+/** 记忆类型 */
+export type MemoryType = 'summary' | 'knowledge' | 'preference'
+
+/** 记忆条目 */
+export interface AiMemory {
+  id: string
+  workspaceId: string
+  type: MemoryType
+  title: string
+  content: string
+  tags: string
+  sourceSessionId?: string
+  weight: number
+  lastUsedAt?: number
+  createdAt: number
+  updatedAt: number
+}
+
+/** 压缩记录 */
+export interface AiCompaction {
+  id: string
+  sessionId: string
+  summary: string
+  originalCount: number
+  originalTokens: number
+  createdAt: number
+}
+
+/** 压缩规则配置 */
+export interface CompactRule {
+  /** P0-必须保留的内容描述 */
+  p0: string
+  /** P1-尽量保留的内容描述 */
+  p1: string
+  /** P2-立即丢弃的内容描述 */
+  p2: string
+  /** 压缩比目标（如 0.2 表示压缩到 20%） */
+  ratio: number
+}
