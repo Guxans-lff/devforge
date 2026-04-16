@@ -363,8 +363,12 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
 
     // 恢复监听 + 加载第一层
     for (const root of roots.value) {
-      invoke('ws_watch_directory', { id: root.id, path: root.path }).catch(() => {})
-      loadChildren(root.id, root.path, 0)
+      invoke('ws_watch_directory', { id: root.id, path: root.path }).catch((e) => {
+        console.warn('[workspace-fs] watch 失败:', root.path, e)
+      })
+      loadChildren(root.id, root.path, 0).catch((e) => {
+        console.warn('[workspace-fs] 首次加载失败:', root.path, e)
+      })
       refreshGitDecorations(root.path)
     }
 
@@ -391,6 +395,24 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     })
   }
 
+  /** 刷新指定 root 的文件树（清缓存 + 重载第一层 + Git 状态） */
+  async function refreshRoot(rootId: string): Promise<void> {
+    const root = roots.value.find(r => r.id === rootId)
+    if (!root) return
+
+    // 清缓存
+    for (const key of nodeCache.value.keys()) {
+      if (key.startsWith(root.path)) {
+        nodeCache.value.delete(key)
+      }
+    }
+    nodeCache.value = new Map(nodeCache.value)
+
+    // 重载
+    await loadChildren(root.id, root.path, 0)
+    refreshGitDecorations(root.path)
+  }
+
   return {
     roots,
     expandedDirs,
@@ -411,6 +433,7 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     moveEntry,
     findNodeById,
     refreshGitDecorations,
+    refreshRoot,
     init,
   }
 })

@@ -70,7 +70,8 @@ const emit = defineEmits<{
   'update:chatMode': [mode: ChatMode]
   openConfig: []
   selectFiles: []
-  dropFiles: [paths: string[]]
+  dropFiles: [files: FileList]
+  dropFilePath: [path: string]
   removeAttachment: [id: string]
   mentionFile: [path: string]
 }>()
@@ -292,17 +293,23 @@ function handleDragLeave() {
 function handleDrop(e: DragEvent) {
   e.preventDefault()
   isDragOver.value = false
-  // Tauri 拖拽事件中文件路径在 dataTransfer.files 或自定义字段
+
+  // 优先处理应用内文件树拖拽（携带绝对路径）
+  const devforgeData = e.dataTransfer?.getData('application/x-devforge-file')
+  if (devforgeData) {
+    try {
+      const { absolutePath } = JSON.parse(devforgeData)
+      if (absolutePath) {
+        emit('dropFilePath', absolutePath)
+        return
+      }
+    } catch { /* ignore */ }
+  }
+
+  // 系统文件拖拽（DOM File 对象）
   const files = e.dataTransfer?.files
   if (files && files.length > 0) {
-    const paths: string[] = []
-    for (let i = 0; i < files.length; i++) {
-      // Tauri webview 中 File 对象的 path 属性包含绝对路径
-      const file = files[i]!
-      const path = (file as unknown as { path?: string }).path ?? file.name
-      paths.push(path)
-    }
-    emit('dropFiles', paths)
+    emit('dropFiles', files)
   }
 }
 

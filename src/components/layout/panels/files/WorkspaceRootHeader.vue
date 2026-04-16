@@ -16,16 +16,14 @@ const store = useWorkspaceFilesStore()
 
 function toggleCollapse() {
   props.root.collapsed = !props.root.collapsed
+  // 展开时如果缓存为空，重新加载
+  if (!props.root.collapsed && !store.nodeCache.has(props.root.path)) {
+    store.refreshRoot(props.root.id)
+  }
 }
 
 function refresh() {
-  store.refreshGitDecorations(props.root.path)
-  for (const key of store.nodeCache.keys()) {
-    if (key.startsWith(props.root.path)) {
-      store.nodeCache.delete(key)
-    }
-  }
-  store.nodeCache = new Map(store.nodeCache)
+  store.refreshRoot(props.root.id)
 }
 </script>
 

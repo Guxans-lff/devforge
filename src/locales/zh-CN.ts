@@ -23,7 +23,7 @@ export default {
   tab: {
     newQuery: '新建查询',
     terminal: '终端',
-    files: '文件传输',
+    files: '资源管理器',
     settings: '设置',
     welcome: '欢迎',
     homepage: '首页',

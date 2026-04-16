@@ -8,7 +8,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiChat } from '@/composables/useAiChat'
-import { useFileAttachment } from '@/composables/useFileAttachment'
+import { useFileAttachment, stripMentionMarkers } from '@/composables/useFileAttachment'
 import { checkTokenLimit } from '@/utils/file-markers'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { getCredential } from '@/api/connection'
@@ -19,6 +19,7 @@ import AiInputArea from '@/components/ai/AiInputArea.vue'
 import AiUsageBadge from '@/components/ai/AiUsageBadge.vue'
 import AiProviderConfig from '@/components/ai/AiProviderConfig.vue'
 import AiSessionDrawer from '@/components/ai/AiSessionDrawer.vue'
+import WorkspaceFilePicker from '@/components/ai/WorkspaceFilePicker.vue'
 import {
   Bot,
   Settings,
@@ -45,6 +46,9 @@ const currentView = ref<'chat' | 'provider-config'>('chat')
 
 /** 历史对话抽屉是否打开 */
 const showSessionDrawer = ref(false)
+
+/** 工作区文件选择器是否打开 */
+const showFilePicker = ref(false)
 
 // 当前选中的 Provider 和 Model
 const selectedProviderId = ref<string | null>(null)
@@ -160,6 +164,9 @@ const effectiveSystemPrompt = computed(() => {
 async function handleSend(content: string) {
   if (!currentProvider.value || !currentModel.value) return
 
+  // 剥离 @filename 标记
+  const cleanContent = stripMentionMarkers(content)
+
   // 从系统密钥环读取 API Key
   const apiKey = await getCredential(`ai-provider-${currentProvider.value.id}`) ?? ''
   if (!apiKey) {
@@ -170,7 +177,7 @@ async function handleSend(content: string) {
   // Token 超限检查
   const attachments = fileAttachment.getReadyAttachments()
   if (currentModel.value.capabilities.maxContext > 0) {
-    const totalText = content + attachments.map(f => f.content ?? '').join('')
+    const totalText = cleanContent + attachments.map(f => f.content ?? '').join('')
     const check = checkTokenLimit(totalText, chat.totalTokens.value, currentModel.value.capabilities.maxContext)
     if (check.warn) {
       console.warn(`[AI] Token 接近上限: 预估 ${check.usage} / 上限 ${check.limit}`)
@@ -179,7 +186,7 @@ async function handleSend(content: string) {
   }
 
   await chat.send(
-    content,
+    cleanContent,
     currentProvider.value,
     currentModel.value,
     apiKey,
@@ -237,6 +244,19 @@ function handleNewAiTab() {
 
 /** 是否有 Provider 配置 */
 const hasProviders = computed(() => store.providers.length > 0)
+
+/** @ 引用文件 */
+function handleMentionFile(path: string) {
+  fileAttachment.addFile(path)
+}
+
+/** 工作区文件选择器确认 */
+function handleFilePickerConfirm(paths: string[]) {
+  showFilePicker.value = false
+  for (const p of paths) {
+    fileAttachment.addFile(p)
+  }
+}
 
 /** 打开/关闭配置页 */
 function openProviderConfig() {
@@ -496,9 +516,11 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
           @update:selected-model-id="selectedModelId = $event"
           @update:chat-mode="chatMode = $event"
           @open-config="openProviderConfig"
-          @select-files="fileAttachment.selectFiles"
-          @drop-files="fileAttachment.handleDrop"
+          @select-files="showFilePicker = true"
+          @drop-files="fileAttachment.handleDomDrop"
+          @drop-file-path="handleMentionFile"
           @remove-attachment="fileAttachment.removeAttachment"
+          @mention-file="handleMentionFile"
         />
       </div>
     </template>
@@ -512,6 +534,13 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
       @select="handleSelectSession"
       @create="handleCreateSession"
       @delete="handleDeleteSession"
+    />
+
+    <!-- 工作区文件选择器 -->
+    <WorkspaceFilePicker
+      v-if="showFilePicker"
+      @confirm="handleFilePickerConfirm"
+      @close="showFilePicker = false"
     />
   </div>
 </template>
