@@ -7,6 +7,8 @@
  */
 import { ref, computed, nextTick } from 'vue'
 import type { ProviderConfig, ModelConfig, FileAttachment } from '@/types/ai'
+import type { FileNode } from '@/types/workspace-files'
+import AtMentionPopover from './AtMentionPopover.vue'
 import {
   Send,
   Square,
@@ -70,11 +72,18 @@ const emit = defineEmits<{
   selectFiles: []
   dropFiles: [paths: string[]]
   removeAttachment: [id: string]
+  mentionFile: [path: string]
 }>()
 
 const inputText = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>()
 const isDragOver = ref(false)
+
+/** @ 引用相关状态 */
+const showAtPopover = ref(false)
+const atQuery = ref('')
+const atStartPos = ref(-1)
+const atAnchorPos = ref({ x: 0, y: 0 })
 
 const canSend = computed(() => inputText.value.trim().length > 0 && !props.disabled && !props.isStreaming)
 
@@ -118,8 +127,126 @@ const CHAT_MODES = {
 
 const currentModeConfig = computed(() => CHAT_MODES[props.chatMode])
 
+/**
+ * 使用 mirror div 技术计算 textarea 中指定位置的光标坐标
+ * @param position 文本位置索引
+ * @returns 屏幕坐标 { x, y }
+ */
+function getCaretCoordinates(position: number): { x: number; y: number } {
+  const el = textareaRef.value
+  if (!el) return { x: 0, y: 0 }
+
+  const mirror = document.createElement('div')
+  const style = getComputedStyle(el)
+  const props = [
+    'fontFamily', 'fontSize', 'fontWeight', 'lineHeight', 'letterSpacing',
+    'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+    'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
+    'boxSizing', 'whiteSpace', 'wordWrap', 'overflowWrap', 'tabSize', 'textIndent',
+  ] as const
+  mirror.style.position = 'absolute'
+  mirror.style.top = '-9999px'
+  mirror.style.left = '-9999px'
+  mirror.style.visibility = 'hidden'
+  mirror.style.overflow = 'hidden'
+  mirror.style.width = `${el.offsetWidth}px`
+  for (const prop of props) {
+    ;(mirror.style as any)[prop] = style.getPropertyValue(
+      prop.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`),
+    )
+  }
+
+  // 插入光标前的文本 + 标记 span
+  const textBefore = el.value.substring(0, position)
+  mirror.textContent = textBefore
+  const marker = document.createElement('span')
+  marker.textContent = '\u200b' // 零宽字符
+  mirror.appendChild(marker)
+
+  document.body.appendChild(mirror)
+  const rect = el.getBoundingClientRect()
+  const x = rect.left + marker.offsetLeft - el.scrollLeft
+  const y = rect.top + marker.offsetTop - el.scrollTop
+  document.body.removeChild(mirror)
+
+  return { x, y }
+}
+
+/**
+ * 检测光标前是否存在未闭合的 @ 引用
+ * 从光标位置往前搜索，遇到空格或换行停止
+ */
+function detectAtMention() {
+  const el = textareaRef.value
+  if (!el) return
+
+  const text = el.value
+  const pos = el.selectionStart ?? 0
+
+  // 从光标往前查找 @
+  let i = pos - 1
+  while (i >= 0) {
+    const ch = text[i]
+    if (ch === '@') {
+      // 找到 @，提取 query
+      atStartPos.value = i
+      atQuery.value = text.substring(i + 1, pos)
+      atAnchorPos.value = getCaretCoordinates(i)
+      showAtPopover.value = true
+      return
+    }
+    if (ch === ' ' || ch === '\n' || ch === '\r') {
+      break
+    }
+    i--
+  }
+
+  // 未找到有效 @，关闭浮层
+  closeAtPopover()
+}
+
+/** 关闭 @ 浮层 */
+function closeAtPopover() {
+  showAtPopover.value = false
+  atQuery.value = ''
+  atStartPos.value = -1
+}
+
+/**
+ * 选中文件后替换 @query 为 @filename 并 emit mentionFile
+ * @param node 选中的文件节点
+ */
+function handleAtSelect(node: FileNode) {
+  const el = textareaRef.value
+  if (!el || atStartPos.value < 0) return
+
+  const before = el.value.substring(0, atStartPos.value)
+  const after = el.value.substring(atStartPos.value + 1 + atQuery.value.length)
+  inputText.value = `${before}@${node.name} ${after}`
+
+  closeAtPopover()
+  emit('mentionFile', node.absolutePath)
+
+  // 聚焦并设置光标到插入文本之后
+  nextTick(() => {
+    el.focus()
+    const cursorPos = atStartPos.value + 1 + node.name.length + 1
+    el.setSelectionRange(cursorPos, cursorPos)
+    adjustHeight()
+  })
+}
+
 /** 处理按键 */
 function handleKeyDown(e: KeyboardEvent) {
+  // @ 浮层可见时，拦截导航键交给 popover 处理
+  if (showAtPopover.value) {
+    if (['ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(e.key)) {
+      e.preventDefault()
+      e.stopPropagation()
+      return
+    }
+  }
+
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     if (canSend.value) {
@@ -241,7 +368,7 @@ defineExpose({ focus })
           class="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm leading-relaxed placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
           style="max-height: 200px"
           @keydown="handleKeyDown"
-          @input="adjustHeight"
+          @input="adjustHeight(); detectAtMention()"
         />
 
         <!-- 底部工具栏 -->
@@ -359,6 +486,15 @@ defineExpose({ focus })
         </div>
       </div>
     </div>
+
+    <!-- @ 文件引用浮层 -->
+    <AtMentionPopover
+      :query="atQuery"
+      :anchor-pos="atAnchorPos"
+      :visible="showAtPopover"
+      @select="handleAtSelect"
+      @close="closeAtPopover"
+    />
 
     <!-- 底部提示 -->
     <div class="flex items-center justify-center px-4 pb-2">
