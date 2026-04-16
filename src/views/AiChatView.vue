@@ -8,6 +8,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiChat } from '@/composables/useAiChat'
+import { useAiMemoryStore } from '@/stores/ai-memory'
 import { useFileAttachment, stripMentionMarkers } from '@/composables/useFileAttachment'
 import { checkTokenLimit } from '@/utils/file-markers'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -19,6 +20,8 @@ import AiInputArea from '@/components/ai/AiInputArea.vue'
 import AiUsageBadge from '@/components/ai/AiUsageBadge.vue'
 import AiProviderConfig from '@/components/ai/AiProviderConfig.vue'
 import AiSessionDrawer from '@/components/ai/AiSessionDrawer.vue'
+import AiMemoryDrawer from '@/components/ai/AiMemoryDrawer.vue'
+import AiCompactBanner from '@/components/ai/AiCompactBanner.vue'
 import WorkspaceFilePicker from '@/components/ai/WorkspaceFilePicker.vue'
 import {
   Bot,
@@ -30,6 +33,7 @@ import {
   Zap,
   MessageSquareText,
   FolderOpen,
+  Brain,
 } from 'lucide-vue-next'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { Button } from '@/components/ui/button'
@@ -38,6 +42,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 const store = useAiChatStore()
 const workspace = useWorkspaceStore()
 const fileAttachment = useFileAttachment()
+const memoryStore = useAiMemoryStore()
 
 // ─────────────────────── 视图状态 ───────────────────────
 
@@ -46,6 +51,9 @@ const currentView = ref<'chat' | 'provider-config'>('chat')
 
 /** 历史对话抽屉是否打开 */
 const showSessionDrawer = ref(false)
+
+/** 记忆管理抽屉是否打开 */
+const showMemoryDrawer = ref(false)
 
 /** 工作区文件选择器是否打开 */
 const showFilePicker = ref(false)
@@ -120,6 +128,11 @@ onMounted(async () => {
   // 加载当前会话的历史
   if (currentSessionId.value) {
     await chat.loadHistory()
+  }
+
+  // 初始化记忆 store（使用当前工作目录）
+  if (chat.workDir.value) {
+    memoryStore.setWorkspace(chat.workDir.value)
   }
 })
 
@@ -287,6 +300,8 @@ async function handleSelectWorkDir() {
   const dir = await openDialog({ directory: true, multiple: false })
   if (dir) {
     chat.workDir.value = dir as string
+    // 更新记忆 store 的工作区
+    memoryStore.setWorkspace(dir as string)
     // 立即持久化到当前 session
     const sid = currentSessionId.value
     if (sid && currentProvider.value && currentModel.value) {
@@ -378,6 +393,16 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" class="text-[11px]">服务商配置</TooltipContent>
+            </Tooltip>
+
+            <!-- 记忆 -->
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <Button variant="ghost" size="icon" class="h-8 w-8" @click="showMemoryDrawer = true">
+                  <Brain class="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" class="text-[11px]">项目记忆</TooltipContent>
             </Tooltip>
           </TooltipProvider>
 
@@ -488,6 +513,9 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
         </div>
       </div>
 
+      <!-- 压缩提示 -->
+      <AiCompactBanner :visible="chat.isCompacting?.value ?? false" />
+
       <!-- 错误提示 -->
       <div
         v-if="chat.error.value"
@@ -541,6 +569,12 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
       v-if="showFilePicker"
       @confirm="handleFilePickerConfirm"
       @close="showFilePicker = false"
+    />
+
+    <!-- 记忆管理抽屉 -->
+    <AiMemoryDrawer
+      :open="showMemoryDrawer"
+      @update:open="showMemoryDrawer = $event"
     />
   </div>
 </template>
