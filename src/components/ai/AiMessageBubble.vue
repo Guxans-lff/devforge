@@ -8,7 +8,7 @@
  * - 错误消息：红色警告条
  */
 import { computed, ref } from 'vue'
-import type { AiMessage } from '@/types/ai'
+import type { AiMessage, FileOperation } from '@/types/ai'
 import { parseFileMarkers } from '@/utils/file-markers'
 import { ChevronRight, Copy, Check, AlertCircle, Download } from 'lucide-vue-next'
 import { save } from '@tauri-apps/plugin-dialog'
@@ -16,6 +16,7 @@ import { writeTextFile } from '@/api/database'
 import AiCodeBlock from './AiCodeBlock.vue'
 import AiFileCard from './AiFileCard.vue'
 import AiToolCallBlock from './AiToolCallBlock.vue'
+import AiFileOpsGroup from './AiFileOpsGroup.vue'
 
 const props = defineProps<{
   message: AiMessage
@@ -28,6 +29,30 @@ const hasThinking = computed(() => !!props.message.thinking?.trim())
 const isUser = computed(() => props.message.role === 'user')
 const isError = computed(() => props.message.role === 'error')
 const hasToolCalls = computed(() => (props.message.toolCalls?.length ?? 0) > 0)
+
+/** 提取 write_file 成功态工具调用，转为 FileOperation 列表供 AiFileOpsGroup 渲染 */
+const fileOperations = computed<FileOperation[]>(() => {
+  if (!props.message.toolCalls) return []
+  return props.message.toolCalls
+    .filter(tc => tc.name === 'write_file' && tc.status === 'success')
+    .map(tc => {
+      const args = tc.parsedArgs ?? {}
+      const path = (args.path as string) ?? ''
+      return {
+        op: 'modify' as const,
+        path,
+        fileName: path.split(/[/\\]/).pop() ?? '',
+        newContent: (args.content as string) ?? '',
+        status: 'pending' as const,
+        toolCallId: tc.id,
+      }
+    })
+})
+
+/** 非文件写入的其他工具调用（如 read_file、search_files 等） */
+const otherToolCalls = computed(() =>
+  (props.message.toolCalls ?? []).filter(tc => tc.name !== 'write_file')
+)
 
 async function copyContent() {
   try {
@@ -248,11 +273,20 @@ function renderBlock(text: string): string {
 
       <!-- 工具调用块 -->
       <div v-if="hasToolCalls" class="mt-1.5 space-y-1">
-        <AiToolCallBlock
-          v-for="tc in message.toolCalls"
-          :key="tc.id"
-          :tool-call="tc"
+        <!-- 文件操作组（聚合 write_file 为毛玻璃卡片组） -->
+        <AiFileOpsGroup
+          v-if="fileOperations.length > 0"
+          :operations="fileOperations"
         />
+
+        <!-- 其他工具调用（read_file、search_files 等） -->
+        <div v-if="otherToolCalls.length" class="space-y-1">
+          <AiToolCallBlock
+            v-for="tc in otherToolCalls"
+            :key="tc.id"
+            :tool-call="tc"
+          />
+        </div>
       </div>
     </div>
   </div>
