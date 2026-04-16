@@ -3,7 +3,9 @@ import { computed, defineAsyncComponent, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTransferStore } from '@/stores/transfer'
-import Sidebar from '@/components/layout/Sidebar.vue'
+import ActivityBar from '@/components/layout/ActivityBar.vue'
+import SidePanel from '@/components/layout/SidePanel.vue'
+import StatusBar from '@/components/layout/StatusBar.vue'
 import TabBar from '@/components/layout/TabBar.vue'
 import TitleBar from '@/components/layout/TitleBar.vue'
 import BottomPanel from '@/components/layout/BottomPanel.vue'
@@ -128,8 +130,9 @@ watch(() => workspace.activeTab?.type, (tabType, oldType) => {
     <TitleBar />
 
     <div class="flex flex-1 min-h-0">
-    <!-- Sidebar（沉浸式下隐藏） -->
-    <Sidebar v-show="!isImmersive" />
+    <!-- Activity Bar + Side Panel（沉浸式下隐藏） -->
+    <ActivityBar v-show="!isImmersive" />
+    <SidePanel v-show="!isImmersive" />
 
     <!-- Main Content Area: Floating and elevated -->
     <div class="flex flex-1 flex-col overflow-hidden bg-background transition-[border-radius] duration-300" :class="isImmersive ? '' : 'sm:rounded-tl-xl border-t border-l border-border/40 shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.15)] dark:shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.6)]'" :style="{ position: 'relative', zIndex: 10 }">
@@ -159,6 +162,9 @@ watch(() => workspace.activeTab?.type, (tabType, oldType) => {
       <BottomPanel v-show="!isImmersive" />
     </div>
     </div>
+
+    <!-- Status Bar（沉浸式下隐藏） -->
+    <StatusBar v-show="!isImmersive && workspace.panelState.showStatusBar" />
 
     <!-- Command Palette -->
     <CommandPalette />

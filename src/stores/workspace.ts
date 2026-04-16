@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { usePersistence } from '@/plugins/persistence'
-import type { Tab, PanelState, WorkspaceSnapshot } from '@/types/workspace'
+import type { Tab, PanelState, SidePanelId, WorkspaceSnapshot } from '@/types/workspace'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useConnectionStore } from '@/stores/connections'
 import { useTransferStore } from '@/stores/transfer'
@@ -22,8 +22,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeTabId = ref('welcome')
 
   const panelState = ref<PanelState>({
-    sidebarWidth: 260,
-    sidebarCollapsed: false,
+    activeSidePanel: 'connections',
+    sidePanelWidth: 260,
+    showStatusBar: true,
     bottomPanelHeight: 200,
     bottomPanelCollapsed: true,
     bottomPanelTab: 'query-history',
@@ -144,10 +145,26 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  /** 设置激活的侧面板 */
+  function setActiveSidePanel(panelId: SidePanelId | null) {
+    panelState.value = { ...panelState.value, activeSidePanel: panelId }
+  }
+
+  /** 切换侧面板（单击已激活的图标→折叠） */
+  function toggleSidePanel(panelId: SidePanelId) {
+    if (panelState.value.activeSidePanel === panelId) {
+      setActiveSidePanel(null)
+    } else {
+      setActiveSidePanel(panelId)
+    }
+  }
+
+  /** 快捷键入口（Ctrl+B） */
   function toggleSidebar() {
-    panelState.value = {
-      ...panelState.value,
-      sidebarCollapsed: !panelState.value.sidebarCollapsed,
+    if (panelState.value.activeSidePanel) {
+      setActiveSidePanel(null)
+    } else {
+      setActiveSidePanel('connections')
     }
   }
 
@@ -159,8 +176,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  function setSidebarWidth(width: number) {
-    panelState.value = { ...panelState.value, sidebarWidth: width }
+  /** 设置侧面板宽度（拖拽调整） */
+  function setSidePanelWidth(width: number) {
+    panelState.value = { ...panelState.value, sidePanelWidth: Math.max(200, Math.min(500, width)) }
   }
 
   function setBottomPanelHeight(height: number) {
@@ -179,24 +197,30 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // ===== 沉浸式模式 =====
 
   /** 进入沉浸式前保存的面板状态快照 */
-  let _panelSnapshot: { sidebarCollapsed: boolean; bottomPanelCollapsed: boolean } | null = null
+  let _panelSnapshot: {
+    activeSidePanel: SidePanelId | null
+    bottomPanelCollapsed: boolean
+    showStatusBar: boolean
+  } | null = null
 
   /** 用户是否手动退出了沉浸式（防止 watch 自动重新进入） */
   let _immersiveManuallyExited = false
 
-  /** 进入沉浸式模式（隐藏 Sidebar + BottomPanel） */
+  /** 进入沉浸式模式（隐藏 ActivityBar + SidePanel + BottomPanel + StatusBar） */
   function enterImmersive(): void {
     if (panelState.value.immersiveMode) return
     if (_immersiveManuallyExited) return  // 用户主动退出后不自动重新进入
     // 保存当前面板状态
     _panelSnapshot = {
-      sidebarCollapsed: panelState.value.sidebarCollapsed,
+      activeSidePanel: panelState.value.activeSidePanel,
       bottomPanelCollapsed: panelState.value.bottomPanelCollapsed,
+      showStatusBar: panelState.value.showStatusBar,
     }
     panelState.value = {
       ...panelState.value,
-      sidebarCollapsed: true,
+      activeSidePanel: null,
       bottomPanelCollapsed: true,
+      showStatusBar: false,
       immersiveMode: true,
     }
   }
@@ -205,12 +229,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function exitImmersive(): void {
     if (!panelState.value.immersiveMode) return
     _immersiveManuallyExited = true  // 标记用户主动退出
-    const snapshot = _panelSnapshot ?? { sidebarCollapsed: false, bottomPanelCollapsed: true }
+    const snapshot = _panelSnapshot ?? {
+      activeSidePanel: 'connections' as SidePanelId,
+      bottomPanelCollapsed: true,
+      showStatusBar: true,
+    }
     _panelSnapshot = null
     panelState.value = {
       ...panelState.value,
-      sidebarCollapsed: snapshot.sidebarCollapsed,
+      activeSidePanel: snapshot.activeSidePanel,
       bottomPanelCollapsed: snapshot.bottomPanelCollapsed,
+      showStatusBar: snapshot.showStatusBar,
       immersiveMode: false,
     }
   }
@@ -230,8 +259,23 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   const persistence = usePersistence<PersistedWorkspace>({
     key: 'workspace',
-    version: 1,
+    version: 2,
     debounce: 500,
+    migrations: {
+      // v1 → v2：PanelState 字段替换（sidebarCollapsed/Width → activeSidePanel/sidePanelWidth/showStatusBar）
+      2: (oldData) => {
+        const data = oldData as PersistedWorkspace
+        const ps = data.panelState as any
+        if (ps) {
+          ps.activeSidePanel = ps.sidebarCollapsed ? null : 'connections'
+          ps.sidePanelWidth = ps.sidebarWidth ?? 260
+          ps.showStatusBar = true
+          delete ps.sidebarCollapsed
+          delete ps.sidebarWidth
+        }
+        return data
+      },
+    },
     serialize: () => ({
       tabs: tabs.value,
       activeTabId: activeTabId.value,
@@ -342,7 +386,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     setActiveTab,
     toggleSidebar,
     toggleBottomPanel,
-    setSidebarWidth,
+    setActiveSidePanel,
+    toggleSidePanel,
+    setSidePanelWidth,
     setBottomPanelHeight,
     setBottomPanelTab,
     enterImmersive,

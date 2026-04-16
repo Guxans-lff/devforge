@@ -165,9 +165,9 @@ export function useKeyboardShortcuts() {
       workspace.toggleBottomPanel()
     },
     focusObjectTree: () => {
-      // 确保侧边栏展开，然后聚焦到对象树
-      if (workspace.panelState.sidebarCollapsed) {
-        workspace.toggleSidebar()
+      // 确保连接面板展开，然后聚焦到对象树
+      if (!workspace.panelState.activeSidePanel) {
+        workspace.setActiveSidePanel('connections')
       }
       window.dispatchEvent(new CustomEvent('devforge:focus-object-tree'))
     },

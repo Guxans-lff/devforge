@@ -9,3 +9,4 @@ pub mod transfer;
 pub mod git;
 pub mod screenshot;
 pub mod ai;
+pub mod workspace_fs;

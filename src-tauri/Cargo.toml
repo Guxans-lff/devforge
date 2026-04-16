@@ -115,6 +115,12 @@ arboard = { version = "3", features = ["image-data"] }
 # SHA-256 校验（更新包完整性）
 sha2 = "0.10"
 
+# 文件监听（去抖 + rename 配对）
+notify-debouncer-full = "0.4"
+
+# 删除到回收站
+trash = "5"
+
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["fileapi"] }
 
