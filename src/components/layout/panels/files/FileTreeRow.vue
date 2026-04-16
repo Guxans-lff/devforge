@@ -4,7 +4,6 @@ import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import type { FileNode, FileDecoration } from '@/types/workspace-files'
 import {
   ChevronRight,
-  File,
   Folder,
   FolderOpen,
 } from 'lucide-vue-next'
@@ -15,6 +14,7 @@ const props = defineProps<{
   focused: boolean
   selected: boolean
   dragOver: boolean
+  multiSelected?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -35,17 +35,22 @@ const decoration = computed<FileDecoration | undefined>(
 
 const isRenaming = computed(() => store.renamingNodeId === props.node.id)
 
-const gitStatusColor = computed(() => {
-  switch (decoration.value?.gitStatus) {
-    case 'modified': return 'text-yellow-500'
-    case 'added': case 'untracked': return 'text-green-500'
-    case 'deleted': return 'text-red-500'
-    case 'conflict': return 'text-orange-500'
-    case 'renamed': return 'text-blue-500'
-    default: return ''
-  }
+/** 文件扩展名到类型色的映射 */
+const FILE_TYPE_COLORS: Record<string, string> = {
+  vue: '#42b883', ts: '#3178c6', tsx: '#3178c6', js: '#f7df1e', jsx: '#f7df1e',
+  java: '#e76f00', py: '#3776ab', rs: '#dea584', go: '#00add8',
+  css: '#264de4', scss: '#cd6799', html: '#e34f26', json: '#292929',
+  md: '#083fa1', sql: '#e38c00', xml: '#f16529', yml: '#cb171e', yaml: '#cb171e',
+}
+
+/** 根据文件扩展名返回对应颜色 */
+const fileColor = computed(() => {
+  if (props.node.isDirectory) return null
+  const ext = props.node.name.split('.').pop()?.toLowerCase() ?? ''
+  return FILE_TYPE_COLORS[ext] ?? '#6b7280'
 })
 
+/** Git 状态字母标识 */
 const gitStatusLetter = computed(() => {
   switch (decoration.value?.gitStatus) {
     case 'modified': return 'M'
@@ -57,61 +62,122 @@ const gitStatusLetter = computed(() => {
     default: return ''
   }
 })
+
+/** Git 状态 pill 样式类 */
+const gitPillClass = computed(() => {
+  switch (decoration.value?.gitStatus) {
+    case 'modified': return 'bg-green-500/10 text-green-400 border border-green-500/15'
+    case 'added': return 'bg-blue-500/10 text-blue-400 border border-blue-500/15'
+    case 'deleted': return 'bg-red-500/10 text-red-400 border border-red-500/15'
+    case 'untracked': return 'bg-yellow-500/10 text-yellow-400 border border-yellow-500/15'
+    case 'conflict': return 'bg-orange-500/10 text-orange-400 border border-orange-500/15'
+    case 'renamed': return 'bg-purple-500/10 text-purple-400 border border-purple-500/15'
+    default: return ''
+  }
+})
 </script>
 
 <template>
   <div
-    class="flex h-7 items-center cursor-pointer select-none text-xs hover:bg-muted/50 transition-colors"
-    :class="{
-      'bg-primary/10': selected,
-      'ring-1 ring-primary/30': focused,
-      'bg-primary/20 ring-1 ring-primary/40': dragOver,
-    }"
-    :style="{ paddingLeft: `${node.depth * 16 + 8}px` }"
+    class="group flex items-center gap-2 cursor-pointer select-none text-[12.5px] transition-all duration-150 mx-1"
+    :class="[
+      selected
+        ? 'bg-primary/8 rounded-lg relative before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-[2px] before:h-4 before:bg-primary before:rounded-full'
+        : 'hover:bg-muted/40 rounded-lg',
+      focused && 'ring-1 ring-primary/20 rounded-lg',
+      dragOver && 'bg-primary/15 ring-1 ring-primary/30 rounded-lg',
+    ]"
+    :style="{ paddingLeft: `${node.depth * 16 + 8}px`, height: '32px' }"
     draggable="true"
-    @click="emit('click', node)"
-    @dblclick="emit('dblclick', node)"
-    @contextmenu.prevent="emit('contextmenu', $event, node)"
-    @dragstart="emit('dragstart', $event, node)"
-    @dragover="emit('dragover', $event, node)"
-    @dragleave="emit('dragleave', $event)"
-    @drop="emit('drop', $event, node)"
+    @click="$emit('click', node)"
+    @dblclick="$emit('dblclick', node)"
+    @contextmenu.prevent="$emit('contextmenu', $event, node)"
+    @dragstart="$emit('dragstart', $event, node)"
+    @dragover.prevent="$emit('dragover', $event, node)"
+    @dragleave="$emit('dragleave', $event)"
+    @drop.prevent="$emit('drop', $event, node)"
   >
-    <!-- 展开箭头（目录） -->
-    <span v-if="node.isDirectory" class="flex-shrink-0 w-4 h-4 flex items-center justify-center">
-      <ChevronRight
-        class="h-3 w-3 text-muted-foreground transition-transform duration-150"
-        :class="{ 'rotate-90': node.isExpanded }"
-      />
-    </span>
-    <span v-else class="w-4 flex-shrink-0" />
-
-    <!-- 图标 -->
-    <component
-      :is="node.isDirectory ? (node.isExpanded ? FolderOpen : Folder) : File"
-      class="h-4 w-4 flex-shrink-0 mr-1.5"
-      :class="node.isDirectory ? 'text-blue-400' : 'text-muted-foreground'"
-    />
-
-    <!-- 文件名 / 重命名输入 -->
-    <FileTreeRenameInput
-      v-if="isRenaming"
-      :node="node"
-      class="flex-1 min-w-0"
-    />
-    <span
-      v-else
-      class="flex-1 truncate"
-      :class="gitStatusColor"
+    <!-- 多选 checkbox -->
+    <div
+      v-if="multiSelected !== undefined"
+      class="flex-shrink-0 w-4 h-4 rounded border transition-colors"
+      :class="multiSelected
+        ? 'bg-primary border-primary text-primary-foreground'
+        : 'border-border/40 group-hover:border-border/60'"
     >
-      {{ node.name }}
+      <svg v-if="multiSelected" class="w-3 h-3 m-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+        <polyline points="20,6 9,17 4,12" />
+      </svg>
+    </div>
+
+    <!-- 展开箭头 -->
+    <div class="flex-shrink-0 w-4 h-4 flex items-center justify-center">
+      <ChevronRight
+        v-if="node.isDirectory"
+        class="h-3.5 w-3.5 text-muted-foreground/50 transition-transform duration-150"
+        :class="node.isExpanded && 'rotate-90'"
+      />
+    </div>
+
+    <!-- 文件/文件夹图标 -->
+    <div class="flex-shrink-0 flex items-center justify-center">
+      <template v-if="node.isDirectory">
+        <div
+          class="w-4 h-4 rounded-[3px] flex items-center justify-center text-[10px]"
+          :style="{ background: node.isExpanded
+            ? 'linear-gradient(135deg, #60a5fa, #818cf8)'
+            : 'linear-gradient(135deg, #f59e0b, #f97316)' }"
+        >
+          <FolderOpen v-if="node.isExpanded" class="w-2.5 h-2.5 text-white" />
+          <Folder v-else class="w-2.5 h-2.5 text-white" />
+        </div>
+      </template>
+      <template v-else>
+        <div
+          class="w-[7px] h-[7px] rounded-[2px]"
+          :style="{ background: fileColor ? `linear-gradient(135deg, ${fileColor}, ${fileColor}cc)` : '#6b7280' }"
+        />
+      </template>
+    </div>
+
+    <!-- 文件名 / 重命名 -->
+    <template v-if="isRenaming">
+      <FileTreeRenameInput :node="node" />
+    </template>
+    <template v-else>
+      <span
+        class="flex-1 truncate transition-colors"
+        :class="[
+          selected ? 'text-foreground font-medium' : 'text-foreground/80',
+          decoration?.gitStatus === 'modified' && 'text-green-400/90',
+          decoration?.gitStatus === 'added' && 'text-blue-400/90',
+          decoration?.gitStatus === 'deleted' && 'text-red-400/90 line-through',
+          decoration?.gitStatus === 'untracked' && 'text-yellow-400/90',
+        ]"
+      >
+        <template v-if="(node as any).isCompressed && (node as any).compressedSegments">
+          <span v-for="(seg, i) in (node as any).compressedSegments" :key="i">
+            <span v-if="i > 0" class="text-muted-foreground/30 mx-0.5">/</span>
+            {{ seg }}
+          </span>
+        </template>
+        <template v-else>{{ node.name }}</template>
+      </span>
+    </template>
+
+    <!-- 目录子项数 badge -->
+    <span
+      v-if="node.isDirectory && !node.isExpanded && (node as any).childCount"
+      class="flex-shrink-0 text-[10px] text-muted-foreground/40 bg-muted/30 px-1.5 rounded-full"
+    >
+      {{ (node as any).childCount }}
     </span>
 
-    <!-- Git 徽标 -->
+    <!-- Git 装饰 pill -->
     <span
-      v-if="gitStatusLetter"
-      class="flex-shrink-0 ml-1 mr-2 text-[10px] font-bold"
-      :class="gitStatusColor"
+      v-if="decoration?.gitStatus && gitStatusLetter"
+      class="flex-shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded-full"
+      :class="gitPillClass"
     >
       {{ gitStatusLetter }}
     </span>
