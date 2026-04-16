@@ -30,3 +30,4 @@ pub mod terminal_recorder;
 pub mod transfer_manager;
 pub mod git_engine;
 pub mod screenshot_engine;
+pub mod file_watcher;
