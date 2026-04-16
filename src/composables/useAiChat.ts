@@ -6,6 +6,7 @@
  */
 
 import { ref, computed, nextTick, onUnmounted, toRef, type MaybeRef } from 'vue'
+import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import type { Ref } from 'vue'
 import type {
   AiMessage,
@@ -116,6 +117,20 @@ export function useAiChat(options: UseAiChatOptions) {
 
   /** 工作目录（Tool Use 安全边界） */
   const workDir = ref('')
+
+  /** 工作区文件 store — 提供可用 workDir 列表 */
+  const filesStore = useWorkspaceFilesStore()
+
+  /** 可用的工作目录列表（工作区根） */
+  const availableWorkDirs = computed(() =>
+    filesStore.roots.map(r => ({ label: r.name, value: r.path }))
+  )
+
+  /** 校验路径是否在某个工作区根内（安全检查） */
+  function isPathInWorkspace(targetPath: string): boolean {
+    const normalized = targetPath.replace(/\\/g, '/')
+    return filesStore.roots.some(r => normalized.startsWith(r.path + '/') || normalized === r.path)
+  }
 
   /** Tool Use 循环最大次数 */
   const MAX_TOOL_LOOPS = 10
@@ -756,6 +771,10 @@ export function useAiChat(options: UseAiChatOptions) {
     canSend,
     /** 工作目录（Tool Use 安全边界） */
     workDir,
+    /** 可用的工作目录列表（工作区根） */
+    availableWorkDirs,
+    /** 校验路径是否在工作区内 */
+    isPathInWorkspace,
     // 操作
     loadHistory,
     send,
