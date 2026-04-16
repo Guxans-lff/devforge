@@ -63,9 +63,9 @@ const gitStatusLetter = computed(() => {
   <div
     class="flex h-7 items-center cursor-pointer select-none text-xs hover:bg-muted/50 transition-colors"
     :class="{
-      'bg-primary/8': selected,
+      'bg-primary/10': selected,
       'ring-1 ring-primary/30': focused,
-      'bg-primary/15 ring-1 ring-primary/40': dragOver,
+      'bg-primary/20 ring-1 ring-primary/40': dragOver,
     }"
     :style="{ paddingLeft: `${node.depth * 16 + 8}px` }"
     draggable="true"

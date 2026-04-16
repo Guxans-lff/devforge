@@ -292,31 +292,31 @@ function handleSearchSelect(node: FileNode) {
           class="absolute z-50 min-w-[180px] rounded-md border bg-popover p-1 shadow-md"
           :style="{ left: `${contextPos.x}px`, top: `${contextPos.y}px` }"
         >
-          <button class="context-item" @click="contextNewFile(); showContextMenu = false">
+          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextNewFile(); showContextMenu = false">
             <FilePlus class="h-3.5 w-3.5" /> 新建文件
           </button>
-          <button class="context-item" @click="contextNewFolder(); showContextMenu = false">
+          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextNewFolder(); showContextMenu = false">
             <FolderPlus class="h-3.5 w-3.5" /> 新建文件夹
           </button>
           <div class="my-1 h-px bg-border" />
-          <button class="context-item" @click="contextRename(); showContextMenu = false">
+          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextRename(); showContextMenu = false">
             重命名 <span class="ml-auto text-[10px] text-muted-foreground">F2</span>
           </button>
-          <button class="context-item text-destructive" @click="contextDelete(); showContextMenu = false">
+          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer text-destructive" @click="contextDelete(); showContextMenu = false">
             删除 <span class="ml-auto text-[10px] text-muted-foreground">Del</span>
           </button>
           <div class="my-1 h-px bg-border" />
-          <button class="context-item" @click="contextCopyPath(); showContextMenu = false">
+          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextCopyPath(); showContextMenu = false">
             复制路径
           </button>
-          <button class="context-item" @click="contextOpenInTerminal(); showContextMenu = false">
+          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextOpenInTerminal(); showContextMenu = false">
             <Terminal class="h-3.5 w-3.5" /> 在终端中打开
           </button>
-          <button class="context-item" @click="contextRevealInExplorer(); showContextMenu = false">
+          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextRevealInExplorer(); showContextMenu = false">
             <ExternalLink class="h-3.5 w-3.5" /> 在系统资源管理器中显示
           </button>
           <div class="my-1 h-px bg-border" />
-          <button class="context-item" @click="contextSetAiWorkDir(); showContextMenu = false">
+          <button class="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer" @click="contextSetAiWorkDir(); showContextMenu = false">
             <Bot class="h-3.5 w-3.5" /> 作为 AI 工作目录
           </button>
         </div>
@@ -333,9 +333,3 @@ function handleSearchSelect(node: FileNode) {
     </Teleport>
   </div>
 </template>
-
-<style scoped>
-.context-item {
-  @apply flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-muted/50 cursor-pointer;
-}
-</style>
