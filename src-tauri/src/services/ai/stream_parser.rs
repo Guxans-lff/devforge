@@ -234,6 +234,7 @@ pub async fn parse_sse_stream(
     let mut parser = SseParser::new();
     let mut accumulator = ToolCallAccumulator::new();
     let mut errored = false; // 标记流是否已出错
+    let mut done_sent = false; // 标记是否已发送过 Done 事件（跨批次）
     let byte_stream = response.bytes_stream();
 
     byte_stream.filter_map(move |result| {
@@ -250,14 +251,20 @@ pub async fn parse_sse_stream(
                 for sse_event in sse_events {
                     match sse_event {
                         SseEvent::Chunk(chunk) => {
-                            ai_events.extend(chunk_to_events(&chunk, &mut accumulator));
+                            let events = chunk_to_events(&chunk, &mut accumulator);
+                            // 检查本批次是否包含 Done 事件
+                            if events.iter().any(|e| matches!(e, AiStreamEvent::Done { .. })) {
+                                done_sent = true;
+                            }
+                            ai_events.extend(events);
                         }
                         SseEvent::Done => {
-                            // 如果还没有发送 Done 事件，补发一个
-                            if !ai_events.iter().any(|e| matches!(e, AiStreamEvent::Done { .. })) {
+                            // 仅在整个流从未发送过 Done 时补发（跨批次检查）
+                            if !done_sent && !ai_events.iter().any(|e| matches!(e, AiStreamEvent::Done { .. })) {
                                 ai_events.push(AiStreamEvent::Done {
                                     finish_reason: "stop".to_string(),
                                 });
+                                done_sent = true;
                             }
                         }
                     }

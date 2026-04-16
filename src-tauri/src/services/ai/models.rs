@@ -113,6 +113,9 @@ pub struct ChatMessage {
     pub role: MessageRole,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// 工具名称（tool 角色消息，部分 API 如 OpenAI 要求）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     /// 工具调用列表（assistant 角色携带）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCallRecord>>,

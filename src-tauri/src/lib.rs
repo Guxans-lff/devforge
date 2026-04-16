@@ -135,7 +135,7 @@ pub fn run() {
                     app.state::<ScreenshotEngineState>().inner().clone();
 
                 let gs_plugin = GsBuilder::new()
-                        .with_shortcuts(["ctrl+shift+a"])?
+                        .with_shortcuts(["ctrl+shift+a", "ctrl+shift+n"])?
                         .with_handler(move |app, shortcut, event| {
                             println!("[GlobalShortcut] 收到快捷键事件: {:?}, state: {:?}", shortcut, event.state);
                             if event.state == ShortcutState::Pressed {
@@ -180,13 +180,42 @@ pub fn run() {
                                         }
                                     });
                                 }
+
+                                // Ctrl+Shift+N → 新建 AI 独立窗口
+                                if shortcut.matches(Modifiers::CONTROL | Modifiers::SHIFT, Code::KeyN) {
+                                    println!("[GlobalShortcut] 匹配 Ctrl+Shift+N → 新建 AI 窗口");
+                                    let handle = app.clone();
+                                    std::thread::spawn(move || {
+                                        let ai_count = handle.webview_windows().keys()
+                                            .filter(|k| k.starts_with("ai-"))
+                                            .count();
+                                        if ai_count >= 5 {
+                                            log::warn!("[AI] AI 窗口数量已达上限 5");
+                                            return;
+                                        }
+                                        let window_id = format!("ai-{}", chrono::Utc::now().timestamp_millis());
+                                        let url = format!("/ai-standalone?windowId={}", window_id);
+                                        if let Err(e) = tauri::WebviewWindowBuilder::new(
+                                            &handle,
+                                            &window_id,
+                                            tauri::WebviewUrl::App(url.into()),
+                                        )
+                                        .title("AI 对话")
+                                        .inner_size(800.0, 700.0)
+                                        .min_inner_size(480.0, 400.0)
+                                        .build()
+                                        {
+                                            log::error!("[AI] 创建 AI 窗口失败: {e}");
+                                        }
+                                    });
+                                }
                             }
                         })
                         .build();
                 if let Err(e) = app.handle().plugin(gs_plugin) {
                     eprintln!("[GlobalShortcut] 全局快捷键注册失败（可能被其他程序占用）: {e}");
                 } else {
-                    println!("[GlobalShortcut] 全局快捷键注册成功: Ctrl+Shift+A, Ctrl+Shift+X");
+                    println!("[GlobalShortcut] 全局快捷键注册成功: Ctrl+Shift+A, Ctrl+Shift+N");
                 }
             }
 
@@ -627,6 +656,7 @@ pub fn run() {
             ai_cmd::ai_search_memories,
             ai_cmd::ai_save_compaction,
             ai_cmd::ai_list_compactions,
+            ai_cmd::create_ai_window,
             // Workspace filesystem
             workspace_fs::ws_read_directory,
             workspace_fs::ws_read_directory_recursive,

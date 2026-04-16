@@ -5,7 +5,7 @@
  * 50ms 节流批量 DOM 更新、自动滚动等。
  */
 
-import { ref, computed, nextTick, onUnmounted, toRef, type MaybeRef } from 'vue'
+import { ref, computed, nextTick, onUnmounted, toRef, watch, type MaybeRef } from 'vue'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import type { Ref } from 'vue'
 import type {
@@ -79,6 +79,7 @@ function buildChatMessages(msgs: AiMessage[]): ChatMessage[] {
             role: 'tool',
             content: tr.content,
             toolCallId: tr.toolCallId,
+            name: tr.toolName,
           })
         }
       }
@@ -119,11 +120,18 @@ export function useAiChat(options: UseAiChatOptions) {
   /** 当前流式助手消息的 ID */
   let streamingMessageId = ''
 
-  /** 工作目录（Tool Use 安全边界） */
+  /** 工作目录（Tool Use 安全边界），默认取工作区第一个根目录 */
   const workDir = ref('')
 
   /** 工作区文件 store — 提供可用 workDir 列表 */
   const filesStore = useWorkspaceFilesStore()
+
+  // 自动初始化 workDir：如果为空且工作区有根目录，自动使用第一个
+  watch(() => filesStore.roots, (roots) => {
+    if (!workDir.value && roots.length > 0) {
+      workDir.value = roots[0].path
+    }
+  }, { immediate: true })
 
   /** 可用的工作目录列表（工作区根） */
   const availableWorkDirs = computed(() =>
@@ -515,6 +523,7 @@ export function useAiChat(options: UseAiChatOptions) {
           role: 'tool',
           content: result.content,
           toolCallId: result.toolCallId,
+          name: result.toolName,
         }
         chatMessages.push(toolMessage)
 

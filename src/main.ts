@@ -45,6 +45,11 @@ const router = createRouter({
       name: 'region-select',
       component: () => import('@/views/RegionSelectWindow.vue'),
     },
+    {
+      path: '/ai-standalone',
+      name: 'ai-standalone',
+      component: () => import('@/views/AiStandaloneView.vue'),
+    },
   ],
 })
 

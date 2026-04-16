@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 use tauri::ipc::Channel;
-use tauri::State;
+use tauri::{Manager, State};
 
 use crate::services::ai::models::*;
 use crate::services::ai::{ai_tools, session_store};
@@ -299,4 +299,36 @@ pub async fn ai_list_compactions(
 ) -> Result<Vec<memory_models::AiCompaction>, AppError> {
     let pool = storage.get_pool().await;
     memory_store::list_compactions(&pool, &session_id).await
+}
+
+/// 创建独立 AI 对话窗口
+///
+/// 每个窗口加载 /ai-standalone 路由，拥有独立 JS context。
+/// 上限 5 个 AI 窗口。
+#[tauri::command]
+pub async fn create_ai_window(app: tauri::AppHandle) -> Result<String, String> {
+    let ai_count = app
+        .webview_windows()
+        .keys()
+        .filter(|k| k.starts_with("ai-"))
+        .count();
+    if ai_count >= 5 {
+        return Err("最多同时打开 5 个 AI 窗口".into());
+    }
+
+    let window_id = format!("ai-{}", chrono::Utc::now().timestamp_millis());
+    let url = format!("/ai-standalone?windowId={}", window_id);
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        &window_id,
+        tauri::WebviewUrl::App(url.into()),
+    )
+    .title("AI 对话")
+    .inner_size(800.0, 700.0)
+    .min_inner_size(480.0, 400.0)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(window_id)
 }

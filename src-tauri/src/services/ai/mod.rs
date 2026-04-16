@@ -7,6 +7,7 @@
 //! - 会话持久化存储
 
 pub mod ai_tools;
+pub mod anthropic;
 pub mod models;
 pub mod openai_compat;
 pub mod provider;
@@ -37,6 +38,7 @@ impl AiEngine {
 
         // 注册内置 Provider
         registry.register(Arc::new(openai_compat::OpenAiCompatProvider::new()));
+        registry.register(Arc::new(anthropic::AnthropicProvider::new()));
 
         Self {
             registry,

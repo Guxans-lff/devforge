@@ -73,6 +73,9 @@ impl OpenAiCompatProvider {
                     if let Some(ref id) = msg.tool_call_id {
                         obj["tool_call_id"] = serde_json::json!(id);
                     }
+                    if let Some(ref name) = msg.name {
+                        obj["name"] = serde_json::json!(name);
+                    }
                     api_messages.push(obj);
                 }
                 // Assistant 可能携带 tool_calls（此时 content 可能为 null）

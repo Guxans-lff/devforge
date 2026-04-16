@@ -26,6 +26,8 @@ import type {
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string | null
+  /** 工具名称（tool 角色消息需要，部分 API 如 OpenAI 要求此字段） */
+  name?: string
   /** 工具调用列表（assistant 角色携带） */
   toolCalls?: Array<{
     id: string
