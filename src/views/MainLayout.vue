@@ -26,6 +26,8 @@ const GitView = defineAsyncComponent(() => import('@/views/GitView.vue'))
 const ScreenshotView = defineAsyncComponent(() => import('@/views/ScreenshotView.vue'))
 const TunnelView = defineAsyncComponent(() => import('@/views/TunnelView.vue'))
 const AiChatView = defineAsyncComponent(() => import('@/views/AiChatView.vue'))
+const FileEditorView = defineAsyncComponent(() => import('@/views/FileEditorView.vue'))
+const AiApprovalDialog = defineAsyncComponent(() => import('@/components/ai/AiApprovalDialog.vue'))
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
@@ -63,6 +65,8 @@ const activeTabComponent = computed(() => {
       return TunnelView
     case 'ai-chat':
       return AiChatView
+    case 'file-editor':
+      return tab.meta?.absolutePath ? FileEditorView : null
     default:
       return null
   }
@@ -81,6 +85,10 @@ const activeTabProps = computed(() => {
   // Git：传递仓库路径
   if (tab.type === 'git' && tab.meta?.repositoryPath) {
     return { repositoryPath: tab.meta.repositoryPath }
+  }
+  // 本地文件编辑器
+  if (tab.type === 'file-editor' && tab.meta?.absolutePath) {
+    return { tabId: tab.id, absolutePath: tab.meta.absolutePath }
   }
   if (tab.connectionId) {
     const base: Record<string, string> = {
@@ -111,15 +119,15 @@ onMounted(() => {
   transferStore.setupListeners()
 })
 
-// ===== 沉浸式模式：AI Tab 激活时自动进入/退出 =====
+// ===== 沉浸式模式 =====
+// 注意：不再"激活 AI Tab 时自动进沉浸"（会在关闭其他 Tab 回落到 AI 时误触发）。
+// 沉浸由用户在 AI 视图内主动切换；这里只负责在离开 AI Tab 时自动退出、复位标记。
 const isImmersive = computed(() => workspace.panelState.immersiveMode)
 
 watch(() => workspace.activeTab?.type, (tabType, oldType) => {
-  if (tabType === 'ai-chat' && oldType !== 'ai-chat') {
-    workspace.enterImmersive()
-  } else if (tabType !== 'ai-chat' && oldType === 'ai-chat') {
+  if (tabType !== 'ai-chat' && oldType === 'ai-chat') {
     workspace.exitImmersive()
-    workspace.resetImmersiveFlag()  // 离开 AI tab 时重置标记，下次进入可以再自动沉浸
+    workspace.resetImmersiveFlag()
   }
 })
 </script>
@@ -168,5 +176,8 @@ watch(() => workspace.activeTab?.type, (tabType, oldType) => {
 
     <!-- Command Palette -->
     <CommandPalette />
+
+    <!-- AI 工具审批弹窗（全局单例） -->
+    <AiApprovalDialog />
   </div>
 </template>

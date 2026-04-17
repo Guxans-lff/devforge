@@ -209,6 +209,10 @@ pub enum AiStreamEvent {
     Usage {
         prompt_tokens: u32,
         completion_tokens: u32,
+        /// 缓存命中的 token 数（Anthropic cache_read_input_tokens / DeepSeek prompt_cache_hit_tokens）
+        /// 未启用缓存或 Provider 不报时为 0
+        #[serde(default)]
+        cache_read_tokens: u32,
     },
     /// 完成信号
     Done { finish_reason: String },
@@ -330,4 +334,7 @@ pub struct ChunkToolCallFunction {
 pub struct ChunkUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
+    /// DeepSeek 自动缓存命中数（部分 Provider 会返回）
+    #[serde(default)]
+    pub prompt_cache_hit_tokens: Option<u32>,
 }

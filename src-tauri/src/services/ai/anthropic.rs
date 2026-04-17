@@ -111,9 +111,16 @@ impl AnthropicProvider {
         });
 
         // 系统提示词（顶级 system 字段）
+        // 打 cache_control 标记：system + tools 整体缓存（Anthropic ephemeral 5 分钟）
         if let Some(ref system_prompt) = config.system_prompt {
             if !system_prompt.is_empty() {
-                body["system"] = serde_json::json!(system_prompt);
+                body["system"] = serde_json::json!([
+                    {
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": { "type": "ephemeral" }
+                    }
+                ]);
             }
         }
 
@@ -125,14 +132,21 @@ impl AnthropicProvider {
         // 工具定义（转换为 Anthropic 格式）
         if let Some(ref tools) = config.tools {
             if !tools.is_empty() {
+                let last_idx = tools.len() - 1;
                 let anthropic_tools: Vec<serde_json::Value> = tools
                     .iter()
-                    .map(|t| {
-                        serde_json::json!({
+                    .enumerate()
+                    .map(|(i, t)| {
+                        let mut v = serde_json::json!({
                             "name": t.function.name,
                             "description": t.function.description,
                             "input_schema": t.function.parameters
-                        })
+                        });
+                        // 最后一个 tool 标记 cache_control，覆盖整段 tools 数组
+                        if i == last_idx {
+                            v["cache_control"] = serde_json::json!({ "type": "ephemeral" });
+                        }
+                        v
                     })
                     .collect();
                 body["tools"] = serde_json::json!(anthropic_tools);
@@ -238,14 +252,15 @@ impl AiProvider for AnthropicProvider {
 
         log::info!("Anthropic 请求: {} model={}", url, config.model);
 
-        let response = self
+        let builder = self
             .client
             .post(&url)
             .header("x-api-key", api_key)
             .header("anthropic-version", "2023-06-01")
             .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
+            .json(&body);
+
+        let response = super::http_retry::send_with_backoff(builder)
             .await
             .map_err(|e| AppError::Connection(format!("Anthropic API 请求失败: {e}")))?;
 
@@ -282,6 +297,7 @@ impl AiProvider for AnthropicProvider {
         let mut full_thinking = String::new();
         let mut prompt_tokens: u32 = 0;
         let mut completion_tokens: u32 = 0;
+        let mut cache_read_tokens: u32 = 0;
         let mut finish_reason = String::from("stop");
 
         // 工具调用累积
@@ -314,10 +330,13 @@ impl AiProvider for AnthropicProvider {
                             for (event_type, data) in events {
                                 match event_type.as_str() {
                                     "message_start" => {
-                                        // 提取 input_tokens
+                                        // 提取 input_tokens + cache 命中
                                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) {
                                             if let Some(usage) = v.get("message").and_then(|m| m.get("usage")) {
                                                 prompt_tokens = usage.get("input_tokens")
+                                                    .and_then(|t| t.as_u64())
+                                                    .unwrap_or(0) as u32;
+                                                cache_read_tokens = usage.get("cache_read_input_tokens")
                                                     .and_then(|t| t.as_u64())
                                                     .unwrap_or(0) as u32;
                                             }
@@ -400,6 +419,7 @@ impl AiProvider for AnthropicProvider {
                                                 let _ = on_event.send(AiStreamEvent::Usage {
                                                     prompt_tokens,
                                                     completion_tokens,
+                                                    cache_read_tokens,
                                                 });
                                             }
                                         }

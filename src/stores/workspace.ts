@@ -56,6 +56,25 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const tab = tabs.value.find((t) => t.id === tabId)
     if (!tab || !tab.closable) return
 
+    // 本地文件编辑器：未保存时弹确认
+    if (tab.type === 'file-editor' && tab.dirty) {
+      const confirmed = window.confirm(`文件 "${tab.title}" 有未保存的修改，确定要关闭吗？`)
+      if (!confirmed) return
+      const absPath = tab.meta?.absolutePath
+      if (absPath) {
+        import('@/stores/local-file-editor').then(({ useLocalFileEditorStore }) => {
+          useLocalFileEditorStore().close(absPath)
+        })
+      }
+    } else if (tab.type === 'file-editor') {
+      const absPath = tab.meta?.absolutePath
+      if (absPath) {
+        import('@/stores/local-file-editor').then(({ useLocalFileEditorStore }) => {
+          useLocalFileEditorStore().close(absPath)
+        })
+      }
+    }
+
     // 关闭 database tab 时清理内部工作区状态并断开连接
     if (tab.type === 'database' && tab.connectionId) {
       const dbWorkspaceStore = useDatabaseWorkspaceStore()
@@ -287,6 +306,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const validTabs = (data.tabs ?? []).filter(tab => {
         if (tab.type === 'welcome' || tab.type === 'settings') return true
         if (tab.type === 'git') return !!tab.meta?.repositoryPath
+        if (tab.type === 'file-editor') return !!tab.meta?.absolutePath
         if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager' || tab.type === 'redis') {
           return !!tab.connectionId
         }
@@ -342,6 +362,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const validTabs = (data.tabs ?? []).filter(tab => {
         if (tab.type === 'welcome' || tab.type === 'settings') return true
         if (tab.type === 'git') return !!tab.meta?.repositoryPath
+        if (tab.type === 'file-editor') return !!tab.meta?.absolutePath
         if (tab.type === 'database' || tab.type === 'terminal' || tab.type === 'file-manager' || tab.type === 'redis') {
           return !!tab.connectionId
         }

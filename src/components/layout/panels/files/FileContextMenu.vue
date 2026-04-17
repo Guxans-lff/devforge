@@ -7,7 +7,7 @@ import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import type { FileNode } from '@/types/workspace-files'
 import {
   FilePlus, FolderPlus, Pencil, Trash2, Copy,
-  CopyCheck, FileText,
+  CopyCheck, FileText, X as IconX,
 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -77,6 +77,24 @@ const menuItems = computed<MenuItem[]>(() => {
     icon: Copy,
     action: async () => { await navigator.clipboard.writeText(n.absolutePath); emit('close') },
   })
+
+  // 工作区根节点：只提供"复制名称 + 移除"，不给相对路径/重命名/删除
+  if (n.isRootHeader) {
+    items.push({
+      label: '复制名称',
+      icon: FileText,
+      action: async () => { await navigator.clipboard.writeText(n.name); emit('close') },
+    })
+    items.push({ label: '', icon: null, action: () => {}, separator: true })
+    items.push({
+      label: '从工作区移除',
+      icon: IconX,
+      action: () => { store.removeRoot(n.rootId); emit('close') },
+      danger: true,
+    })
+    return items
+  }
+
   items.push({
     label: '复制相对路径',
     icon: CopyCheck,

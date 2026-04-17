@@ -46,6 +46,7 @@ const tabTypeIcons: Record<TabType, typeof Database> = {
   screenshot: Camera,
   tunnel: Cable,
   'ai-chat': Bot,
+  'file-editor': FileCode,
 }
 
 // 连接类型图标

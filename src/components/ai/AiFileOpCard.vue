@@ -10,6 +10,12 @@ import { computeMiniDiff } from '@/composables/useAiDiff'
 import type { FileOperation } from '@/types/ai'
 import { ChevronRight, Check, X } from 'lucide-vue-next'
 import AiDiffViewer from './AiDiffViewer.vue'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 
 const props = defineProps<{
   op: FileOperation
@@ -117,7 +123,7 @@ const dirPath = computed(() => {
     </div>
 
     <!-- mini diff 展开区 -->
-    <div v-if="expanded && !showDiffViewer" class="border-t border-white/[0.03]">
+    <div v-if="expanded" class="border-t border-white/[0.03]">
       <div v-if="miniDiff" class="px-3.5 py-2 font-mono text-[10px] leading-[1.7] bg-black/15">
         <div
           v-for="(line, i) in miniDiff.lines"
@@ -149,17 +155,28 @@ const dirPath = computed(() => {
       </div>
     </div>
 
-    <!-- 并排 Diff 全量视图 -->
-    <div v-if="showDiffViewer && op.oldContent && op.newContent" class="border-t border-white/[0.03]">
-      <AiDiffViewer
-        :old-text="op.oldContent"
-        :new-text="op.newContent"
-        :file-name="op.fileName"
-        :dir-path="dirPath"
-        @apply="handleApply"
-        @reject="handleReject"
-        @close="showDiffViewer = false"
-      />
-    </div>
+    <!-- 并排 Diff 全屏抽屉 -->
+    <Sheet v-model:open="showDiffViewer">
+      <SheetContent side="right" class="w-[min(1100px,96vw)] sm:max-w-none p-0 overflow-hidden bg-background">
+        <SheetHeader class="px-4 py-2 border-b border-border/30">
+          <SheetTitle class="text-sm">全屏审阅 · {{ op.fileName }}</SheetTitle>
+        </SheetHeader>
+        <div class="h-[calc(100vh-52px)] overflow-auto p-3">
+          <AiDiffViewer
+            v-if="op.oldContent && op.newContent"
+            :old-text="op.oldContent"
+            :new-text="op.newContent"
+            :file-name="op.fileName"
+            :dir-path="dirPath"
+            @apply="() => { handleApply(); showDiffViewer = false }"
+            @reject="() => { handleReject(); showDiffViewer = false }"
+            @close="showDiffViewer = false"
+          />
+          <div v-else class="p-6 text-sm text-muted-foreground">
+            本次操作无旧内容可对比（新建文件或无 oldContent）。
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
   </div>
 </template>

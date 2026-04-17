@@ -19,13 +19,17 @@ import type {
   ToolCallInfo,
   ToolResultInfo,
 } from '@/types/ai'
-import { aiChatStream, aiAbortStream, aiSaveMessage, aiGetSession, aiExecuteTool } from '@/api/ai'
+import { aiChatStream, aiAbortStream, aiSaveMessage, aiGetSession, aiExecuteTool, aiEnforceToolResultBudget } from '@/api/ai'
+import { requestApproval, type ApprovalToolName } from '@/composables/useToolApproval'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiMemoryStore } from '@/stores/ai-memory'
 import { useAutoCompact } from '@/composables/useAutoCompact'
 import { ensureErrorString } from '@/types/error'
 import { buildFileMarkedContent } from '@/utils/file-markers'
+import { createLogger } from '@/utils/logger'
 import type { ChatMessage } from '@/api/ai'
+
+const log = createLogger('ai.chat')
 
 /** 生成唯一 ID */
 function genId(): string {
@@ -39,6 +43,83 @@ function tryParseJson(str: string): Record<string, unknown> | undefined {
   } catch {
     return undefined
   }
+}
+
+/** 工具名 → 是否需要审批 */
+function pickApprovalTool(name: string): ApprovalToolName | null {
+  if (name === 'write_file' || name === 'edit_file' || name === 'bash' || name === 'web_fetch') return name
+  return null
+}
+
+/** 根据 toolCall 的 parsedArgs 构造审批请求 */
+async function requestApprovalForTool(
+  toolName: ApprovalToolName,
+  tc: ToolCallInfo,
+): Promise<'allow' | 'deny'> {
+  const args = tc.parsedArgs ?? tryParseJson(tc.arguments) ?? {}
+  if (toolName === 'bash') {
+    const decision = await requestApproval({
+      toolName,
+      command: String((args as Record<string, unknown>).command ?? ''),
+      newContent: String((args as Record<string, unknown>).command ?? ''),
+    })
+    return decision === 'deny' ? 'deny' : 'allow'
+  }
+  if (toolName === 'web_fetch') {
+    const decision = await requestApproval({
+      toolName,
+      url: String((args as Record<string, unknown>).url ?? ''),
+    })
+    return decision === 'deny' ? 'deny' : 'allow'
+  }
+  // write_file / edit_file
+  const path = String((args as Record<string, unknown>).path ?? '')
+  if (toolName === 'write_file') {
+    const decision = await requestApproval({
+      toolName,
+      path,
+      newContent: String((args as Record<string, unknown>).content ?? ''),
+    })
+    return decision === 'deny' ? 'deny' : 'allow'
+  }
+  // edit_file
+  const decision = await requestApproval({
+    toolName,
+    path,
+    oldContent: String((args as Record<string, unknown>).old_string ?? ''),
+    newContent: String((args as Record<string, unknown>).new_string ?? ''),
+  })
+  return decision === 'deny' ? 'deny' : 'allow'
+}
+
+/**
+ * 清洗从 DB 加载的消息列表 — 修复上一次流式中途崩溃/刷新遗留的脏状态
+ *
+ * 1. 所有 assistant 强制 isStreaming: false（防 UI 卡"思考中"）
+ * 2. 最后一条 assistant 若无 content 且无 toolCalls → 转为 error 封口
+ */
+function sanitizeLoadedMessages(msgs: AiMessage[]): AiMessage[] {
+  if (msgs.length === 0) return msgs
+  const out = msgs.map(m =>
+    m.role === 'assistant' && m.isStreaming ? { ...m, isStreaming: false } : m,
+  )
+  for (let i = out.length - 1; i >= 0; i--) {
+    const m = out[i]!
+    if (m.role === 'assistant') {
+      const noContent = !m.content || m.content.trim() === ''
+      const noToolCalls = !m.toolCalls || m.toolCalls.length === 0
+      if (noContent && noToolCalls) {
+        out[i] = {
+          ...m,
+          role: 'error',
+          content: '[上一轮回复未完成或已中断]',
+          isStreaming: false,
+        }
+      }
+      break
+    }
+  }
+  return out
 }
 
 /**
@@ -73,13 +154,18 @@ function buildChatMessages(msgs: AiMessage[]): ChatMessage[] {
       result.push(chatMsg)
 
       // 展开 toolResults 为独立的 tool 消息
-      if (msg.toolResults && msg.toolResults.length > 0) {
-        for (const tr of msg.toolResults) {
+      // 关键：OpenAI 协议要求 assistant(tool_calls) 之后必须跟与 tool_calls 数量匹配的 tool 消息。
+      // 若历史中存在"孤儿"（如用户中断导致 toolResults 缺失），必须补齐 stub，否则服务端 400。
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        const existingResults = msg.toolResults ?? []
+        const resultsById = new Map(existingResults.map(tr => [tr.toolCallId, tr]))
+        for (const tc of msg.toolCalls) {
+          const tr = resultsById.get(tc.id)
           result.push({
             role: 'tool',
-            content: tr.content,
-            toolCallId: tr.toolCallId,
-            name: tr.toolName,
+            content: tr?.content ?? '[工具调用被用户中断，未执行]',
+            toolCallId: tc.id,
+            name: tc.name,
           })
         }
       }
@@ -145,7 +231,52 @@ export function useAiChat(options: UseAiChatOptions) {
   }
 
   /** Tool Use 循环最大次数 */
-  const MAX_TOOL_LOOPS = 10
+  const MAX_TOOL_LOOPS = 50
+
+  /** 流式看门狗：30s 无事件即视为卡死 */
+  const STREAM_WATCHDOG_MS = 30_000
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+  /** 工具执行期间暂停看门狗（工具本身可能慢） */
+  let inToolExec = false
+
+  function clearWatchdog(): void {
+    if (watchdogTimer) {
+      clearTimeout(watchdogTimer)
+      watchdogTimer = null
+    }
+  }
+
+  function resetWatchdog(): void {
+    clearWatchdog()
+    watchdogTimer = setTimeout(async () => {
+      watchdogTimer = null
+      if (inToolExec || !isStreaming.value) return
+      error.value = '流式响应超时（30s 无数据）'
+      log.warn('watchdog_timeout', { sessionId: sessionIdRef.value, ms: STREAM_WATCHDOG_MS })
+      try {
+        await aiAbortStream(sessionIdRef.value)
+      } catch (e) {
+        log.warn('watchdog_abort_failed', { sessionId: sessionIdRef.value }, e)
+      }
+      flushPendingDelta()
+      updateStreamingMessage(msg => ({
+        ...msg,
+        content: msg.content + '\n\n[超时中断]',
+        isStreaming: false,
+      }))
+      isStreaming.value = false
+    }, STREAM_WATCHDOG_MS)
+  }
+
+  /** 工具调用失败熔断：同一工具+同一参数连续失败 N 次后强制让 AI 放弃 */
+  const toolFailureCounter = new Map<string, number>()
+  const MAX_SAME_TOOL_FAILURE = 3
+
+  function hashArgs(s: string): string {
+    let h = 0
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0
+    return Math.abs(h).toString(36)
+  }
 
   /** 流式期间收集的 ToolCall 事件 */
   let pendingToolCalls: ToolCallInfo[] = []
@@ -183,8 +314,10 @@ export function useAiChat(options: UseAiChatOptions) {
     error.value = null
     try {
       const result = await aiGetSession(sid)
+      log.info('load_history', { sessionId: sid, hit: !!result, recordCount: result?.[1]?.length ?? 0 })
       if (!result) {
         messages.value = []
+        error.value = `未找到会话 ${sid}`
         return
       }
 
@@ -246,9 +379,11 @@ export function useAiChat(options: UseAiChatOptions) {
           })
         }
       }
-      messages.value = restored
+      messages.value = sanitizeLoadedMessages(restored)
     } catch (e) {
-      error.value = ensureErrorString(e)
+      const msg = ensureErrorString(e)
+      error.value = msg
+      log.error('load_history_failed', { sessionId: sid }, e)
     } finally {
       isLoading.value = false
     }
@@ -331,7 +466,7 @@ export function useAiChat(options: UseAiChatOptions) {
       cost: 0,
       createdAt: userMsg.timestamp,
     }
-    aiSaveMessage(userRecord).catch(e => console.warn('[AI] 保存用户消息失败:', e))
+    aiSaveMessage(userRecord).catch(e => log.warn('save_user_msg_failed', { sessionId: sid }, e))
 
     // 2. 构建发送给 API 的消息列表（包含 tool 消息链）
     const chatMessages: ChatMessage[] = buildChatMessages(messages.value)
@@ -346,17 +481,63 @@ export function useAiChat(options: UseAiChatOptions) {
       )
     } catch (e) {
       const errMsg = ensureErrorString(e)
-      error.value = errMsg
-      // 如果有正在流式的消息，标记为错误
-      if (streamingMessageId) {
-        updateStreamingMessage(msg => ({
-          ...msg,
-          role: 'error' as const,
-          content: errMsg,
-          isStreaming: false,
-        }))
+
+      // context_length_exceeded 自动恢复：触发紧急压缩后重试 1 次
+      const isOverflow = /context_length_exceeded|maximum context length|tokens.*exceed|prompt.*too.*long/i.test(errMsg)
+      if (isOverflow) {
+        log.info('overflow_detected', { sessionId: sid, errMsg: errMsg.slice(0, 200) })
+        // 清理失败的流式消息
+        if (streamingMessageId) {
+          const sidSnap = streamingMessageId
+          messages.value = messages.value.filter(m => m.id !== sidSnap)
+          streamingMessageId = ''
+        }
+        const compacted = await autoCompact.forceCompact(
+          messages.value, sid, provider, model, apiKey,
+        )
+        if (compacted) {
+          messages.value = compacted
+          try {
+            // 压缩后重建消息链并重试一次
+            const retryChat = buildChatMessages(messages.value)
+            await streamWithToolLoop(
+              sid, retryChat, provider, model, apiKey, enrichedSystemPrompt, enableTools,
+            )
+            error.value = null
+            log.info('overflow_recovered', { sessionId: sid })
+          } catch (e2) {
+            const errMsg2 = ensureErrorString(e2)
+            log.error('overflow_retry_failed', { sessionId: sid }, e2)
+            error.value = `${errMsg2}\n已尝试自动压缩但仍超限，请手动清空历史或换更大上下文模型。`
+            if (streamingMessageId) {
+              updateStreamingMessage(msg => ({
+                ...msg,
+                role: 'error' as const,
+                content: errMsg2,
+                isStreaming: false,
+              }))
+            }
+          }
+        } else {
+          log.error('overflow_compact_failed', { sessionId: sid })
+          error.value = `${errMsg}\n自动压缩失败，请手动清空历史或换更大上下文模型。`
+        }
+      } else {
+        log.error('send_failed', { sessionId: sid }, e)
+        error.value = errMsg
+        // 如果有正在流式的消息，标记为错误
+        if (streamingMessageId) {
+          updateStreamingMessage(msg => ({
+            ...msg,
+            role: 'error' as const,
+            content: errMsg,
+            isStreaming: false,
+          }))
+        }
       }
     } finally {
+      clearWatchdog()
+      inToolExec = false
       if (streamingMessageId) {
         updateStreamingMessage(msg => ({ ...msg, isStreaming: false }))
       }
@@ -378,7 +559,7 @@ export function useAiChat(options: UseAiChatOptions) {
         updatedAt: now,
         workDir: workDir.value || undefined,
       }
-      aiStore.saveSession(session).catch(e => console.warn('[AI] 保存会话失败:', e))
+      aiStore.saveSession(session).catch(e => log.warn('save_session_failed', { sessionId: sid }, e))
 
       // 自动压缩检测
       if (model.capabilities.maxContext > 0) {
@@ -416,6 +597,7 @@ export function useAiChat(options: UseAiChatOptions) {
     enableTools: boolean,
   ): Promise<void> {
     let loopCount = 0
+    log.info('stream_start', { sessionId: sid, model: model.id, enableTools, msgCount: chatMessages.length })
 
     while (loopCount <= MAX_TOOL_LOOPS) {
       // 创建助手占位消息
@@ -437,6 +619,7 @@ export function useAiChat(options: UseAiChatOptions) {
       messages.value = [...messages.value, assistantMsg]
 
       // 流式对话
+      resetWatchdog()
       await aiChatStream(
         {
           sessionId: sid,
@@ -451,6 +634,7 @@ export function useAiChat(options: UseAiChatOptions) {
         },
         (event: AiStreamEvent) => handleStreamEvent(event),
       )
+      clearWatchdog()
 
       // 刷新最后的缓冲
       flushPendingDelta()
@@ -469,7 +653,7 @@ export function useAiChat(options: UseAiChatOptions) {
           cost: 0,
           createdAt: finalMsg.timestamp,
         }
-        aiSaveMessage(assistantRecord).catch(e => console.warn('[AI] 保存助手消息失败:', e))
+        aiSaveMessage(assistantRecord).catch(e => log.warn('save_assistant_msg_failed', { sessionId: sid }, e))
       }
 
       // 检查是否需要 Tool Use 循环
@@ -480,7 +664,9 @@ export function useAiChat(options: UseAiChatOptions) {
 
       // ── 进入 Tool Use 循环 ──
       loopCount++
+      log.info('tool_loop', { sessionId: sid, loopCount, toolCount: pendingToolCalls.length })
       if (loopCount > MAX_TOOL_LOOPS) {
+        log.warn('tool_loop_exceeded', { sessionId: sid, max: MAX_TOOL_LOOPS })
         updateStreamingMessage(msg => ({
           ...msg,
           content: msg.content + '\n\n[AI 工具调用次数超限，已停止]',
@@ -538,7 +724,7 @@ export function useAiChat(options: UseAiChatOptions) {
           cost: 0,
           createdAt: Date.now(),
         }
-        aiSaveMessage(toolRecord).catch(e => console.warn('[AI] 保存工具消息失败:', e))
+        aiSaveMessage(toolRecord).catch(e => log.warn('save_tool_msg_failed', { sessionId: sid }, e))
       }
 
       // 重置 streamingMessageId 以便下一轮创建新的助手消息
@@ -550,6 +736,8 @@ export function useAiChat(options: UseAiChatOptions) {
    * 并行执行一组工具调用
    */
   async function executeToolCalls(toolCalls: ToolCallInfo[]): Promise<ToolResultInfo[]> {
+    inToolExec = true
+    clearWatchdog()
     // 更新状态为 running
     for (const tc of toolCalls) {
       tc.status = 'running'
@@ -560,11 +748,62 @@ export function useAiChat(options: UseAiChatOptions) {
 
     // 并行执行
     const promises = toolCalls.map(async (tc) => {
+      const failureKey = `${tc.name}:${hashArgs(tc.arguments)}`
+      const prevFailures = toolFailureCounter.get(failureKey) ?? 0
+
+      // 熔断：同一调用已连续失败达到上限 → 直接短路，不再真正调用后端
+      if (prevFailures >= MAX_SAME_TOOL_FAILURE) {
+        const argsBrief = tc.arguments.length > 80 ? tc.arguments.slice(0, 80) + '…' : tc.arguments
+        const content = `[CIRCUIT_OPEN] 同一调用 ${tc.name}(${argsBrief}) 已连续失败 ${prevFailures} 次，请换一种思路或直接回答用户`
+        log.warn('tool_circuit_open', { sessionId: sessionIdRef.value, tool: tc.name, failures: prevFailures })
+        tc.status = 'error'
+        tc.error = content
+        results.push({
+          toolCallId: tc.id,
+          toolName: tc.name,
+          success: false,
+          content,
+        })
+        return
+      }
+
       try {
-        const result = await aiExecuteTool(tc.name, tc.arguments, workDir.value)
+        // 写/编辑/执行命令类工具需先过审批（P1-1）
+        const approvalTool = pickApprovalTool(tc.name)
+        if (approvalTool) {
+          const decision = await requestApprovalForTool(approvalTool, tc)
+          if (decision === 'deny') {
+            const content = `[user_rejected] 用户拒绝了 ${tc.name} 调用`
+            tc.status = 'error'
+            tc.error = content
+            // 审批拒绝不计入熔断计数，避免被短路
+            toolFailureCounter.delete(failureKey)
+            results.push({
+              toolCallId: tc.id,
+              toolName: tc.name,
+              success: false,
+              content,
+            })
+            return
+          }
+        }
+
+        const result = await aiExecuteTool(
+          tc.name,
+          tc.arguments,
+          workDir.value,
+          sessionIdRef.value,
+          tc.id,
+        )
         tc.status = result.success ? 'success' : 'error'
         tc.result = result.content
-        if (!result.success) tc.error = result.content
+        if (!result.success) {
+          tc.error = result.content
+          toolFailureCounter.set(failureKey, prevFailures + 1)
+        } else {
+          // 成功则清零该 key（避免偶发失败误伤）
+          toolFailureCounter.delete(failureKey)
+        }
 
         results.push({
           toolCallId: tc.id,
@@ -576,6 +815,7 @@ export function useAiChat(options: UseAiChatOptions) {
         const errMsg = ensureErrorString(e)
         tc.status = 'error'
         tc.error = errMsg
+        toolFailureCounter.set(failureKey, prevFailures + 1)
 
         results.push({
           toolCallId: tc.id,
@@ -588,9 +828,31 @@ export function useAiChat(options: UseAiChatOptions) {
 
     await Promise.all(promises)
 
+    // 单轮累计预算检查：若多个工具结果之和过大，后端会挑最大的若干条落盘替换
+    try {
+      const budgetInput = results.map(r => ({
+        toolCallId: r.toolCallId,
+        toolName: r.toolName,
+        content: r.content,
+      }))
+      const budgeted = await aiEnforceToolResultBudget(sessionIdRef.value, budgetInput)
+      // 把预算结果写回 results 与 toolCalls
+      for (const b of budgeted) {
+        const r = results.find(x => x.toolCallId === b.toolCallId)
+        if (r && r.content !== b.content) {
+          r.content = b.content
+          const tc = toolCalls.find(x => x.id === b.toolCallId)
+          if (tc) tc.result = b.content
+        }
+      }
+    } catch (e) {
+      log.warn('budget_check_failed', { sessionId: sessionIdRef.value }, e)
+    }
+
     // 更新 UI
     updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
 
+    inToolExec = false
     return results
   }
 
@@ -598,6 +860,7 @@ export function useAiChat(options: UseAiChatOptions) {
 
   /** 处理单个流式事件 */
   function handleStreamEvent(event: AiStreamEvent): void {
+    resetWatchdog()
     switch (event.type) {
       case 'TextDelta':
         pendingTextDelta += event.delta
@@ -702,12 +965,54 @@ export function useAiChat(options: UseAiChatOptions) {
   /** 中断当前流式生成 */
   async function abort(): Promise<void> {
     if (!isStreaming.value) return
+    clearWatchdog()
     try {
       await aiAbortStream(sessionIdRef.value)
     } catch (e) {
-      console.warn('[AI] 中断请求失败:', e)
+      log.warn('abort_failed', { sessionId: sessionIdRef.value }, e)
     }
     flushPendingDelta()
+
+    // 为未响应的 tool_calls 补偿 tool stub 消息，避免下一次请求触发 OpenAI 400：
+    // "assistant message with 'tool_calls' must be followed by tool messages"
+    const streamingMsg = messages.value.find(m => m.id === streamingMessageId)
+    if (streamingMsg?.toolCalls && streamingMsg.toolCalls.length > 0) {
+      const existingResults = streamingMsg.toolResults ?? []
+      const respondedIds = new Set(existingResults.map(tr => tr.toolCallId))
+      const missing = streamingMsg.toolCalls.filter(tc => !respondedIds.has(tc.id))
+
+      if (missing.length > 0) {
+        const stubContent = '[工具调用被用户中断，未执行]'
+        const patchedResults = [
+          ...existingResults,
+          ...missing.map(tc => ({
+            toolCallId: tc.id,
+            toolName: tc.name,
+            success: false,
+            content: stubContent,
+          })),
+        ]
+        updateStreamingMessage(msg => ({ ...msg, toolResults: patchedResults }))
+
+        // 持久化每条 stub 到 DB，保证历史可加载
+        const sid = sessionIdRef.value
+        for (const tc of missing) {
+          const toolRecord: AiMessageRecord = {
+            id: genId(),
+            sessionId: sid,
+            role: 'tool',
+            content: stubContent,
+            contentType: 'tool_result',
+            tokens: 0,
+            cost: 0,
+            parentId: tc.id,
+            createdAt: Date.now(),
+          }
+          aiSaveMessage(toolRecord).catch(e => log.warn('save_abort_stub_failed', { sessionId: sid, toolCallId: tc.id }, e))
+        }
+      }
+    }
+
     updateStreamingMessage(msg => ({
       ...msg,
       content: msg.content + '\n\n[已中断]',
@@ -768,6 +1073,8 @@ export function useAiChat(options: UseAiChatOptions) {
       clearTimeout(throttleTimer)
       throttleTimer = null
     }
+    clearWatchdog()
+    toolFailureCounter.clear()
     autoCompact.resetCircuitBreaker()
   }
 
@@ -799,6 +1106,7 @@ export function useAiChat(options: UseAiChatOptions) {
       clearTimeout(throttleTimer)
       throttleTimer = null
     }
+    clearWatchdog()
   })
 
   return {

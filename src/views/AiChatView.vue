@@ -11,7 +11,9 @@ import { useAiChat } from '@/composables/useAiChat'
 import { useAiMemoryStore } from '@/stores/ai-memory'
 import { useFileAttachment, stripMentionMarkers } from '@/composables/useFileAttachment'
 import { checkTokenLimit } from '@/utils/file-markers'
+import { buildToolGuide } from '@/utils/ai-prompts'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import { getCredential } from '@/api/connection'
 import type { ProviderConfig, ModelConfig, AiSession } from '@/types/ai'
 import type { ChatMode } from '@/components/ai/AiInputArea.vue'
@@ -34,13 +36,23 @@ import {
   MessageSquareText,
   FolderOpen,
   Brain,
+  Check,
 } from 'lucide-vue-next'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 const store = useAiChatStore()
 const workspace = useWorkspaceStore()
+const wsFiles = useWorkspaceFilesStore()
 const fileAttachment = useFileAttachment()
 const memoryStore = useAiMemoryStore()
 
@@ -159,15 +171,14 @@ const effectiveSystemPrompt = computed(() => {
 
   // 工具行为指引（模型支持 Tool Use + 有工作目录时追加）
   const enableTools = currentModel.value?.capabilities.toolUse && !!chat.workDir.value
-  let toolGuide = ''
-  if (enableTools) {
-    toolGuide = `\n\n【工具使用指引】\n你可以通过工具调用来操作用户的工作目录中的文件。\n工作目录: ${chat.workDir.value}\n\n使用原则：\n- 当用户提供文件路径或要求读取文件时，必须立即调用 read_file 工具，不要只是口头说"我来读取"然后不调用\n- 需要了解文件内容时，调用工具读取，不要凭记忆猜测\n- 需要创建或修改文件时，调用 write_file 工具直接写入\n- 搜索代码时优先使用 search_files 工具\n- 重要：收到文件路径后直接调用工具，不要先回复再调用`
-
-    // 全自动模式额外追加
-    if (chatMode.value === 'auto') {
-      toolGuide += `\n\n当用户要求修改或创建文件时，直接调用 write_file 工具写入，不要在回复中输出完整代码块让用户手动保存。`
-    }
-  }
+  const toolGuide = enableTools
+    ? buildToolGuide({
+        workDir: chat.workDir.value,
+        chatMode: chatMode.value,
+        modelId: currentModel.value?.id,
+        ideContext: wsFiles.activeEditor,
+      })
+    : ''
 
   const result = base + (suffix || '') + toolGuide
   return result || undefined
@@ -209,6 +220,17 @@ async function handleSend(content: string) {
 
   // 发送后清空附件
   fileAttachment.clearAttachments()
+}
+
+/** 继续生成（基于最后一条用户消息重新发起一轮流式） */
+async function handleContinue() {
+  if (!currentProvider.value || !currentModel.value) return
+  const apiKey = await getCredential(`ai-provider-${currentProvider.value.id}`) ?? ''
+  if (!apiKey) {
+    chat.error.value = '未配置 API Key'
+    return
+  }
+  await chat.regenerate(currentProvider.value, currentModel.value, apiKey, effectiveSystemPrompt.value)
 }
 
 /** 新建 AI Chat Tab */
@@ -307,28 +329,29 @@ function exitImmersive() {
 /** 选择工作目录 */
 async function handleSelectWorkDir() {
   const dir = await openDialog({ directory: true, multiple: false })
-  if (dir) {
-    chat.workDir.value = dir as string
-    // 更新记忆 store 的工作区
-    memoryStore.setWorkspace(dir as string)
-    // 立即持久化到当前 session
-    const sid = currentSessionId.value
-    if (sid && currentProvider.value && currentModel.value) {
-      const session: AiSession = {
-        id: sid,
-        title: '新对话',
-        providerId: currentProvider.value.id,
-        model: currentModel.value.id,
-        systemPrompt: systemPrompt.value,
-        messageCount: chat.messages.value.filter(m => m.role !== 'error').length,
-        totalTokens: chat.totalTokens.value,
-        estimatedCost: 0,
-        createdAt: chat.messages.value[0]?.timestamp ?? Date.now(),
-        updatedAt: Date.now(),
-        workDir: dir as string,
-      }
-      store.saveSession(session).catch(e => console.warn('[AI] 保存工作目录失败:', e))
+  if (dir) setWorkDir(dir as string)
+}
+
+/** 直接切换到某个已知工作目录（传空串表示清除） */
+function setWorkDir(dir: string) {
+  chat.workDir.value = dir
+  if (dir) memoryStore.setWorkspace(dir)
+  const sid = currentSessionId.value
+  if (sid && currentProvider.value && currentModel.value) {
+    const session: AiSession = {
+      id: sid,
+      title: '新对话',
+      providerId: currentProvider.value.id,
+      model: currentModel.value.id,
+      systemPrompt: systemPrompt.value,
+      messageCount: chat.messages.value.filter(m => m.role !== 'error').length,
+      totalTokens: chat.totalTokens.value,
+      estimatedCost: 0,
+      createdAt: chat.messages.value[0]?.timestamp ?? Date.now(),
+      updatedAt: Date.now(),
+      workDir: dir || undefined,
     }
+    store.saveSession(session).catch(e => console.warn('[AI] 保存工作目录失败:', e))
   }
 }
 
@@ -416,18 +439,49 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
           </TooltipProvider>
 
           <!-- 工作目录选择器 -->
-          <button
-            class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors"
-            :class="chat.workDir.value
-              ? 'text-muted-foreground hover:text-foreground hover:bg-muted'
-              : 'text-muted-foreground/40 hover:text-muted-foreground/60 hover:bg-muted/50'"
-            :title="chat.workDir.value || '设置工作目录（启用 AI 文件操作）'"
-            @click="handleSelectWorkDir"
-          >
-            <FolderOpen class="h-3.5 w-3.5" />
-            <span v-if="chat.workDir.value">{{ workDirDisplay }}</span>
-            <span v-else>设置工作目录</span>
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <button
+                class="flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] transition-colors"
+                :class="chat.workDir.value
+                  ? 'text-muted-foreground hover:text-foreground hover:bg-muted'
+                  : 'text-muted-foreground/40 hover:text-muted-foreground/60 hover:bg-muted/50'"
+                :title="chat.workDir.value || '设置工作目录（启用 AI 文件操作）'"
+              >
+                <FolderOpen class="h-3.5 w-3.5" />
+                <span v-if="chat.workDir.value">{{ workDirDisplay }}</span>
+                <span v-else>设置工作目录</span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" class="w-64">
+              <DropdownMenuLabel class="text-[11px] text-muted-foreground">资源管理器中的目录</DropdownMenuLabel>
+              <DropdownMenuItem
+                v-for="root in chat.availableWorkDirs.value"
+                :key="root.value"
+                class="flex items-center justify-between gap-2 text-[12px]"
+                @select="setWorkDir(root.value)"
+              >
+                <span class="truncate" :title="root.value">{{ root.label }}</span>
+                <Check v-if="chat.workDir.value === root.value" class="h-3.5 w-3.5 text-primary shrink-0" />
+              </DropdownMenuItem>
+              <div
+                v-if="chat.availableWorkDirs.value.length === 0"
+                class="px-2 py-1.5 text-[11px] text-muted-foreground"
+              >资源管理器尚未添加文件夹</div>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem class="text-[12px]" @select="handleSelectWorkDir">
+                <FolderOpen class="mr-2 h-3.5 w-3.5" />
+                浏览其他目录…
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                v-if="chat.workDir.value"
+                class="text-[12px] text-muted-foreground"
+                @select="setWorkDir('')"
+              >
+                清除工作目录
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div class="flex items-center gap-2">
@@ -518,6 +572,8 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
             v-for="msg in chat.messages.value"
             :key="msg.id"
             :message="msg"
+            :session-id="currentSessionId"
+            @continue="handleContinue"
           />
         </div>
       </div>

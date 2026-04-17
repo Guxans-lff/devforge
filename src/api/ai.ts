@@ -187,6 +187,46 @@ export function aiGetTools(): Promise<ToolDefinition[]> {
  * @param args JSON 字符串参数
  * @param workDir 工作目录（安全边界）
  */
-export function aiExecuteTool(name: string, args: string, workDir: string): Promise<ToolExecResult> {
-  return invokeCommand('ai_execute_tool', { name, arguments: args, workDir }, { source: 'AI' })
+export function aiExecuteTool(
+  name: string,
+  args: string,
+  workDir: string,
+  sessionId: string,
+  toolCallId: string,
+): Promise<ToolExecResult> {
+  return invokeCommand(
+    'ai_execute_tool',
+    { name, arguments: args, workDir, sessionId, toolCallId },
+    { source: 'AI' },
+  )
+}
+
+/** 单轮累计预算检查：超预算时挑最大的若干条落盘替换 */
+export interface ToolResultEntry {
+  toolCallId: string
+  toolName: string
+  content: string
+}
+
+export function aiEnforceToolResultBudget(
+  sessionId: string,
+  results: ToolResultEntry[],
+): Promise<ToolResultEntry[]> {
+  return invokeCommand(
+    'ai_enforce_tool_result_budget',
+    { sessionId, results },
+    { source: 'AI' },
+  )
+}
+
+/** 读取完整落盘结果（供 UI "查看完整" 使用） */
+export function aiReadToolResultFile(
+  sessionId: string,
+  toolCallId: string,
+): Promise<string> {
+  return invokeCommand(
+    'ai_read_tool_result_file',
+    { sessionId, toolCallId },
+    { source: 'AI' },
+  )
 }

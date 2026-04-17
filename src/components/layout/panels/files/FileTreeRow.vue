@@ -18,7 +18,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  click: [node: FileNode]
+  click: [e: MouseEvent, node: FileNode]
   dblclick: [node: FileNode]
   contextmenu: [e: MouseEvent, node: FileNode]
   dragstart: [e: DragEvent, node: FileNode]
@@ -89,7 +89,7 @@ const gitPillClass = computed(() => {
     ]"
     :style="{ paddingLeft: `${node.depth * 16 + 8}px`, height: '32px' }"
     draggable="true"
-    @click="$emit('click', node)"
+    @click="$emit('click', $event, node)"
     @dblclick="$emit('dblclick', node)"
     @contextmenu.prevent="$emit('contextmenu', $event, node)"
     @dragstart="$emit('dragstart', $event, node)"

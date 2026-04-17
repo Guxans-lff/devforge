@@ -265,6 +265,34 @@ pub fn run() {
             }
 
             log::info!("App setup completed");
+
+            // 启动 AI 工具结果落盘目录的 GC：只清理 DB 中已不存在的孤儿会话目录
+            if let Ok(data_dir) = app.path().app_data_dir() {
+                let storage_state = app.state::<StorageState>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    let pool = storage_state.get_pool().await;
+                    let live_ids: std::collections::HashSet<String> =
+                        match services::ai::session_store::list_session_ids(&pool).await {
+                            Ok(ids) => ids.into_iter().collect(),
+                            Err(e) => {
+                                log::warn!("读取会话列表失败，跳过工具结果 GC: {}", e);
+                                return;
+                            }
+                        };
+                    match services::ai::tool_result_store::gc_orphan_results(
+                        &data_dir, &live_ids,
+                    )
+                    .await
+                    {
+                        Ok(n) if n > 0 => {
+                            log::info!("AI 工具结果 GC 清理了 {} 个孤儿会话目录", n)
+                        }
+                        Ok(_) => {}
+                        Err(e) => log::warn!("AI 工具结果 GC 失败: {}", e),
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -650,6 +678,8 @@ pub fn run() {
             ai_cmd::ai_get_usage_stats,
             ai_cmd::ai_get_tools,
             ai_cmd::ai_execute_tool,
+            ai_cmd::ai_enforce_tool_result_budget,
+            ai_cmd::ai_read_tool_result_file,
             ai_cmd::ai_list_memories,
             ai_cmd::ai_save_memory,
             ai_cmd::ai_delete_memory,

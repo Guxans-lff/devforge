@@ -8,6 +8,9 @@
 
 pub mod ai_tools;
 pub mod anthropic;
+pub mod exec_bash;
+pub mod exec_web;
+pub mod http_retry;
 pub mod models;
 pub mod openai_compat;
 pub mod provider;
@@ -15,6 +18,8 @@ pub mod session_store;
 pub mod stream_parser;
 pub mod memory_models;
 pub mod memory_store;
+pub mod tool_result_store;
+pub mod tool_result_budget;
 
 use std::collections::HashMap;
 use std::sync::Arc;

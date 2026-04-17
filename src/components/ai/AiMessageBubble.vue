@@ -10,7 +10,7 @@
 import { computed, ref } from 'vue'
 import type { AiMessage, FileOperation } from '@/types/ai'
 import { parseFileMarkers } from '@/utils/file-markers'
-import { ChevronRight, Copy, Check, AlertCircle, Download } from 'lucide-vue-next'
+import { ChevronRight, Copy, Check, AlertCircle, Download, RotateCw } from 'lucide-vue-next'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeTextFile } from '@/api/database'
 import AiCodeBlock from './AiCodeBlock.vue'
@@ -20,6 +20,11 @@ import AiFileOpsGroup from './AiFileOpsGroup.vue'
 
 const props = defineProps<{
   message: AiMessage
+  sessionId?: string
+}>()
+
+const emit = defineEmits<{
+  (e: 'continue'): void
 }>()
 
 const showThinking = ref(false)
@@ -29,6 +34,13 @@ const hasThinking = computed(() => !!props.message.thinking?.trim())
 const isUser = computed(() => props.message.role === 'user')
 const isError = computed(() => props.message.role === 'error')
 const hasToolCalls = computed(() => (props.message.toolCalls?.length ?? 0) > 0)
+
+/** 可恢复的错误消息（流式超时/中断/未完成） */
+const canContinue = computed(() => {
+  if (!isError.value) return false
+  const c = props.message.content ?? ''
+  return /\[超时中断\]|\[已中断\]|上一轮回复未完成或已中断/.test(c)
+})
 
 /** 提取 write_file 成功态工具调用，转为 FileOperation 列表供 AiFileOpsGroup 渲染 */
 const fileOperations = computed<FileOperation[]>(() => {
@@ -186,7 +198,16 @@ function renderBlock(text: string): string {
   <div v-else-if="isError" class="my-1">
     <div class="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-2.5">
       <AlertCircle class="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-      <div class="text-[13px] text-destructive leading-relaxed select-text">{{ message.content }}</div>
+      <div class="flex-1 text-[13px] text-destructive leading-relaxed select-text">{{ message.content }}</div>
+      <button
+        v-if="canContinue"
+        class="shrink-0 flex items-center gap-1 rounded-md border border-destructive/30 bg-background/60 px-2 py-1 text-[11px] text-destructive hover:bg-destructive/10 transition-colors"
+        title="基于上一次的用户输入重新生成"
+        @click="emit('continue')"
+      >
+        <RotateCw class="h-3 w-3" />
+        继续生成
+      </button>
     </div>
   </div>
 
@@ -285,6 +306,7 @@ function renderBlock(text: string): string {
             v-for="tc in otherToolCalls"
             :key="tc.id"
             :tool-call="tc"
+            :session-id="sessionId"
           />
         </div>
       </div>

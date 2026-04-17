@@ -12,6 +12,10 @@ const props = defineProps<{
   root: WorkspaceRoot
 }>()
 
+const emit = defineEmits<{
+  (e: 'contextmenu', ev: MouseEvent): void
+}>()
+
 const store = useWorkspaceFilesStore()
 
 function toggleCollapse() {
@@ -33,6 +37,7 @@ function refresh() {
     :class="root.collapsed ? 'hover:bg-muted/30' : 'bg-muted/20 hover:bg-muted/30'"
     style="height: 36px;"
     @click="toggleCollapse"
+    @contextmenu.prevent="emit('contextmenu', $event)"
   >
     <ChevronRight
       class="h-3.5 w-3.5 text-muted-foreground/50 transition-transform duration-150 flex-shrink-0"

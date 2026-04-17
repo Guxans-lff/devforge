@@ -10,7 +10,10 @@ import { ref } from 'vue'
 import { useAiMemoryStore } from '@/stores/ai-memory'
 import { aiSaveCompaction } from '@/api/ai-memory'
 import { aiChatStream } from '@/api/ai'
+import { createLogger } from '@/utils/logger'
 import type { AiMessage, AiMemory, AiStreamEvent, ProviderConfig, ModelConfig, CompactRule, AiCompaction } from '@/types/ai'
+
+const log = createLogger('ai.compact')
 
 /** 压缩阈值：maxContext 的 90% */
 const COMPACT_THRESHOLD = 0.9
@@ -114,7 +117,7 @@ export function useAutoCompact() {
       return await level2Compact(messages, sessionId, provider, model, apiKey)
     } catch (e) {
       consecutiveFailures.value++
-      console.error('[AutoCompact] 压缩失败:', e)
+      log.error('compact_failed', { sessionId }, e)
       return null
     } finally {
       isCompacting.value = false
@@ -173,7 +176,7 @@ export function useAutoCompact() {
       originalTokens: compressedTokens,
       createdAt: Date.now(),
     }
-    aiSaveCompaction(compaction).catch(e => console.warn('[AutoCompact] 保存压缩记录失败:', e))
+    aiSaveCompaction(compaction).catch(e => log.warn('save_compaction_failed', { sessionId }, e))
 
     // 从摘要中提取关键知识点存入记忆库
     const knowledgeMemory: AiMemory = {
@@ -188,7 +191,7 @@ export function useAutoCompact() {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     }
-    memoryStore.saveMemory(knowledgeMemory).catch(e => console.warn('[AutoCompact] 保存摘要记忆失败:', e))
+    memoryStore.saveMemory(knowledgeMemory).catch(e => log.warn('save_summary_memory_failed', { sessionId }, e))
 
     // 构建摘要消息
     const summaryMsg: AiMessage = {
@@ -199,6 +202,12 @@ export function useAutoCompact() {
     }
 
     consecutiveFailures.value = 0
+    log.info('compact_done', {
+      sessionId,
+      originalCount: toCompress.length,
+      originalTokens: compressedTokens,
+      summaryChars: summary.length,
+    })
     return [summaryMsg, ...toKeep]
   }
 
@@ -207,10 +216,37 @@ export function useAutoCompact() {
     consecutiveFailures.value = 0
   }
 
+  /**
+   * 强制压缩（跳过阈值判断）— 用于 context_length_exceeded 紧急恢复
+   * 直接走 Level 2 AI 摘要路径
+   */
+  async function forceCompact(
+    messages: AiMessage[],
+    sessionId: string,
+    provider: ProviderConfig,
+    model: ModelConfig,
+    apiKey: string,
+  ): Promise<AiMessage[] | null> {
+    if (consecutiveFailures.value >= MAX_FAILURES) return null
+    const nonErrorMsgs = messages.filter(m => m.role !== 'error')
+    if (nonErrorMsgs.length <= KEEP_RECENT_ROUNDS * 2) return null
+    isCompacting.value = true
+    try {
+      return await level2Compact(messages, sessionId, provider, model, apiKey)
+    } catch (e) {
+      consecutiveFailures.value++
+      log.error('force_compact_failed', { sessionId }, e)
+      return null
+    } finally {
+      isCompacting.value = false
+    }
+  }
+
   return {
     isCompacting,
     consecutiveFailures,
     checkAndCompact,
+    forceCompact,
     resetCircuitBreaker,
   }
 }

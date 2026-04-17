@@ -11,11 +11,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 const props = withDefaults(defineProps<{
   promptTokens?: number
   completionTokens?: number
+  cacheReadTokens?: number
   maxContext?: number
   pricing?: { inputPer1m: number; outputPer1m: number; currency: string }
 }>(), {
   promptTokens: 0,
   completionTokens: 0,
+  cacheReadTokens: 0,
   maxContext: 0,
 })
 
@@ -74,6 +76,9 @@ function formatTokens(n: number): string {
       <TooltipContent side="top" class="text-[11px]">
         <div class="space-y-0.5">
           <p>输入: {{ formatTokens(promptTokens) }} tokens</p>
+          <p v-if="cacheReadTokens > 0" class="text-emerald-500">
+            缓存命中: {{ formatTokens(cacheReadTokens) }} tokens
+          </p>
           <p>输出: {{ formatTokens(completionTokens) }} tokens</p>
           <p v-if="maxContext > 0">上下文: {{ formatTokens(totalTokens) }} / {{ formatTokens(maxContext) }}</p>
           <p v-if="estimatedCost != null">

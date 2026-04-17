@@ -6,14 +6,25 @@
  */
 import { ref, computed, watch } from 'vue'
 import type { ToolCallInfo, FileOperation } from '@/types/ai'
-import { ChevronRight, Loader2, CheckCircle2, XCircle, Wrench, ExternalLink } from 'lucide-vue-next'
+import { ChevronRight, Loader2, CheckCircle2, XCircle, Wrench, ExternalLink, Eye, Copy } from 'lucide-vue-next'
 import AiCodeBlock from './AiCodeBlock.vue'
 import AiFileOpCard from './AiFileOpCard.vue'
+import AiTodoPanel from './AiTodoPanel.vue'
 import { inferLanguageFromPath } from '@/utils/file-markers'
 import { openPath } from '@tauri-apps/plugin-opener'
+import { aiReadToolResultFile } from '@/api/ai'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 
 const props = defineProps<{
   toolCall: ToolCallInfo
+  sessionId?: string
 }>()
 
 const expanded = ref(false)
@@ -39,6 +50,11 @@ const toolDisplayName = computed(() => {
     list_directory: '列出目录',
     search_files: '搜索文件',
     write_file: '写入文件',
+    edit_file: '编辑文件',
+    bash: '执行命令',
+    web_search: '网页搜索',
+    web_fetch: '抓取网页',
+    todo_write: '任务清单',
   }
   return map[props.toolCall.name] ?? props.toolCall.name
 })
@@ -58,6 +74,21 @@ const argsSummary = computed(() => {
       return `"${args.pattern}" in ${args.directory}`
     case 'write_file':
       return (args.path as string) ?? ''
+    case 'edit_file':
+      return (args.path as string) ?? ''
+    case 'bash': {
+      const cmd = (args.command as string) ?? ''
+      return cmd.length > 80 ? cmd.slice(0, 80) + '…' : cmd
+    }
+    case 'todo_write': {
+      const todos = (args.todos as Array<{ status: string }> | undefined) ?? []
+      const done = todos.filter(t => t.status === 'completed').length
+      return `${done}/${todos.length} 已完成`
+    }
+    case 'web_search':
+      return (args.query as string) ?? ''
+    case 'web_fetch':
+      return (args.url as string) ?? ''
     default:
       return JSON.stringify(args).slice(0, 80)
   }
@@ -83,6 +114,59 @@ const resultPreview = computed(() => {
   }
   return content
 })
+
+/** 是否为已落盘的大型结果（含 <persisted-output> 包装标签） */
+const isPersisted = computed(() => {
+  const content = props.toolCall.result ?? ''
+  return content.includes('<persisted-output>')
+})
+
+/** 从落盘包装中解析出总字符数和文件路径 */
+const persistedInfo = computed(() => {
+  const content = props.toolCall.result ?? ''
+  const sizeMatch = content.match(/Output too large \((\d+) chars\)/)
+  const pathMatch = content.match(/saved to:\s+(.+)/)
+  return {
+    totalChars: sizeMatch ? Number(sizeMatch[1]) : 0,
+    filepath: pathMatch ? pathMatch[1].trim() : '',
+  }
+})
+
+// ───────── 查看完整结果（弹窗） ─────────
+const showFullDialog = ref(false)
+const fullLoading = ref(false)
+const fullContent = ref('')
+const fullError = ref('')
+const copiedFull = ref(false)
+
+async function openFullResult() {
+  if (!props.sessionId) {
+    fullError.value = '会话上下文缺失，无法加载'
+    showFullDialog.value = true
+    return
+  }
+  showFullDialog.value = true
+  fullLoading.value = true
+  fullError.value = ''
+  fullContent.value = ''
+  try {
+    fullContent.value = await aiReadToolResultFile(props.sessionId, props.toolCall.id)
+  } catch (e: unknown) {
+    fullError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    fullLoading.value = false
+  }
+}
+
+async function copyFull() {
+  try {
+    await navigator.clipboard.writeText(fullContent.value)
+    copiedFull.value = true
+    setTimeout(() => (copiedFull.value = false), 1500)
+  } catch (e) {
+    console.warn('[AI] 复制失败:', e)
+  }
+}
 
 /** 是否为文件操作工具（write_file / read_file） */
 const isFileOp = computed(() =>
@@ -229,8 +313,15 @@ async function handleOpenFile() {
 
     <!-- 展开内容 -->
     <div v-if="expanded" class="border-t border-border/20">
+      <!-- ===== todo_write：任务清单面板 ===== -->
+      <template v-if="toolCall.name === 'todo_write' && Array.isArray(toolCall.parsedArgs?.todos)">
+        <div class="px-1 pb-1 pt-1">
+          <AiTodoPanel :todos="(toolCall.parsedArgs!.todos as any)" />
+        </div>
+      </template>
+
       <!-- ===== write_file 成功态：毛玻璃文件操作卡片 ===== -->
-      <template v-if="toolCall.name === 'write_file' && toolCall.status === 'success' && fileOperation">
+      <template v-else-if="toolCall.name === 'write_file' && toolCall.status === 'success' && fileOperation">
         <div class="px-1 pb-1 pt-1">
           <AiFileOpCard
             :op="fileOperation"
@@ -283,6 +374,26 @@ async function handleOpenFile() {
             <div class="text-[10px] font-medium mb-0.5" :class="toolCall.error ? 'text-destructive/60' : 'text-muted-foreground/40'">
               {{ toolCall.error ? '错误' : '结果' }}
             </div>
+            <!-- 落盘提示 badge -->
+            <div
+              v-if="isPersisted"
+              class="mb-1.5 flex items-center gap-2 rounded border border-amber-500/20 bg-amber-500/5 px-2 py-1 text-[10px] text-amber-600 dark:text-amber-400"
+            >
+              <span class="font-semibold">📦 结果过大已落盘</span>
+              <span class="font-mono">{{ persistedInfo.totalChars.toLocaleString() }} 字符</span>
+              <span
+                v-if="persistedInfo.filepath"
+                class="truncate font-mono text-muted-foreground/70"
+                :title="persistedInfo.filepath"
+              >· {{ persistedInfo.filepath }}</span>
+              <button
+                type="button"
+                class="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium hover:bg-amber-500/10"
+                @click.stop="openFullResult"
+              >
+                <Eye class="h-3 w-3" /> 查看完整
+              </button>
+            </div>
             <pre
               class="text-[11px] font-mono whitespace-pre-wrap overflow-x-auto max-h-[200px] overflow-y-auto"
               :class="toolCall.error ? 'text-destructive/70' : 'text-foreground/60'"
@@ -292,4 +403,39 @@ async function handleOpenFile() {
       </template>
     </div>
   </div>
+
+  <!-- 查看完整落盘结果对话框 -->
+  <Dialog v-model:open="showFullDialog">
+    <DialogContent class="max-w-3xl">
+      <DialogHeader>
+        <DialogTitle class="flex items-center gap-2 text-base">
+          📦 完整工具结果
+          <span class="text-xs font-mono font-normal text-muted-foreground">{{ toolCall.name }} · {{ toolCall.id }}</span>
+        </DialogTitle>
+        <DialogDescription class="text-xs">
+          从磁盘读取完整落盘内容
+          <span v-if="persistedInfo.totalChars">（{{ persistedInfo.totalChars.toLocaleString() }} 字符）</span>
+        </DialogDescription>
+      </DialogHeader>
+      <div class="min-h-[200px]">
+        <div v-if="fullLoading" class="flex items-center justify-center py-8 text-sm text-muted-foreground">
+          <Loader2 class="mr-2 h-4 w-4 animate-spin" /> 加载中…
+        </div>
+        <div v-else-if="fullError" class="rounded border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+          {{ fullError }}
+        </div>
+        <pre
+          v-else
+          class="max-h-[60vh] overflow-auto rounded border border-border bg-muted/30 p-3 text-[11px] font-mono whitespace-pre-wrap"
+        >{{ fullContent }}</pre>
+      </div>
+      <div class="flex justify-end gap-2">
+        <Button variant="outline" size="sm" :disabled="!fullContent || fullLoading" @click="copyFull">
+          <Copy class="mr-1 h-3.5 w-3.5" />
+          {{ copiedFull ? '已复制' : '复制' }}
+        </Button>
+        <Button size="sm" @click="showFullDialog = false">关闭</Button>
+      </div>
+    </DialogContent>
+  </Dialog>
 </template>

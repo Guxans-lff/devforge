@@ -151,13 +151,14 @@ impl AiProvider for OpenAiCompatProvider {
 
         log::info!("AI 请求: {} model={}", url, config.model);
 
-        let response = self
+        let builder = self
             .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", api_key))
             .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
+            .json(&body);
+
+        let response = super::http_retry::send_with_backoff(builder)
             .await
             .map_err(|e| AppError::Connection(format!("AI API 请求失败: {e}")))?;
 
@@ -226,7 +227,7 @@ impl AiProvider for OpenAiCompatProvider {
                                     AiStreamEvent::ThinkingDelta { delta } => {
                                         full_thinking.push_str(delta);
                                     }
-                                    AiStreamEvent::Usage { prompt_tokens: pt, completion_tokens: ct } => {
+                                    AiStreamEvent::Usage { prompt_tokens: pt, completion_tokens: ct, .. } => {
                                         prompt_tokens = *pt;
                                         completion_tokens = *ct;
                                     }

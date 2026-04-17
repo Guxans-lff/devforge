@@ -31,6 +31,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: TypeScript 类型检查
+        run: pnpm vue-tsc --noEmit
+
+      - name: 前端构建
         run: pnpm build
 
       - name: 运行测试
@@ -44,14 +47,24 @@ jobs:
 
       - name: 安装 Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Rust 缓存
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
 
+      - name: Cargo fmt 检查
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+        continue-on-error: true
+
+      - name: Cargo clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+        continue-on-error: true
+
       - name: Cargo check
         run: cargo check --manifest-path src-tauri/Cargo.toml
 
       - name: Cargo test
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib

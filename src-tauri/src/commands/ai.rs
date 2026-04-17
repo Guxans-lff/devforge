@@ -7,7 +7,7 @@ use tauri::ipc::Channel;
 use tauri::{Manager, State};
 
 use crate::services::ai::models::*;
-use crate::services::ai::{ai_tools, session_store};
+use crate::services::ai::{ai_tools, session_store, tool_result_budget, tool_result_store};
 use crate::services::ai::{memory_models, memory_store};
 use crate::services::ai::AiEngine;
 use crate::services::storage::Storage;
@@ -37,6 +37,15 @@ pub async fn ai_chat_stream(
     engine: State<'_, AiEngineState>,
     storage: State<'_, Arc<Storage>>,
 ) -> Result<ChatResult, AppError> {
+    log::info!(
+        target: "ai.stream",
+        "stream_start session={} model={} provider={} msg_count={} tools={}",
+        session_id,
+        model,
+        provider_type,
+        messages.len(),
+        enable_tools.unwrap_or(false)
+    );
     // 工具定义
     let (tools, tool_choice) = if enable_tools.unwrap_or(false) {
         (Some(ai_tools::get_tool_definitions()), Some("auto".to_string()))
@@ -78,6 +87,15 @@ pub async fn ai_chat_stream(
 
     // 记录用量统计
     if let Ok(ref chat_result) = result {
+        log::info!(
+            target: "ai.stream",
+            "stream_done session={} model={} prompt_tokens={} completion_tokens={} finish_reason={}",
+            session_id,
+            model,
+            chat_result.prompt_tokens,
+            chat_result.completion_tokens,
+            chat_result.finish_reason,
+        );
         let pool = storage.get_pool().await;
         // 计算费用（简单估算，后续可根据模型定价精确计算）
         let cost = 0.0; // V2 增加精确费用计算
@@ -101,7 +119,9 @@ pub async fn ai_abort_stream(
     session_id: String,
     engine: State<'_, AiEngineState>,
 ) -> Result<bool, AppError> {
-    Ok(engine.abort(&session_id).await)
+    let aborted = engine.abort(&session_id).await;
+    log::info!(target: "ai.stream", "stream_abort session={} hit={}", session_id, aborted);
+    Ok(aborted)
 }
 
 // ─────────────────────────────────── Provider 管理 ───────────────────────────────────
@@ -179,9 +199,18 @@ pub async fn ai_get_session(
 pub async fn ai_delete_session(
     id: String,
     storage: State<'_, Arc<Storage>>,
+    app: tauri::AppHandle,
 ) -> Result<(), AppError> {
     let pool = storage.get_pool().await;
-    session_store::delete_session(&pool, &id).await
+    session_store::delete_session(&pool, &id).await?;
+
+    // 同步清理该会话产生的落盘工具结果
+    if let Ok(dir) = app.path().app_data_dir() {
+        if let Err(e) = tool_result_store::cleanup_session(&dir, &id).await {
+            log::warn!("清理落盘工具结果失败（不影响删除）: {e}");
+        }
+    }
+    Ok(())
 }
 
 /// 保存消息
@@ -225,23 +254,76 @@ pub async fn ai_execute_tool(
     name: String,
     arguments: String,
     work_dir: String,
+    session_id: String,
+    tool_call_id: String,
+    app: tauri::AppHandle,
 ) -> Result<ai_tools::ToolExecResult, AppError> {
-    log::info!("AI 工具调用: {} | 工作目录: {}", name, work_dir);
+    log::info!(
+        target: "ai.tool",
+        "execute name={} session={} tool_call={} work_dir={}",
+        name,
+        session_id,
+        tool_call_id,
+        work_dir,
+    );
+
+    let app_data_dir = app.path().app_data_dir().ok();
 
     // 超时 30 秒
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(30),
-        ai_tools::execute_tool(&name, &arguments, &work_dir),
+        ai_tools::execute_tool(
+            &name,
+            &arguments,
+            &work_dir,
+            &session_id,
+            &tool_call_id,
+            app_data_dir.as_deref(),
+        ),
     )
     .await;
 
     match result {
         Ok(exec_result) => Ok(exec_result),
-        Err(_) => Ok(ai_tools::ToolExecResult {
-            success: false,
-            content: format!("工具执行超时（30秒限制）: {}", name),
-        }),
+        Err(_) => {
+            log::warn!(target: "ai.tool", "timeout name={} session={} tool_call={}", name, session_id, tool_call_id);
+            Ok(ai_tools::ToolExecResult {
+                success: false,
+                content: format!("工具执行超时（30秒限制）: {}", name),
+            })
+        }
     }
+}
+
+/// 对单轮并行工具结果执行累计预算检查
+///
+/// 前端在 `executeToolCalls` 完成后、将结果追加到消息链之前调用此命令。
+/// 超出 `MAX_TOOL_RESULTS_PER_MESSAGE_CHARS` 时，从最大的开始落盘替换。
+#[tauri::command]
+pub async fn ai_enforce_tool_result_budget(
+    session_id: String,
+    results: Vec<tool_result_budget::ToolResultEntry>,
+    app: tauri::AppHandle,
+) -> Result<Vec<tool_result_budget::ToolResultEntry>, AppError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("应用数据目录不可用: {e}")))?;
+    tool_result_budget::enforce(&dir, &session_id, results).await
+}
+
+/// 读取完整落盘工具结果（供前端"查看完整"使用）
+#[tauri::command]
+pub async fn ai_read_tool_result_file(
+    session_id: String,
+    tool_call_id: String,
+    app: tauri::AppHandle,
+) -> Result<String, AppError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("应用数据目录不可用: {e}")))?;
+    tool_result_store::read_full(&dir, &session_id, &tool_call_id).await
 }
 
 // ─────────────────────────────────── 记忆系统 ───────────────────────────────────

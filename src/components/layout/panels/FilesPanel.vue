@@ -8,6 +8,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
+import { useWorkspaceStore } from '@/stores/workspace'
 import { useFileTree } from '@/composables/useFileTree'
 import type { FileNode } from '@/types/workspace-files'
 import WorkspaceRootHeader from './files/WorkspaceRootHeader.vue'
@@ -25,6 +26,7 @@ import {
 
 
 const store = useWorkspaceFilesStore()
+const workspace = useWorkspaceStore()
 const scrollContainerRef = ref<HTMLElement | null>(null)
 const showSearch = ref(false)
 
@@ -69,15 +71,38 @@ function collapseAll() {
 }
 
 // ─── 行交互 ───
+function openFileInTab(node: FileNode) {
+  const existing = workspace.tabs.find(
+    t => t.type === 'file-editor' && t.meta?.absolutePath === node.absolutePath,
+  )
+  if (existing) {
+    workspace.setActiveTab(existing.id)
+    return
+  }
+  workspace.addTab({
+    id: `file-editor:${node.absolutePath}`,
+    type: 'file-editor',
+    title: node.name,
+    closable: true,
+    meta: { absolutePath: node.absolutePath },
+  })
+}
+
 function handleRowClick(e: MouseEvent, node: FileNode) {
   treeHandleRowClick(e, node, store.flatNodes.indexOf(node))
+  // 单击文件 → 直接打开 Tab（忽略多选/范围选择修饰键）
+  if (!node.isDirectory && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    openFileInTab(node)
+  }
 }
 
 function handleRowDblClick(node: FileNode) {
   if (node.isDirectory) {
     store.toggleDir(node.id)
+    return
   }
-  // TODO: 文件双击打开编辑器 Tab（后续任务）
+  // 双击文件仍然打开（兼容习惯），聚焦已有 Tab
+  openFileInTab(node)
 }
 
 // ─── 右键菜单 ───
@@ -87,6 +112,25 @@ const showContextMenu = ref(false)
 
 function handleContextMenu(e: MouseEvent, node: FileNode) {
   contextNode.value = node
+  contextPos.value = { x: e.clientX, y: e.clientY }
+  showContextMenu.value = true
+}
+
+/** 根节点右键 — 合成伪 FileNode 复用同一菜单（含复制路径） */
+function handleRootContextMenu(e: MouseEvent, root: { id: string; path: string; name: string }) {
+  contextNode.value = {
+    id: root.id,
+    rootId: root.id,
+    name: root.name,
+    path: '',
+    absolutePath: root.path,
+    depth: -1,
+    isDirectory: true,
+    isExpanded: true,
+    isLoading: false,
+    isCompressed: false,
+    isRootHeader: true,
+  }
   contextPos.value = { x: e.clientX, y: e.clientY }
   showContextMenu.value = true
 }
@@ -231,6 +275,7 @@ function handleSearchSelect(node: FileNode) {
           <WorkspaceRootHeader
             v-if="store.flatNodes[item.index]?.isRootHeader"
             :root="store.roots.find(r => r.id === store.flatNodes[item.index].rootId)!"
+            @contextmenu="(ev: MouseEvent) => handleRootContextMenu(ev, store.roots.find(r => r.id === store.flatNodes[item.index].rootId)!)"
           />
           <!-- 文件行 -->
           <FileTreeRow
@@ -240,7 +285,7 @@ function handleSearchSelect(node: FileNode) {
             :selected="selectedNodeId === store.flatNodes[item.index]?.id"
             :drag-over="dragOverNodeId === store.flatNodes[item.index]?.id"
             :multi-selected="store.selectedNodes.size > 0 ? store.selectedNodes.has(store.flatNodes[item.index]?.id) : undefined"
-            @click="(node: FileNode) => handleRowClick($event, node)"
+            @click="(ev: MouseEvent, node: FileNode) => handleRowClick(ev, node)"
             @dblclick="handleRowDblClick(store.flatNodes[item.index])"
             @contextmenu="handleContextMenu"
             @dragstart="handleDragStart"

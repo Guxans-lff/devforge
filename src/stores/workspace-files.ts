@@ -22,6 +22,24 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
   /** 多选节点 ID 集合 */
   const selectedNodes = ref<Set<string>>(new Set())
 
+  /** 当前活跃编辑器上下文（用于 AI IDE 上下文注入 P1-4） */
+  interface ActiveEditorInfo {
+    path: string
+    language: string
+    cursorLine: number
+    selectedText: string
+  }
+  const activeEditor = ref<ActiveEditorInfo | null>(null)
+  let _editorSetTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** 节流 300ms 更新 activeEditor（Monaco 光标频繁触发） */
+  function setActiveEditor(info: ActiveEditorInfo | null): void {
+    if (_editorSetTimer) clearTimeout(_editorSetTimer)
+    _editorSetTimer = setTimeout(() => {
+      activeEditor.value = info
+    }, 300)
+  }
+
   // ─── 持久化（仅 roots） ───
   const persistence = usePersistence({
     key: 'workspace-files',
@@ -259,14 +277,39 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
   }
 
   // ─── CRUD 操作 ───
+
+  /**
+   * 主动刷新一个目录的子节点缓存
+   *
+   * 依赖 file_watcher 事件有延迟（notify debounce 300ms）甚至偶发不触发，
+   * CRUD 操作后必须自己刷新父目录以获得即时反馈。
+   */
+  async function refreshDirectory(absolutePath: string): Promise<void> {
+    // 若父目录还未加载过（未展开），无需刷新，展开时会懒加载
+    if (!nodeCache.value.has(absolutePath)) {
+      // 但根目录必须刷新
+      const isRoot = roots.value.some(r => r.path === absolutePath)
+      if (!isRoot) return
+    }
+    const node = findNodeByAbsPath(absolutePath)
+    const depth = node ? (node.depth < 0 ? 0 : node.depth + 1) : 0
+    const rootId =
+      node?.rootId ??
+      roots.value.find(r => absolutePath === r.path || absolutePath.startsWith(r.path + '/'))?.id
+    if (!rootId) return
+    await loadChildren(rootId, absolutePath, depth)
+  }
+
   async function createFile(parentPath: string, name: string): Promise<void> {
     const fullPath = `${parentPath}/${name}`
     await invoke('ws_create_file', { path: fullPath })
+    await refreshDirectory(parentPath)
   }
 
   async function createDirectory(parentPath: string, name: string): Promise<void> {
     const fullPath = `${parentPath}/${name}`
     await invoke('ws_create_directory', { path: fullPath })
+    await refreshDirectory(parentPath)
   }
 
   async function renameEntry(oldAbsPath: string, newName: string): Promise<void> {
@@ -274,14 +317,20 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     const newPath = `${parent}/${newName}`
     await invoke('ws_rename_entry', { oldPath: oldAbsPath, newPath })
     renamingNodeId.value = null
+    await refreshDirectory(parent)
   }
 
   async function deleteEntry(absolutePath: string, permanent = false): Promise<void> {
+    const parent = absolutePath.split('/').slice(0, -1).join('/')
     await invoke('ws_delete_entry', { path: absolutePath, permanent })
+    if (parent) await refreshDirectory(parent)
   }
 
   async function moveEntry(source: string, targetDir: string): Promise<void> {
+    const sourceParent = source.split('/').slice(0, -1).join('/')
     await invoke('ws_move_entry', { source, targetDir })
+    if (sourceParent) await refreshDirectory(sourceParent)
+    await refreshDirectory(targetDir)
   }
 
   // ─── Git 装饰 ───
@@ -493,6 +542,8 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     decorations,
     renamingNodeId,
     selectedNodes,
+    activeEditor,
+    setActiveEditor,
     flatNodes,
     addRoot,
     removeRoot,

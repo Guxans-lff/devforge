@@ -725,10 +725,7 @@ const canSave = computed(() =>
               </div>
 
               <div class="flex items-center gap-3 pl-8 pt-1">
-                <Switch
-                  :checked="form.isDefault"
-                  @update:checked="form.isDefault = $event"
-                />
+                <Switch v-model="form.isDefault" />
                 <Label class="text-xs cursor-pointer" @click="form.isDefault = !form.isDefault">
                   设为默认服务商
                 </Label>
@@ -840,19 +837,19 @@ const canSave = computed(() =>
             <Label class="text-xs font-semibold text-foreground/70">模型能力</Label>
             <div class="grid grid-cols-2 gap-x-6 gap-y-3.5">
               <label class="flex items-center gap-3 text-sm cursor-pointer">
-                <Switch :checked="modelForm.streaming" @update:checked="modelForm.streaming = $event" />
+                <Switch v-model="modelForm.streaming" />
                 <span class="flex items-center gap-1.5"><Zap class="h-3.5 w-3.5 text-muted-foreground" /> 流式输出</span>
               </label>
               <label class="flex items-center gap-3 text-sm cursor-pointer">
-                <Switch :checked="modelForm.vision" @update:checked="modelForm.vision = $event" />
+                <Switch v-model="modelForm.vision" />
                 <span class="flex items-center gap-1.5"><ImageIcon class="h-3.5 w-3.5 text-muted-foreground" /> 图片输入</span>
               </label>
               <label class="flex items-center gap-3 text-sm cursor-pointer">
-                <Switch :checked="modelForm.thinking" @update:checked="modelForm.thinking = $event" />
+                <Switch v-model="modelForm.thinking" />
                 <span class="flex items-center gap-1.5"><Brain class="h-3.5 w-3.5 text-muted-foreground" /> 思考过程</span>
               </label>
               <label class="flex items-center gap-3 text-sm cursor-pointer">
-                <Switch :checked="modelForm.toolUse" @update:checked="modelForm.toolUse = $event" />
+                <Switch v-model="modelForm.toolUse" />
                 <span class="flex items-center gap-1.5"><Wrench class="h-3.5 w-3.5 text-muted-foreground" /> 工具调用</span>
               </label>
             </div>
@@ -873,7 +870,7 @@ const canSave = computed(() =>
           <!-- 定价 -->
           <div class="space-y-3.5">
             <label class="flex items-center gap-3 text-sm cursor-pointer">
-              <Switch :checked="modelForm.pricingEnabled" @update:checked="modelForm.pricingEnabled = $event" />
+              <Switch v-model="modelForm.pricingEnabled" />
               启用定价计费
             </label>
             <div v-if="modelForm.pricingEnabled" class="grid grid-cols-3 gap-3 pl-8">

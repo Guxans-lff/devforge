@@ -61,7 +61,7 @@ export type AiStreamEvent =
   | { type: 'TextDelta'; delta: string }
   | { type: 'ThinkingDelta'; delta: string }
   | { type: 'ToolCall'; id: string; name: string; arguments: string }
-  | { type: 'Usage'; prompt_tokens: number; completion_tokens: number }
+  | { type: 'Usage'; prompt_tokens: number; completion_tokens: number; cache_read_tokens?: number }
   | { type: 'Done'; finish_reason: string }
   | { type: 'Error'; message: string; retryable: boolean }
 

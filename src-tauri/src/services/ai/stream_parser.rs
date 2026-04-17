@@ -219,6 +219,7 @@ pub fn chunk_to_events(
         events.push(AiStreamEvent::Usage {
             prompt_tokens: usage.prompt_tokens,
             completion_tokens: usage.completion_tokens,
+            cache_read_tokens: usage.prompt_cache_hit_tokens.unwrap_or(0),
         });
     }
 

@@ -250,6 +250,15 @@ pub async fn list_sessions(pool: &SqlitePool) -> Result<Vec<AiSession>, AppError
     Ok(sessions)
 }
 
+/// 仅查询所有会话 ID（用于 GC 判定孤儿目录）
+pub async fn list_session_ids(pool: &SqlitePool) -> Result<Vec<String>, AppError> {
+    let rows: Vec<(String,)> = sqlx::query_as("SELECT id FROM ai_sessions")
+        .fetch_all(pool)
+        .await
+        .map_err(|e| AppError::Other(format!("查询会话 ID 列表失败: {e}")))?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 /// 获取单个会话
 pub async fn get_session(pool: &SqlitePool, id: &str) -> Result<Option<AiSession>, AppError> {
     let row: Option<(String, String, String, String, Option<String>, u32, u32, f64, Option<String>, i64, i64, Option<String>)> =
