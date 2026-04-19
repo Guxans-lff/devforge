@@ -1,36 +1,31 @@
 <script setup lang="ts">
 /**
- * AI 文件操作卡片组 — Accept All / Reject All
+ * AI 文件操作卡片组 — Apply / Reject
  *
- * 将多个文件操作卡片聚合展示，提供批量确认/拒绝按钮。
- * @props operations - FileOperation 列表
- * @emits update:operations - 更新操作状态
+ * write_file 已在工具执行时写入磁盘，并保存了写入前快照。
+ * - Apply  → 用 plugin-opener 唤起外部编辑器查看文件（不再重复写盘）
+ * - Reject → 调 ai_revert_write_file 通过快照回滚（删除新建 / 写回原文）
  */
 import { computed } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { openPath } from '@tauri-apps/plugin-opener'
 import type { FileOperation } from '@/types/ai'
 import AiFileOpCard from './AiFileOpCard.vue'
+import { aiRevertWriteFile } from '@/api/ai'
 import { Check } from 'lucide-vue-next'
 
 const props = defineProps<{
   operations: FileOperation[]
+  sessionId?: string
 }>()
 
 const emit = defineEmits<{
   'update:operations': [ops: FileOperation[]]
 }>()
 
-/** 是否还有待确认的操作 */
 const hasPending = computed(() =>
   props.operations.some(op => op.status === 'pending')
 )
 
-/**
- * 是否自动展开 mini diff
- * - 新建文件：自动展开
- * - 删除文件：自动展开
- * - 行数变化 ≥ 3：自动展开
- */
 function shouldAutoExpand(op: FileOperation): boolean {
   if (op.op === 'create') return true
   if (!op.oldContent || !op.newContent) return false
@@ -39,65 +34,30 @@ function shouldAutoExpand(op: FileOperation): boolean {
   return Math.abs(newLines - oldLines) >= 3 || op.op === 'delete'
 }
 
-/**
- * 应用单个文件操作（写入/删除文件）
- * @param op 文件操作对象
- */
+/** Apply：唤起系统默认编辑器（VSCode 等）查看文件 */
 async function handleApply(op: FileOperation) {
   try {
-    if (op.op === 'modify' && op.oldContent) {
-      try {
-        const currentContent: string = await invoke('local_read_file_content', { path: op.path })
-        if (currentContent !== op.oldContent) {
-          const ok = confirm(`文件 ${op.fileName} 已被外部修改，是否强制覆盖？`)
-          if (!ok) return
-        }
-      } catch {
-        // 文件可能不存在（新建场景），继续执行
-      }
-    }
-
-    if (op.op !== 'delete' && op.newContent !== undefined) {
-      await invoke('ws_create_file', { path: op.path, content: op.newContent })
-    } else if (op.op === 'delete') {
-      await invoke('ws_delete_entry', { path: op.path, permanent: false })
-    }
-
+    await openPath(op.path)
     updateOpStatus(op.toolCallId, 'applied')
   } catch (e) {
     updateOpStatus(op.toolCallId, 'error', String(e))
   }
 }
 
-/**
- * 拒绝单个文件操作（还原文件内容）
- * @param op 文件操作对象
- */
+/** Reject：通过写入前快照回滚 */
 async function handleReject(op: FileOperation) {
+  if (!props.sessionId) {
+    updateOpStatus(op.toolCallId, 'error', '缺少 sessionId，无法回滚')
+    return
+  }
   try {
-    if (op.op === 'modify' && op.oldContent) {
-      // 还原旧内容
-      await invoke('ws_create_file', { path: op.path, content: op.oldContent })
-    } else if (op.op === 'create') {
-      try {
-        // 新建文件被拒绝则删除
-        await invoke('ws_delete_entry', { path: op.path, permanent: false })
-      } catch {
-        // 文件可能已不存在，忽略错误
-      }
-    }
+    await aiRevertWriteFile(props.sessionId, op.toolCallId, op.path)
     updateOpStatus(op.toolCallId, 'rejected')
   } catch (e) {
     updateOpStatus(op.toolCallId, 'error', String(e))
   }
 }
 
-/**
- * 更新操作状态并通知父组件
- * @param toolCallId 工具调用 ID
- * @param status 新状态
- * @param errorMessage 错误信息（可选）
- */
 function updateOpStatus(toolCallId: string, status: FileOperation['status'], errorMessage?: string) {
   const updated = props.operations.map(op =>
     op.toolCallId === toolCallId ? { ...op, status, errorMessage } : op
@@ -105,21 +65,15 @@ function updateOpStatus(toolCallId: string, status: FileOperation['status'], err
   emit('update:operations', updated)
 }
 
-/** 批量确认所有待处理操作 */
 async function acceptAll() {
   for (const op of props.operations) {
-    if (op.status === 'pending') {
-      await handleApply(op)
-    }
+    if (op.status === 'pending') await handleApply(op)
   }
 }
 
-/** 批量拒绝所有待处理操作 */
 async function rejectAll() {
   for (const op of props.operations) {
-    if (op.status === 'pending') {
-      await handleReject(op)
-    }
+    if (op.status === 'pending') await handleReject(op)
   }
 }
 </script>

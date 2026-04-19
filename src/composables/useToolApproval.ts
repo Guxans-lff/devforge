@@ -4,10 +4,10 @@
  * 为 `write_file` / `edit_file` / `bash` 等副作用工具增加一道用户确认关卡。
  * - 会话内的"信任路径/信任命令"集合短路后续同目标的审批弹窗
  * - Promise 驱动：`requestApproval()` 在 composable 层 await，弹窗决定 resolve
- * - 模块级单例（多处调用共用同一份 pending 状态）
+ * - 按 sessionId 分区隔离，多 Tab 并发互不干扰
  */
 
-import { ref, readonly } from 'vue'
+import { ref, readonly, watch, computed } from 'vue'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('ai.approval')
@@ -17,6 +17,16 @@ export type ApprovalToolName = 'write_file' | 'edit_file' | 'bash' | 'web_fetch'
 
 /** 审批决定 */
 export type ApprovalDecision = 'allow' | 'trust' | 'deny'
+
+/**
+ * 会话级审批模式（三态）
+ * - `ask`    默认，副作用工具均弹窗
+ * - `auto`   全自动：所有副作用工具自动放行（仅在大哥明确授权的 chatMode=auto 下使用）
+ * - `deny`   全拒绝：禁用副作用工具（用于 plan 模式 / 只读探索）
+ */
+export type ApprovalMode = 'ask' | 'auto' | 'deny'
+
+// ─────────────────────── 按 sessionId 分区的状态 ───────────────────────
 
 /** 待审批的请求元数据（送入弹窗展示） */
 export interface PendingApproval {
@@ -36,15 +46,60 @@ export interface PendingApproval {
   resolve: (decision: ApprovalDecision) => void
 }
 
-// ─────────────────────── 模块级单例状态 ───────────────────────
+/** 每个 session 的审批状态 */
+interface SessionApprovalState {
+  mode: ApprovalMode
+  pending: PendingApproval | null
+  timer: ReturnType<typeof setTimeout> | null
+}
 
-const pending = ref<PendingApproval | null>(null)
+const sessionStates = ref<Map<string, SessionApprovalState>>(new Map())
 
-/** 会话内被信任的 key（write/edit = 绝对路径；bash = 命令字面） */
-const trustedKeys = ref<Set<string>>(new Set())
+/** 当前活跃的 sessionId（由 AiChatView 在激活时设置） */
+const activeSessionId = ref<string>('')
 
-/** 持久化到 localStorage（可选，仅保存路径类） */
+/** 5 分钟无操作自动拒绝（防止 AI 挂起等待） */
+const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000
+
+function getOrCreateState(sessionId: string): SessionApprovalState {
+  if (!sessionStates.value.has(sessionId)) {
+    sessionStates.value.set(sessionId, { mode: 'ask', pending: null, timer: null })
+  }
+  return sessionStates.value.get(sessionId)!
+}
+
+// ─────────────────────── 活跃 session 设置 ───────────────────────
+
+/** 设置当前活跃的 sessionId（由 AiChatView onActivated 调用） */
+export function setActiveSessionId(sessionId: string): void {
+  activeSessionId.value = sessionId
+}
+
+// ─────────────────────── 审批模式 ───────────────────────
+
+/** 供 UI 订阅当前模式（基于活跃 session） */
+export function useApprovalMode() {
+  return computed(() => {
+    const sid = activeSessionId.value
+    if (!sid) return 'ask' as ApprovalMode
+    return getOrCreateState(sid).mode
+  })
+}
+
+/** 设置指定会话的审批模式 */
+export function setApprovalMode(mode: ApprovalMode, sessionId?: string): void {
+  const sid = sessionId ?? activeSessionId.value
+  if (!sid) return
+  const state = getOrCreateState(sid)
+  if (state.mode === mode) return
+  log.info('approval_mode_changed', { sessionId: sid, from: state.mode, to: mode })
+  state.mode = mode
+}
+
+// ─────────────────────── 持久化信任集合 ───────────────────────
+
 const STORAGE_KEY = 'ai.trustedPaths'
+const trustedKeys = ref<Set<string>>(new Set())
 
 function loadTrusted(): void {
   try {
@@ -81,6 +136,8 @@ export interface RequestApprovalOptions {
   newContent?: string
   /** 旧内容（edit_file 可选） */
   oldContent?: string
+  /** 所属会话 ID（必填，避免跨 Tab 串扰） */
+  sessionId: string
 }
 
 /**
@@ -88,21 +145,37 @@ export interface RequestApprovalOptions {
  * 否则展示弹窗并返回一个 Promise，用户点击按钮后 resolve。
  */
 export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalDecision> {
+  const { sessionId } = opts
+  const state = getOrCreateState(sessionId)
+
   const trustKey = opts.toolName === 'bash'
     ? (opts.command ?? '').trim()
     : opts.toolName === 'web_fetch'
       ? (opts.url ?? '').trim()
       : (opts.path ?? '').trim()
 
+  // 会话级审批模式短路
+  if (state.mode === 'auto') {
+    log.info('approval_auto_mode_allow', { toolName: opts.toolName, trustKey, sessionId })
+    return Promise.resolve('allow')
+  }
+  if (state.mode === 'deny') {
+    log.info('approval_deny_mode_reject', { toolName: opts.toolName, trustKey, sessionId })
+    return Promise.resolve('deny')
+  }
+
   if (trustKey && trustedKeys.value.has(trustKey)) {
-    log.info('approval_auto_allow', { toolName: opts.toolName, trustKey })
+    log.info('approval_auto_allow', { toolName: opts.toolName, trustKey, sessionId })
     return Promise.resolve('allow')
   }
 
-  // 若已经有 pending，排队等前一个结束（简单串行：一次只弹一个）
-  const prev = pending.value
+  // 若该 session 已经有 pending，排队等前一个结束（串行）
+  const prev = state.pending
   const run = () => new Promise<ApprovalDecision>((resolve) => {
-    pending.value = {
+    // 清理旧定时器
+    if (state.timer) { clearTimeout(state.timer); state.timer = null }
+
+    state.pending = {
       toolName: opts.toolName,
       target: trustKey,
       targetLabel: opts.toolName === 'bash'
@@ -119,13 +192,26 @@ export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalD
       trustKey,
       resolve,
     }
+
+    // 强制触发响应式更新
+    sessionStates.value = new Map(sessionStates.value)
+
+    // 超时自动拒绝
+    const target = trustKey
+    state.timer = setTimeout(() => {
+      state.timer = null
+      if (state.pending?.target === target) {
+        log.warn('approval_timeout', { toolName: opts.toolName, target, sessionId })
+        resolveApproval('deny', sessionId)
+      }
+    }, APPROVAL_TIMEOUT_MS)
   })
 
   if (!prev) return run()
   // 等 prev 解决后再排队
   return new Promise<ApprovalDecision>((resolve) => {
     const unwatch = setInterval(() => {
-      if (!pending.value) {
+      if (!state.pending) {
         clearInterval(unwatch)
         run().then(resolve)
       }
@@ -134,31 +220,51 @@ export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalD
 }
 
 /** 弹窗按钮回调：做出决定 */
-export function resolveApproval(decision: ApprovalDecision): void {
-  const cur = pending.value
+export function resolveApproval(decision: ApprovalDecision, sessionId?: string): void {
+  const sid = sessionId ?? activeSessionId.value
+  if (!sid) return
+  const state = sessionStates.value.get(sid)
+  if (!state) return
+  const cur = state.pending
   if (!cur) return
-  pending.value = null
+
+  if (state.timer) { clearTimeout(state.timer); state.timer = null }
+  state.pending = null
+  // 强制触发响应式更新
+  sessionStates.value = new Map(sessionStates.value)
 
   if (decision === 'trust' && cur.trustKey) {
     trustedKeys.value.add(cur.trustKey)
     persistTrusted()
-    log.info('approval_trusted', { toolName: cur.toolName, trustKey: cur.trustKey })
+    log.info('approval_trusted', { toolName: cur.toolName, trustKey: cur.trustKey, sessionId: sid })
     cur.resolve('allow')
     return
   }
 
-  log.info('approval_decision', { toolName: cur.toolName, decision })
+  log.info('approval_decision', { toolName: cur.toolName, decision, sessionId: sid })
   cur.resolve(decision)
 }
 
 /** 取消当前待审批（如组件卸载/关闭弹窗） — 当作 deny 处理 */
-export function cancelApproval(): void {
-  if (pending.value) resolveApproval('deny')
+export function cancelApproval(sessionId?: string): void {
+  const sid = sessionId ?? activeSessionId.value
+  if (!sid) return
+  const state = sessionStates.value.get(sid)
+  if (state?.pending) resolveApproval('deny', sid)
 }
 
-/** 暴露只读 pending 给 UI */
+/** 暴露只读 pending 给 UI（基于活跃 session） */
 export function usePendingApproval() {
-  return readonly(pending)
+  return computed(() => {
+    const sid = activeSessionId.value
+    if (!sid) return null
+    return sessionStates.value.get(sid)?.pending ?? null
+  })
+}
+
+/** 暴露指定 session 的 pending（供 AiApprovalDialog 使用） */
+export function useSessionPendingApproval(sessionId: string) {
+  return computed(() => sessionStates.value.get(sessionId)?.pending ?? null)
 }
 
 /** 清空信任集合（供设置页使用） */
@@ -170,4 +276,15 @@ export function clearTrustedKeys(): void {
 /** 查询当前信任列表（供设置页展示） */
 export function useTrustedKeys() {
   return readonly(trustedKeys)
+}
+
+/** 清理会话状态（会话关闭时调用） */
+export function cleanupSessionApproval(sessionId: string): void {
+  const state = sessionStates.value.get(sessionId)
+  if (state) {
+    if (state.timer) clearTimeout(state.timer)
+    if (state.pending) state.pending.resolve('deny')
+    sessionStates.value.delete(sessionId)
+    sessionStates.value = new Map(sessionStates.value)
+  }
 }

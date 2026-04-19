@@ -36,6 +36,8 @@ export interface ChatMessage {
   }>
   /** 工具调用 ID（tool 角色必须） */
   toolCallId?: string
+  /** Reasoning 模型（MiMo / DeepSeek-R 系）工作记忆回传 —— assistant 角色携带 */
+  reasoningContent?: string
 }
 
 /** 流式对话参数 */
@@ -51,6 +53,8 @@ export interface ChatStreamParams {
   systemPrompt?: string
   /** 是否启用工具调用 */
   enableTools?: boolean
+  /** Extended Thinking 预算（token），未设置或 <1024 则关闭。仅 Anthropic thinking 能力模型生效 */
+  thinkingBudget?: number
 }
 
 // ─────────────────────────────────── 流式对话 ───────────────────────────────────
@@ -82,6 +86,7 @@ export function aiChatStream(
     temperature: params.temperature ?? null,
     systemPrompt: params.systemPrompt ?? null,
     enableTools: params.enableTools ?? null,
+    thinkingBudget: params.thinkingBudget ?? null,
     onEvent: channel,
   }, { source: 'AI' })
 }
@@ -230,3 +235,39 @@ export function aiReadToolResultFile(
     { source: 'AI' },
   )
 }
+
+/** 回滚 write_file（前端 Reject 调用） */
+export function aiRevertWriteFile(
+  sessionId: string,
+  toolCallId: string,
+  targetPath: string,
+): Promise<string> {
+  return invokeCommand(
+    'ai_revert_write_file',
+    { sessionId, toolCallId, targetPath },
+    { source: 'AI' },
+  )
+}
+
+// ─────────────────────────────────── Workspace 配置 ───────────────────────────────────
+
+/** 读取工作区 .devforge/config.json（返回 null 表示不存在） */
+export function aiReadWorkspaceConfig(root: string): Promise<string | null> {
+  return invokeCommand('ai_read_workspace_config', { root }, { source: 'AI' })
+}
+
+/** 写入工作区 .devforge/config.json */
+export function aiWriteWorkspaceConfig(root: string, content: string): Promise<void> {
+  return invokeCommand('ai_write_workspace_config', { root, content }, { source: 'AI' })
+}
+
+/** 读取单个上下文文件内容（截断到前 maxLines 行） */
+export function aiReadContextFile(root: string, path: string, maxLines?: number): Promise<string> {
+  return invokeCommand('ai_read_context_file', { root, path, maxLines }, { source: 'AI' })
+}
+
+/** 更新会话日志 .devforge/journal.md 中指定标记区间 */
+export function aiUpdateJournalSection(root: string, marker: string, content: string): Promise<void> {
+  return invokeCommand('ai_update_journal_section', { root, marker, content }, { source: 'AI' })
+}
+

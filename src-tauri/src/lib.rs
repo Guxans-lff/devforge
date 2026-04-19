@@ -58,7 +58,17 @@ pub fn run() {
     services::crash_reporter::init_panic_hook();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_log::Builder::default().build())
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .level_for("devforge", log::LevelFilter::Debug)
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Webview),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir { file_name: Some("devforge".into()) }),
+                ])
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         // .plugin(tauri_plugin_updater::Builder::new().build()) // 暂时禁用：当前 endpoint 为 HTTP，Tauri updater 要求 HTTPS，启动时会 panic
@@ -680,6 +690,7 @@ pub fn run() {
             ai_cmd::ai_execute_tool,
             ai_cmd::ai_enforce_tool_result_budget,
             ai_cmd::ai_read_tool_result_file,
+            ai_cmd::ai_revert_write_file,
             ai_cmd::ai_list_memories,
             ai_cmd::ai_save_memory,
             ai_cmd::ai_delete_memory,
@@ -687,6 +698,10 @@ pub fn run() {
             ai_cmd::ai_save_compaction,
             ai_cmd::ai_list_compactions,
             ai_cmd::create_ai_window,
+            ai_cmd::ai_read_workspace_config,
+            ai_cmd::ai_write_workspace_config,
+            ai_cmd::ai_read_context_file,
+            ai_cmd::ai_update_journal_section,
             // Workspace filesystem
             workspace_fs::ws_read_directory,
             workspace_fs::ws_read_directory_recursive,

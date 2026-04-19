@@ -269,4 +269,28 @@ async function handleChoosePath() {
       </button>
     </div>
   </div>
+
+  <!-- ===== AI 对话密度 ===== -->
+  <div class="rounded-2xl bg-card border border-border/50 p-5">
+    <h3 class="text-sm font-bold text-foreground mb-4">AI 对话</h3>
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm font-medium">对话密度</p>
+        <p class="text-xs text-muted-foreground/60 mt-0.5">调整 AI 消息区字号与间距</p>
+      </div>
+      <div class="flex gap-2">
+        <button
+          v-for="opt in [{ value: 'comfortable', label: '舒适' }, { value: 'compact', label: '紧凑' }] as const"
+          :key="opt.value"
+          class="px-4 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+          :class="settingsStore.settings.aiDensity === opt.value
+            ? 'bg-primary text-primary-foreground border-primary'
+            : 'bg-background border-border/50 text-muted-foreground hover:border-primary/40'"
+          @click="settingsStore.update({ aiDensity: opt.value })"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+    </div>
+  </div>
 </template>

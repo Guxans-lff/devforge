@@ -122,6 +122,9 @@ pub struct ChatMessage {
     /// 工具调用 ID（tool 角色必须）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// Reasoning 模型工作记忆回传（MiMo / DeepSeek-R 系，assistant 角色携带）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 /// 工具调用记录（完整）
@@ -172,6 +175,12 @@ pub struct ChatConfig {
     pub tools: Option<Vec<ToolDefinition>>,
     /// 工具选择策略（"auto" | "none"）
     pub tool_choice: Option<String>,
+    /// Thinking/Extended thinking 预算（token 数）。
+    /// - `None` 或 `Some(0)` 表示关闭
+    /// - Anthropic: 启用时会在请求体加 `thinking: { type: "enabled", budget_tokens: N }`
+    /// - 仅支持 thinking 能力的模型生效
+    #[serde(default)]
+    pub thinking_budget: Option<u32>,
 }
 
 impl Default for ChatConfig {
@@ -183,6 +192,7 @@ impl Default for ChatConfig {
             system_prompt: None,
             tools: None,
             tool_choice: None,
+            thinking_budget: None,
         }
     }
 }
@@ -204,6 +214,16 @@ pub enum AiStreamEvent {
         id: String,
         name: String,
         arguments: String,
+    },
+    /// 工具调用参数增量（流式累积进度，用于 UI 实时反馈）
+    ToolCallDelta {
+        index: u32,
+        /// 首次出现时携带
+        id: Option<String>,
+        /// 首次出现时携带
+        name: Option<String>,
+        /// 本次增量片段（前端自行累加）
+        arguments_delta: String,
     },
     /// 用量统计（流结束时发送）
     Usage {

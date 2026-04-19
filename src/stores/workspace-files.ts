@@ -321,9 +321,21 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
   }
 
   async function deleteEntry(absolutePath: string, permanent = false): Promise<void> {
-    const parent = absolutePath.split('/').slice(0, -1).join('/')
     await invoke('ws_delete_entry', { path: absolutePath, permanent })
-    if (parent) await refreshDirectory(parent)
+    // 从父目录缓存里直接移除该节点，避免整棵树重渲染
+    const sep = absolutePath.lastIndexOf('/')
+    const parent = sep > 0 ? absolutePath.slice(0, sep) : ''
+    if (parent && nodeCache.value.has(parent)) {
+      const filtered = nodeCache.value.get(parent)!.filter(n => n.absolutePath !== absolutePath)
+      nodeCache.value.set(parent, filtered)
+      nodeCache.value = new Map(nodeCache.value)
+    }
+    // 若被删的是目录，清理其自身缓存及所有子缓存
+    for (const key of nodeCache.value.keys()) {
+      if (key === absolutePath || key.startsWith(absolutePath + '/')) {
+        nodeCache.value.delete(key)
+      }
+    }
   }
 
   async function moveEntry(source: string, targetDir: string): Promise<void> {
@@ -487,24 +499,38 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
   /** 批量删除选中节点 */
   async function batchDelete(): Promise<{ success: number; failed: number }> {
     let success = 0, failed = 0
-    // 记录受影响的 rootId（在删除前收集，避免清选后拿不到）
-    const rootIds = new Set([...selectedNodes.value].map(id => id.split(':')[0]))
+    const deleted: string[] = []
 
     for (const id of selectedNodes.value) {
       const node = findNodeById(id)
       if (!node) { failed++; continue }
       try {
         await invoke('ws_delete_entry', { path: node.absolutePath, permanent: false })
+        deleted.push(node.absolutePath)
         success++
       } catch { failed++ }
     }
 
     clearSelection()
 
-    // 刷新所有受影响的根目录
-    for (const rid of rootIds) {
-      await refreshRoot(rid)
+    // 局部移除缓存节点，避免全量刷新
+    for (const absPath of deleted) {
+      const sep = absPath.lastIndexOf('/')
+      const parent = sep > 0 ? absPath.slice(0, sep) : ''
+      if (parent && nodeCache.value.has(parent)) {
+        const filtered = nodeCache.value.get(parent)!.filter(n => n.absolutePath !== absPath)
+        nodeCache.value.set(parent, filtered)
+      }
+      for (const key of nodeCache.value.keys()) {
+        if (key === absPath || key.startsWith(absPath + '/')) {
+          nodeCache.value.delete(key)
+        }
+      }
     }
+    if (deleted.length > 0) {
+      nodeCache.value = new Map(nodeCache.value)
+    }
+
     return { success, failed }
   }
 

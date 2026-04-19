@@ -10,7 +10,7 @@ import {
 import type { ColumnDef as TanstackColumnDef, SortingState, ColumnResizeMode, ColumnPinningState } from '@tanstack/vue-table'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { save } from '@tauri-apps/plugin-dialog'
-import { writeTextFile, dbExecuteQueryInDatabase, dbGenerateScript } from '@/api/database'
+import { writeTextFile, dbExecuteQueryInDatabase, dbGenerateScript, dbGetTableData } from '@/api/database'
 import { formatData, getFilters, type ExportFormat } from '@/utils/exportData'
 import { useToast } from '@/composables/useToast'
 import { useAdaptiveOverscan } from '@/composables/useAdaptiveOverscan'
@@ -753,7 +753,26 @@ export function useQueryResult(options: UseQueryResultOptions) {
           // 获取 DDL 失败时静默跳过，不影响数据导出
         }
       }
-      const content = formatData(result.value, format, tablePart, ddl)
+      // 表浏览模式下若服务端还有更多行，从头重新全量分页拉取再导出
+      let exportResult = result.value
+      if (isTableBrowse.value && hasMoreServerRows.value && connectionId.value && database.value && (tableName.value || result.value.tableName)) {
+        const tbl = tableName.value || result.value.tableName!
+        const batchSize = 1000
+        const whereClause = buildServerWhereClause()
+        const orderBy = serverSortCol.value && serverSortDir.value
+          ? `${serverSortCol.value} ${serverSortDir.value}` : null
+        const allRows: unknown[][] = []
+        let page = 1
+        while (true) {
+          const more = await dbGetTableData(connectionId.value, database.value, tbl, page, batchSize, whereClause || null, orderBy)
+          allRows.push(...more.rows)
+          if (more.rows.length < batchSize) break
+          if (more.totalCount !== null && allRows.length >= more.totalCount) break
+          page++
+        }
+        exportResult = { ...result.value, rows: allRows }
+      }
+      const content = formatData(exportResult, format, tablePart, ddl)
       await writeTextFile(path, content)
       toast.success(t('toast.exportSuccess'))
     } catch (e: unknown) {

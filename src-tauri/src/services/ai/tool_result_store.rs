@@ -19,6 +19,33 @@ use crate::utils::error::AppError;
 /// 单工具结果落盘阈值（字符）：超过即落盘只返回预览
 pub const MAX_RESULT_SIZE_CHARS: usize = 30_000;
 
+/// 按工具分级的落盘阈值（字符）——对齐 claude-code `toolLimits.ts` 的分级策略
+///
+/// 未命中的工具走默认 `MAX_RESULT_SIZE_CHARS`。
+/// 字符阈值近似 token * 4（保守估计），宁小勿大以防上下文爆炸。
+///
+/// | 工具 | token 上限 | 字符阈值 | 理由 |
+/// |------|-----------|---------|------|
+/// | bash | 200K | 200_000 | 构建/测试日志可能很长 |
+/// | search_files | 100K | 100_000 | grep 命中多时结果大 |
+/// | read_file | 50K | 50_000 | 单文件读取适中 |
+/// | list_directory | 30K | 30_000 | 目录树不该太大 |
+/// | web_search / web_fetch | 30K | 30_000 | 摘要/正文都已受限 |
+pub fn per_tool_persist_threshold(tool_name: &str) -> usize {
+    match tool_name {
+        "bash" => 200_000,
+        "search_files" => 100_000,
+        "read_file" => 50_000,
+        _ => MAX_RESULT_SIZE_CHARS,
+    }
+}
+
+/// 判断某工具是否应落盘
+#[inline]
+pub fn should_persist_for_tool(tool_name: &str, content: &str) -> bool {
+    content.chars().count() > per_tool_persist_threshold(tool_name)
+}
+
 /// 预览大小（字符）：给模型的文件头部内容
 pub const PREVIEW_SIZE_CHARS: usize = 2_000;
 
@@ -266,4 +293,30 @@ pub async fn gc_orphan_results(
         log::info!(target: "ai.gc", "done removed={} live={}", removed, live_session_ids.len());
     }
     Ok(removed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn per_tool_threshold_respects_classification() {
+        assert_eq!(per_tool_persist_threshold("bash"), 200_000);
+        assert_eq!(per_tool_persist_threshold("search_files"), 100_000);
+        assert_eq!(per_tool_persist_threshold("read_file"), 50_000);
+        // 未分类 → 走默认
+        assert_eq!(per_tool_persist_threshold("list_directory"), MAX_RESULT_SIZE_CHARS);
+        assert_eq!(per_tool_persist_threshold("web_fetch"), MAX_RESULT_SIZE_CHARS);
+    }
+
+    #[test]
+    fn should_persist_for_tool_uses_tool_specific_limit() {
+        // 40K 字符：read_file(50K) 不落盘，list_directory(30K) 落盘
+        let body: String = "a".repeat(40_000);
+        assert!(!should_persist_for_tool("read_file", &body));
+        assert!(should_persist_for_tool("list_directory", &body));
+        // bash 150K 仍不落盘（上限 200K）
+        let big: String = "a".repeat(150_000);
+        assert!(!should_persist_for_tool("bash", &big));
+    }
 }

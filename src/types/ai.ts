@@ -61,6 +61,7 @@ export type AiStreamEvent =
   | { type: 'TextDelta'; delta: string }
   | { type: 'ThinkingDelta'; delta: string }
   | { type: 'ToolCall'; id: string; name: string; arguments: string }
+  | { type: 'ToolCallDelta'; index: number; id?: string; name?: string; arguments_delta: string }
   | { type: 'Usage'; prompt_tokens: number; completion_tokens: number; cache_read_tokens?: number }
   | { type: 'Done'; finish_reason: string }
   | { type: 'Error'; message: string; retryable: boolean }
@@ -120,6 +121,17 @@ export interface AiMessage {
   toolCalls?: ToolCallInfo[]
   /** 工具执行结果（内嵌到 assistant 消息中展示） */
   toolResults?: ToolResultInfo[]
+  /** 消息持久化状态（仅 assistant/user 消息关心） */
+  saveStatus?: 'saving' | 'saved' | 'error'
+  /** 分割线类型（换模型/手动标记），此类消息不参与 AI 上下文 */
+  type?: 'divider'
+  /** 分割线显示文本 */
+  dividerText?: string
+  /** 系统提示横幅（如工具调用超限、流被中断等），独立于 content 渲染 */
+  notice?: {
+    kind: 'warn' | 'error' | 'info'
+    text: string
+  }
 }
 
 // ─────────────────────────────────── Tool Use ───────────────────────────────────
@@ -132,11 +144,21 @@ export interface ToolCallInfo {
   /** 解析后的参数对象 */
   parsedArgs?: Record<string, unknown>
   /** 执行状态 */
-  status: 'pending' | 'running' | 'success' | 'error'
+  status: 'pending' | 'running' | 'success' | 'error' | 'streaming'
+  /** 流式累积进度（status='streaming' 时实时增长，单位字符） */
+  streamingChars?: number
   /** 执行结果 */
   result?: string
   /** 错误信息 */
   error?: string
+  /**
+   * 审批状态（仅 write_file / edit_file / bash / web_fetch 可能出现）
+   * - awaiting: 等待用户点击按钮（UI 内嵌审批条）
+   * - allowed:  用户已点"允许一次"或"信任"
+   * - denied:   用户已拒绝
+   * - undefined: 无需审批 / 尚未进入审批流
+   */
+  approvalState?: 'awaiting' | 'allowed' | 'denied'
 }
 
 /** AI 文件操作信息 */
@@ -218,7 +240,26 @@ export interface FileAttachment {
   error?: string
 }
 
-// ─────────────────────────────────── 旧版兼容（截图翻译使用） ───────────────────────────────────
+// ─────────────────────────────────── Workspace 配置 ───────────────────────────────────
+
+/**
+ * 工作区级 AI 配置（存储在 .devforge/config.json）
+ *
+ * 优先级高于全局 Provider 设置。
+ */
+export interface WorkspaceConfig {
+  /** 首选模型 ID（覆盖全局设置） */
+  preferredModel?: string
+  /** 系统提示覆盖（追加到全局系统提示后） */
+  systemPromptExtra?: string
+  /** 上下文注入文件路径列表（相对于工作区根目录或绝对路径） */
+  contextFiles?: Array<{ path: string; reason?: string }>
+  /** 是否启用 Plan Gate（默认 false） */
+  planGateEnabled?: boolean
+  /** Dispatcher 模式系统提示覆盖 */
+  dispatcherPrompt?: string
+}
+
 
 /** 旧版 AI 配置（保留兼容） */
 export interface AiConfig {

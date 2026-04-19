@@ -29,6 +29,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     bottomPanelCollapsed: true,
     bottomPanelTab: 'query-history',
     immersiveMode: false,
+    zenMode: false,
   })
 
   const activeTab = computed(() =>
@@ -136,6 +137,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const nextIndex = Math.min(index, tabs.value.length - 1)
       activeTabId.value = tabs.value[nextIndex]?.id ?? ''
     }
+  }
+
+  /** 更新指定 Tab 的标题 */
+  function updateTabTitle(tabId: string, title: string) {
+    tabs.value = tabs.value.map(t => t.id === tabId ? { ...t, title } : t)
   }
 
   /** 更新指定 Tab 的 meta（不可变更新） */
@@ -268,6 +274,47 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     _immersiveManuallyExited = false
   }
 
+  // ===== Zen Mode =====
+
+  /** Zen 模式前的面板快照 */
+  let _zenSnapshot: {
+    activeSidePanel: SidePanelId | null
+    bottomPanelCollapsed: boolean
+    showStatusBar: boolean
+  } | null = null
+
+  /** 切换 Zen 模式（隐藏一切 chrome，仅保留当前 Tab 主体） */
+  function toggleZenMode(): void {
+    if (!panelState.value.zenMode) {
+      _zenSnapshot = {
+        activeSidePanel: panelState.value.activeSidePanel,
+        bottomPanelCollapsed: panelState.value.bottomPanelCollapsed,
+        showStatusBar: panelState.value.showStatusBar,
+      }
+      panelState.value = {
+        ...panelState.value,
+        activeSidePanel: null,
+        bottomPanelCollapsed: true,
+        showStatusBar: false,
+        zenMode: true,
+      }
+    } else {
+      const snap = _zenSnapshot ?? {
+        activeSidePanel: 'connections' as SidePanelId,
+        bottomPanelCollapsed: true,
+        showStatusBar: true,
+      }
+      _zenSnapshot = null
+      panelState.value = {
+        ...panelState.value,
+        activeSidePanel: snap.activeSidePanel,
+        bottomPanelCollapsed: snap.bottomPanelCollapsed,
+        showStatusBar: snap.showStatusBar,
+        zenMode: false,
+      }
+    }
+  }
+
   // ===== SQLite 持久化 =====
   /** 持久化快照格式（只保存必要数据，不包含运行时状态） */
   interface PersistedWorkspace {
@@ -328,7 +375,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       activeTabId.value = validActiveTab ? data.activeTabId : (validTabs[0]?.id ?? '')
 
       if (data.panelState) {
-        panelState.value = data.panelState
+        panelState.value = { ...panelState.value, ...data.panelState }
       }
     },
   })
@@ -374,7 +421,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       tabs.value = validTabs
       const validActiveTab = validTabs.find(t => t.id === data.activeTabId)
       activeTabId.value = validActiveTab ? data.activeTabId : (validTabs[0]?.id ?? '')
-      if (data.panelState) panelState.value = data.panelState
+      if (data.panelState) panelState.value = { ...panelState.value, ...data.panelState }
 
       // 立即写入 SQLite
       await persistence.saveImmediate()
@@ -404,6 +451,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     addTab,
     closeTab,
     updateTabMeta,
+    updateTabTitle,
     setActiveTab,
     toggleSidebar,
     toggleBottomPanel,
@@ -415,6 +463,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     enterImmersive,
     exitImmersive,
     resetImmersiveFlag,
+    toggleZenMode,
     // 持久化方法
     restoreState,
     enableAutoSave,

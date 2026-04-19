@@ -1,0 +1,137 @@
+<h2>文件树视觉风格</h2>
+<p class="subtitle">选择你喜欢的整体风格方向</p>
+
+<div class="cards">
+  <!-- Option A: VS Code 风格增强 -->
+  <div class="card" data-choice="vscode-enhanced" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#1e1e2e;border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.8;color:#cdd6f4;">
+        <div style="display:flex;align-items:center;gap:6px;padding:3px 8px;background:#313244;border-radius:4px;margin-bottom:4px;">
+          <span style="color:#89b4fa;">DEVFORGE</span>
+          <span style="margin-left:auto;font-size:10px;color:#6c7086;">3 files changed</span>
+        </div>
+        <div style="padding:2px 0 2px 8px;display:flex;align-items:center;gap:6px;">
+          <span style="color:#fab387;">&#9660;</span>
+          <span style="color:#f9e2af;">&#128193;</span>
+          <span style="color:#cdd6f4;">src</span>
+        </div>
+        <div style="padding:2px 0 2px 24px;display:flex;align-items:center;gap:6px;">
+          <span style="color:#fab387;">&#9660;</span>
+          <span style="color:#89b4fa;">&#128193;</span>
+          <span style="color:#cdd6f4;">components</span>
+        </div>
+        <div style="padding:2px 0 2px 40px;display:flex;align-items:center;gap:6px;background:rgba(137,180,250,0.08);border-radius:4px;">
+          <span style="color:#89dceb;">TS</span>
+          <span style="color:#cdd6f4;">Button.vue</span>
+          <span style="margin-left:auto;font-size:10px;color:#a6e3a1;">M</span>
+        </div>
+        <div style="padding:2px 0 2px 40px;display:flex;align-items:center;gap:6px;">
+          <span style="color:#89dceb;">TS</span>
+          <span style="color:#cdd6f4;">Dialog.vue</span>
+        </div>
+        <div style="padding:2px 0 2px 24px;display:flex;align-items:center;gap:6px;">
+          <span style="color:#fab387;">&#9654;</span>
+          <span style="color:#89b4fa;">&#128193;</span>
+          <span style="color:#cdd6f4;">stores</span>
+          <span style="margin-left:auto;font-size:10px;color:#585b70;">4</span>
+        </div>
+        <div style="padding:2px 0 2px 8px;display:flex;align-items:center;gap:6px;">
+          <span style="color:#89dceb;">&#9881;</span>
+          <span style="color:#bac2de;">vite.config.ts</span>
+          <span style="margin-left:auto;font-size:10px;color:#585b70;">2.1 KB</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 精致增强型</h3>
+      <p>在 VS Code 基础上增强：文件类型图标、Git 装饰、行 hover 高亮、折叠目录子项数量、文件大小提示。风格内敛专业。</p>
+    </div>
+  </div>
+
+  <!-- Option B: macOS Finder 风格 -->
+  <div class="card" data-choice="macos-modern" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#1e1e2e;border-radius:8px;padding:12px;font-family:-apple-system,sans-serif;font-size:12px;line-height:2;color:#cdd6f4;">
+        <div style="padding:4px 10px;display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,rgba(137,180,250,0.15),rgba(137,180,250,0.05));border-radius:8px;margin-bottom:6px;">
+          <span style="font-size:16px;">&#128194;</span>
+          <span style="font-weight:600;color:#89b4fa;">src</span>
+          <span style="margin-left:auto;background:#313244;padding:1px 8px;border-radius:12px;font-size:10px;color:#a6adc8;">12 items</span>
+        </div>
+        <div style="padding:4px 10px 4px 20px;display:flex;align-items:center;gap:8px;border-radius:6px;">
+          <span style="font-size:14px;">&#128194;</span>
+          <span style="color:#cdd6f4;">components</span>
+          <span style="margin-left:auto;background:rgba(166,227,161,0.15);padding:1px 6px;border-radius:8px;font-size:9px;color:#a6e3a1;">+2</span>
+        </div>
+        <div style="padding:4px 10px 4px 36px;display:flex;align-items:center;gap:8px;background:rgba(137,180,250,0.1);border-radius:6px;border-left:2px solid #89b4fa;">
+          <span style="font-size:14px;">&#128196;</span>
+          <span style="color:#cdd6f4;">Button.vue</span>
+          <span style="margin-left:auto;font-size:10px;color:#585b70;">刚刚</span>
+        </div>
+        <div style="padding:4px 10px 4px 36px;display:flex;align-items:center;gap:8px;border-radius:6px;">
+          <span style="font-size:14px;">&#128196;</span>
+          <span style="color:#bac2de;">Dialog.vue</span>
+          <span style="margin-left:auto;font-size:10px;color:#585b70;">2 天前</span>
+        </div>
+        <div style="padding:4px 10px 4px 20px;display:flex;align-items:center;gap:8px;border-radius:6px;">
+          <span style="font-size:14px;">&#128194;</span>
+          <span style="color:#cdd6f4;">stores</span>
+          <span style="margin-left:auto;background:#313244;padding:1px 6px;border-radius:8px;font-size:9px;color:#a6adc8;">4</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 圆润现代型</h3>
+      <p>借鉴 macOS Finder 和 Arc Browser：圆角行项、渐变选中态、时间戳替代大小、胶囊标签。更温暖友好。</p>
+    </div>
+  </div>
+
+  <!-- Option C: 信息密集型 -->
+  <div class="card" data-choice="info-dense" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div style="background:#1e1e2e;border-radius:8px;padding:12px;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.6;color:#cdd6f4;">
+        <div style="display:flex;align-items:center;gap:4px;padding:2px 6px;border-bottom:1px solid #313244;margin-bottom:4px;font-size:10px;">
+          <span style="color:#89b4fa;">&#128269; 搜索</span>
+          <span style="margin-left:auto;color:#585b70;">&#9776; 排序 | &#128065; 筛选</span>
+        </div>
+        <div style="padding:1px 0 1px 6px;display:flex;align-items:center;gap:4px;">
+          <span style="color:#fab387;font-size:8px;">&#9660;</span>
+          <span style="color:#f9e2af;font-size:10px;">&#128193;</span>
+          <span>src/</span>
+          <span style="color:#585b70;font-size:9px;margin-left:auto;">12 | 48KB</span>
+        </div>
+        <div style="padding:1px 0 1px 18px;display:flex;align-items:center;gap:4px;">
+          <span style="color:#fab387;font-size:8px;">&#9660;</span>
+          <span style="color:#89b4fa;font-size:10px;">&#128193;</span>
+          <span>components/</span>
+          <span style="color:#585b70;font-size:9px;margin-left:auto;">6 | 12KB</span>
+        </div>
+        <div style="padding:1px 0 1px 30px;display:flex;align-items:center;gap:4px;background:rgba(137,180,250,0.08);">
+          <span style="color:#89dceb;font-size:9px;">VUE</span>
+          <span>Button.vue</span>
+          <span style="color:#a6e3a1;font-size:9px;">M</span>
+          <span style="color:#585b70;font-size:9px;margin-left:auto;">2.1KB | 5min</span>
+        </div>
+        <div style="padding:1px 0 1px 30px;display:flex;align-items:center;gap:4px;">
+          <span style="color:#89dceb;font-size:9px;">VUE</span>
+          <span>Dialog.vue</span>
+          <span style="color:#585b70;font-size:9px;margin-left:auto;">3.4KB | 2d</span>
+        </div>
+        <div style="padding:1px 0 1px 18px;display:flex;align-items:center;gap:4px;">
+          <span style="color:#fab387;font-size:8px;">&#9654;</span>
+          <span style="color:#89b4fa;font-size:10px;">&#128193;</span>
+          <span>stores/</span>
+          <span style="color:#585b70;font-size:9px;margin-left:auto;">4 | 8KB</span>
+        </div>
+        <div style="padding:1px 0 1px 6px;display:flex;align-items:center;gap:4px;">
+          <span style="color:#89dceb;font-size:9px;">TS</span>
+          <span style="color:#bac2de;">vite.config.ts</span>
+          <span style="color:#585b70;font-size:9px;margin-left:auto;">2.1KB | 1w</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. 信息密集型</h3>
+      <p>JetBrains IDEA 思路：紧凑行高、内嵌搜索栏、文件数+大小+修改时间全显示、排序/筛选按钮。效率至上。</p>
+    </div>
+  </div>
+</div>

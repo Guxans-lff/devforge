@@ -14,8 +14,11 @@ const props = withDefaults(defineProps<{
   code: string
   /** 是否显示顶栏操作按钮（复制/保存），默认 true */
   showActions?: boolean
+  /** 流式生成中，跳过 Shiki 高亮（避免 CPU 飙升） */
+  isStreaming?: boolean
 }>(), {
   showActions: true,
+  isStreaming: false,
 })
 
 const copied = ref(false)
@@ -104,7 +107,7 @@ async function highlight() {
 }
 
 onMounted(highlight)
-watch(() => [props.code, props.language], highlight)
+watch(() => [props.code, props.language], () => { if (!props.isStreaming) highlight() })
 </script>
 
 <template>

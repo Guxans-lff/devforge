@@ -295,8 +295,8 @@ const modelForm = reactive({
   vision: false,
   thinking: false,
   toolUse: false,
-  maxContext: 128000,
-  maxOutput: 4096,
+  maxContext: 200000,
+  maxOutput: 16384,
   pricingEnabled: false,
   inputPer1m: 0,
   outputPer1m: 0,
@@ -426,8 +426,8 @@ function openAddModel() {
   modelForm.vision = false
   modelForm.thinking = false
   modelForm.toolUse = false
-  modelForm.maxContext = 128000
-  modelForm.maxOutput = 4096
+  modelForm.maxContext = 200000
+  modelForm.maxOutput = 16384
   modelForm.pricingEnabled = false
   modelForm.inputPer1m = 0
   modelForm.outputPer1m = 0

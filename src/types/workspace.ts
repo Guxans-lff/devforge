@@ -26,6 +26,8 @@ export interface PanelState {
   bottomPanelTab: 'query-history' | 'log' | 'transfer' | 'history' | 'dev'
   /** 沉浸式模式（AI 对话等场景，隐藏 ActivityBar/SidePanel/BottomPanel/StatusBar） */
   immersiveMode: boolean
+  /** Zen Mode（极简：隐藏所有面板与 TabBar，仅保留当前 Tab 主体） */
+  zenMode: boolean
 }
 
 // 工作区快照 - 用于持久化

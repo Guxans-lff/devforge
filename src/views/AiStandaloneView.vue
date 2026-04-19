@@ -6,7 +6,8 @@
  * 从 URL query 解析 windowId，生成独立 sessionId。
  * 窗口关闭前自动保存会话。
  */
-import { ref, computed, onMounted, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, watch, onBeforeUnmount, shallowRef } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useRoute } from 'vue-router'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiChat } from '@/composables/useAiChat'
@@ -14,6 +15,7 @@ import { useAiMemoryStore } from '@/stores/ai-memory'
 import { useFileAttachment, stripMentionMarkers } from '@/composables/useFileAttachment'
 import { checkTokenLimit } from '@/utils/file-markers'
 import { buildToolGuide } from '@/utils/ai-prompts'
+import { setApprovalMode, setActiveSessionId } from '@/composables/useToolApproval'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import { getCredential } from '@/api/connection'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
@@ -81,6 +83,11 @@ const selectedModelId = ref<string | null>(null)
 const systemPrompt = ref<string | undefined>(undefined)
 const chatMode = ref<ChatMode>('normal')
 
+// chatMode → 审批模式（auto=放行 / plan=拒绝副作用 / normal=弹窗）
+watch(chatMode, (m) => {
+  setApprovalMode(m === 'auto' ? 'auto' : m === 'plan' ? 'deny' : 'ask', currentSessionId.value)
+}, { immediate: true })
+
 const MODE_SUFFIXES: Record<ChatMode, string> = {
   normal: '',
   plan: '\n\n【模式：规划模式】\n你现在处于规划模式。对于用户的任何请求：\n1. 先详细分析需求，列出关键点\n2. 提出实施方案（如有多个方案则对比优劣）\n3. 列出具体步骤计划\n4. 等待用户确认后才给出最终的代码或执行方案\n不要直接给出代码，先让用户审核你的计划。',
@@ -97,6 +104,21 @@ const chat = useAiChat({
   scrollContainer,
 })
 
+// ─────────────────────── 虚拟滚动（G1） ───────────────────────
+
+const virtualizer = useVirtualizer(computed(() => ({
+  count: chat.messages.value.length,
+  getScrollElement: () => scrollContainer.value,
+  estimateSize: () => 120,
+  overscan: 4,
+  measureElement: (el: Element) => el.getBoundingClientRect().height,
+})))
+
+const virtualItems = computed(() => virtualizer.value.getVirtualItems())
+const totalSize = computed(() => virtualizer.value.getTotalSize())
+
+const virtualItemEls = shallowRef<HTMLElement[]>([])
+
 const currentProvider = computed<ProviderConfig | null>(() =>
   store.providers.find(p => p.id === selectedProviderId.value) ?? null,
 )
@@ -110,6 +132,8 @@ const currentModel = computed<ModelConfig | null>(() =>
 let unlistenClose: (() => void) | null = null
 
 onMounted(async () => {
+  if (currentSessionId.value) setActiveSessionId(currentSessionId.value)
+
   try {
     await store.init()
   } catch (e) {
@@ -243,6 +267,37 @@ async function handleContinue() {
     return
   }
   await chat.regenerate(currentProvider.value, currentModel.value, apiKey, effectiveSystemPrompt.value)
+}
+
+/** 一键调大当前模型 maxOutput 并继续刚才未完成的任务 */
+async function handleBumpMaxOutput(value: number) {
+  if (!currentProvider.value || !currentModel.value) return
+  const apiKey = await getCredential(`ai-provider-${currentProvider.value.id}`) ?? ''
+  if (!apiKey) {
+    chat.error.value = '未配置 API Key'
+    return
+  }
+  const provider = currentProvider.value
+  const modelId = currentModel.value.id
+  const next: ProviderConfig = {
+    ...provider,
+    models: provider.models.map(m =>
+      m.id === modelId
+        ? { ...m, capabilities: { ...m.capabilities, maxOutput: value } }
+        : m,
+    ),
+  }
+  await store.saveProvider(next)
+  chat.removeLastError()
+  const nextProvider = store.providers.find(p => p.id === provider.id) ?? next
+  const nextModel = nextProvider.models.find(m => m.id === modelId) ?? currentModel.value
+  await chat.send(
+    '已调大输出预算，请接着上一轮未完成的任务清单继续推进，不要重复已完成步骤',
+    nextProvider,
+    nextModel,
+    apiKey,
+    effectiveSystemPrompt.value,
+  )
 }
 
 function handleCreateSession() {
@@ -491,9 +546,35 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
           </div>
         </div>
 
-        <!-- 消息列表 -->
-        <div v-else class="px-4 pb-4">
-          <AiMessageBubble v-for="msg in chat.messages.value" :key="msg.id" :message="msg" :session-id="currentSessionId" @continue="handleContinue" />
+        <!-- 消息列表（虚拟滚动） -->
+        <div
+          v-else
+          :style="{ height: `${totalSize}px`, width: '100%', position: 'relative' }"
+        >
+          <div
+            :style="{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              transform: `translateY(${virtualItems[0]?.start ?? 0}px)`,
+            }"
+          >
+            <div
+              v-for="vRow in virtualItems"
+              :key="chat.messages.value[vRow.index]!.id + (chat.messages.value[vRow.index]!.isStreaming ? '-s' : '')"
+              :data-index="vRow.index"
+              :ref="(el) => { if (el) { (virtualItemEls.value as HTMLElement[])[vRow.index] = el as HTMLElement; virtualizer.value.measureElement(el as HTMLElement) } }"
+              class="px-4 py-0.5"
+            >
+              <AiMessageBubble
+                :message="chat.messages.value[vRow.index]!"
+                :session-id="currentSessionId"
+                @continue="handleContinue"
+                @bump-max-output="handleBumpMaxOutput"
+              />
+            </div>
+          </div>
         </div>
       </div>
 
@@ -521,6 +602,7 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
           :placeholder="chatMode === 'plan' ? '描述你的需求，AI 将先给出规划方案…' : chatMode === 'auto' ? '描述任务，AI 将自动分析并给出完整方案…' : '发送消息…'"
           @send="handleSend"
           @abort="chat.abort"
+          @clear-session="handleCreateSession"
           @update:selected-provider-id="selectedProviderId = $event"
           @update:selected-model-id="selectedModelId = $event"
           @update:chat-mode="chatMode = $event"

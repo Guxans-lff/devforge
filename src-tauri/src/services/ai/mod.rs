@@ -20,6 +20,7 @@ pub mod memory_models;
 pub mod memory_store;
 pub mod tool_result_store;
 pub mod tool_result_budget;
+pub mod write_snapshot;
 
 use std::collections::HashMap;
 use std::sync::Arc;

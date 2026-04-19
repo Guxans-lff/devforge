@@ -14,6 +14,8 @@ const props = defineProps<{
   fileName: string
   dirPath?: string
   description?: string
+  /** 隐藏底部操作栏（审批卡内嵌场景，按钮由外层提供） */
+  hideActions?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -59,8 +61,8 @@ async function copyNewContent() {
       style="background: radial-gradient(circle, rgba(99,102,241,0.06), transparent 70%);"
     />
 
-    <!-- 文件信息栏 -->
-    <div class="flex items-center gap-2.5 px-4 py-3 relative z-10">
+    <!-- 文件信息栏（非 hideActions 模式才显示，embedded 时外层已有文件名和变更数） -->
+    <div v-if="!hideActions" class="flex items-center gap-2.5 px-4 py-3 relative z-10">
       <div
         class="w-7 h-7 rounded-[10px] flex items-center justify-center shadow-lg"
         style="background: linear-gradient(135deg, #6366f1, #8b5cf6); box-shadow: 0 2px 10px rgba(99,102,241,0.25);"
@@ -192,7 +194,7 @@ async function copyNewContent() {
     </div>
 
     <!-- 操作栏 -->
-    <div class="flex items-center gap-2 px-3.5 py-3">
+    <div v-if="!hideActions" class="flex items-center gap-2 px-3.5 py-3">
       <button
         class="flex items-center gap-1.5 px-5 py-[7px] rounded-[10px] text-[11px] font-semibold text-white border-none cursor-pointer"
         style="background: linear-gradient(135deg, #22c55e, #16a34a); box-shadow: 0 2px 12px rgba(34,197,94,0.2);"

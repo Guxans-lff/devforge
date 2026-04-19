@@ -10,6 +10,7 @@
 use async_trait::async_trait;
 use futures::StreamExt;
 use reqwest::Client;
+use std::sync::Mutex;
 use tauri::ipc::Channel;
 use tokio::sync::watch;
 
@@ -17,20 +18,36 @@ use super::models::*;
 use super::provider::AiProvider;
 use crate::utils::error::AppError;
 
+fn build_http_client() -> Client {
+    Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(30))
+        .read_timeout(std::time::Duration::from_secs(120))
+        .build()
+        .expect("创建 HTTP 客户端失败")
+}
+
 /// Anthropic Provider
 pub struct AnthropicProvider {
-    client: Client,
+    /// Mutex 包装以便连接池坏死时原地替换（VPN 切换自愈）
+    client: Mutex<Client>,
 }
 
 impl AnthropicProvider {
     pub fn new() -> Self {
-        let client = Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(30))
-            .read_timeout(std::time::Duration::from_secs(120))
-            .build()
-            .expect("创建 HTTP 客户端失败");
+        Self {
+            client: Mutex::new(build_http_client()),
+        }
+    }
 
-        Self { client }
+    /// 取当前 client 的克隆（reqwest::Client 内部是 Arc）
+    fn current_client(&self) -> Client {
+        self.client.lock().expect("client mutex poisoned").clone()
+    }
+
+    /// 丢弃旧 client，换成新 client（清空连接池）
+    fn rebuild_client(&self) {
+        let mut guard = self.client.lock().expect("client mutex poisoned");
+        *guard = build_http_client();
     }
 
     /// 构建 Anthropic Messages API 请求体
@@ -127,6 +144,21 @@ impl AnthropicProvider {
         // 温度
         if config.temperature > 0.0 {
             body["temperature"] = serde_json::json!(config.temperature);
+        }
+
+        // Extended Thinking（仅当模型支持且配置了预算时启用）
+        // 启用时 Anthropic 要求 temperature 必须为 1.0，自动覆盖
+        if let Some(budget) = config.thinking_budget {
+            if budget >= 1024 {
+                let caps = self.capabilities(&config.model);
+                if caps.thinking {
+                    body["thinking"] = serde_json::json!({
+                        "type": "enabled",
+                        "budget_tokens": budget
+                    });
+                    body["temperature"] = serde_json::json!(1.0);
+                }
+            }
         }
 
         // 工具定义（转换为 Anthropic 格式）
@@ -226,11 +258,18 @@ impl AiProvider for AnthropicProvider {
         "anthropic"
     }
 
-    fn capabilities(&self, _model: &str) -> ModelCapabilities {
+    fn capabilities(&self, model: &str) -> ModelCapabilities {
+        // claude-3.7 / claude-sonnet-4 / claude-opus-4 系列原生支持 Extended Thinking
+        let lower = model.to_lowercase();
+        let supports_thinking = lower.contains("claude-3-7")
+            || lower.contains("claude-3.7")
+            || lower.contains("claude-sonnet-4")
+            || lower.contains("claude-opus-4")
+            || lower.contains("claude-haiku-4");
         ModelCapabilities {
             streaming: true,
             vision: true,
-            thinking: false,
+            thinking: supports_thinking,
             tool_use: true,
             max_context: 200000,
             max_output: 8192,
@@ -252,17 +291,19 @@ impl AiProvider for AnthropicProvider {
 
         log::info!("Anthropic 请求: {} model={}", url, config.model);
 
-        let builder = self
-            .client
-            .post(&url)
-            .header("x-api-key", api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("Content-Type", "application/json")
-            .json(&body);
-
-        let response = super::http_retry::send_with_backoff(builder)
-            .await
-            .map_err(|e| AppError::Connection(format!("Anthropic API 请求失败: {e}")))?;
+        let response = super::http_retry::send_with_rebuild(
+            || {
+                self.current_client()
+                    .post(&url)
+                    .header("x-api-key", api_key)
+                    .header("anthropic-version", "2023-06-01")
+                    .header("Content-Type", "application/json")
+                    .json(&body)
+            },
+            || self.rebuild_client(),
+        )
+        .await
+        .map_err(|e| AppError::Connection(format!("Anthropic API 请求失败: {e}")))?;
 
         // 检查 HTTP 状态码
         if !response.status().is_success() {

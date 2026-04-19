@@ -33,6 +33,7 @@ pub async fn ai_chat_stream(
     temperature: Option<f64>,
     system_prompt: Option<String>,
     enable_tools: Option<bool>,
+    thinking_budget: Option<u32>,
     on_event: Channel<AiStreamEvent>,
     engine: State<'_, AiEngineState>,
     storage: State<'_, Arc<Storage>>,
@@ -60,6 +61,7 @@ pub async fn ai_chat_stream(
         system_prompt,
         tools,
         tool_choice,
+        thinking_budget,
     };
 
     // 查找 Provider
@@ -190,7 +192,43 @@ pub async fn ai_get_session(
             let messages = session_store::get_messages(&pool, &id).await?;
             Ok(Some((s, messages)))
         }
-        None => Ok(None),
+        None => {
+            // session 行缺失（可能崩溃/中断导致），尝试从孤儿 messages 重建骨架
+            let messages = session_store::get_messages(&pool, &id).await?;
+            if messages.is_empty() {
+                return Ok(None);
+            }
+            let first_ts = messages.first().map(|m| m.created_at).unwrap_or_else(|| {
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as i64
+            });
+            let last_ts = messages.last().map(|m| m.created_at).unwrap_or(first_ts);
+            // 用第一条用户消息前 20 字作标题
+            let title = messages
+                .iter()
+                .find(|m| m.role == "user")
+                .map(|m| m.content.chars().take(20).collect::<String>())
+                .unwrap_or_else(|| "已恢复的对话".to_string());
+            let skeleton = AiSession {
+                id: id.clone(),
+                title,
+                provider_id: String::new(),
+                model: String::new(),
+                system_prompt: None,
+                message_count: messages.len() as u32,
+                total_tokens: 0,
+                estimated_cost: 0.0,
+                tags: None,
+                created_at: first_ts,
+                updated_at: last_ts,
+                work_dir: None,
+            };
+            // 写回 DB，避免下次再走重建逻辑
+            let _ = session_store::save_session(&pool, &skeleton).await;
+            Ok(Some((skeleton, messages)))
+        }
     }
 }
 
@@ -326,6 +364,32 @@ pub async fn ai_read_tool_result_file(
     tool_result_store::read_full(&dir, &session_id, &tool_call_id).await
 }
 
+/// 回滚 write_file 工具调用（前端 Reject）
+///
+/// 使用 `write_snapshot` 模块保存的写入前快照恢复磁盘原状态：
+/// - 原文件不存在 → 删除新写入的文件
+/// - 原文件存在 → 写回原始字节
+#[tauri::command]
+pub async fn ai_revert_write_file(
+    session_id: String,
+    tool_call_id: String,
+    target_path: String,
+    app: tauri::AppHandle,
+) -> Result<String, AppError> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| AppError::Other(format!("应用数据目录不可用: {e}")))?;
+    let path = std::path::PathBuf::from(&target_path);
+    crate::services::ai::write_snapshot::revert_from_snapshot(
+        &dir,
+        &session_id,
+        &tool_call_id,
+        &path,
+    )
+    .await
+}
+
 // ─────────────────────────────────── 记忆系统 ───────────────────────────────────
 
 #[tauri::command]
@@ -381,6 +445,94 @@ pub async fn ai_list_compactions(
 ) -> Result<Vec<memory_models::AiCompaction>, AppError> {
     let pool = storage.get_pool().await;
     memory_store::list_compactions(&pool, &session_id).await
+}
+
+// ─────────────────────────────────── Workspace 配置 ───────────────────────────────────
+
+/// 读取工作区 .devforge/config.json
+///
+/// 返回 JSON 字符串；文件不存在时返回 None。
+#[tauri::command]
+pub async fn ai_read_workspace_config(root: String) -> Option<String> {
+    let path = std::path::PathBuf::from(&root).join(".devforge").join("config.json");
+    tokio::fs::read_to_string(&path).await.ok()
+}
+
+/// 写入工作区 .devforge/config.json（自动创建目录）
+#[tauri::command]
+pub async fn ai_write_workspace_config(root: String, content: String) -> Result<(), AppError> {
+    let dir = std::path::PathBuf::from(&root).join(".devforge");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Other(format!("创建 .devforge 目录失败: {e}")))?;
+    tokio::fs::write(dir.join("config.json"), content.as_bytes())
+        .await
+        .map_err(|e| AppError::Other(format!("写入 config.json 失败: {e}")))
+}
+
+/// 读取工作区文件内容（供上下文注入使用）
+///
+/// 路径可以是绝对路径或相对于 root 的相对路径。截断到前 max_lines 行（默认 200）。
+#[tauri::command]
+pub async fn ai_read_context_file(
+    root: String,
+    path: String,
+    max_lines: Option<usize>,
+) -> Result<String, AppError> {
+    let full_path = {
+        let p = std::path::PathBuf::from(&path);
+        if p.is_absolute() { p } else { std::path::PathBuf::from(&root).join(p) }
+    };
+    let content = tokio::fs::read_to_string(&full_path)
+        .await
+        .map_err(|e| AppError::Other(format!("读取上下文文件失败 {path}: {e}")))?;
+    let limit = max_lines.unwrap_or(200);
+    let lines: Vec<&str> = content.lines().collect();
+    if lines.len() > limit {
+        Ok(format!("{}\n[已截断，共 {} 行]", lines[..limit].join("\n"), lines.len()))
+    } else {
+        Ok(content)
+    }
+}
+
+/// 更新会话日志 .devforge/journal.md 中指定标记区间
+///
+/// 找到 `<!-- @@@auto:marker -->...<!-- @@@end:marker -->` 区间并替换内容。
+/// 若文件不存在则创建；若标记不存在则追加。
+#[tauri::command]
+pub async fn ai_update_journal_section(
+    root: String,
+    marker: String,
+    content: String,
+) -> Result<(), AppError> {
+    let dir = std::path::PathBuf::from(&root).join(".devforge");
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| AppError::Other(format!("创建 .devforge 目录失败: {e}")))?;
+    let journal_path = dir.join("journal.md");
+
+    let existing = tokio::fs::read_to_string(&journal_path).await.unwrap_or_default();
+    let open_tag = format!("<!-- @@@auto:{} -->", marker);
+    let close_tag = format!("<!-- @@@end:{} -->", marker);
+
+    let new_section = format!("{}\n{}\n{}", open_tag, content, close_tag);
+    let new_content = if existing.contains(&open_tag) {
+        // 替换现有区间
+        let start = existing.find(&open_tag).unwrap();
+        let end = existing.find(&close_tag).map(|i| i + close_tag.len()).unwrap_or(existing.len());
+        format!("{}{}{}", &existing[..start], new_section, &existing[end..])
+    } else {
+        // 追加
+        if existing.is_empty() {
+            new_section
+        } else {
+            format!("{}\n\n{}", existing.trim_end(), new_section)
+        }
+    };
+
+    tokio::fs::write(&journal_path, new_content.as_bytes())
+        .await
+        .map_err(|e| AppError::Other(format!("写入 journal.md 失败: {e}")))
 }
 
 /// 创建独立 AI 对话窗口

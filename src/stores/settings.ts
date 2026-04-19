@@ -55,6 +55,8 @@ export interface AppSettings {
   scheduleLight: string
   /** 夜间开始时间，格式 "HH:mm"（schedule 模式） */
   scheduleDark: string
+  /** AI 对话密度：comfortable=舒适（默认），compact=紧凑 */
+  aiDensity: 'comfortable' | 'compact'
 }
 
 const defaultShortcuts: ShortcutBinding[] = [
@@ -96,6 +98,7 @@ const defaultShortcuts: ShortcutBinding[] = [
   { id: 'focusEditor', keys: 'Ctrl+Shift+D', category: 'view' },
   { id: 'toggleMessageCenter', keys: 'Ctrl+Shift+M', category: 'view' },
   { id: 'toggleFullscreen', keys: 'F11', category: 'view' },
+  { id: 'toggleZenMode', keys: 'Ctrl+K Z', category: 'view' },
 
   // 通用操作 (5个)
   { id: 'commandPalette', keys: 'Ctrl+K', category: 'general' },
@@ -128,6 +131,7 @@ const defaults: AppSettings = {
   themeDarkId: 'default-dark',
   scheduleLight: '07:00',
   scheduleDark: '19:00',
+  aiDensity: 'comfortable',
 }
 
 /** 合并快捷键：保留用户自定义的绑定，同时补充新增的默认快捷键 */

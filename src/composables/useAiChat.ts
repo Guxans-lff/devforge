@@ -5,7 +5,7 @@
  * 50ms 节流批量 DOM 更新、自动滚动等。
  */
 
-import { ref, computed, nextTick, onUnmounted, toRef, watch, type MaybeRef } from 'vue'
+import { ref, reactive, computed, nextTick, onUnmounted, toRef, watch, type MaybeRef } from 'vue'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import type { Ref } from 'vue'
 import type {
@@ -19,8 +19,8 @@ import type {
   ToolCallInfo,
   ToolResultInfo,
 } from '@/types/ai'
-import { aiChatStream, aiAbortStream, aiSaveMessage, aiGetSession, aiExecuteTool, aiEnforceToolResultBudget } from '@/api/ai'
-import { requestApproval, type ApprovalToolName } from '@/composables/useToolApproval'
+import { aiChatStream, aiAbortStream, aiSaveMessage, aiGetSession, aiExecuteTool, aiEnforceToolResultBudget, aiReadContextFile } from '@/api/ai'
+import { requestApproval, type ApprovalToolName, type ApprovalDecision } from '@/composables/useToolApproval'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiMemoryStore } from '@/stores/ai-memory'
 import { useAutoCompact } from '@/composables/useAutoCompact'
@@ -55,40 +55,47 @@ function pickApprovalTool(name: string): ApprovalToolName | null {
 async function requestApprovalForTool(
   toolName: ApprovalToolName,
   tc: ToolCallInfo,
+  sessionId: string,
+  onAwaiting?: () => void,
 ): Promise<'allow' | 'deny'> {
   const args = tc.parsedArgs ?? tryParseJson(tc.arguments) ?? {}
+  // 标记审批等待态并触发 UI 刷新（让内嵌审批卡挂到该 tool call 上）
+  tc.approvalState = 'awaiting'
+  onAwaiting?.()
+
+  let decision: ApprovalDecision
   if (toolName === 'bash') {
-    const decision = await requestApproval({
+    decision = await requestApproval({
       toolName,
       command: String((args as Record<string, unknown>).command ?? ''),
       newContent: String((args as Record<string, unknown>).command ?? ''),
+      sessionId,
     })
-    return decision === 'deny' ? 'deny' : 'allow'
-  }
-  if (toolName === 'web_fetch') {
-    const decision = await requestApproval({
+  } else if (toolName === 'web_fetch') {
+    decision = await requestApproval({
       toolName,
       url: String((args as Record<string, unknown>).url ?? ''),
+      sessionId,
     })
-    return decision === 'deny' ? 'deny' : 'allow'
-  }
-  // write_file / edit_file
-  const path = String((args as Record<string, unknown>).path ?? '')
-  if (toolName === 'write_file') {
-    const decision = await requestApproval({
+  } else if (toolName === 'write_file') {
+    decision = await requestApproval({
       toolName,
-      path,
+      path: String((args as Record<string, unknown>).path ?? ''),
       newContent: String((args as Record<string, unknown>).content ?? ''),
+      sessionId,
     })
-    return decision === 'deny' ? 'deny' : 'allow'
+  } else {
+    // edit_file
+    decision = await requestApproval({
+      toolName,
+      path: String((args as Record<string, unknown>).path ?? ''),
+      oldContent: String((args as Record<string, unknown>).old_string ?? ''),
+      newContent: String((args as Record<string, unknown>).new_string ?? ''),
+      sessionId,
+    })
   }
-  // edit_file
-  const decision = await requestApproval({
-    toolName,
-    path,
-    oldContent: String((args as Record<string, unknown>).old_string ?? ''),
-    newContent: String((args as Record<string, unknown>).new_string ?? ''),
-  })
+
+  tc.approvalState = decision === 'deny' ? 'denied' : 'allowed'
   return decision === 'deny' ? 'deny' : 'allow'
 }
 
@@ -133,13 +140,28 @@ function buildChatMessages(msgs: AiMessage[]): ChatMessage[] {
 
   for (const msg of msgs) {
     if (msg.role === 'error') continue
+    if (msg.type === 'divider') continue
 
     if (msg.role === 'user') {
       result.push({ role: 'user', content: msg.content })
     } else if (msg.role === 'assistant') {
+      // 孤儿守卫：无 content 且无 toolCalls 的 assistant 不能回传 API
+      // （如上一轮流中途崩溃、模型只吐 thinking 就 stop 的残骸），否则 OpenAI 会返回 400
+      const hasContent = !!(msg.content && msg.content.trim())
+      const hasToolCalls = !!(msg.toolCalls && msg.toolCalls.length > 0)
+      if (!hasContent && !hasToolCalls) continue
+
       const chatMsg: ChatMessage = {
         role: 'assistant',
         content: msg.content || null,
+      }
+      // 回传 reasoning_content（thinking）：
+      // DeepSeek/MiMo 要求在 tool 调用循环内（同 turn）回传，但历史 turn 的 thinking 不应回传：
+      // 1. 历史 thinking 可能数万 token，每轮都带会极速耗尽上下文
+      // 2. 官方"建议保留"指同一 tool 循环内；新一轮用户消息后旧 thinking 无需携带
+      // 因此：只有携带 toolCalls 的 assistant 消息才回传 thinking（tool 循环中间态）
+      if (msg.thinking && msg.thinking.trim() && msg.toolCalls && msg.toolCalls.length > 0) {
+        chatMsg.reasoningContent = msg.thinking
       }
 
       // 携带 toolCalls（如果有）
@@ -202,12 +224,43 @@ export function useAiChat(options: UseAiChatOptions) {
   let pendingTextDelta = ''
   let pendingThinkingDelta = ''
   let throttleTimer: ReturnType<typeof setTimeout> | null = null
+  let _flushRafId: number | null = null
+  let _scrollRafId: number | null = null
 
   /** 当前流式助手消息的 ID */
   let streamingMessageId = ''
 
   /** 工作目录（Tool Use 安全边界），默认取工作区第一个根目录 */
   const workDir = ref('')
+
+  // ─────────────────────── Plan Gate 状态 ───────────────────────
+
+  /** 是否开启规划门控（AI 首轮必须先输出计划，不能调工具） */
+  const planGateEnabled = ref(false)
+  /** 当前对话轮是否已经用户确认过计划 */
+  const planApproved = ref(false)
+  /** AI 输出的最新计划文本（供 AiPlanGateBar 展示） */
+  const pendingPlan = ref('')
+  /** 是否等待用户确认计划（AI 已输出计划，尚未确认） */
+  const awaitingPlanApproval = ref(false)
+
+  /** 确认当前计划并发送继续执行指令 */
+  function approvePlan(): void {
+    planApproved.value = true
+    awaitingPlanApproval.value = false
+  }
+
+  /** 拒绝计划，重置状态允许 AI 重新规划 */
+  function rejectPlan(): void {
+    planApproved.value = false
+    awaitingPlanApproval.value = false
+    pendingPlan.value = ''
+  }
+
+  // ─────────────────────── Phase Tracking 状态 ───────────────────────
+
+  /** 当前活跃阶段信息（从流式内容中实时解析） */
+  const currentPhase = ref<{ current: number; total: number; label: string } | null>(null)
 
   /** 工作区文件 store — 提供可用 workDir 列表 */
   const filesStore = useWorkspaceFilesStore()
@@ -233,9 +286,15 @@ export function useAiChat(options: UseAiChatOptions) {
   /** Tool Use 循环最大次数 */
   const MAX_TOOL_LOOPS = 50
 
-  /** 流式看门狗：30s 无事件即视为卡死 */
-  const STREAM_WATCHDOG_MS = 30_000
+  /**
+   * 流式看门狗（对齐 Claude Code 官方策略）
+   * - 45s: 仅告警日志，不中断（慢模型生成大 JSON 参数期间可能静默）
+   * - 90s: 正式判定卡死，中断流
+   */
+  const STREAM_WATCHDOG_MS = 90_000
+  const STREAM_WATCHDOG_WARN_MS = 45_000
   let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+  let watchdogWarnTimer: ReturnType<typeof setTimeout> | null = null
   /** 工具执行期间暂停看门狗（工具本身可能慢） */
   let inToolExec = false
 
@@ -244,14 +303,25 @@ export function useAiChat(options: UseAiChatOptions) {
       clearTimeout(watchdogTimer)
       watchdogTimer = null
     }
+    if (watchdogWarnTimer) {
+      clearTimeout(watchdogWarnTimer)
+      watchdogWarnTimer = null
+    }
   }
 
   function resetWatchdog(): void {
     clearWatchdog()
+    // 先挂一个 warning（不中断）
+    watchdogWarnTimer = setTimeout(() => {
+      watchdogWarnTimer = null
+      if (inToolExec || !isStreaming.value) return
+      log.warn('watchdog_warning', { sessionId: sessionIdRef.value, ms: STREAM_WATCHDOG_WARN_MS })
+    }, STREAM_WATCHDOG_WARN_MS)
+    // 再挂真正的中断
     watchdogTimer = setTimeout(async () => {
       watchdogTimer = null
       if (inToolExec || !isStreaming.value) return
-      error.value = '流式响应超时（30s 无数据）'
+      error.value = `流式响应超时（${STREAM_WATCHDOG_MS / 1000}s 无数据）`
       log.warn('watchdog_timeout', { sessionId: sessionIdRef.value, ms: STREAM_WATCHDOG_MS })
       try {
         await aiAbortStream(sessionIdRef.value)
@@ -285,18 +355,29 @@ export function useAiChat(options: UseAiChatOptions) {
 
   // ─────────────────────── 计算属性 ───────────────────────
 
-  /** 总 token 数 */
-  const totalTokens = computed(() =>
-    messages.value.reduce((sum, m) => sum + (m.tokens ?? 0), 0),
-  )
+  /**
+   * 当前 context 窗口用量（prompt tokens）
+   * 取最后一条 assistant 消息记录的 prompt_tokens，代表最近一次请求实际消耗。
+   * 历史累加会严重虚高（每轮 prompt 都包含全部历史），不适合作为压缩阈值。
+   */
+  const totalTokens = computed(() => {
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const m = messages.value[i]
+      if (m.role === 'assistant' && m.tokens) return m.tokens
+    }
+    return 0
+  })
 
   /** 是否可以发送（非流式 + 非加载中） */
   const canSend = computed(() => !isStreaming.value && !isLoading.value)
 
   // ─────────────────────── 加载历史消息 ───────────────────────
 
+  let _loadSeq = 0  // 递增版本号，过期请求结果直接丢弃
+
   /** 从后端加载会话历史消息（可传入指定 sessionId，解决响应式延迟问题） */
   async function loadHistory(overrideSessionId?: string): Promise<void> {
+    const seq = ++_loadSeq
     // 先清理流式状态，防止从正在流式的会话切换过来时出现数据混乱
     if (isStreaming.value) {
       isStreaming.value = false
@@ -314,10 +395,12 @@ export function useAiChat(options: UseAiChatOptions) {
     error.value = null
     try {
       const result = await aiGetSession(sid)
+      // 过期请求（被更新的 loadHistory 调用覆盖）直接丢弃
+      if (seq !== _loadSeq) return
       log.info('load_history', { sessionId: sid, hit: !!result, recordCount: result?.[1]?.length ?? 0 })
       if (!result) {
         messages.value = []
-        error.value = `未找到会话 ${sid}`
+        // 新建会话时数据库里还不存在记录，属于正常情况，不视为错误
         return
       }
 
@@ -446,6 +529,43 @@ export function useAiChat(options: UseAiChatOptions) {
       }
     }
 
+    // 工作区配置增强：注入 contextFiles + systemPromptExtra
+    const wsConfig = aiStore.currentWorkspaceConfig
+    if (wsConfig && workDir.value) {
+      // 注入额外系统提示
+      if (wsConfig.systemPromptExtra) {
+        enrichedSystemPrompt = (enrichedSystemPrompt ?? '') + '\n\n' + wsConfig.systemPromptExtra
+      }
+      // 批量读取上下文文件，拼接到系统提示
+      if (wsConfig.contextFiles && wsConfig.contextFiles.length > 0) {
+        const contextParts: string[] = []
+        await Promise.allSettled(
+          wsConfig.contextFiles.map(async (entry) => {
+            try {
+              const fileContent = await aiReadContextFile(workDir.value, entry.path)
+              const header = entry.reason
+                ? `# ${entry.path} (${entry.reason})`
+                : `# ${entry.path}`
+              contextParts.push(`${header}\n\`\`\`\n${fileContent}\n\`\`\``)
+            } catch (e) {
+              log.warn('context_file_read_failed', { path: entry.path }, e)
+            }
+          }),
+        )
+        if (contextParts.length > 0) {
+          enrichedSystemPrompt = (enrichedSystemPrompt ?? '') +
+            '\n\n<context-files>\n' + contextParts.join('\n\n') + '\n</context-files>'
+        }
+      }
+    }
+
+    // Plan Gate：首轮未确认时禁止工具调用，追加约束提示
+    if (planGateEnabled.value && !planApproved.value) {
+      enrichedSystemPrompt = (enrichedSystemPrompt ?? '') +
+        '\n\n[PLAN GATE ACTIVE] 你必须先输出清晰的执行计划（步骤列表），' +
+        '不能调用任何工具，等待用户确认后才开始执行。计划中每个步骤请以 "- " 开头。'
+    }
+
     // 1. 添加用户消息到列表
     const userMsg: AiMessage = {
       id: genId(),
@@ -467,6 +587,22 @@ export function useAiChat(options: UseAiChatOptions) {
       createdAt: userMsg.timestamp,
     }
     aiSaveMessage(userRecord).catch(e => log.warn('save_user_msg_failed', { sessionId: sid }, e))
+
+    // 提前保存 session 行，防止崩溃或中断时 messages 成孤儿（无对应 session 记录）
+    if (!aiStore.sessions.some(s => s.id === sid)) {
+      const now = Date.now()
+      aiStore.saveSession({
+        id: sid,
+        title: content.replace(/<file\b[^>]*>[\s\S]*?<\/file>/g, '').trim().slice(0, 50) || '新对话',
+        providerId: provider.id,
+        model: model.id,
+        messageCount: 0,
+        totalTokens: 0,
+        estimatedCost: 0,
+        createdAt: now,
+        updatedAt: now,
+      }).catch(e => log.warn('eager_save_session_failed', { sessionId: sid }, e))
+    }
 
     // 2. 构建发送给 API 的消息列表（包含 tool 消息链）
     const chatMessages: ChatMessage[] = buildChatMessages(messages.value)
@@ -548,7 +684,7 @@ export function useAiChat(options: UseAiChatOptions) {
       const now = Date.now()
       const session: AiSession = {
         id: sid,
-        title: messages.value.find(m => m.role === 'user')?.content.slice(0, 50) ?? '新对话',
+        title: (messages.value.find(m => m.role === 'user')?.content ?? '').replace(/<file\b[^>]*>[\s\S]*?<\/file>/g, '').trim().slice(0, 50) || '新对话',
         providerId: provider.id,
         model: model.id,
         systemPrompt,
@@ -561,20 +697,26 @@ export function useAiChat(options: UseAiChatOptions) {
       }
       aiStore.saveSession(session).catch(e => log.warn('save_session_failed', { sessionId: sid }, e))
 
-      // 自动压缩检测
-      if (model.capabilities.maxContext > 0) {
-        const compacted = await autoCompact.checkAndCompact(
+      // 自动压缩检测：后台异步触发，不阻塞 stream_done
+      // 压缩本身要再调一次 AI（可能耗时数十秒到几分钟），同步 await 会让用户以为卡死
+      const effectiveMaxContext = model.capabilities.maxContext > 0
+        ? model.capabilities.maxContext
+        : 0
+      if (effectiveMaxContext > 0) {
+        autoCompact.checkAndCompact(
           messages.value,
           totalTokens.value,
-          model.capabilities.maxContext,
+          effectiveMaxContext,
           sid,
           provider,
           model,
           apiKey,
-        )
-        if (compacted) {
-          messages.value = compacted
-        }
+        ).then(compacted => {
+          if (compacted) {
+            messages.value = compacted
+            log.info('background_compact_applied', { sessionId: sid, newCount: compacted.length })
+          }
+        }).catch(e => log.warn('background_compact_failed', { sessionId: sid }, e))
       }
     }
   }
@@ -631,6 +773,8 @@ export function useAiChat(options: UseAiChatOptions) {
           maxTokens: model.capabilities.maxOutput > 0 ? model.capabilities.maxOutput : undefined,
           systemPrompt,
           enableTools,
+          // 模型支持 thinking 时默认 8K 预算；后续可由用户面板覆盖
+          thinkingBudget: model.capabilities.thinking ? 8192 : undefined,
         },
         (event: AiStreamEvent) => handleStreamEvent(event),
       )
@@ -639,9 +783,40 @@ export function useAiChat(options: UseAiChatOptions) {
       // 刷新最后的缓冲
       flushPendingDelta()
 
+      // 孤儿守卫：空 assistant（无 content + 无 toolCalls）在此直接转 error
+      // 防止下一轮 buildChatMessages 回传 OpenAI 400
+      const finalMsgCheck = messages.value.find(m => m.id === streamingMessageId)
+      if (finalMsgCheck && finalMsgCheck.role === 'assistant') {
+        const noContent = !finalMsgCheck.content || finalMsgCheck.content.trim() === ''
+        const noToolCalls = pendingToolCalls.length === 0
+        if (noContent && noToolCalls) {
+          const hasThinking = !!(finalMsgCheck.thinking && finalMsgCheck.thinking.trim())
+          // 根据 finish_reason 精准定位根因
+          let errMsg: string
+          if (lastFinishReason === 'length') {
+            errMsg = `[输出被 max_tokens 截断] 模型 thinking 耗尽了输出预算（${model.capabilities.maxOutput} token）还没开始写正文。请在 Provider 设置里调大该模型的"最大输出"（建议 ≥ 16384），或换非 reasoning 模型。`
+          } else if (hasThinking) {
+            errMsg = `[模型 thinking 后 stop 空回] finish_reason=${lastFinishReason}。MiMo / DeepSeek-R 系在 tool 循环第 2 轮常见此问题，尝试：1) 换模型测试 2) 在 Provider 里关闭该模型的 thinking 能力标志 3) 调大 max_tokens。`
+          } else {
+            errMsg = `[模型未生成回复] finish_reason=${lastFinishReason}。可能因异常中断或服务端问题。`
+          }
+          log.warn('empty_assistant_converted_to_error', {
+            sessionId: sid,
+            finishReason: lastFinishReason,
+            hasThinking,
+            maxOutput: model.capabilities.maxOutput,
+          })
+          messages.value = messages.value.map(m =>
+            m.id === streamingMessageId
+              ? { ...m, role: 'error' as const, content: errMsg, isStreaming: false }
+              : m,
+          )
+        }
+      }
+
       // 持久化助手消息
       const finalMsg = messages.value.find(m => m.id === streamingMessageId)
-      if (finalMsg) {
+      if (finalMsg && finalMsg.role === 'assistant') {
         const hasToolCalls = pendingToolCalls.length > 0
         const assistantRecord: AiMessageRecord = {
           id: finalMsg.id,
@@ -653,12 +828,24 @@ export function useAiChat(options: UseAiChatOptions) {
           cost: 0,
           createdAt: finalMsg.timestamp,
         }
-        aiSaveMessage(assistantRecord).catch(e => log.warn('save_assistant_msg_failed', { sessionId: sid }, e))
+        aiSaveMessage(assistantRecord)
+          .catch(e => {
+            log.warn('save_assistant_msg_failed', { sessionId: sid }, e)
+            const idx = messages.value.findIndex(m => m.id === finalMsg.id)
+            if (idx !== -1) messages.value[idx] = { ...messages.value[idx]!, saveStatus: 'error' }
+          })
       }
 
       // 检查是否需要 Tool Use 循环
       if (lastFinishReason !== 'tool_calls' || pendingToolCalls.length === 0) {
-        // 正常结束
+        // 正常结束 — 解析 Session Journal 标记并写入；解析 Dispatcher SPAWN 标记
+        if (workDir.value) {
+          const finalMsg = messages.value.find(m => m.id === streamingMessageId)
+          if (finalMsg?.content) {
+            parseAndWriteJournalSections(finalMsg.content, workDir.value)
+            parseSpawnedTasks(finalMsg.content)
+          }
+        }
         break
       }
 
@@ -669,7 +856,7 @@ export function useAiChat(options: UseAiChatOptions) {
         log.warn('tool_loop_exceeded', { sessionId: sid, max: MAX_TOOL_LOOPS })
         updateStreamingMessage(msg => ({
           ...msg,
-          content: msg.content + '\n\n[AI 工具调用次数超限，已停止]',
+          notice: { kind: 'warn', text: `已达到工具调用上限 ${MAX_TOOL_LOOPS} 次，本轮停止。可继续发消息让 AI 接着干。` },
           isStreaming: false,
         }))
         break
@@ -682,7 +869,9 @@ export function useAiChat(options: UseAiChatOptions) {
       updateStreamingMessage(msg => ({ ...msg, isStreaming: false }))
 
       // 执行所有工具调用
-      const toolResults = await executeToolCalls(pendingToolCalls)
+      log.info('tool_exec_start', { sessionId: sid, tools: pendingToolCalls.map(t => t.name) })
+      const toolResults = await executeToolCalls(pendingToolCalls, sid)
+      log.info('tool_exec_done', { sessionId: sid, resultCount: toolResults.length, results: toolResults.map(r => ({ id: r.toolCallId, name: r.toolName, len: r.content.length })) })
 
       // 更新 UI 中的工具调用状态
       updateStreamingMessage(msg => ({
@@ -692,8 +881,8 @@ export function useAiChat(options: UseAiChatOptions) {
       }))
 
       // 构建下一轮的消息链：追加 assistant(tool_calls) + tool(results)
-      // assistant 消息（携带 tool_calls）
-      chatMessages.push({
+      // 回传 reasoning_content（MiMo / DeepSeek 思考模式 + 工具调用硬性要求）
+      const assistantTurnMsg: ChatMessage = {
         role: 'assistant',
         content: finalMsg?.content || null,
         toolCalls: pendingToolCalls.map(tc => ({
@@ -701,7 +890,11 @@ export function useAiChat(options: UseAiChatOptions) {
           type: 'function',
           function: { name: tc.name, arguments: tc.arguments },
         })),
-      })
+      }
+      if (finalMsg?.thinking && finalMsg.thinking.trim()) {
+        assistantTurnMsg.reasoningContent = finalMsg.thinking
+      }
+      chatMessages.push(assistantTurnMsg)
 
       // 每个工具调用对应一条 tool 消息
       for (const result of toolResults) {
@@ -729,18 +922,21 @@ export function useAiChat(options: UseAiChatOptions) {
 
       // 重置 streamingMessageId 以便下一轮创建新的助手消息
       streamingMessageId = ''
+      log.info('tool_loop_next', { sessionId: sid, loopCount, newMsgCount: chatMessages.length })
     }
   }
 
   /**
    * 并行执行一组工具调用
    */
-  async function executeToolCalls(toolCalls: ToolCallInfo[]): Promise<ToolResultInfo[]> {
+  async function executeToolCalls(toolCalls: ToolCallInfo[], sessionId: string): Promise<ToolResultInfo[]> {
     inToolExec = true
     clearWatchdog()
-    // 更新状态为 running
+    // 初始状态：需要审批的工具保持 pending（UI 不显示转圈，展开可见审批条）；
+    // 其他工具直接进入 running 等执行。
     for (const tc of toolCalls) {
-      tc.status = 'running'
+      const needApproval = pickApprovalTool(tc.name) !== null
+      tc.status = needApproval ? 'pending' : 'running'
     }
     updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
 
@@ -771,7 +967,11 @@ export function useAiChat(options: UseAiChatOptions) {
         // 写/编辑/执行命令类工具需先过审批（P1-1）
         const approvalTool = pickApprovalTool(tc.name)
         if (approvalTool) {
-          const decision = await requestApprovalForTool(approvalTool, tc)
+          const decision = await requestApprovalForTool(approvalTool, tc, sessionId, () => {
+            updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
+          })
+          // 审批决定后刷新 UI（保留 approvalState 痕迹）
+          updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
           if (decision === 'deny') {
             const content = `[user_rejected] 用户拒绝了 ${tc.name} 调用`
             tc.status = 'error'
@@ -786,6 +986,9 @@ export function useAiChat(options: UseAiChatOptions) {
             })
             return
           }
+          // 审批通过：切到 running 让 UI 显示执行中
+          tc.status = 'running'
+          updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
         }
 
         const result = await aiExecuteTool(
@@ -803,6 +1006,16 @@ export function useAiChat(options: UseAiChatOptions) {
         } else {
           // 成功则清零该 key（避免偶发失败误伤）
           toolFailureCounter.delete(failureKey)
+          // write_file / edit_file 成功后，从本地文件编辑器缓存中驱逐该路径，
+          // 下次打开时自动重新读磁盘，保证显示最新内容
+          if (tc.name === 'write_file' || tc.name === 'edit_file') {
+            const filePath = (tc.parsedArgs?.path as string) ?? ''
+            if (filePath) {
+              import('@/stores/local-file-editor').then(({ useLocalFileEditorStore }) => {
+                useLocalFileEditorStore().close(filePath)
+              })
+            }
+          }
         }
 
         results.push({
@@ -864,6 +1077,17 @@ export function useAiChat(options: UseAiChatOptions) {
     switch (event.type) {
       case 'TextDelta':
         pendingTextDelta += event.delta
+        // Phase Tracking：实时从累积文本中解析 [PHASE:N/M label]
+        {
+          const phaseMatch = pendingTextDelta.match(/\[PHASE:(\d+)\/(\d+)\s+([^\]]+)\]/)
+          if (phaseMatch) {
+            currentPhase.value = {
+              current: Number(phaseMatch[1]),
+              total: Number(phaseMatch[2]),
+              label: phaseMatch[3]!.trim(),
+            }
+          }
+        }
         scheduleFlush()
         break
 
@@ -875,13 +1099,26 @@ export function useAiChat(options: UseAiChatOptions) {
       case 'Usage':
         updateStreamingMessage(msg => ({
           ...msg,
-          tokens: event.prompt_tokens + event.completion_tokens,
+          tokens: event.prompt_tokens,  // 只存 prompt tokens，代表本轮 context 窗口消耗
         }))
         break
 
       case 'Done':
         flushPendingDelta()
         lastFinishReason = event.finish_reason
+        log.info('stream_done', {
+          sessionId: sessionIdRef.value,
+          finishReason: event.finish_reason,
+          pendingToolCalls: pendingToolCalls.length,
+        })
+        // Plan Gate 检测：若开启且未确认，检查 AI 是否输出了计划（无工具调用）
+        if (planGateEnabled.value && !planApproved.value && pendingToolCalls.length === 0) {
+          const streamingMsg = messages.value.find(m => m.id === streamingMessageId)
+          if (streamingMsg?.content) {
+            pendingPlan.value = streamingMsg.content
+            awaitingPlanApproval.value = true
+          }
+        }
         break
 
       case 'Error':
@@ -897,31 +1134,71 @@ export function useAiChat(options: UseAiChatOptions) {
 
       case 'ToolCall':
         // 收集工具调用（后端已完成增量拼接，这里收到的是完整的 ToolCall）
-        pendingToolCalls.push({
-          id: event.id,
-          name: event.name,
-          arguments: event.arguments,
-          parsedArgs: tryParseJson(event.arguments),
-          status: 'pending',
-        })
+        // 若 ToolCallDelta 已创建占位（id 匹配），则升级为完整状态，不再新建
+        {
+          const existing = pendingToolCalls.find(tc => tc.id === event.id)
+          if (existing) {
+            existing.name = event.name
+            existing.arguments = event.arguments
+            existing.parsedArgs = tryParseJson(event.arguments)
+            existing.status = 'pending'
+            existing.streamingChars = undefined
+            existing.streamingIndex = undefined
+          } else {
+            // reactive 包装：后续 tc.status / tc.approvalState 等 mutation 才能触发子组件响应式更新
+            pendingToolCalls.push(reactive({
+              id: event.id,
+              name: event.name,
+              arguments: event.arguments,
+              parsedArgs: tryParseJson(event.arguments),
+              status: 'pending',
+            }) as ToolCallInfo)
+          }
+        }
         // 更新 UI
         updateStreamingMessage(msg => ({
           ...msg,
           toolCalls: [...pendingToolCalls],
         }))
         break
+
+      case 'ToolCallDelta':
+        // 流式累积进度：按 index 定位（OpenAI 只在第一个 delta 带 id/name，后续只有 arguments）
+        {
+          let existing = pendingToolCalls.find(tc => tc.streamingIndex === event.index)
+          if (!existing && event.id && event.name) {
+            existing = reactive({
+              id: event.id,
+              name: event.name,
+              arguments: '',
+              status: 'streaming',
+              streamingChars: 0,
+              streamingIndex: event.index,
+            }) as ToolCallInfo
+            pendingToolCalls.push(existing)
+            updateStreamingMessage(msg => ({
+              ...msg,
+              toolCalls: [...pendingToolCalls],
+            }))
+          }
+          if (existing) {
+            existing.arguments += event.arguments_delta
+            existing.streamingChars = existing.arguments.length
+          }
+        }
+        break
     }
   }
 
-  // ─────────────────────── 50ms 节流 ───────────────────────
+  // ─────────────────────── 流式节流（RAF 驱动） ───────────────────────
 
-  /** 调度一次 50ms 后的刷新 */
+  /** 调度一帧后刷新（RAF，比 setTimeout 50ms 更省CPU且对齐渲染节拍） */
   function scheduleFlush(): void {
-    if (throttleTimer) return
-    throttleTimer = setTimeout(() => {
-      throttleTimer = null
+    if (_flushRafId !== null) return
+    _flushRafId = requestAnimationFrame(() => {
+      _flushRafId = null
       flushPendingDelta()
-    }, 50)
+    })
   }
 
   /** 将缓冲区的增量合并到消息中 */
@@ -929,6 +1206,10 @@ export function useAiChat(options: UseAiChatOptions) {
     if (throttleTimer) {
       clearTimeout(throttleTimer)
       throttleTimer = null
+    }
+    if (_flushRafId !== null) {
+      cancelAnimationFrame(_flushRafId)
+      _flushRafId = null
     }
 
     if (!pendingTextDelta && !pendingThinkingDelta) return
@@ -952,12 +1233,11 @@ export function useAiChat(options: UseAiChatOptions) {
 
   // ─────────────────────── 消息更新 ───────────────────────
 
-  /** 不可变更新当前流式消息 */
+  /** 不可变更新当前流式消息（O(1) 索引赋值，避免全量重建数组） */
   function updateStreamingMessage(updater: (msg: AiMessage) => AiMessage): void {
     if (!streamingMessageId) return
-    messages.value = messages.value.map(m =>
-      m.id === streamingMessageId ? updater(m) : m,
-    )
+    const idx = messages.value.findIndex(m => m.id === streamingMessageId)
+    if (idx !== -1) messages.value[idx] = updater(messages.value[idx]!)
   }
 
   // ─────────────────────── 中断 ───────────────────────
@@ -983,6 +1263,7 @@ export function useAiChat(options: UseAiChatOptions) {
 
       if (missing.length > 0) {
         const stubContent = '[工具调用被用户中断，未执行]'
+        const missingIds = new Set(missing.map(tc => tc.id))
         const patchedResults = [
           ...existingResults,
           ...missing.map(tc => ({
@@ -992,7 +1273,16 @@ export function useAiChat(options: UseAiChatOptions) {
             content: stubContent,
           })),
         ]
-        updateStreamingMessage(msg => ({ ...msg, toolResults: patchedResults }))
+        updateStreamingMessage(msg => ({
+          ...msg,
+          toolResults: patchedResults,
+          // 关键：把未完成的 tool_call status 从 running 改为 error，否则 UI 一直转圈
+          toolCalls: (msg.toolCalls ?? []).map(tc =>
+            missingIds.has(tc.id)
+              ? { ...tc, status: 'error' as const, errorMessage: stubContent }
+              : tc,
+          ),
+        }))
 
         // 持久化每条 stub 到 DB，保证历史可加载
         const sid = sessionIdRef.value
@@ -1062,6 +1352,16 @@ export function useAiChat(options: UseAiChatOptions) {
 
   // ─────────────────────── 清空对话 ───────────────────────
 
+  /** 移除列表中最后一条 error 消息（max_tokens 截断恢复场景用） */
+  function removeLastError(): void {
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      if (messages.value[i]?.role === 'error') {
+        messages.value = messages.value.filter((_, idx) => idx !== i)
+        break
+      }
+    }
+  }
+
   function clearMessages(): void {
     messages.value = []
     error.value = null
@@ -1089,14 +1389,58 @@ export function useAiChat(options: UseAiChatOptions) {
   }
 
   /**
-   * 处理用户滚动事件
+   * 处理用户滚动事件（RAF 节流，避免高频触发）
    */
   function handleScroll(event: Event): void {
-    const el = event.target as HTMLElement
-    if (!el) return
-    const threshold = 50
-    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
-    userScrolled.value = !isAtBottom
+    if (_scrollRafId !== null) return
+    _scrollRafId = requestAnimationFrame(() => {
+      _scrollRafId = null
+      const el = event.target as HTMLElement
+      if (!el) return
+      const threshold = 50
+      const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+      userScrolled.value = !isAtBottom
+    })
+  }
+
+  // ─────────────────────── Session Journal 写入 ───────────────────────
+
+  /**
+   * 从 AI 回复文本中提取 <!-- @@@journal:xxx -->...<!-- @@@end:journal:xxx --> 块
+   * 并写入 .devforge/journal.md 对应标记区间。
+   */
+  function parseAndWriteJournalSections(text: string, workDirPath: string): void {
+    const regex = /<!-- @@@journal:(\S+) -->([\s\S]*?)<!-- @@@end:journal:\1 -->/g
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(text)) !== null) {
+      const marker = match[1]!
+      const content = match[2]!.trim()
+      import('@/api/ai').then(({ aiUpdateJournalSection }) => {
+        aiUpdateJournalSection(workDirPath, marker, content)
+          .catch(e => log.warn('journal_write_failed', { marker }, e))
+      })
+    }
+  }
+
+  // ─────────────────────── Dispatcher Spawn 解析 ───────────────────────
+
+  /** Dispatcher 模式下，AI 声明的待执行子任务队列 */
+  const spawnedTasks = ref<Array<{ id: string; description: string; status: 'pending' | 'running' | 'done' | 'error' }>>([])
+
+  /**
+   * 从 AI 回复文本中提取 [SPAWN:xxx] 标记并追加到 spawnedTasks。
+   * 调用方负责执行子任务（如创建新 session 发起新对话）。
+   */
+  function parseSpawnedTasks(text: string): void {
+    const regex = /\[SPAWN:([^\]]+)\]/g
+    let match: RegExpExecArray | null
+    while ((match = regex.exec(text)) !== null) {
+      const description = match[1]!.trim()
+      spawnedTasks.value = [
+        ...spawnedTasks.value,
+        { id: genId(), description, status: 'pending' },
+      ]
+    }
   }
 
   // ─────────────────────── 清理 ───────────────────────
@@ -1106,6 +1450,8 @@ export function useAiChat(options: UseAiChatOptions) {
       clearTimeout(throttleTimer)
       throttleTimer = null
     }
+    if (_flushRafId !== null) { cancelAnimationFrame(_flushRafId); _flushRafId = null }
+    if (_scrollRafId !== null) { cancelAnimationFrame(_scrollRafId); _scrollRafId = null }
     clearWatchdog()
   })
 
@@ -1125,12 +1471,28 @@ export function useAiChat(options: UseAiChatOptions) {
     availableWorkDirs,
     /** 校验路径是否在工作区内 */
     isPathInWorkspace,
+    // Plan Gate
+    planGateEnabled,
+    planApproved,
+    pendingPlan,
+    awaitingPlanApproval,
+    approvePlan,
+    rejectPlan,
+    // Phase Tracking
+    currentPhase,
+    // Dispatcher
+    spawnedTasks,
     // 操作
     loadHistory,
     send,
     abort,
     regenerate,
+    removeLastError,
     clearMessages,
+    /** 手动压缩对话历史 */
+    manualCompact: (provider: ProviderConfig, model: ModelConfig, apiKey: string) =>
+      autoCompact.forceCompact(messages.value, sessionIdRef.value ?? '', provider, model, apiKey)
+        .then(compacted => { if (compacted) messages.value = compacted; return !!compacted }),
     // 滚动
     handleScroll,
     scrollToBottom,

@@ -201,6 +201,16 @@ export function useAutoCompact() {
       timestamp: Date.now(),
     }
 
+    // 插入压缩分割线，显示释放了多少 tokens
+    const dividerMsg: AiMessage = {
+      id: `compact-divider-${Date.now()}`,
+      role: 'system',
+      type: 'divider',
+      dividerText: `Compacted chat · auto · ${compressedTokens.toLocaleString()} tokens freed`,
+      content: '',
+      timestamp: Date.now(),
+    }
+
     consecutiveFailures.value = 0
     log.info('compact_done', {
       sessionId,
@@ -208,7 +218,7 @@ export function useAutoCompact() {
       originalTokens: compressedTokens,
       summaryChars: summary.length,
     })
-    return [summaryMsg, ...toKeep]
+    return [summaryMsg, dividerMsg, ...toKeep]
   }
 
   /** 重置熔断器（新对话时调用） */

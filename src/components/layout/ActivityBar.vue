@@ -56,7 +56,11 @@ const isPanelCollapsed = computed(() => !workspace.panelState.activeSidePanel)
 
 // 在线连接数（用于角标）
 const onlineCount = computed(() => {
-  return connectionStore.connections.filter(c => c.status === 'connected').length
+  let n = 0
+  for (const c of connectionStore.connections.values()) {
+    if (c.status === 'connected') n++
+  }
+  return n
 })
 
 // 上部面板切换图标

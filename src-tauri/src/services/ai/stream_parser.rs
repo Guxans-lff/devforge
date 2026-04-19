@@ -188,10 +188,23 @@ pub fn chunk_to_events(
             }
         }
 
-        // 工具调用增量 → 累积到 accumulator
+        // 工具调用增量 → 累积到 accumulator + 实时 emit ToolCallDelta
         if let Some(ref tool_calls) = choice.delta.tool_calls {
             for tc in tool_calls {
                 accumulator.accumulate(tc);
+                // 每个增量都 emit 一个 ToolCallDelta 事件：
+                // 1) 保活前端 90s watchdog
+                // 2) UI 可实时显示工具调用进度（名称 + 已累积字符数）
+                events.push(AiStreamEvent::ToolCallDelta {
+                    index: tc.index,
+                    id: tc.id.clone(),
+                    name: tc.function.as_ref().and_then(|f| f.name.clone()),
+                    arguments_delta: tc
+                        .function
+                        .as_ref()
+                        .and_then(|f| f.arguments.clone())
+                        .unwrap_or_default(),
+                });
             }
         }
 

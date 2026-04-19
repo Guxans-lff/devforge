@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useTransferStore } from '@/stores/transfer'
+import { useSettingsStore } from '@/stores/settings'
 import ActivityBar from '@/components/layout/ActivityBar.vue'
 import SidePanel from '@/components/layout/SidePanel.vue'
 import StatusBar from '@/components/layout/StatusBar.vue'
@@ -27,13 +28,26 @@ const ScreenshotView = defineAsyncComponent(() => import('@/views/ScreenshotView
 const TunnelView = defineAsyncComponent(() => import('@/views/TunnelView.vue'))
 const AiChatView = defineAsyncComponent(() => import('@/views/AiChatView.vue'))
 const FileEditorView = defineAsyncComponent(() => import('@/views/FileEditorView.vue'))
-const AiApprovalDialog = defineAsyncComponent(() => import('@/components/ai/AiApprovalDialog.vue'))
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const transferStore = useTransferStore()
+const settingsStore = useSettingsStore()
 
 useKeyboardShortcuts()
+
+// 密度切换：写 data-density 到 html 元素
+watch(
+  () => settingsStore.settings.aiDensity,
+  (density) => {
+    if (density === 'compact') {
+      document.documentElement.setAttribute('data-density', 'compact')
+    } else {
+      document.documentElement.removeAttribute('data-density')
+    }
+  },
+  { immediate: true },
+)
 
 const activeTabComponent = computed(() => {
   const tab = workspace.activeTab
@@ -130,6 +144,9 @@ watch(() => workspace.activeTab?.type, (tabType, oldType) => {
     workspace.resetImmersiveFlag()
   }
 })
+
+// ===== AI Side Dock / Zen Mode =====
+const isZen = computed(() => workspace.panelState.zenMode)
 </script>
 
 <template>
@@ -138,46 +155,45 @@ watch(() => workspace.activeTab?.type, (tabType, oldType) => {
     <TitleBar />
 
     <div class="flex flex-1 min-h-0">
-    <!-- Activity Bar + Side Panel（沉浸式下隐藏） -->
-    <ActivityBar v-show="!isImmersive" />
-    <SidePanel v-show="!isImmersive" />
+    <!-- Activity Bar + Side Panel（沉浸式 / Zen 下隐藏） -->
+    <ActivityBar v-show="!isImmersive && !isZen" />
+    <SidePanel v-show="!isImmersive && !isZen" />
 
     <!-- Main Content Area: Floating and elevated -->
-    <div class="flex flex-1 flex-col overflow-hidden bg-background transition-[border-radius] duration-300" :class="isImmersive ? '' : 'sm:rounded-tl-xl border-t border-l border-border/40 shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.15)] dark:shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.6)]'" :style="{ position: 'relative', zIndex: 10 }">
-      <!-- Tab Bar（沉浸式下隐藏） -->
-      <TabBar v-show="!isImmersive" />
+    <div class="flex flex-1 flex-col overflow-hidden bg-background transition-[border-radius] duration-300" :class="(isImmersive || isZen) ? '' : 'sm:rounded-tl-xl border-t border-l border-border/40 shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.15)] dark:shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.6)]'" :style="{ position: 'relative', zIndex: 10 }">
+      <!-- Tab Bar（沉浸式 / Zen 下隐藏） -->
+      <TabBar v-show="!isImmersive && !isZen" />
 
-      <!-- Workspace -->
-      <main class="flex-1 overflow-hidden">
-        <!-- Tab Content with KeepAlive for state preservation -->
-        <KeepAlive :max="10">
-          <component
-            :is="activeTabComponent"
-            v-if="activeTabComponent"
-            :key="workspace.activeTabId"
-            v-bind="activeTabProps"
-          />
-        </KeepAlive>
-        <div
-          v-if="!activeTabComponent && workspace.activeTab"
-          class="flex h-full items-center justify-center text-muted-foreground"
-        >
-          <p class="text-sm">{{ activeTabPlaceholder }}</p>
-        </div>
-      </main>
+      <!-- Workspace 主体 -->
+      <div class="flex flex-1 min-h-0">
+        <main class="flex-1 overflow-hidden min-w-0">
+          <!-- Tab Content with KeepAlive for state preservation -->
+          <KeepAlive :max="10">
+            <component
+              :is="activeTabComponent"
+              v-if="activeTabComponent"
+              :key="workspace.activeTabId"
+              v-bind="activeTabProps"
+            />
+          </KeepAlive>
+          <div
+            v-if="!activeTabComponent && workspace.activeTab"
+            class="flex h-full items-center justify-center text-muted-foreground"
+          >
+            <p class="text-sm">{{ activeTabPlaceholder }}</p>
+          </div>
+        </main>
+      </div>
 
-      <!-- Bottom Panel（沉浸式下隐藏） -->
-      <BottomPanel v-show="!isImmersive" />
+      <!-- Bottom Panel（沉浸式 / Zen 下隐藏） -->
+      <BottomPanel v-show="!isImmersive && !isZen" />
     </div>
     </div>
 
-    <!-- Status Bar（沉浸式下隐藏） -->
-    <StatusBar v-show="!isImmersive && workspace.panelState.showStatusBar" />
+    <!-- Status Bar（沉浸式 / Zen 下隐藏） -->
+    <StatusBar v-show="!isImmersive && !isZen && workspace.panelState.showStatusBar" />
 
     <!-- Command Palette -->
     <CommandPalette />
-
-    <!-- AI 工具审批弹窗（全局单例） -->
-    <AiApprovalDialog />
   </div>
 </template>

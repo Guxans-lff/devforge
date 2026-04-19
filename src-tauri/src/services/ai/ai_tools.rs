@@ -101,7 +101,23 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "read_file".to_string(),
-                description: "读取指定文件的文本内容。支持相对路径（基于工作目录）和绝对路径。大文件可通过 offset/limit 分页读取以节省上下文。".to_string(),
+                description: "读取指定文件的文本内容。\n\n\
+                    ## 何时使用\n\
+                    - 用户明确要求查看某个文件内容\n\
+                    - 回答当前问题**必须**依赖文件实际内容（而不是靠猜）\n\
+                    - 编辑前需要确认文件当前状态\n\n\
+                    ## 何时不要使用（重要）\n\
+                    - ❌ 用户只是打招呼、闲聊、问概念（\"你好\"、\"你是谁\"、\"什么是 XX\"）\n\
+                    - ❌ 为了\"了解项目\"而盲目翻文件——项目结构不是用户的问题\n\
+                    - ❌ 你已经有足够信息回答时，不要\"顺手\"再读一个文件\n\
+                    - ❌ 用 search_files 更合适的场景（找某个符号、关键词）\n\n\
+                    ## 参数\n\
+                    - `path`: 文件路径（相对工作目录或绝对路径）\n\
+                    - `offset`/`limit`: 大文件分页（0 基），省略则读全文；建议 >2000 行的文件用 500 行分页\n\n\
+                    ## 示例\n\
+                    - 用户\"看下 src/main.rs 怎么写的\" → `{\"path\": \"src/main.rs\"}`\n\
+                    - 用户\"第 100-150 行是什么\" → `{\"path\": \"...\", \"offset\": 99, \"limit\": 52}`"
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -126,7 +142,21 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "list_directory".to_string(),
-                description: "列出指定目录的文件和子目录。默认只列出第一层，可设置递归深度。".to_string(),
+                description: "列出指定目录的文件和子目录。\n\n\
+                    ## 何时使用\n\
+                    - 用户明确要求查看目录结构（\"看下项目有哪些文件\"）\n\
+                    - 你不知道目标文件路径，需要定位后再 read_file\n\n\
+                    ## 何时不要使用（重要）\n\
+                    - ❌ 用户打招呼 / 闲聊 / 问概念问题时，**绝对不要**列目录\n\
+                    - ❌ 为了\"熟悉项目\"主动列目录——用户没问就不要看\n\
+                    - ❌ 要找具体文件时改用 search_files（按内容）或直接 read_file（已知路径）\n\
+                    - ❌ 不要一进会话就 `list_directory /` 扫根目录\n\n\
+                    ## 参数\n\
+                    - `path`: 目录路径\n\
+                    - `recursive`: 是否递归（默认 false，只列一层）\n\
+                    - `max_depth`: 递归深度（默认 3）\n\n\
+                    自动跳过 .git、node_modules、target、__pycache__、dist 等噪音目录。"
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -151,7 +181,21 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "search_files".to_string(),
-                description: "在指定目录中搜索文件内容，返回匹配行及文件路径。类似 grep 功能。".to_string(),
+                description: "在目录中按文本模式搜索文件内容（子字符串匹配），返回 `文件:行号: 内容` 列表。类似 grep。\n\n\
+                    ## 何时使用\n\
+                    - 找某个符号/函数/常量在哪里定义或使用\n\
+                    - 排查某个字符串从哪里来\n\
+                    - 批量定位要改的地方\n\n\
+                    ## 何时不要使用\n\
+                    - ❌ 已知具体文件路径时直接用 read_file\n\
+                    - ❌ 用户问概念/闲聊时不要搜\n\
+                    - ❌ 用于遍历目录结构（用 list_directory）\n\n\
+                    ## 参数\n\
+                    - `directory`: 搜索目录\n\
+                    - `pattern`: 搜索文本（不是正则，是子串）\n\
+                    - `case_sensitive`: 默认 false\n\n\
+                    最多返回 100 条匹配；自动跳过 >1MB 文件和二进制。"
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -176,7 +220,20 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "write_file".to_string(),
-                description: "将内容写入指定文件。如果文件不存在则创建，存在则覆盖。可选创建中间目录。".to_string(),
+                description: "将内容写入指定文件（不存在则新建，存在则**完全覆盖**）。\n\n\
+                    ## 何时使用\n\
+                    - 创建新文件\n\
+                    - 对现有文件做大面积重写（多数内容都变）\n\n\
+                    ## 何时不要使用（重要）\n\
+                    - ❌ **小范围修改请用 `edit_file`**——write_file 会重传整个文件，浪费 token\n\
+                    - ❌ **预计 > 1500 行 / > 64KB 的大文件**：先 `write_file` 写最小骨架（如 HTML 头尾 + 空 body），再多次 `edit_file` 填充。**后端硬拦截**：超阈值会直接返回错误（已存在文件强制 edit_file，新文件强制骨架策略）\n\
+                    - ❌ 没读过就写——如果是修改已有文件，先 read_file 确认当前内容\n\
+                    - ❌ 把完整代码贴在对话里；代码的归属是文件，不是聊天\n\n\
+                    ## 参数\n\
+                    - `path`: 文件路径\n\
+                    - `content`: 完整文件内容（单次上限 1MB）\n\
+                    - `create_dirs`: 父目录不存在时自动创建（默认 true）"
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -201,7 +258,23 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "edit_file".to_string(),
-                description: "对已存在文件做精确替换。给定 old_string 必须在文件中唯一出现，会被替换为 new_string。适合小范围修改，比 write_file 重写整文件更节省 token。如 old_string 为空字符串，则视为追加到文件末尾。".to_string(),
+                description: "对已存在文件做**精确字符串替换**。首选的文件修改方式。\n\n\
+                    ## 何时使用\n\
+                    - 修改文件中的某个函数、某几行、某个常量\n\
+                    - 只要不是重写整个文件，都优先用这个\n\n\
+                    ## 何时不要使用\n\
+                    - ❌ 文件不存在（用 write_file 新建）\n\
+                    - ❌ 多数内容都要改（用 write_file 重写）\n\
+                    - ❌ 没读过就改——先 read_file 拿到确切上下文\n\n\
+                    ## 参数\n\
+                    - `path`: 文件路径\n\
+                    - `old_string`: 要被替换的旧文本。**必须在文件中唯一出现**，建议带 3-5 行上下文保证唯一。空串表示追加到末尾。\n\
+                    - `new_string`: 替换后的新文本\n\
+                    - `replace_all`: 是否替换所有出现（默认 false，要求唯一匹配）\n\n\
+                    ## 失败时如何处理\n\
+                    - 报\"未找到\" → 检查空格/缩进/换行是否完全一致\n\
+                    - 报\"匹配到 N 处\" → 把 old_string 加更多上下文使其唯一，或用 replace_all"
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -230,10 +303,24 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "bash".to_string(),
-                description: "在工作目录执行 shell 命令（Windows 用 cmd，其他平台用 bash）。\
-                    用于构建、测试、依赖安装等确实需要外部工具的场景。\
-                    优先使用 read_file / search_files / list_directory 而非 cat/grep/ls。\
-                    已内置安全黑名单拦截破坏性命令（rm -rf /、mkfs、shutdown、管道 sh 等）。"
+                description: "在工作目录执行 shell 命令（Windows 用 cmd，其他平台用 bash）。\n\n\
+                    ## 何时使用\n\
+                    - 构建（npm run build / cargo build）\n\
+                    - 测试（pnpm test / cargo test）\n\
+                    - 依赖安装（npm i / cargo add）\n\
+                    - Git 操作（查看状态/提交——破坏性 Git 命令仍需用户确认）\n\n\
+                    ## 何时不要使用（重要）\n\
+                    - ❌ `cat` / `head` / `tail` / `less` → 用 `read_file`\n\
+                    - ❌ `grep` / `rg` → 用 `search_files`\n\
+                    - ❌ `ls` / `dir` / `find` → 用 `list_directory`\n\
+                    - ❌ `echo \"...\" > file` → 用 `write_file`\n\
+                    - ❌ `sed -i` / `awk` 改文件 → 用 `edit_file`\n\n\
+                    ## 安全约束\n\
+                    已内置黑名单拦截：`rm -rf /`、`mkfs`、`shutdown`、`reboot`、管道执行（`curl | sh`）、fork bomb 等。\n\n\
+                    ## 参数\n\
+                    - `command`: 完整 shell 命令\n\
+                    - `timeout_seconds`: 超时（默认 60，上限 300）\n\
+                    - `description`: 命令意图说明（用于审批面板，不影响执行）"
                     .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -259,10 +346,21 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "web_search".to_string(),
-                description: "使用 Tavily 搜索引擎检索网页内容。\
-                    返回综合答案 + 最多 10 条结果（含标题 / URL / 摘要）。\
-                    需要环境变量 TAVILY_API_KEY，否则调用会报错指引用户配置。\
-                    适用于查文档、查最新 API、补充知识盲区。"
+                description: "通过 Tavily 搜索引擎检索网页。返回综合答案 + 最多 10 条结果（标题/URL/摘要）。\n\n\
+                    ## 何时使用\n\
+                    - 查找最新 API 文档、版本更新、社区讨论\n\
+                    - 你的知识截止日期后可能变化的内容\n\
+                    - 确认某个错误信息在网上的解决方案\n\n\
+                    ## 何时不要使用\n\
+                    - ❌ 用户问项目内部的事（用 read_file / search_files）\n\
+                    - ❌ 通用编程概念（你已经知道，直接答）\n\
+                    - ❌ 简单闲聊 / 打招呼\n\n\
+                    ## 配置\n\
+                    需要环境变量 `TAVILY_API_KEY`。未配置时调用会报 `permission` 错误——此时不要再调，直接文字告知用户并给出其他方案。\n\n\
+                    ## 参数\n\
+                    - `query`: 搜索关键词\n\
+                    - `max_results`: 返回结果数（默认 5，上限 10）\n\
+                    - `topic`: `general` / `news`"
                     .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -286,8 +384,15 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "web_fetch".to_string(),
-                description: "抓取指定 URL 的正文（自动剥 HTML 标签），截断 20KB。\
-                    仅支持 http/https；localhost / 私网段 / 云元数据地址会被拒。"
+                description: "抓取指定 URL 的正文内容（自动剥 HTML 标签，截断到 20KB）。\n\n\
+                    ## 何时使用\n\
+                    - 用户给了一个链接要你读\n\
+                    - web_search 返回结果后要深入看某一页\n\n\
+                    ## 何时不要使用\n\
+                    - ❌ 用户没给 URL 时不要瞎猜域名\n\
+                    - ❌ 本地 / 私网 / 云元数据地址会被拒绝（127.0.0.1、10.x、169.254 等）\n\n\
+                    ## 参数\n\
+                    - `url`: 完整的 http/https URL"
                     .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -302,9 +407,28 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "todo_write".to_string(),
-                description: "规划与跟踪多步任务清单。面对 3 步以上的任务，先用它列出步骤再动手；\
-                    每完成一项调用此工具把对应 id 的 status 更新为 completed，并把下一个置为 in_progress。\
-                    同一时刻只能有一个任务处于 in_progress。工具本身不会真正执行任务，仅用于向用户展示进度。"
+                description: "规划与跟踪多步任务清单——**仅用于真正复杂的多步任务**。\n\n\
+                    ## 何时使用（正例）\n\
+                    - ✅ 实现一个跨多文件的功能（>=3 个不同文件改动）\n\
+                    - ✅ 有明显顺序依赖的任务链（建数据库 → 写 API → 写前端）\n\
+                    - ✅ 用户一次给了多个独立任务（\"帮我做 A、B、C 三件事\"）\n\
+                    - ✅ 调试复杂问题需要分阶段验证\n\n\
+                    ## 何时不要使用（反例，重要）\n\
+                    - ❌ **打招呼 / 闲聊 / 问概念**（\"你好\"、\"你是谁\"、\"1+1\"）\n\
+                    - ❌ 单步操作（改一个变量、读一个文件、答一个问题）\n\
+                    - ❌ 2 步以内就能完成的事\n\
+                    - ❌ 纯信息查询（\"这个项目用什么框架\"）\n\
+                    - ❌ 已完成任务的事后复述\n\n\
+                    ## 使用规则\n\
+                    - 每次调用传**全量**清单（不是增量）\n\
+                    - status: `pending` / `in_progress` / `completed`\n\
+                    - **同一时刻只能有 1 个 in_progress**\n\
+                    - 完成一项立即再次调用把它置 completed、下一个置 in_progress（不要攒着）\n\n\
+                    ## 数据字段\n\
+                    - `id`: 稳定 id，跨轮次保持不变\n\
+                    - `content`: 祈使句（\"写测试\"、\"修复登录 bug\"）\n\
+                    - `activeForm`: 进行时（\"正在写测试\"、\"正在修复登录 bug\"）\n\
+                    - `status`: 当前状态"
                     .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -335,9 +459,19 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             tool_type: "function".to_string(),
             function: ToolFunctionDef {
                 name: "read_tool_result".to_string(),
-                description: "读取之前因过大被持久化到磁盘的工具结果。\
-                    当你在响应中看到 <persisted-output> 标签时，说明该工具的完整输出被存到了磁盘，\
-                    你只看到了前 2000 字符的行对齐预览。需要更多内容时调用此工具，按行分片读取。"
+                description: "读取之前因过大被持久化到磁盘的工具结果（仅在看到 `<persisted-output>` 标签时用）。\n\n\
+                    ## 何时使用\n\
+                    - 上次某个工具返回被截断，你只看到头部 2000 字符行对齐预览\n\
+                    - 响应里出现 `<persisted-output tool_call_id=\"xxx\" .../>` 标签\n\
+                    - 你需要看更多内容才能回答用户\n\n\
+                    ## 何时不要使用\n\
+                    - ❌ 从来没看到过 `<persisted-output>` 标签时不要瞎猜 id\n\
+                    - ❌ 不要自引用（读 read_tool_result 自己的结果）\n\
+                    - ❌ 不要用它读普通文件（用 read_file）\n\n\
+                    ## 参数\n\
+                    - `tool_call_id`: 预览里给出的 id\n\
+                    - `offset_line`: 起始行（0 基，默认 0）\n\
+                    - `limit_lines`: 最多读多少行（默认 500，上限 2000）"
                     .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
@@ -400,7 +534,7 @@ pub async fn execute_tool(
         "read_file" => exec_read_file(arguments, work_dir).await,
         "list_directory" => exec_list_directory(arguments, work_dir).await,
         "search_files" => exec_search_files(arguments, work_dir).await,
-        "write_file" => exec_write_file(arguments, work_dir).await,
+        "write_file" => exec_write_file(arguments, work_dir, session_id, tool_call_id, app_data_dir).await,
         "edit_file" => exec_edit_file(arguments, work_dir).await,
         "bash" => super::exec_bash::exec_bash(arguments, work_dir).await,
         "web_search" => super::exec_web::exec_web_search(arguments).await,
@@ -423,7 +557,8 @@ pub async fn execute_tool(
 
             let skip_persist = PERSIST_SKIP_TOOLS.contains(&name);
             let persistable = tool_result_store::is_persistable(&content);
-            let oversized = tool_result_store::should_persist(&content);
+            // 使用 per-tool 分级阈值（bash 200K / search_files 100K / read_file 50K / 其他 30K）
+            let oversized = tool_result_store::should_persist_for_tool(name, &content);
 
             let final_content = if oversized && !skip_persist && persistable {
                 match app_data_dir {
@@ -781,7 +916,13 @@ struct WriteFileArgs {
     create_dirs: Option<bool>,
 }
 
-async fn exec_write_file(arguments: &str, work_dir: &str) -> Result<String, AppError> {
+async fn exec_write_file(
+    arguments: &str,
+    work_dir: &str,
+    session_id: &str,
+    tool_call_id: &str,
+    app_data_dir: Option<&Path>,
+) -> Result<String, AppError> {
     let args: WriteFileArgs = serde_json::from_str(arguments)
         .map_err(|e| AppError::Other(format!("参数解析失败: {e}")))?;
 
@@ -791,6 +932,48 @@ async fn exec_write_file(arguments: &str, work_dir: &str) -> Result<String, AppE
             "写入内容过大 ({:.1} MB)，超过 {:.0} KB 单次写入上限",
             args.content.len() as f64 / 1024.0 / 1024.0,
             MAX_WRITE_CONTENT_BYTES as f64 / 1024.0
+        )));
+    }
+
+    // 软约束兜底（针对指令遵循较弱的模型，如 MiMo/DeepSeek）
+    // 阈值参考：Claude Code 完全不限，但其底座模型指令遵循强；这里给非 Claude 模型托底
+    // - 已存在文件超阈值：强制 edit_file（重写大文件几乎都是误用）
+    // - 新文件超阈值：提示骨架策略，但允许执行（用户偶尔确实要一次落盘大文件）
+    // 注：流式心跳 + ToolCallDelta 已解决 watchdog 超时，阈值从 16KB 放宽到 64KB
+    const WRITE_SOFT_LINE_LIMIT: usize = 1500;
+    const WRITE_SOFT_BYTE_LIMIT: usize = 64 * 1024;
+    let line_count = args.content.lines().count();
+    let byte_len = args.content.len();
+    let too_big = line_count > WRITE_SOFT_LINE_LIMIT || byte_len > WRITE_SOFT_BYTE_LIMIT;
+
+    // 提前 canonicalize 路径只为判断 existed，validate_path 后面还会再做一次（开销可忽略）
+    let pre_path = if PathBuf::from(&args.path).is_absolute() {
+        PathBuf::from(&args.path)
+    } else {
+        PathBuf::from(work_dir).join(&args.path)
+    };
+    let target_existed = pre_path.exists();
+
+    if too_big && target_existed {
+        return Err(AppError::Other(format!(
+            "write_file 被拒绝：目标文件已存在且新内容过大（{} 行 / {:.1} KB > 上限 {} 行 / {} KB）。\n\
+             **必须改用 edit_file** 做精确替换：用 old_string/new_string 逐段修改，每次只传差异。\n\
+             如果确实要整体重写：先 read_file 确认当前内容，再分多次 edit_file 改造（不要一次性 write_file 覆盖大文件）。",
+            line_count,
+            byte_len as f64 / 1024.0,
+            WRITE_SOFT_LINE_LIMIT,
+            WRITE_SOFT_BYTE_LIMIT / 1024,
+        )));
+    }
+    if too_big && !target_existed {
+        return Err(AppError::Other(format!(
+            "write_file 被拒绝：单次新建文件过大（{} 行 / {:.1} KB > 上限 {} 行 / {} KB）。\n\
+             **改用骨架 + 增量策略**：① 先 write_file 一个 ≤ 200 行的最小骨架（HTML 头尾 + 空 body / 函数签名空实现）；② 然后多次 edit_file 往骨架里填充。\n\
+             理由：一次性大文件会让整段内容序列化进 tool_call 参数，响应时间按每 1000 token ≈ 10 秒线性增长。",
+            line_count,
+            byte_len as f64 / 1024.0,
+            WRITE_SOFT_LINE_LIMIT,
+            WRITE_SOFT_BYTE_LIMIT / 1024,
         )));
     }
 
@@ -807,6 +990,21 @@ async fn exec_write_file(arguments: &str, work_dir: &str) -> Result<String, AppE
 
     let existed = path.exists();
     let byte_count = args.content.len();
+
+    // 写入前保存快照（用于前端 Reject 一键回滚）
+    if let Some(data_dir) = app_data_dir {
+        if let Err(e) = super::write_snapshot::save_snapshot(
+            data_dir,
+            session_id,
+            tool_call_id,
+            &path,
+            existed,
+        )
+        .await
+        {
+            log::warn!(target: "ai.tool", "save snapshot failed (non-fatal): {}", e);
+        }
+    }
 
     tokio::fs::write(&path, &args.content).await
         .map_err(|e| AppError::Other(format!("写入文件失败: {e}")))?;
@@ -1138,7 +1336,7 @@ mod tests {
             "path": "../escape.txt",
             "content": "bad",
         });
-        let res = exec_write_file(&args.to_string(), &work).await;
+        let res = exec_write_file(&args.to_string(), &work, "test-session", "test-tc", None).await;
         assert!(res.is_err(), "越权路径应被 validate_path 拒绝");
     }
 

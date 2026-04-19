@@ -5,19 +5,22 @@
  * 底部集成：文本输入 + 模型选择 + 模式切换 + 配置入口。
  * 支持 Shift+Enter 换行、Enter 发送、自动增高。
  */
-import { ref, computed, nextTick } from 'vue'
+import { ref, computed, nextTick, onMounted } from 'vue'
 import type { ProviderConfig, ModelConfig, FileAttachment } from '@/types/ai'
 import type { FileNode } from '@/types/workspace-files'
 import AtMentionPopover from './AtMentionPopover.vue'
+import SlashCommandPopover, { type SlashCommand } from './SlashCommandPopover.vue'
+import AiPromptEnhancer from './AiPromptEnhancer.vue'
 import {
   Send,
   Square,
   Loader2,
   ChevronDown,
   Settings,
+  MessageSquareText,
   Sparkles,
   Zap,
-  MessageSquareText,
+  Network,
   AtSign,
   Paperclip,
 } from 'lucide-vue-next'
@@ -33,7 +36,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
-export type ChatMode = 'normal' | 'plan' | 'auto'
+export type ChatMode = 'normal' | 'plan' | 'auto' | 'dispatcher'
 
 const props = withDefaults(defineProps<{
   isStreaming?: boolean
@@ -50,6 +53,8 @@ const props = withDefaults(defineProps<{
   chatMode?: ChatMode
   /** 文件附件列表 */
   attachments?: FileAttachment[]
+  /** 上下文使用百分比（0-100），用于显示圆环指示器 */
+  contextUsagePercent?: number
 }>(), {
   isStreaming: false,
   disabled: false,
@@ -60,6 +65,7 @@ const props = withDefaults(defineProps<{
   selectedModelId: null,
   chatMode: 'normal',
   attachments: () => [],
+  contextUsagePercent: 0,
 })
 
 const emit = defineEmits<{
@@ -74,11 +80,74 @@ const emit = defineEmits<{
   dropFilePath: [path: string]
   removeAttachment: [id: string]
   mentionFile: [path: string]
+  clearSession: []
+  compact: []
 }>()
 
 const inputText = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>()
 const isDragOver = ref(false)
+
+// ─────────── 输入历史（G13） ───────────
+const INPUT_HISTORY_KEY = 'ai-input-history'
+const MAX_HISTORY = 50
+const inputHistory = ref<string[]>([])
+const historyIndex = ref(-1)
+const savedDraft = ref('')
+
+onMounted(() => {
+  try {
+    const saved = localStorage.getItem(INPUT_HISTORY_KEY)
+    if (saved) inputHistory.value = JSON.parse(saved)
+  } catch { /* 忽略 */ }
+})
+
+function pushHistory(text: string) {
+  const trimmed = text.trim()
+  if (!trimmed) return
+  // 去重：若已存在则移到末尾
+  const idx = inputHistory.value.indexOf(trimmed)
+  if (idx !== -1) inputHistory.value.splice(idx, 1)
+  inputHistory.value.push(trimmed)
+  if (inputHistory.value.length > MAX_HISTORY) inputHistory.value.shift()
+  try { localStorage.setItem(INPUT_HISTORY_KEY, JSON.stringify(inputHistory.value)) } catch { /* 忽略 */ }
+}
+
+function historyUp() {
+  if (inputHistory.value.length === 0) return
+  if (historyIndex.value === -1) {
+    savedDraft.value = inputText.value
+    historyIndex.value = inputHistory.value.length - 1
+  } else if (historyIndex.value > 0) {
+    historyIndex.value--
+  } else {
+    return
+  }
+  inputText.value = inputHistory.value[historyIndex.value]!
+  nextTick(adjustHeight)
+}
+
+function historyDown() {
+  if (historyIndex.value === -1) return
+  if (historyIndex.value < inputHistory.value.length - 1) {
+    historyIndex.value++
+    inputText.value = inputHistory.value[historyIndex.value]!
+  } else {
+    historyIndex.value = -1
+    inputText.value = savedDraft.value
+  }
+  nextTick(adjustHeight)
+}
+
+// ─────────── 发送快捷键配置（G12） ───────────
+/** 发送方式：enter = Enter 发送，cmd = Cmd/Ctrl+Enter 发送 */
+const SEND_MODE_KEY = 'ai-send-mode'
+const sendMode = ref<'enter' | 'cmd'>((localStorage.getItem(SEND_MODE_KEY) as 'enter' | 'cmd' | null) ?? 'enter')
+function toggleSendMode() {
+  sendMode.value = sendMode.value === 'enter' ? 'cmd' : 'enter'
+  localStorage.setItem(SEND_MODE_KEY, sendMode.value)
+}
+const sendHint = computed(() => sendMode.value === 'enter' ? 'Enter 发送 · Shift+Enter 换行' : 'Cmd+Enter 发送 · Enter 换行')
 
 /** @ 引用相关状态 */
 const showAtPopover = ref(false)
@@ -86,7 +155,23 @@ const atQuery = ref('')
 const atStartPos = ref(-1)
 const atAnchorPos = ref({ x: 0, y: 0 })
 
+/** 斜杠命令状态（仅当输入首字符为 "/" 时触发） */
+const showSlashPopover = ref(false)
+const slashQuery = ref('')
+const slashAnchorPos = ref({ x: 0, y: 0 })
+
 const canSend = computed(() => inputText.value.trim().length > 0 && !props.disabled && !props.isStreaming)
+
+// ─────────── 提示词优化（G14） ───────────
+const showEnhancer = ref(false)
+function openEnhancer() {
+  if (!inputText.value.trim()) return
+  showEnhancer.value = true
+}
+function handleEnhancerAccept(text: string) {
+  inputText.value = text
+  nextTick(adjustHeight)
+}
 
 /** 当前 Provider */
 const currentProvider = computed(() =>
@@ -123,6 +208,14 @@ const CHAT_MODES = {
     icon: Zap,
     color: 'text-amber-500',
     bg: 'bg-amber-500/10',
+  },
+  dispatcher: {
+    label: 'Dispatcher',
+    shortLabel: '调度',
+    desc: 'AI 分解任务，编排子任务执行',
+    icon: Network,
+    color: 'text-sky-500',
+    bg: 'bg-sky-500/10',
   },
 } as const
 
@@ -213,6 +306,51 @@ function closeAtPopover() {
   atStartPos.value = -1
 }
 
+/** 检测斜杠命令：仅当文本以 "/" 开头时触发；浮层锚定到输入框上方 */
+function detectSlashCommand() {
+  const el = textareaRef.value
+  if (!el) return
+  const text = el.value
+  if (text.startsWith('/') && !text.includes(' ') && !text.includes('\n')) {
+    slashQuery.value = text.slice(1)
+    const rect = el.getBoundingClientRect()
+    // 宽度 320，定位在输入框左侧与顶部对齐上方 8px（上移浮层高度在 popover 内自适应）
+    slashAnchorPos.value = { x: rect.left, y: rect.top }
+    showSlashPopover.value = true
+  } else {
+    closeSlashPopover()
+  }
+}
+
+function closeSlashPopover() {
+  showSlashPopover.value = false
+  slashQuery.value = ''
+}
+
+/** 选中斜杠命令：用模板替换输入；/clear 走专用事件 */
+function handleSlashSelect(cmd: SlashCommand) {
+  closeSlashPopover()
+  if (cmd.template === '__CLEAR_SESSION__') {
+    inputText.value = ''
+    emit('clearSession')
+    return
+  }
+  if (cmd.template === '__COMPACT__') {
+    inputText.value = ''
+    emit('compact')
+    return
+  }
+  inputText.value = cmd.template
+  nextTick(() => {
+    const el = textareaRef.value
+    if (!el) return
+    el.focus()
+    const pos = inputText.value.length
+    el.setSelectionRange(pos, pos)
+    adjustHeight()
+  })
+}
+
 /**
  * 选中文件后替换 @query 为 @filename 并 emit mentionFile
  * @param node 选中的文件节点
@@ -239,19 +377,41 @@ function handleAtSelect(node: FileNode) {
 
 /** 处理按键 */
 function handleKeyDown(e: KeyboardEvent) {
-  // @ 浮层可见时，拦截导航键交给 popover 处理
-  if (showAtPopover.value) {
-    if (['ArrowUp', 'ArrowDown', 'Enter', 'Escape'].includes(e.key)) {
+  // @ / 斜杠浮层可见时，拦截导航键交给 popover 处理
+  if (showAtPopover.value || showSlashPopover.value) {
+    if (['ArrowUp', 'ArrowDown', 'Enter', 'Escape', 'Tab'].includes(e.key)) {
       e.preventDefault()
       e.stopPropagation()
       return
     }
   }
 
-  if (e.key === 'Enter' && !e.shiftKey) {
+  // 输入历史导航（仅在输入框无选区时，且非 Popover 状态）
+  if (e.key === 'ArrowUp' && !e.shiftKey && (textareaRef.value?.selectionStart ?? 0) === 0) {
     e.preventDefault()
-    if (canSend.value) {
-      handleSend()
+    historyUp()
+    return
+  }
+  if (e.key === 'ArrowDown' && !e.shiftKey) {
+    const el = textareaRef.value
+    if (el && el.selectionStart === el.value.length) {
+      e.preventDefault()
+      historyDown()
+      return
+    }
+  }
+
+  // 发送逻辑
+  if (sendMode.value === 'enter') {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      if (canSend.value) handleSend()
+    }
+  } else {
+    // cmd 模式：Cmd/Ctrl+Enter 发送，Enter 换行（默认）
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault()
+      if (canSend.value) handleSend()
     }
   }
 }
@@ -260,6 +420,9 @@ function handleKeyDown(e: KeyboardEvent) {
 function handleSend() {
   const content = inputText.value.trim()
   if (!content) return
+  pushHistory(content)
+  historyIndex.value = -1
+  savedDraft.value = ''
   emit('send', content)
   inputText.value = ''
   nextTick(adjustHeight)
@@ -375,7 +538,7 @@ defineExpose({ focus })
           class="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm leading-relaxed placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
           style="max-height: 200px"
           @keydown="handleKeyDown"
-          @input="adjustHeight(); detectAtMention()"
+          @input="adjustHeight(); detectAtMention(); detectSlashCommand()"
         />
 
         <!-- 底部工具栏 -->
@@ -470,6 +633,36 @@ defineExpose({ focus })
               <Paperclip class="h-3.5 w-3.5" />
             </button>
 
+            <!-- 上下文使用圆环指示器 -->
+            <div
+              v-if="contextUsagePercent > 0"
+              class="flex items-center justify-center h-7 w-7 shrink-0"
+              :title="`上下文已用 ${Math.round(contextUsagePercent)}%`"
+            >
+              <svg width="18" height="18" viewBox="0 0 18 18" class="rotate-[-90deg]">
+                <circle cx="9" cy="9" r="7" fill="none" stroke-width="2"
+                  class="text-muted-foreground/15"
+                  stroke="currentColor"
+                />
+                <circle cx="9" cy="9" r="7" fill="none" stroke-width="2"
+                  :stroke="contextUsagePercent >= 90 ? '#ef4444' : contextUsagePercent >= 70 ? '#f59e0b' : '#10b981'"
+                  :stroke-dasharray="`${Math.min(contextUsagePercent, 100) * 0.4398} 43.98`"
+                  stroke-linecap="round"
+                />
+              </svg>
+            </div>
+
+            <!-- 提示词优化按钮（G14） -->
+            <button
+              class="flex items-center justify-center h-7 w-7 rounded-lg transition-colors"
+              :class="inputText.trim() ? 'text-violet-500/70 hover:text-violet-500 hover:bg-violet-500/10' : 'text-muted-foreground/25 cursor-not-allowed'"
+              :disabled="!inputText.trim() || disabled"
+              title="优化提示词"
+              @click="openEnhancer"
+            >
+              <Sparkles class="h-3.5 w-3.5" />
+            </button>
+
             <Button
               v-if="isStreaming"
               variant="destructive"
@@ -479,16 +672,18 @@ defineExpose({ focus })
             >
               <Square class="h-3 w-3" />
             </Button>
-            <Button
+            <button
               v-else
               :disabled="!canSend"
-              size="icon"
-              class="h-7 w-7 rounded-lg"
+              class="h-7 w-7 rounded-lg flex items-center justify-center transition-colors"
+              :class="canSend
+                ? 'text-primary hover:bg-primary/10'
+                : 'text-muted-foreground/25 cursor-not-allowed'"
               @click="handleSend"
             >
               <Loader2 v-if="loading" class="h-3 w-3 animate-spin" />
               <Send v-else class="h-3 w-3" />
-            </Button>
+            </button>
           </div>
         </div>
       </div>
@@ -503,11 +698,36 @@ defineExpose({ focus })
       @close="closeAtPopover"
     />
 
+    <!-- 斜杠命令浮层 -->
+    <SlashCommandPopover
+      :query="slashQuery"
+      :anchor-pos="slashAnchorPos"
+      :visible="showSlashPopover"
+      @select="handleSlashSelect"
+      @close="closeSlashPopover"
+    />
+
     <!-- 底部提示 -->
-    <div class="flex items-center justify-center px-4 pb-2">
+    <div class="flex items-center justify-between px-4 pb-2">
       <p class="text-[10px] text-muted-foreground/40">
-        Shift+Enter 换行 · Enter 发送 · AI 回复仅供参考
+        {{ sendHint }} · AI 回复仅供参考
       </p>
+      <button
+        class="text-[10px] text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors px-1.5 py-0.5 rounded hover:bg-muted/30"
+        :title="`切换发送方式（当前：${sendMode === 'enter' ? 'Enter 发送' : 'Cmd+Enter 发送'}）`"
+        @click="toggleSendMode"
+      >
+        ⌨ {{ sendMode === 'enter' ? 'Enter' : '⌘↵' }}
+      </button>
     </div>
   </div>
+
+  <!-- 提示词优化对话框（G14） -->
+  <AiPromptEnhancer
+    v-model:open="showEnhancer"
+    :original-text="inputText"
+    :provider="currentProvider"
+    :model="currentModel"
+    @accept="handleEnhancerAccept"
+  />
 </template>

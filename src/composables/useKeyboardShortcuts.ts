@@ -164,6 +164,9 @@ export function useKeyboardShortcuts() {
     toggleBottomPanel: () => {
       workspace.toggleBottomPanel()
     },
+    toggleZenMode: () => {
+      workspace.toggleZenMode()
+    },
     focusObjectTree: () => {
       // 确保连接面板展开，然后聚焦到对象树
       if (!workspace.panelState.activeSidePanel) {

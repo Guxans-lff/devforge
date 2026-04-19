@@ -2,13 +2,14 @@
 /**
  * 文件树右键菜单 — 圆润现代风格
  */
-import { computed } from 'vue'
+import { computed, ref, nextTick, watch } from 'vue'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import type { FileNode } from '@/types/workspace-files'
 import {
   FilePlus, FolderPlus, Pencil, Trash2, Copy,
-  CopyCheck, FileText, X as IconX,
+  CopyCheck, FileText, X as IconX, FolderOpen,
 } from 'lucide-vue-next'
+import { openPath } from '@tauri-apps/plugin-opener'
 
 const props = defineProps<{
   node: FileNode | null
@@ -26,6 +27,38 @@ const emit = defineEmits<{
 }>()
 
 const store = useWorkspaceFilesStore()
+
+const menuRef = ref<HTMLElement | null>(null)
+
+/** 计算实际渲染位置：防止超出屏幕底部/右侧 */
+const adjustedPos = computed(() => {
+  const { x, y } = props.position
+  return { x, y }
+})
+
+watch(
+  () => props.position,
+  () => {
+    nextTick(() => {
+      const el = menuRef.value
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      if (rect.bottom > vh) {
+        el.style.top = `${props.position.y - rect.height}px`
+      } else {
+        el.style.top = `${props.position.y}px`
+      }
+      if (rect.right > vw) {
+        el.style.left = `${props.position.x - rect.width}px`
+      } else {
+        el.style.left = `${props.position.x}px`
+      }
+    })
+  },
+  { immediate: true },
+)
 
 interface MenuItem {
   label: string
@@ -76,6 +109,19 @@ const menuItems = computed<MenuItem[]>(() => {
     label: '复制路径',
     icon: Copy,
     action: async () => { await navigator.clipboard.writeText(n.absolutePath); emit('close') },
+  })
+
+  items.push({
+    label: '在资源管理器中打开',
+    icon: FolderOpen,
+    action: async () => {
+      // 文件夹直接打开，文件打开其所在目录
+      const target = n.isDirectory
+        ? n.absolutePath
+        : n.absolutePath.replace(/[/\\][^/\\]+$/, '')
+      await openPath(target)
+      emit('close')
+    },
   })
 
   // 工作区根节点：只提供"复制名称 + 移除"，不给相对路径/重命名/删除
@@ -135,8 +181,9 @@ const menuItems = computed<MenuItem[]>(() => {
       @contextmenu.prevent="$emit('close')"
     >
       <div
+        ref="menuRef"
         class="absolute min-w-[180px] rounded-xl border border-border/30 bg-popover/95 backdrop-blur-xl shadow-xl py-1.5 text-[12px]"
-        :style="{ left: `${position.x}px`, top: `${position.y}px` }"
+        :style="{ left: `${adjustedPos.x}px`, top: `${adjustedPos.y}px` }"
         @click.stop
       >
         <template v-for="(item, i) in menuItems" :key="i">
