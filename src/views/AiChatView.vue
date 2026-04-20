@@ -5,7 +5,7 @@
  * 全屏居中消息流，底部输入区集成模型/模式切换，
  * 历史对话通过 Sheet 抽屉访问，支持多 Tab 独立对话。
  */
-import { ref, computed, onMounted, onActivated, watch, shallowRef } from 'vue'
+import { ref, computed, onMounted, onActivated, watch } from 'vue'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiChat } from '@/composables/useAiChat'
 import { useAiMemoryStore } from '@/stores/ai-memory'
@@ -86,18 +86,6 @@ const chatMode = ref<ChatMode>('normal')
 // - auto → 全自动放行（大哥明确授权）
 // - plan → 全拒绝副作用（只读规划）
 // - normal → 正常弹窗
-watch(chatMode, (m) => {
-  setApprovalMode(m === 'auto' ? 'auto' : m === 'plan' || m === 'dispatcher' ? 'deny' : 'ask', currentSessionId.value)
-  // 规划模式自动开启门控；离开规划模式时关闭
-  if (m === 'plan') {
-    chat.planGateEnabled.value = true
-    chat.planApproved.value = false
-  } else {
-    chat.planGateEnabled.value = false
-    chat.planApproved.value = false
-  }
-}, { immediate: true })
-
 /** 模式对应的 system prompt 后缀 */
 const MODE_SUFFIXES: Record<ChatMode, string> = {
   normal: '',
@@ -123,7 +111,7 @@ const ownTab = workspace.tabs.find(t => t.id === ownTabId)
 const currentSessionId = ref<string>(
   (ownTab?.meta?.sessionId as string | undefined)
     ?? localStorage.getItem(LAST_SESSION_KEY)
-    ?? `session-${randomUUID()}`,
+    ?? `session-${crypto.randomUUID()}`,
 )
 
 // 监听自己 tab 的 meta.sessionId 变化（用户在抽屉里切换历史会话时）
@@ -140,6 +128,18 @@ const chat = useAiChat({
   sessionId: currentSessionId,
   scrollContainer,
 })
+
+watch(chatMode, (m) => {
+  setApprovalMode(m === 'auto' ? 'auto' : m === 'plan' || m === 'dispatcher' ? 'deny' : 'ask', currentSessionId.value)
+  // 规划模式自动开启门控；离开规划模式时关闭
+  if (m === 'plan') {
+    chat.planGateEnabled.value = true
+    chat.planApproved.value = false
+  } else {
+    chat.planGateEnabled.value = false
+    chat.planApproved.value = false
+  }
+}, { immediate: true })
 
 // sessionId 变化时：1) 写入 localStorage；2) workspace 恢复后切换到真实 sessionId 时重新加载历史
 // immediate: true 确保初始值写入 localStorage
@@ -803,7 +803,9 @@ const CHAT_MODE_CONFIG = {
           <!-- Token 用量 -->
           <AiUsageBadge
             v-if="currentModel"
-            :prompt-tokens="chat.totalTokens.value"
+            :prompt-tokens="chat.latestUsage.value.promptTokens"
+            :completion-tokens="chat.latestUsage.value.completionTokens"
+            :cache-read-tokens="chat.latestUsage.value.cacheReadTokens"
             :max-context="currentModel.capabilities.maxContext"
             :pricing="currentModel.capabilities.pricing"
           />
@@ -889,11 +891,23 @@ const CHAT_MODE_CONFIG = {
           >
             <!-- 分割线（换模型标记） -->
             <template v-if="item.msg.type === 'divider'">
-              <div class="flex items-center gap-3 py-1.5 select-none">
+              <div class="flex items-center justify-center gap-3 py-1.5 select-none">
                 <div class="flex-1 h-px bg-border/40" />
-                <span class="text-[10px] text-muted-foreground/40 font-medium shrink-0">
-                  {{ item.msg.dividerText }}
-                </span>
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="text-[10px] text-muted-foreground/40 font-medium shrink-0">
+                    {{ item.msg.dividerText }}
+                  </span>
+                  <Button
+                    v-if="item.msg.id.startsWith('history-window-') && chat.canLoadMoreHistory.value"
+                    variant="ghost"
+                    size="sm"
+                    class="h-6 px-2 text-[10px] text-muted-foreground"
+                    :disabled="chat.isLoading.value"
+                    @click="chat.loadMoreHistory"
+                  >
+                    加载更早历史
+                  </Button>
+                </div>
                 <div class="flex-1 h-px bg-border/40" />
               </div>
             </template>

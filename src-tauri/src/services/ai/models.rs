@@ -4,6 +4,25 @@
 
 use serde::{Deserialize, Serialize};
 
+// ─────────────────────────────────── 多模态内容块 ───────────────────────────────────
+
+/// 多模态内容块
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ContentBlock {
+    Text { text: String },
+    Image { source: ImageSource },
+}
+
+/// 图片源数据
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageSource {
+    #[serde(rename = "type")]
+    pub source_type: String,  // "base64"
+    pub media_type: String,   // "image/png", "image/jpeg", etc.
+    pub data: String,         // base64 数据
+}
+
 // ─────────────────────────────────── Provider 配置 ───────────────────────────────────
 
 /// Provider 类型
@@ -72,6 +91,8 @@ pub struct ModelConfig {
     pub name: String,
     /// 模型能力
     pub capabilities: ModelCapabilities,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thinking_effort: Option<String>,
 }
 
 /// Provider 配置（持久化到 SQLite）
@@ -113,6 +134,9 @@ pub struct ChatMessage {
     pub role: MessageRole,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
+    /// 新增：结构化内容块支持（多模态）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_blocks: Option<Vec<ContentBlock>>,
     /// 工具名称（tool 角色消息，部分 API 如 OpenAI 要求）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
@@ -291,7 +315,20 @@ pub struct AiMessageRecord {
     pub tokens: u32,
     pub cost: f64,
     pub parent_id: Option<String>,
+    pub success: Option<bool>,
+    pub tool_name: Option<String>,
     pub created_at: i64,
+}
+
+/// 单个会话及其历史消息载荷
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSessionDetail {
+    pub session: AiSession,
+    pub messages: Vec<AiMessageRecord>,
+    pub total_records: u32,
+    pub loaded_records: u32,
+    pub truncated: bool,
 }
 
 /// 每日用量统计

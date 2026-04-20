@@ -1,206 +1,49 @@
-/**
- * AI 对话核心 composable
- *
- * 管理单个会话的消息列表、流式发送/接收、中断控制、
- * 50ms 节流批量 DOM 更新、自动滚动等。
- */
-
-import { ref, reactive, computed, nextTick, onUnmounted, toRef, watch, type MaybeRef } from 'vue'
-import { useWorkspaceFilesStore } from '@/stores/workspace-files'
-import type { Ref } from 'vue'
-import type {
-  AiMessage,
-  AiStreamEvent,
-  AiMessageRecord,
-  AiSession,
-  ModelConfig,
-  ProviderConfig,
-  FileAttachment,
-  ToolCallInfo,
-  ToolResultInfo,
-} from '@/types/ai'
-import { aiChatStream, aiAbortStream, aiSaveMessage, aiGetSession, aiExecuteTool, aiEnforceToolResultBudget, aiReadContextFile } from '@/api/ai'
-import { requestApproval, type ApprovalToolName, type ApprovalDecision } from '@/composables/useToolApproval'
+import { computed, nextTick, onUnmounted, reactive, ref, toRef, watch, type MaybeRef, type Ref } from 'vue'
+import { aiAbortStream, type ChatMessage } from '@/api/ai'
+import { useAutoCompact } from '@/composables/useAutoCompact'
+import { abortChat } from '@/composables/ai/chatAbort'
+import {
+  canExpandHistoryWindow,
+  getExpandedHistoryWindowSize,
+  HISTORY_RECENT_RECORD_LIMIT,
+  loadChatHistoryWindow,
+} from '@/composables/ai/chatHistoryLoad'
+import { finalizeSend } from '@/composables/ai/chatSendFinalize'
+import { prepareSendContext } from '@/composables/ai/chatSendPreparation'
+import { handleSendFailure } from '@/composables/ai/chatSendRecovery'
+import {
+  parseAndWriteJournalSections as writeJournalSectionsFromText,
+  parseSpawnedTasks as collectSpawnedTasks,
+  type SpawnedTask,
+} from '@/composables/ai/chatSideEffects'
+import {
+  handleStreamEvent as applyStreamEvent,
+  type AiChatPhaseState,
+  type AiChatStreamState,
+} from '@/composables/ai/chatStreamEvents'
+import { executeToolCalls as runToolCalls } from '@/composables/ai/chatToolExecution'
+import { streamWithToolLoop as runStreamWithToolLoop } from '@/composables/ai/chatToolLoop'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiMemoryStore } from '@/stores/ai-memory'
-import { useAutoCompact } from '@/composables/useAutoCompact'
+import { useWorkspaceFilesStore } from '@/stores/workspace-files'
+import type {
+  AiMessage,
+  FileAttachment,
+  ModelConfig,
+  ProviderConfig,
+  ToolCallInfo,
+} from '@/types/ai'
 import { ensureErrorString } from '@/types/error'
-import { buildFileMarkedContent } from '@/utils/file-markers'
 import { createLogger } from '@/utils/logger'
-import type { ChatMessage } from '@/api/ai'
 
 const log = createLogger('ai.chat')
 
-/** 生成唯一 ID */
-function genId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-}
-
-/** 安全解析 JSON */
-function tryParseJson(str: string): Record<string, unknown> | undefined {
-  try {
-    return JSON.parse(str)
-  } catch {
-    return undefined
-  }
-}
-
-/** 工具名 → 是否需要审批 */
-function pickApprovalTool(name: string): ApprovalToolName | null {
-  if (name === 'write_file' || name === 'edit_file' || name === 'bash' || name === 'web_fetch') return name
-  return null
-}
-
-/** 根据 toolCall 的 parsedArgs 构造审批请求 */
-async function requestApprovalForTool(
-  toolName: ApprovalToolName,
-  tc: ToolCallInfo,
-  sessionId: string,
-  onAwaiting?: () => void,
-): Promise<'allow' | 'deny'> {
-  const args = tc.parsedArgs ?? tryParseJson(tc.arguments) ?? {}
-  // 标记审批等待态并触发 UI 刷新（让内嵌审批卡挂到该 tool call 上）
-  tc.approvalState = 'awaiting'
-  onAwaiting?.()
-
-  let decision: ApprovalDecision
-  if (toolName === 'bash') {
-    decision = await requestApproval({
-      toolName,
-      command: String((args as Record<string, unknown>).command ?? ''),
-      newContent: String((args as Record<string, unknown>).command ?? ''),
-      sessionId,
-    })
-  } else if (toolName === 'web_fetch') {
-    decision = await requestApproval({
-      toolName,
-      url: String((args as Record<string, unknown>).url ?? ''),
-      sessionId,
-    })
-  } else if (toolName === 'write_file') {
-    decision = await requestApproval({
-      toolName,
-      path: String((args as Record<string, unknown>).path ?? ''),
-      newContent: String((args as Record<string, unknown>).content ?? ''),
-      sessionId,
-    })
-  } else {
-    // edit_file
-    decision = await requestApproval({
-      toolName,
-      path: String((args as Record<string, unknown>).path ?? ''),
-      oldContent: String((args as Record<string, unknown>).old_string ?? ''),
-      newContent: String((args as Record<string, unknown>).new_string ?? ''),
-      sessionId,
-    })
-  }
-
-  tc.approvalState = decision === 'deny' ? 'denied' : 'allowed'
-  return decision === 'deny' ? 'deny' : 'allow'
-}
-
-/**
- * 清洗从 DB 加载的消息列表 — 修复上一次流式中途崩溃/刷新遗留的脏状态
- *
- * 1. 所有 assistant 强制 isStreaming: false（防 UI 卡"思考中"）
- * 2. 最后一条 assistant 若无 content 且无 toolCalls → 转为 error 封口
- */
-function sanitizeLoadedMessages(msgs: AiMessage[]): AiMessage[] {
-  if (msgs.length === 0) return msgs
-  const out = msgs.map(m =>
-    m.role === 'assistant' && m.isStreaming ? { ...m, isStreaming: false } : m,
-  )
-  for (let i = out.length - 1; i >= 0; i--) {
-    const m = out[i]!
-    if (m.role === 'assistant') {
-      const noContent = !m.content || m.content.trim() === ''
-      const noToolCalls = !m.toolCalls || m.toolCalls.length === 0
-      if (noContent && noToolCalls) {
-        out[i] = {
-          ...m,
-          role: 'error',
-          content: '[上一轮回复未完成或已中断]',
-          isStreaming: false,
-        }
-      }
-      break
-    }
-  }
-  return out
-}
-
-/**
- * 从 AiMessage 列表构建完整的 ChatMessage 链
- *
- * 包含 user / assistant（携带 toolCalls）/ tool 消息，
- * 确保 API 看到完整的工具调用上下文。
- */
-function buildChatMessages(msgs: AiMessage[]): ChatMessage[] {
-  const result: ChatMessage[] = []
-
-  for (const msg of msgs) {
-    if (msg.role === 'error') continue
-    if (msg.type === 'divider') continue
-
-    if (msg.role === 'user') {
-      result.push({ role: 'user', content: msg.content })
-    } else if (msg.role === 'assistant') {
-      // 孤儿守卫：无 content 且无 toolCalls 的 assistant 不能回传 API
-      // （如上一轮流中途崩溃、模型只吐 thinking 就 stop 的残骸），否则 OpenAI 会返回 400
-      const hasContent = !!(msg.content && msg.content.trim())
-      const hasToolCalls = !!(msg.toolCalls && msg.toolCalls.length > 0)
-      if (!hasContent && !hasToolCalls) continue
-
-      const chatMsg: ChatMessage = {
-        role: 'assistant',
-        content: msg.content || null,
-      }
-      // 回传 reasoning_content（thinking）：
-      // DeepSeek/MiMo 要求在 tool 调用循环内（同 turn）回传，但历史 turn 的 thinking 不应回传：
-      // 1. 历史 thinking 可能数万 token，每轮都带会极速耗尽上下文
-      // 2. 官方"建议保留"指同一 tool 循环内；新一轮用户消息后旧 thinking 无需携带
-      // 因此：只有携带 toolCalls 的 assistant 消息才回传 thinking（tool 循环中间态）
-      if (msg.thinking && msg.thinking.trim() && msg.toolCalls && msg.toolCalls.length > 0) {
-        chatMsg.reasoningContent = msg.thinking
-      }
-
-      // 携带 toolCalls（如果有）
-      if (msg.toolCalls && msg.toolCalls.length > 0) {
-        chatMsg.toolCalls = msg.toolCalls.map(tc => ({
-          id: tc.id,
-          type: 'function',
-          function: { name: tc.name, arguments: tc.arguments },
-        }))
-      }
-
-      result.push(chatMsg)
-
-      // 展开 toolResults 为独立的 tool 消息
-      // 关键：OpenAI 协议要求 assistant(tool_calls) 之后必须跟与 tool_calls 数量匹配的 tool 消息。
-      // 若历史中存在"孤儿"（如用户中断导致 toolResults 缺失），必须补齐 stub，否则服务端 400。
-      if (msg.toolCalls && msg.toolCalls.length > 0) {
-        const existingResults = msg.toolResults ?? []
-        const resultsById = new Map(existingResults.map(tr => [tr.toolCallId, tr]))
-        for (const tc of msg.toolCalls) {
-          const tr = resultsById.get(tc.id)
-          result.push({
-            role: 'tool',
-            content: tr?.content ?? '[工具调用被用户中断，未执行]',
-            toolCallId: tc.id,
-            name: tc.name,
-          })
-        }
-      }
-    }
-  }
-
-  return result
-}
+const MAX_TOOL_LOOPS = 50
+const STREAM_WATCHDOG_MS = 90_000
+const STREAM_WATCHDOG_WARN_MS = 45_000
 
 export interface UseAiChatOptions {
-  /** 会话 ID（支持响应式） */
   sessionId: MaybeRef<string>
-  /** 滚动容器 ref（用于自动滚动） */
   scrollContainer?: Ref<HTMLElement | null>
 }
 
@@ -209,281 +52,373 @@ export function useAiChat(options: UseAiChatOptions) {
   const aiStore = useAiChatStore()
   const memoryStore = useAiMemoryStore()
   const autoCompact = useAutoCompact()
-
-  // ─────────────────────── 状态 ───────────────────────
+  const filesStore = useWorkspaceFilesStore()
 
   const messages = ref<AiMessage[]>([])
   const isStreaming = ref(false)
   const isLoading = ref(false)
   const error = ref<string | null>(null)
-
-  /** 用户是否手动滚动（暂停自动滚动） */
   const userScrolled = ref(false)
-
-  /** 当前流式消息的累积文本（节流缓冲） */
-  let pendingTextDelta = ''
-  let pendingThinkingDelta = ''
-  let throttleTimer: ReturnType<typeof setTimeout> | null = null
-  let _flushRafId: number | null = null
-  let _scrollRafId: number | null = null
-
-  /** 当前流式助手消息的 ID */
-  let streamingMessageId = ''
-
-  /** 工作目录（Tool Use 安全边界），默认取工作区第一个根目录 */
   const workDir = ref('')
+  const historyLoadedRecords = ref(0)
+  const historyTotalRecords = ref(0)
+  const historyWindowSize = ref(HISTORY_RECENT_RECORD_LIMIT)
 
-  // ─────────────────────── Plan Gate 状态 ───────────────────────
-
-  /** 是否开启规划门控（AI 首轮必须先输出计划，不能调工具） */
   const planGateEnabled = ref(false)
-  /** 当前对话轮是否已经用户确认过计划 */
   const planApproved = ref(false)
-  /** AI 输出的最新计划文本（供 AiPlanGateBar 展示） */
   const pendingPlan = ref('')
-  /** 是否等待用户确认计划（AI 已输出计划，尚未确认） */
   const awaitingPlanApproval = ref(false)
+  const currentPhase = ref<AiChatPhaseState | null>(null)
+  const spawnedTasks = ref<SpawnedTask[]>([])
 
-  /** 确认当前计划并发送继续执行指令 */
+  const streamState = reactive<AiChatStreamState>({
+    pendingTextDelta: '',
+    pendingThinkingDelta: '',
+    pendingToolCalls: [],
+    lastFinishReason: '',
+    streamingMessageId: '',
+    inToolExec: false,
+  })
+
+  let throttleTimer: ReturnType<typeof setTimeout> | null = null
+  let flushRafId: number | null = null
+  let scrollRafId: number | null = null
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+  let watchdogWarnTimer: ReturnType<typeof setTimeout> | null = null
+  let loadSeq = 0
+  let streamingMessageIndex = -1
+
+  const toolFailureCounter = new Map<string, number>()
+
+  const availableWorkDirs = computed(() =>
+    filesStore.roots.map(root => ({ label: root.name, value: root.path })),
+  )
+
+  const totalTokens = computed(() => {
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const message = messages.value[i]
+      if (message?.role === 'assistant') {
+        if (message.totalTokens) return message.totalTokens
+        if (message.tokens) return message.tokens
+      }
+    }
+    return 0
+  })
+
+  const latestUsage = computed(() => {
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const message = messages.value[i]
+      if (message?.role === 'assistant' && (
+        message.promptTokens
+        || message.completionTokens
+        || message.totalTokens
+      )) {
+        return {
+          promptTokens: message.promptTokens ?? message.totalTokens ?? message.tokens ?? 0,
+          completionTokens: message.completionTokens ?? 0,
+          cacheReadTokens: message.cacheReadTokens ?? 0,
+          totalTokens: message.totalTokens ?? message.tokens ?? 0,
+        }
+      }
+    }
+    return {
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheReadTokens: 0,
+      totalTokens: 0,
+    }
+  })
+
+  const canSend = computed(() => !isStreaming.value && !isLoading.value)
+  const canLoadMoreHistory = computed(() =>
+    canExpandHistoryWindow({
+      windowSize: historyWindowSize.value,
+      loadedRecords: historyLoadedRecords.value,
+      totalRecords: historyTotalRecords.value,
+    }),
+  )
+
+  watch(
+    () => filesStore.roots,
+    roots => {
+      if (!workDir.value && roots.length > 0) {
+        workDir.value = roots[0]?.path ?? ''
+      }
+    },
+    { immediate: true },
+  )
+
   function approvePlan(): void {
     planApproved.value = true
     awaitingPlanApproval.value = false
   }
 
-  /** 拒绝计划，重置状态允许 AI 重新规划 */
   function rejectPlan(): void {
     planApproved.value = false
     awaitingPlanApproval.value = false
     pendingPlan.value = ''
   }
 
-  // ─────────────────────── Phase Tracking 状态 ───────────────────────
-
-  /** 当前活跃阶段信息（从流式内容中实时解析） */
-  const currentPhase = ref<{ current: number; total: number; label: string } | null>(null)
-
-  /** 工作区文件 store — 提供可用 workDir 列表 */
-  const filesStore = useWorkspaceFilesStore()
-
-  // 自动初始化 workDir：如果为空且工作区有根目录，自动使用第一个
-  watch(() => filesStore.roots, (roots) => {
-    if (!workDir.value && roots.length > 0) {
-      workDir.value = roots[0].path
-    }
-  }, { immediate: true })
-
-  /** 可用的工作目录列表（工作区根） */
-  const availableWorkDirs = computed(() =>
-    filesStore.roots.map(r => ({ label: r.name, value: r.path }))
-  )
-
-  /** 校验路径是否在某个工作区根内（安全检查） */
-  function isPathInWorkspace(targetPath: string): boolean {
-    const normalized = targetPath.replace(/\\/g, '/')
-    return filesStore.roots.some(r => normalized.startsWith(r.path + '/') || normalized === r.path)
+  function normalizeWorkspacePath(targetPath: string): string {
+    return targetPath.replace(/\\/g, '/')
   }
 
-  /** Tool Use 循环最大次数 */
-  const MAX_TOOL_LOOPS = 50
+  function isPathInWorkspace(targetPath: string): boolean {
+    const normalized = normalizeWorkspacePath(targetPath)
+    return filesStore.roots.some(root => normalized === root.path || normalized.startsWith(`${root.path}/`))
+  }
 
-  /**
-   * 流式看门狗（对齐 Claude Code 官方策略）
-   * - 45s: 仅告警日志，不中断（慢模型生成大 JSON 参数期间可能静默）
-   * - 90s: 正式判定卡死，中断流
-   */
-  const STREAM_WATCHDOG_MS = 90_000
-  const STREAM_WATCHDOG_WARN_MS = 45_000
-  let watchdogTimer: ReturnType<typeof setTimeout> | null = null
-  let watchdogWarnTimer: ReturnType<typeof setTimeout> | null = null
-  /** 工具执行期间暂停看门狗（工具本身可能慢） */
-  let inToolExec = false
+  async function refreshWorkspaceDirectoryForToolPath(targetPath: string): Promise<void> {
+    const normalized = normalizeWorkspacePath(targetPath)
+    if (!isPathInWorkspace(normalized)) return
+
+    const lastSlash = normalized.lastIndexOf('/')
+    const parentDir = lastSlash > 0 ? normalized.slice(0, lastSlash) : normalized
+    const storeWithOptionalRefresh = filesStore as typeof filesStore & {
+      refreshDirectory?: (absolutePath: string) => Promise<void>
+      refreshRoot?: (rootId: string) => Promise<void>
+    }
+
+    if (typeof storeWithOptionalRefresh.refreshDirectory === 'function') {
+      await storeWithOptionalRefresh.refreshDirectory(parentDir)
+      return
+    }
+
+    const ownerRoot = filesStore.roots.find(root => parentDir === root.path || parentDir.startsWith(`${root.path}/`))
+    if (ownerRoot && typeof filesStore.refreshRoot === 'function') {
+      await filesStore.refreshRoot(ownerRoot.id)
+    }
+  }
 
   function clearWatchdog(): void {
-    if (watchdogTimer) {
-      clearTimeout(watchdogTimer)
-      watchdogTimer = null
-    }
     if (watchdogWarnTimer) {
       clearTimeout(watchdogWarnTimer)
       watchdogWarnTimer = null
+    }
+    if (watchdogTimer) {
+      clearTimeout(watchdogTimer)
+      watchdogTimer = null
     }
   }
 
   function resetWatchdog(): void {
     clearWatchdog()
-    // 先挂一个 warning（不中断）
+
     watchdogWarnTimer = setTimeout(() => {
       watchdogWarnTimer = null
-      if (inToolExec || !isStreaming.value) return
+      if (streamState.inToolExec || !isStreaming.value) return
       log.warn('watchdog_warning', { sessionId: sessionIdRef.value, ms: STREAM_WATCHDOG_WARN_MS })
     }, STREAM_WATCHDOG_WARN_MS)
-    // 再挂真正的中断
+
     watchdogTimer = setTimeout(async () => {
       watchdogTimer = null
-      if (inToolExec || !isStreaming.value) return
-      error.value = `流式响应超时（${STREAM_WATCHDOG_MS / 1000}s 无数据）`
+      if (streamState.inToolExec || !isStreaming.value) return
+
+      error.value = `娴佸紡鍝嶅簲瓒呮椂锛?{STREAM_WATCHDOG_MS / 1000}s 鏃犳暟鎹級`
       log.warn('watchdog_timeout', { sessionId: sessionIdRef.value, ms: STREAM_WATCHDOG_MS })
+
       try {
         await aiAbortStream(sessionIdRef.value)
-      } catch (e) {
-        log.warn('watchdog_abort_failed', { sessionId: sessionIdRef.value }, e)
+      } catch (err) {
+        log.warn('watchdog_abort_failed', { sessionId: sessionIdRef.value }, err)
       }
+
       flushPendingDelta()
-      updateStreamingMessage(msg => ({
-        ...msg,
-        content: msg.content + '\n\n[超时中断]',
+      updateStreamingMessage(message => ({
+        ...message,
+        content: `${message.content}\n\n[瓒呮椂涓柇]`,
         isStreaming: false,
       }))
       isStreaming.value = false
     }, STREAM_WATCHDOG_MS)
   }
 
-  /** 工具调用失败熔断：同一工具+同一参数连续失败 N 次后强制让 AI 放弃 */
-  const toolFailureCounter = new Map<string, number>()
-  const MAX_SAME_TOOL_FAILURE = 3
-
-  function hashArgs(s: string): string {
-    let h = 0
-    for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0
-    return Math.abs(h).toString(36)
+  function cancelFlushTimer(): void {
+    if (throttleTimer) {
+      clearTimeout(throttleTimer)
+      throttleTimer = null
+    }
+    if (flushRafId !== null) {
+      cancelAnimationFrame(flushRafId)
+      flushRafId = null
+    }
   }
 
-  /** 流式期间收集的 ToolCall 事件 */
-  let pendingToolCalls: ToolCallInfo[] = []
-  /** 流式结束原因 */
-  let lastFinishReason = ''
+  function scheduleFlush(): void {
+    if (flushRafId !== null) return
+    flushRafId = requestAnimationFrame(() => {
+      flushRafId = null
+      flushPendingDelta()
+    })
+  }
 
-  // ─────────────────────── 计算属性 ───────────────────────
+  function flushPendingDelta(): void {
+    cancelFlushTimer()
 
-  /**
-   * 当前 context 窗口用量（prompt tokens）
-   * 取最后一条 assistant 消息记录的 prompt_tokens，代表最近一次请求实际消耗。
-   * 历史累加会严重虚高（每轮 prompt 都包含全部历史），不适合作为压缩阈值。
-   */
-  const totalTokens = computed(() => {
-    for (let i = messages.value.length - 1; i >= 0; i--) {
-      const m = messages.value[i]
-      if (m.role === 'assistant' && m.tokens) return m.tokens
+    if (!streamState.pendingTextDelta && !streamState.pendingThinkingDelta) return
+
+    const textChunk = streamState.pendingTextDelta
+    const thinkingChunk = streamState.pendingThinkingDelta
+    streamState.pendingTextDelta = ''
+    streamState.pendingThinkingDelta = ''
+
+    updateStreamingMessage(message => ({
+      ...message,
+      content: message.content + textChunk,
+      thinking: (message.thinking ?? '') + thinkingChunk,
+    }))
+
+    if (!userScrolled.value) {
+      scrollToBottom()
     }
-    return 0
-  })
+  }
 
-  /** 是否可以发送（非流式 + 非加载中） */
-  const canSend = computed(() => !isStreaming.value && !isLoading.value)
+  function updateStreamingMessage(updater: (msg: AiMessage) => AiMessage): void {
+    if (!streamState.streamingMessageId) return
+    let index = streamingMessageIndex
+    if (
+      index < 0
+      || index >= messages.value.length
+      || messages.value[index]?.id !== streamState.streamingMessageId
+    ) {
+      index = messages.value.findIndex(message => message.id === streamState.streamingMessageId)
+      streamingMessageIndex = index
+    }
+    if (index !== -1) {
+      messages.value[index] = updater(messages.value[index]!)
+    }
+  }
 
-  // ─────────────────────── 加载历史消息 ───────────────────────
+  function handleIncomingStreamEvent(event: import('@/types/ai').AiStreamEvent): void {
+    applyStreamEvent({
+      event,
+      sessionId: sessionIdRef.value,
+      log,
+      streamState,
+      messages,
+      error,
+      currentPhase,
+      planGateEnabled,
+      planApproved,
+      pendingPlan,
+      awaitingPlanApproval,
+      resetWatchdog,
+      flushPendingDelta,
+      scheduleFlush,
+      updateStreamingMessage,
+    })
+  }
 
-  let _loadSeq = 0  // 递增版本号，过期请求结果直接丢弃
+  async function executeToolCalls(toolCalls: ToolCallInfo[], sessionId: string) {
+    return runToolCalls({
+      sessionId,
+      workDir: workDir.value,
+      toolCalls,
+      toolFailureCounter,
+      log,
+      clearWatchdog,
+      setInToolExec: value => {
+        streamState.inToolExec = value
+      },
+      updateStreamingMessage,
+      refreshWorkspaceDirectoryForToolPath,
+    })
+  }
 
-  /** 从后端加载会话历史消息（可传入指定 sessionId，解决响应式延迟问题） */
-  async function loadHistory(overrideSessionId?: string): Promise<void> {
-    const seq = ++_loadSeq
-    // 先清理流式状态，防止从正在流式的会话切换过来时出现数据混乱
+  function parseAndWriteJournalSections(text: string, workDirPath: string): void {
+    writeJournalSectionsFromText(text, workDirPath, log)
+  }
+
+  function parseSpawnedTasks(text: string): void {
+    const tasks = collectSpawnedTasks(text)
+    if (tasks.length === 0) return
+    spawnedTasks.value = [...spawnedTasks.value, ...tasks]
+  }
+
+  async function streamWithToolLoop(
+    sid: string,
+    chatMessages: ChatMessage[],
+    provider: ProviderConfig,
+    model: ModelConfig,
+    apiKey: string,
+    systemPrompt: string | undefined,
+    enableTools: boolean,
+  ): Promise<void> {
+    await runStreamWithToolLoop({
+      sid,
+      chatMessages,
+      provider,
+      model,
+      apiKey,
+      systemPrompt,
+      enableTools,
+      log,
+      messages,
+      isStreaming,
+      workDir,
+      streamState,
+      maxToolLoops: MAX_TOOL_LOOPS,
+      resetWatchdog,
+      clearWatchdog,
+      flushPendingDelta,
+      updateStreamingMessage,
+      onStreamEvent: handleIncomingStreamEvent,
+      executeToolCalls,
+      parseAndWriteJournalSections,
+      parseSpawnedTasks,
+    })
+  }
+
+  async function loadHistory(overrideSessionId?: string, options?: { windowSize?: number }): Promise<void> {
+    const seq = ++loadSeq
+
     if (isStreaming.value) {
       isStreaming.value = false
-      streamingMessageId = ''
-      pendingTextDelta = ''
-      pendingThinkingDelta = ''
-      if (throttleTimer) {
-        clearTimeout(throttleTimer)
-        throttleTimer = null
-      }
+      clearWatchdog()
+      cancelFlushTimer()
+      streamState.streamingMessageId = ''
+      streamingMessageIndex = -1
+      streamState.pendingTextDelta = ''
+      streamState.pendingThinkingDelta = ''
+      streamState.pendingToolCalls = []
+      streamState.lastFinishReason = ''
+      streamState.inToolExec = false
     }
 
     const sid = overrideSessionId ?? sessionIdRef.value
+    const requestedWindowSize = options?.windowSize ?? historyWindowSize.value
     isLoading.value = true
     error.value = null
+
     try {
-      const result = await aiGetSession(sid)
-      // 过期请求（被更新的 loadHistory 调用覆盖）直接丢弃
-      if (seq !== _loadSeq) return
-      log.info('load_history', { sessionId: sid, hit: !!result, recordCount: result?.[1]?.length ?? 0 })
-      if (!result) {
-        messages.value = []
-        // 新建会话时数据库里还不存在记录，属于正常情况，不视为错误
-        return
+      const result = await loadChatHistoryWindow(sid, requestedWindowSize)
+      if (seq !== loadSeq) return
+
+      log.info('load_history', {
+        sessionId: sid,
+        hit: !!result.session,
+        recordCount: result.window.loadedRecords,
+        totalRecords: result.window.totalRecords,
+        truncated: result.truncated,
+      })
+
+      historyWindowSize.value = result.window.windowSize
+      historyLoadedRecords.value = result.window.loadedRecords
+      historyTotalRecords.value = result.window.totalRecords
+      if (result.session?.workDir) {
+        workDir.value = result.session.workDir
       }
 
-      const [session, records] = result
-      // 恢复工作目录
-      if (session.workDir) {
-        workDir.value = session.workDir
-      }
-
-      // 还原消息链（处理 tool_calls / tool_result 类型）
-      const restored: AiMessage[] = []
-      for (const r of records) {
-        if (r.role === 'assistant' && r.contentType === 'tool_calls') {
-          // assistant 消息携带 tool_calls，content 是 ToolCallInfo[] JSON
-          const toolCalls: ToolCallInfo[] = tryParseJson(r.content) as ToolCallInfo[] ?? []
-          restored.push({
-            id: r.id,
-            role: 'assistant',
-            content: '',
-            timestamp: r.createdAt,
-            tokens: r.tokens,
-            toolCalls,
-            toolResults: [],
-          })
-        } else if (r.role === 'tool' && r.contentType === 'tool_result') {
-          // tool 结果消息 → 附加到最近的 assistant 消息的 toolResults
-          const lastAssistant = [...restored].reverse().find(
-            m => m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0,
-          )
-          if (lastAssistant) {
-            // 找到对应的 toolCall 获取 toolCallId
-            const matchedTc = lastAssistant.toolCalls?.find(tc => {
-              // 按名称和顺序匹配（tool 消息无 toolCallId 字段存储）
-              return !lastAssistant.toolResults?.some(tr => tr.toolCallId === tc.id)
-            })
-            if (!lastAssistant.toolResults) lastAssistant.toolResults = []
-            lastAssistant.toolResults.push({
-              toolCallId: matchedTc?.id ?? r.id,
-              toolName: matchedTc?.name ?? 'unknown',
-              success: !r.content.startsWith('工具执行异常'),
-              content: r.content,
-            })
-            // 更新对应 toolCall 的状态和结果
-            if (matchedTc) {
-              matchedTc.status = r.content.startsWith('工具执行异常') ? 'error' : 'success'
-              matchedTc.result = r.content
-              matchedTc.parsedArgs = matchedTc.parsedArgs ?? tryParseJson(matchedTc.arguments)
-            }
-          }
-          // tool 消息不单独显示在列表中（已内嵌到 assistant）
-        } else {
-          // 普通 user / assistant / error 消息
-          restored.push({
-            id: r.id,
-            role: r.role as AiMessage['role'],
-            content: r.content,
-            timestamp: r.createdAt,
-            tokens: r.tokens,
-          })
-        }
-      }
-      messages.value = sanitizeLoadedMessages(restored)
-    } catch (e) {
-      const msg = ensureErrorString(e)
-      error.value = msg
-      log.error('load_history_failed', { sessionId: sid }, e)
+      messages.value = result.messages
+      streamingMessageIndex = -1
+    } catch (err) {
+      error.value = ensureErrorString(err)
+      log.error('load_history_failed', { sessionId: sid }, err)
     } finally {
       isLoading.value = false
     }
   }
 
-  // ─────────────────────── 发送消息 ───────────────────────
-
-  /**
-   * 发送消息并开始流式接收
-   *
-   * @param content 用户输入文本
-   * @param provider Provider 配置
-   * @param model 模型配置
-   * @param apiKey API Key
-   * @param systemPrompt 系统提示词
-   * @param attachments 文件附件列表（可选）
-   */
   async function send(
     content: string,
     provider: ProviderConfig,
@@ -496,826 +431,98 @@ export function useAiChat(options: UseAiChatOptions) {
 
     const sid = sessionIdRef.value
     if (!sid) {
-      error.value = '会话 ID 无效'
+      error.value = '浼氳瘽 ID 鏃犳晥'
       return
     }
+
     error.value = null
 
-    // 构建最终消息内容（拼接文件标签）
-    const readyFiles = (attachments ?? []).filter(f => f.status === 'ready' && f.content)
-    const finalContent = readyFiles.length > 0
-      ? buildFileMarkedContent(content.trim(), readyFiles.map(f => ({
-          name: f.name,
-          path: f.path,
-          size: f.size,
-          content: f.content!,
-          lines: f.lines ?? 0,
-        })))
-      : content.trim()
-
-    // 判断 contentType
-    const contentType = readyFiles.length > 0 ? 'text_with_files' : 'text'
-
-    // 是否启用 Tool Use（模型支持 + 有工作目录）
-    const enableTools = model.capabilities.toolUse && !!workDir.value
-
-    // 智能召回：检索相关记忆注入 system prompt
-    let enrichedSystemPrompt = systemPrompt
-    if (memoryStore.currentWorkspaceId !== '_global') {
-      const tokenBudget = Math.floor(model.capabilities.maxContext * 0.05)
-      const recalled = await memoryStore.recall(content, tokenBudget)
-      if (recalled) {
-        enrichedSystemPrompt = (systemPrompt ?? '') + '\n\n' + recalled
-      }
-    }
-
-    // 工作区配置增强：注入 contextFiles + systemPromptExtra
-    const wsConfig = aiStore.currentWorkspaceConfig
-    if (wsConfig && workDir.value) {
-      // 注入额外系统提示
-      if (wsConfig.systemPromptExtra) {
-        enrichedSystemPrompt = (enrichedSystemPrompt ?? '') + '\n\n' + wsConfig.systemPromptExtra
-      }
-      // 批量读取上下文文件，拼接到系统提示
-      if (wsConfig.contextFiles && wsConfig.contextFiles.length > 0) {
-        const contextParts: string[] = []
-        await Promise.allSettled(
-          wsConfig.contextFiles.map(async (entry) => {
-            try {
-              const fileContent = await aiReadContextFile(workDir.value, entry.path)
-              const header = entry.reason
-                ? `# ${entry.path} (${entry.reason})`
-                : `# ${entry.path}`
-              contextParts.push(`${header}\n\`\`\`\n${fileContent}\n\`\`\``)
-            } catch (e) {
-              log.warn('context_file_read_failed', { path: entry.path }, e)
-            }
-          }),
-        )
-        if (contextParts.length > 0) {
-          enrichedSystemPrompt = (enrichedSystemPrompt ?? '') +
-            '\n\n<context-files>\n' + contextParts.join('\n\n') + '\n</context-files>'
-        }
-      }
-    }
-
-    // Plan Gate：首轮未确认时禁止工具调用，追加约束提示
-    if (planGateEnabled.value && !planApproved.value) {
-      enrichedSystemPrompt = (enrichedSystemPrompt ?? '') +
-        '\n\n[PLAN GATE ACTIVE] 你必须先输出清晰的执行计划（步骤列表），' +
-        '不能调用任何工具，等待用户确认后才开始执行。计划中每个步骤请以 "- " 开头。'
-    }
-
-    // 1. 添加用户消息到列表
-    const userMsg: AiMessage = {
-      id: genId(),
-      role: 'user',
-      content: finalContent,
-      timestamp: Date.now(),
-    }
-    messages.value = [...messages.value, userMsg]
-
-    // 持久化用户消息
-    const userRecord: AiMessageRecord = {
-      id: userMsg.id,
+    const {
+      chatMessages,
+      enableTools,
+      enrichedSystemPrompt,
+      hasVisionCapability,
+    } = await prepareSendContext({
+      content,
+      provider,
+      model,
+      systemPrompt,
+      attachments,
       sessionId: sid,
-      role: 'user',
-      content: finalContent,
-      contentType,
-      tokens: 0,
-      cost: 0,
-      createdAt: userMsg.timestamp,
-    }
-    aiSaveMessage(userRecord).catch(e => log.warn('save_user_msg_failed', { sessionId: sid }, e))
+      messages,
+      workDir: workDir.value,
+      planGateEnabled: planGateEnabled.value,
+      planApproved: planApproved.value,
+      aiStore,
+      memoryStore,
+      log,
+    })
 
-    // 提前保存 session 行，防止崩溃或中断时 messages 成孤儿（无对应 session 记录）
-    if (!aiStore.sessions.some(s => s.id === sid)) {
-      const now = Date.now()
-      aiStore.saveSession({
-        id: sid,
-        title: content.replace(/<file\b[^>]*>[\s\S]*?<\/file>/g, '').trim().slice(0, 50) || '新对话',
-        providerId: provider.id,
-        model: model.id,
-        messageCount: 0,
-        totalTokens: 0,
-        estimatedCost: 0,
-        createdAt: now,
-        updatedAt: now,
-      }).catch(e => log.warn('eager_save_session_failed', { sessionId: sid }, e))
-    }
-
-    // 2. 构建发送给 API 的消息列表（包含 tool 消息链）
-    const chatMessages: ChatMessage[] = buildChatMessages(messages.value)
-
-    // 3. 开始流式对话（可能包含 Tool Use 循环）
     isStreaming.value = true
     userScrolled.value = false
 
     try {
       await streamWithToolLoop(
-        sid, chatMessages, provider, model, apiKey, enrichedSystemPrompt, enableTools,
+        sid,
+        chatMessages,
+        provider,
+        model,
+        apiKey,
+        enrichedSystemPrompt,
+        enableTools,
       )
-    } catch (e) {
-      const errMsg = ensureErrorString(e)
-
-      // context_length_exceeded 自动恢复：触发紧急压缩后重试 1 次
-      const isOverflow = /context_length_exceeded|maximum context length|tokens.*exceed|prompt.*too.*long/i.test(errMsg)
-      if (isOverflow) {
-        log.info('overflow_detected', { sessionId: sid, errMsg: errMsg.slice(0, 200) })
-        // 清理失败的流式消息
-        if (streamingMessageId) {
-          const sidSnap = streamingMessageId
-          messages.value = messages.value.filter(m => m.id !== sidSnap)
-          streamingMessageId = ''
-        }
-        const compacted = await autoCompact.forceCompact(
-          messages.value, sid, provider, model, apiKey,
-        )
-        if (compacted) {
-          messages.value = compacted
-          try {
-            // 压缩后重建消息链并重试一次
-            const retryChat = buildChatMessages(messages.value)
-            await streamWithToolLoop(
-              sid, retryChat, provider, model, apiKey, enrichedSystemPrompt, enableTools,
-            )
-            error.value = null
-            log.info('overflow_recovered', { sessionId: sid })
-          } catch (e2) {
-            const errMsg2 = ensureErrorString(e2)
-            log.error('overflow_retry_failed', { sessionId: sid }, e2)
-            error.value = `${errMsg2}\n已尝试自动压缩但仍超限，请手动清空历史或换更大上下文模型。`
-            if (streamingMessageId) {
-              updateStreamingMessage(msg => ({
-                ...msg,
-                role: 'error' as const,
-                content: errMsg2,
-                isStreaming: false,
-              }))
-            }
-          }
-        } else {
-          log.error('overflow_compact_failed', { sessionId: sid })
-          error.value = `${errMsg}\n自动压缩失败，请手动清空历史或换更大上下文模型。`
-        }
-      } else {
-        log.error('send_failed', { sessionId: sid }, e)
-        error.value = errMsg
-        // 如果有正在流式的消息，标记为错误
-        if (streamingMessageId) {
-          updateStreamingMessage(msg => ({
-            ...msg,
-            role: 'error' as const,
-            content: errMsg,
-            isStreaming: false,
-          }))
-        }
-      }
+    } catch (err) {
+      await handleSendFailure({
+        error: err,
+        sessionId: sid,
+        provider,
+        model,
+        apiKey,
+        enrichedSystemPrompt,
+        enableTools,
+        hasVisionCapability,
+        messages,
+        errorRef: error,
+        streamState,
+        log,
+        updateStreamingMessage,
+        forceCompact: autoCompact.forceCompact,
+        streamWithToolLoop,
+      })
     } finally {
-      clearWatchdog()
-      inToolExec = false
-      if (streamingMessageId) {
-        updateStreamingMessage(msg => ({ ...msg, isStreaming: false }))
-      }
-      isStreaming.value = false
-      streamingMessageId = ''
-
-      // 更新会话统计
-      const now = Date.now()
-      const session: AiSession = {
-        id: sid,
-        title: (messages.value.find(m => m.role === 'user')?.content ?? '').replace(/<file\b[^>]*>[\s\S]*?<\/file>/g, '').trim().slice(0, 50) || '新对话',
-        providerId: provider.id,
-        model: model.id,
+      finalizeSend({
+        sessionId: sid,
+        provider,
+        model,
         systemPrompt,
-        messageCount: messages.value.filter(m => m.role !== 'error').length,
+        apiKey,
+        messages,
+        isStreaming,
+        streamState,
+        workDir: workDir.value,
         totalTokens: totalTokens.value,
-        estimatedCost: 0,
-        createdAt: messages.value[0]?.timestamp ?? now,
-        updatedAt: now,
-        workDir: workDir.value || undefined,
-      }
-      aiStore.saveSession(session).catch(e => log.warn('save_session_failed', { sessionId: sid }, e))
-
-      // 自动压缩检测：后台异步触发，不阻塞 stream_done
-      // 压缩本身要再调一次 AI（可能耗时数十秒到几分钟），同步 await 会让用户以为卡死
-      const effectiveMaxContext = model.capabilities.maxContext > 0
-        ? model.capabilities.maxContext
-        : 0
-      if (effectiveMaxContext > 0) {
-        autoCompact.checkAndCompact(
-          messages.value,
-          totalTokens.value,
-          effectiveMaxContext,
-          sid,
-          provider,
-          model,
-          apiKey,
-        ).then(compacted => {
-          if (compacted) {
-            messages.value = compacted
-            log.info('background_compact_applied', { sessionId: sid, newCount: compacted.length })
-          }
-        }).catch(e => log.warn('background_compact_failed', { sessionId: sid }, e))
-      }
+        clearWatchdog,
+        updateStreamingMessage,
+        aiStore,
+        autoCompact,
+        log,
+      })
     }
   }
 
-  // ─────────────────────── Tool Use 循环 ───────────────────────
-
-  /**
-   * 流式对话 + Tool Use 自动循环
-   *
-   * 当 AI 返回 finish_reason === 'tool_calls' 时，执行工具并将结果追加到消息链，重新调用 AI。
-   * 最多循环 MAX_TOOL_LOOPS 次。
-   */
-  async function streamWithToolLoop(
-    sid: string,
-    chatMessages: ChatMessage[],
-    provider: ProviderConfig,
-    model: ModelConfig,
-    apiKey: string,
-    systemPrompt: string | undefined,
-    enableTools: boolean,
-  ): Promise<void> {
-    let loopCount = 0
-    log.info('stream_start', { sessionId: sid, model: model.id, enableTools, msgCount: chatMessages.length })
-
-    while (loopCount <= MAX_TOOL_LOOPS) {
-      // 创建助手占位消息
-      streamingMessageId = genId()
-      pendingToolCalls = []
-      lastFinishReason = ''
-      pendingTextDelta = ''
-      pendingThinkingDelta = ''
-
-      const assistantMsg: AiMessage = {
-        id: streamingMessageId,
-        role: 'assistant',
-        content: '',
-        thinking: '',
-        timestamp: Date.now(),
-        isStreaming: true,
-        toolCalls: [],
-      }
-      messages.value = [...messages.value, assistantMsg]
-
-      // 流式对话
-      resetWatchdog()
-      await aiChatStream(
-        {
-          sessionId: sid,
-          messages: chatMessages,
-          providerType: provider.providerType,
-          model: model.id,
-          apiKey,
-          endpoint: provider.endpoint,
-          maxTokens: model.capabilities.maxOutput > 0 ? model.capabilities.maxOutput : undefined,
-          systemPrompt,
-          enableTools,
-          // 模型支持 thinking 时默认 8K 预算；后续可由用户面板覆盖
-          thinkingBudget: model.capabilities.thinking ? 8192 : undefined,
-        },
-        (event: AiStreamEvent) => handleStreamEvent(event),
-      )
-      clearWatchdog()
-
-      // 刷新最后的缓冲
-      flushPendingDelta()
-
-      // 孤儿守卫：空 assistant（无 content + 无 toolCalls）在此直接转 error
-      // 防止下一轮 buildChatMessages 回传 OpenAI 400
-      const finalMsgCheck = messages.value.find(m => m.id === streamingMessageId)
-      if (finalMsgCheck && finalMsgCheck.role === 'assistant') {
-        const noContent = !finalMsgCheck.content || finalMsgCheck.content.trim() === ''
-        const noToolCalls = pendingToolCalls.length === 0
-        if (noContent && noToolCalls) {
-          const hasThinking = !!(finalMsgCheck.thinking && finalMsgCheck.thinking.trim())
-          // 根据 finish_reason 精准定位根因
-          let errMsg: string
-          if (lastFinishReason === 'length') {
-            errMsg = `[输出被 max_tokens 截断] 模型 thinking 耗尽了输出预算（${model.capabilities.maxOutput} token）还没开始写正文。请在 Provider 设置里调大该模型的"最大输出"（建议 ≥ 16384），或换非 reasoning 模型。`
-          } else if (hasThinking) {
-            errMsg = `[模型 thinking 后 stop 空回] finish_reason=${lastFinishReason}。MiMo / DeepSeek-R 系在 tool 循环第 2 轮常见此问题，尝试：1) 换模型测试 2) 在 Provider 里关闭该模型的 thinking 能力标志 3) 调大 max_tokens。`
-          } else {
-            errMsg = `[模型未生成回复] finish_reason=${lastFinishReason}。可能因异常中断或服务端问题。`
-          }
-          log.warn('empty_assistant_converted_to_error', {
-            sessionId: sid,
-            finishReason: lastFinishReason,
-            hasThinking,
-            maxOutput: model.capabilities.maxOutput,
-          })
-          messages.value = messages.value.map(m =>
-            m.id === streamingMessageId
-              ? { ...m, role: 'error' as const, content: errMsg, isStreaming: false }
-              : m,
-          )
-        }
-      }
-
-      // 持久化助手消息
-      const finalMsg = messages.value.find(m => m.id === streamingMessageId)
-      if (finalMsg && finalMsg.role === 'assistant') {
-        const hasToolCalls = pendingToolCalls.length > 0
-        const assistantRecord: AiMessageRecord = {
-          id: finalMsg.id,
-          sessionId: sid,
-          role: 'assistant',
-          content: hasToolCalls ? JSON.stringify(pendingToolCalls) : finalMsg.content,
-          contentType: hasToolCalls ? 'tool_calls' : 'text',
-          tokens: finalMsg.tokens ?? 0,
-          cost: 0,
-          createdAt: finalMsg.timestamp,
-        }
-        aiSaveMessage(assistantRecord)
-          .catch(e => {
-            log.warn('save_assistant_msg_failed', { sessionId: sid }, e)
-            const idx = messages.value.findIndex(m => m.id === finalMsg.id)
-            if (idx !== -1) messages.value[idx] = { ...messages.value[idx]!, saveStatus: 'error' }
-          })
-      }
-
-      // 检查是否需要 Tool Use 循环
-      if (lastFinishReason !== 'tool_calls' || pendingToolCalls.length === 0) {
-        // 正常结束 — 解析 Session Journal 标记并写入；解析 Dispatcher SPAWN 标记
-        if (workDir.value) {
-          const finalMsg = messages.value.find(m => m.id === streamingMessageId)
-          if (finalMsg?.content) {
-            parseAndWriteJournalSections(finalMsg.content, workDir.value)
-            parseSpawnedTasks(finalMsg.content)
-          }
-        }
-        break
-      }
-
-      // ── 进入 Tool Use 循环 ──
-      loopCount++
-      log.info('tool_loop', { sessionId: sid, loopCount, toolCount: pendingToolCalls.length })
-      if (loopCount > MAX_TOOL_LOOPS) {
-        log.warn('tool_loop_exceeded', { sessionId: sid, max: MAX_TOOL_LOOPS })
-        updateStreamingMessage(msg => ({
-          ...msg,
-          notice: { kind: 'warn', text: `已达到工具调用上限 ${MAX_TOOL_LOOPS} 次，本轮停止。可继续发消息让 AI 接着干。` },
-          isStreaming: false,
-        }))
-        break
-      }
-
-      // 如果被中断，退出循环
-      if (!isStreaming.value) break
-
-      // 标记当前助手消息结束流式
-      updateStreamingMessage(msg => ({ ...msg, isStreaming: false }))
-
-      // 执行所有工具调用
-      log.info('tool_exec_start', { sessionId: sid, tools: pendingToolCalls.map(t => t.name) })
-      const toolResults = await executeToolCalls(pendingToolCalls, sid)
-      log.info('tool_exec_done', { sessionId: sid, resultCount: toolResults.length, results: toolResults.map(r => ({ id: r.toolCallId, name: r.toolName, len: r.content.length })) })
-
-      // 更新 UI 中的工具调用状态
-      updateStreamingMessage(msg => ({
-        ...msg,
-        toolCalls: pendingToolCalls,
-        toolResults,
-      }))
-
-      // 构建下一轮的消息链：追加 assistant(tool_calls) + tool(results)
-      // 回传 reasoning_content（MiMo / DeepSeek 思考模式 + 工具调用硬性要求）
-      const assistantTurnMsg: ChatMessage = {
-        role: 'assistant',
-        content: finalMsg?.content || null,
-        toolCalls: pendingToolCalls.map(tc => ({
-          id: tc.id,
-          type: 'function',
-          function: { name: tc.name, arguments: tc.arguments },
-        })),
-      }
-      if (finalMsg?.thinking && finalMsg.thinking.trim()) {
-        assistantTurnMsg.reasoningContent = finalMsg.thinking
-      }
-      chatMessages.push(assistantTurnMsg)
-
-      // 每个工具调用对应一条 tool 消息
-      for (const result of toolResults) {
-        const toolMessage: ChatMessage = {
-          role: 'tool',
-          content: result.content,
-          toolCallId: result.toolCallId,
-          name: result.toolName,
-        }
-        chatMessages.push(toolMessage)
-
-        // 持久化 tool 消息
-        const toolRecord: AiMessageRecord = {
-          id: genId(),
-          sessionId: sid,
-          role: 'tool',
-          content: result.content,
-          contentType: 'tool_result',
-          tokens: 0,
-          cost: 0,
-          createdAt: Date.now(),
-        }
-        aiSaveMessage(toolRecord).catch(e => log.warn('save_tool_msg_failed', { sessionId: sid }, e))
-      }
-
-      // 重置 streamingMessageId 以便下一轮创建新的助手消息
-      streamingMessageId = ''
-      log.info('tool_loop_next', { sessionId: sid, loopCount, newMsgCount: chatMessages.length })
-    }
-  }
-
-  /**
-   * 并行执行一组工具调用
-   */
-  async function executeToolCalls(toolCalls: ToolCallInfo[], sessionId: string): Promise<ToolResultInfo[]> {
-    inToolExec = true
-    clearWatchdog()
-    // 初始状态：需要审批的工具保持 pending（UI 不显示转圈，展开可见审批条）；
-    // 其他工具直接进入 running 等执行。
-    for (const tc of toolCalls) {
-      const needApproval = pickApprovalTool(tc.name) !== null
-      tc.status = needApproval ? 'pending' : 'running'
-    }
-    updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
-
-    const results: ToolResultInfo[] = []
-
-    // 并行执行
-    const promises = toolCalls.map(async (tc) => {
-      const failureKey = `${tc.name}:${hashArgs(tc.arguments)}`
-      const prevFailures = toolFailureCounter.get(failureKey) ?? 0
-
-      // 熔断：同一调用已连续失败达到上限 → 直接短路，不再真正调用后端
-      if (prevFailures >= MAX_SAME_TOOL_FAILURE) {
-        const argsBrief = tc.arguments.length > 80 ? tc.arguments.slice(0, 80) + '…' : tc.arguments
-        const content = `[CIRCUIT_OPEN] 同一调用 ${tc.name}(${argsBrief}) 已连续失败 ${prevFailures} 次，请换一种思路或直接回答用户`
-        log.warn('tool_circuit_open', { sessionId: sessionIdRef.value, tool: tc.name, failures: prevFailures })
-        tc.status = 'error'
-        tc.error = content
-        results.push({
-          toolCallId: tc.id,
-          toolName: tc.name,
-          success: false,
-          content,
-        })
-        return
-      }
-
-      try {
-        // 写/编辑/执行命令类工具需先过审批（P1-1）
-        const approvalTool = pickApprovalTool(tc.name)
-        if (approvalTool) {
-          const decision = await requestApprovalForTool(approvalTool, tc, sessionId, () => {
-            updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
-          })
-          // 审批决定后刷新 UI（保留 approvalState 痕迹）
-          updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
-          if (decision === 'deny') {
-            const content = `[user_rejected] 用户拒绝了 ${tc.name} 调用`
-            tc.status = 'error'
-            tc.error = content
-            // 审批拒绝不计入熔断计数，避免被短路
-            toolFailureCounter.delete(failureKey)
-            results.push({
-              toolCallId: tc.id,
-              toolName: tc.name,
-              success: false,
-              content,
-            })
-            return
-          }
-          // 审批通过：切到 running 让 UI 显示执行中
-          tc.status = 'running'
-          updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
-        }
-
-        const result = await aiExecuteTool(
-          tc.name,
-          tc.arguments,
-          workDir.value,
-          sessionIdRef.value,
-          tc.id,
-        )
-        tc.status = result.success ? 'success' : 'error'
-        tc.result = result.content
-        if (!result.success) {
-          tc.error = result.content
-          toolFailureCounter.set(failureKey, prevFailures + 1)
-        } else {
-          // 成功则清零该 key（避免偶发失败误伤）
-          toolFailureCounter.delete(failureKey)
-          // write_file / edit_file 成功后，从本地文件编辑器缓存中驱逐该路径，
-          // 下次打开时自动重新读磁盘，保证显示最新内容
-          if (tc.name === 'write_file' || tc.name === 'edit_file') {
-            const filePath = (tc.parsedArgs?.path as string) ?? ''
-            if (filePath) {
-              import('@/stores/local-file-editor').then(({ useLocalFileEditorStore }) => {
-                useLocalFileEditorStore().close(filePath)
-              })
-            }
-          }
-        }
-
-        results.push({
-          toolCallId: tc.id,
-          toolName: tc.name,
-          success: result.success,
-          content: result.content,
-        })
-      } catch (e) {
-        const errMsg = ensureErrorString(e)
-        tc.status = 'error'
-        tc.error = errMsg
-        toolFailureCounter.set(failureKey, prevFailures + 1)
-
-        results.push({
-          toolCallId: tc.id,
-          toolName: tc.name,
-          success: false,
-          content: `工具执行异常: ${errMsg}`,
-        })
-      }
-    })
-
-    await Promise.all(promises)
-
-    // 单轮累计预算检查：若多个工具结果之和过大，后端会挑最大的若干条落盘替换
-    try {
-      const budgetInput = results.map(r => ({
-        toolCallId: r.toolCallId,
-        toolName: r.toolName,
-        content: r.content,
-      }))
-      const budgeted = await aiEnforceToolResultBudget(sessionIdRef.value, budgetInput)
-      // 把预算结果写回 results 与 toolCalls
-      for (const b of budgeted) {
-        const r = results.find(x => x.toolCallId === b.toolCallId)
-        if (r && r.content !== b.content) {
-          r.content = b.content
-          const tc = toolCalls.find(x => x.id === b.toolCallId)
-          if (tc) tc.result = b.content
-        }
-      }
-    } catch (e) {
-      log.warn('budget_check_failed', { sessionId: sessionIdRef.value }, e)
-    }
-
-    // 更新 UI
-    updateStreamingMessage(msg => ({ ...msg, toolCalls: [...toolCalls] }))
-
-    inToolExec = false
-    return results
-  }
-
-  // ─────────────────────── 流事件处理 ───────────────────────
-
-  /** 处理单个流式事件 */
-  function handleStreamEvent(event: AiStreamEvent): void {
-    resetWatchdog()
-    switch (event.type) {
-      case 'TextDelta':
-        pendingTextDelta += event.delta
-        // Phase Tracking：实时从累积文本中解析 [PHASE:N/M label]
-        {
-          const phaseMatch = pendingTextDelta.match(/\[PHASE:(\d+)\/(\d+)\s+([^\]]+)\]/)
-          if (phaseMatch) {
-            currentPhase.value = {
-              current: Number(phaseMatch[1]),
-              total: Number(phaseMatch[2]),
-              label: phaseMatch[3]!.trim(),
-            }
-          }
-        }
-        scheduleFlush()
-        break
-
-      case 'ThinkingDelta':
-        pendingThinkingDelta += event.delta
-        scheduleFlush()
-        break
-
-      case 'Usage':
-        updateStreamingMessage(msg => ({
-          ...msg,
-          tokens: event.prompt_tokens,  // 只存 prompt tokens，代表本轮 context 窗口消耗
-        }))
-        break
-
-      case 'Done':
-        flushPendingDelta()
-        lastFinishReason = event.finish_reason
-        log.info('stream_done', {
-          sessionId: sessionIdRef.value,
-          finishReason: event.finish_reason,
-          pendingToolCalls: pendingToolCalls.length,
-        })
-        // Plan Gate 检测：若开启且未确认，检查 AI 是否输出了计划（无工具调用）
-        if (planGateEnabled.value && !planApproved.value && pendingToolCalls.length === 0) {
-          const streamingMsg = messages.value.find(m => m.id === streamingMessageId)
-          if (streamingMsg?.content) {
-            pendingPlan.value = streamingMsg.content
-            awaitingPlanApproval.value = true
-          }
-        }
-        break
-
-      case 'Error':
-        flushPendingDelta()
-        error.value = event.message
-        if (!event.retryable) {
-          updateStreamingMessage(msg => ({
-            ...msg,
-            content: msg.content + `\n\n[错误] ${event.message}`,
-          }))
-        }
-        break
-
-      case 'ToolCall':
-        // 收集工具调用（后端已完成增量拼接，这里收到的是完整的 ToolCall）
-        // 若 ToolCallDelta 已创建占位（id 匹配），则升级为完整状态，不再新建
-        {
-          const existing = pendingToolCalls.find(tc => tc.id === event.id)
-          if (existing) {
-            existing.name = event.name
-            existing.arguments = event.arguments
-            existing.parsedArgs = tryParseJson(event.arguments)
-            existing.status = 'pending'
-            existing.streamingChars = undefined
-            existing.streamingIndex = undefined
-          } else {
-            // reactive 包装：后续 tc.status / tc.approvalState 等 mutation 才能触发子组件响应式更新
-            pendingToolCalls.push(reactive({
-              id: event.id,
-              name: event.name,
-              arguments: event.arguments,
-              parsedArgs: tryParseJson(event.arguments),
-              status: 'pending',
-            }) as ToolCallInfo)
-          }
-        }
-        // 更新 UI
-        updateStreamingMessage(msg => ({
-          ...msg,
-          toolCalls: [...pendingToolCalls],
-        }))
-        break
-
-      case 'ToolCallDelta':
-        // 流式累积进度：按 index 定位（OpenAI 只在第一个 delta 带 id/name，后续只有 arguments）
-        {
-          let existing = pendingToolCalls.find(tc => tc.streamingIndex === event.index)
-          if (!existing && event.id && event.name) {
-            existing = reactive({
-              id: event.id,
-              name: event.name,
-              arguments: '',
-              status: 'streaming',
-              streamingChars: 0,
-              streamingIndex: event.index,
-            }) as ToolCallInfo
-            pendingToolCalls.push(existing)
-            updateStreamingMessage(msg => ({
-              ...msg,
-              toolCalls: [...pendingToolCalls],
-            }))
-          }
-          if (existing) {
-            existing.arguments += event.arguments_delta
-            existing.streamingChars = existing.arguments.length
-          }
-        }
-        break
-    }
-  }
-
-  // ─────────────────────── 流式节流（RAF 驱动） ───────────────────────
-
-  /** 调度一帧后刷新（RAF，比 setTimeout 50ms 更省CPU且对齐渲染节拍） */
-  function scheduleFlush(): void {
-    if (_flushRafId !== null) return
-    _flushRafId = requestAnimationFrame(() => {
-      _flushRafId = null
-      flushPendingDelta()
-    })
-  }
-
-  /** 将缓冲区的增量合并到消息中 */
-  function flushPendingDelta(): void {
-    if (throttleTimer) {
-      clearTimeout(throttleTimer)
-      throttleTimer = null
-    }
-    if (_flushRafId !== null) {
-      cancelAnimationFrame(_flushRafId)
-      _flushRafId = null
-    }
-
-    if (!pendingTextDelta && !pendingThinkingDelta) return
-
-    const textChunk = pendingTextDelta
-    const thinkingChunk = pendingThinkingDelta
-    pendingTextDelta = ''
-    pendingThinkingDelta = ''
-
-    updateStreamingMessage(msg => ({
-      ...msg,
-      content: msg.content + textChunk,
-      thinking: (msg.thinking ?? '') + thinkingChunk,
-    }))
-
-    // 自动滚动
-    if (!userScrolled.value) {
-      scrollToBottom()
-    }
-  }
-
-  // ─────────────────────── 消息更新 ───────────────────────
-
-  /** 不可变更新当前流式消息（O(1) 索引赋值，避免全量重建数组） */
-  function updateStreamingMessage(updater: (msg: AiMessage) => AiMessage): void {
-    if (!streamingMessageId) return
-    const idx = messages.value.findIndex(m => m.id === streamingMessageId)
-    if (idx !== -1) messages.value[idx] = updater(messages.value[idx]!)
-  }
-
-  // ─────────────────────── 中断 ───────────────────────
-
-  /** 中断当前流式生成 */
   async function abort(): Promise<void> {
-    if (!isStreaming.value) return
-    clearWatchdog()
-    try {
-      await aiAbortStream(sessionIdRef.value)
-    } catch (e) {
-      log.warn('abort_failed', { sessionId: sessionIdRef.value }, e)
-    }
-    flushPendingDelta()
-
-    // 为未响应的 tool_calls 补偿 tool stub 消息，避免下一次请求触发 OpenAI 400：
-    // "assistant message with 'tool_calls' must be followed by tool messages"
-    const streamingMsg = messages.value.find(m => m.id === streamingMessageId)
-    if (streamingMsg?.toolCalls && streamingMsg.toolCalls.length > 0) {
-      const existingResults = streamingMsg.toolResults ?? []
-      const respondedIds = new Set(existingResults.map(tr => tr.toolCallId))
-      const missing = streamingMsg.toolCalls.filter(tc => !respondedIds.has(tc.id))
-
-      if (missing.length > 0) {
-        const stubContent = '[工具调用被用户中断，未执行]'
-        const missingIds = new Set(missing.map(tc => tc.id))
-        const patchedResults = [
-          ...existingResults,
-          ...missing.map(tc => ({
-            toolCallId: tc.id,
-            toolName: tc.name,
-            success: false,
-            content: stubContent,
-          })),
-        ]
-        updateStreamingMessage(msg => ({
-          ...msg,
-          toolResults: patchedResults,
-          // 关键：把未完成的 tool_call status 从 running 改为 error，否则 UI 一直转圈
-          toolCalls: (msg.toolCalls ?? []).map(tc =>
-            missingIds.has(tc.id)
-              ? { ...tc, status: 'error' as const, errorMessage: stubContent }
-              : tc,
-          ),
-        }))
-
-        // 持久化每条 stub 到 DB，保证历史可加载
-        const sid = sessionIdRef.value
-        for (const tc of missing) {
-          const toolRecord: AiMessageRecord = {
-            id: genId(),
-            sessionId: sid,
-            role: 'tool',
-            content: stubContent,
-            contentType: 'tool_result',
-            tokens: 0,
-            cost: 0,
-            parentId: tc.id,
-            createdAt: Date.now(),
-          }
-          aiSaveMessage(toolRecord).catch(e => log.warn('save_abort_stub_failed', { sessionId: sid, toolCallId: tc.id }, e))
-        }
-      }
-    }
-
-    updateStreamingMessage(msg => ({
-      ...msg,
-      content: msg.content + '\n\n[已中断]',
-      isStreaming: false,
-    }))
-    isStreaming.value = false
+    await abortChat({
+      sessionId: sessionIdRef.value,
+      messages,
+      isStreaming,
+      streamState,
+      log,
+      clearWatchdog,
+      flushPendingDelta,
+      updateStreamingMessage,
+    })
   }
 
-  // ─────────────────────── 重新生成 ───────────────────────
-
-  /**
-   * 重新生成最后一条助手回复
-   */
   async function regenerate(
     provider: ProviderConfig,
     model: ModelConfig,
@@ -1324,39 +531,34 @@ export function useAiChat(options: UseAiChatOptions) {
   ): Promise<void> {
     if (isStreaming.value) return
 
-    const lastUserMsg = [...messages.value].reverse().find(m => m.role === 'user')
-    if (!lastUserMsg) return
+    const lastUserMessage = [...messages.value].reverse().find(message => message.role === 'user')
+    if (!lastUserMessage) return
 
-    // 移除最后一条助手消息
-    let lastAssistantIdx = -1
+    let lastAssistantIndex = -1
     for (let i = messages.value.length - 1; i >= 0; i--) {
-      const msg = messages.value[i]
-      if (msg && (msg.role === 'assistant' || msg.role === 'error')) {
-        lastAssistantIdx = i
+      const message = messages.value[i]
+      if (message && (message.role === 'assistant' || message.role === 'error')) {
+        lastAssistantIndex = i
         break
       }
     }
-    if (lastAssistantIdx >= 0) {
-      messages.value = messages.value.filter((_, i) => i !== lastAssistantIdx)
+
+    if (lastAssistantIndex >= 0) {
+      messages.value = messages.value.filter((_, index) => index !== lastAssistantIndex)
     }
 
-    // 移除最后一条用户消息（send 会重新添加）
-    const lastUserIdx = messages.value.lastIndexOf(lastUserMsg)
-    if (lastUserIdx >= 0) {
-      messages.value = messages.value.filter((_, i) => i !== lastUserIdx)
+    const lastUserIndex = messages.value.lastIndexOf(lastUserMessage)
+    if (lastUserIndex >= 0) {
+      messages.value = messages.value.filter((_, index) => index !== lastUserIndex)
     }
 
-    // 重新发送
-    await send(lastUserMsg.content, provider, model, apiKey, systemPrompt)
+    await send(lastUserMessage.content, provider, model, apiKey, systemPrompt)
   }
 
-  // ─────────────────────── 清空对话 ───────────────────────
-
-  /** 移除列表中最后一条 error 消息（max_tokens 截断恢复场景用） */
   function removeLastError(): void {
     for (let i = messages.value.length - 1; i >= 0; i--) {
       if (messages.value[i]?.role === 'error') {
-        messages.value = messages.value.filter((_, idx) => idx !== i)
+        messages.value = messages.value.filter((_, index) => index !== i)
         break
       }
     }
@@ -1366,19 +568,29 @@ export function useAiChat(options: UseAiChatOptions) {
     messages.value = []
     error.value = null
     isStreaming.value = false
-    streamingMessageId = ''
-    pendingTextDelta = ''
-    pendingThinkingDelta = ''
-    if (throttleTimer) {
-      clearTimeout(throttleTimer)
-      throttleTimer = null
-    }
+    historyLoadedRecords.value = 0
+    historyTotalRecords.value = 0
+    historyWindowSize.value = HISTORY_RECENT_RECORD_LIMIT
+    currentPhase.value = null
+    streamState.streamingMessageId = ''
+    streamingMessageIndex = -1
+    streamState.pendingTextDelta = ''
+    streamState.pendingThinkingDelta = ''
+    streamState.pendingToolCalls = []
+    streamState.lastFinishReason = ''
+    streamState.inToolExec = false
+    cancelFlushTimer()
     clearWatchdog()
     toolFailureCounter.clear()
     autoCompact.resetCircuitBreaker()
   }
 
-  // ─────────────────────── 自动滚动 ───────────────────────
+  async function loadMoreHistory(): Promise<void> {
+    if (!canLoadMoreHistory.value) return
+    await loadHistory(sessionIdRef.value, {
+      windowSize: getExpandedHistoryWindowSize(historyWindowSize.value),
+    })
+  }
 
   function scrollToBottom(): void {
     const container = options.scrollContainer?.value
@@ -1388,112 +600,63 @@ export function useAiChat(options: UseAiChatOptions) {
     })
   }
 
-  /**
-   * 处理用户滚动事件（RAF 节流，避免高频触发）
-   */
   function handleScroll(event: Event): void {
-    if (_scrollRafId !== null) return
-    _scrollRafId = requestAnimationFrame(() => {
-      _scrollRafId = null
-      const el = event.target as HTMLElement
-      if (!el) return
+    if (scrollRafId !== null) return
+    scrollRafId = requestAnimationFrame(() => {
+      scrollRafId = null
+      const element = event.target as HTMLElement | null
+      if (!element) return
       const threshold = 50
-      const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold
+      const isAtBottom = element.scrollHeight - element.scrollTop - element.clientHeight < threshold
       userScrolled.value = !isAtBottom
     })
   }
 
-  // ─────────────────────── Session Journal 写入 ───────────────────────
-
-  /**
-   * 从 AI 回复文本中提取 <!-- @@@journal:xxx -->...<!-- @@@end:journal:xxx --> 块
-   * 并写入 .devforge/journal.md 对应标记区间。
-   */
-  function parseAndWriteJournalSections(text: string, workDirPath: string): void {
-    const regex = /<!-- @@@journal:(\S+) -->([\s\S]*?)<!-- @@@end:journal:\1 -->/g
-    let match: RegExpExecArray | null
-    while ((match = regex.exec(text)) !== null) {
-      const marker = match[1]!
-      const content = match[2]!.trim()
-      import('@/api/ai').then(({ aiUpdateJournalSection }) => {
-        aiUpdateJournalSection(workDirPath, marker, content)
-          .catch(e => log.warn('journal_write_failed', { marker }, e))
-      })
-    }
-  }
-
-  // ─────────────────────── Dispatcher Spawn 解析 ───────────────────────
-
-  /** Dispatcher 模式下，AI 声明的待执行子任务队列 */
-  const spawnedTasks = ref<Array<{ id: string; description: string; status: 'pending' | 'running' | 'done' | 'error' }>>([])
-
-  /**
-   * 从 AI 回复文本中提取 [SPAWN:xxx] 标记并追加到 spawnedTasks。
-   * 调用方负责执行子任务（如创建新 session 发起新对话）。
-   */
-  function parseSpawnedTasks(text: string): void {
-    const regex = /\[SPAWN:([^\]]+)\]/g
-    let match: RegExpExecArray | null
-    while ((match = regex.exec(text)) !== null) {
-      const description = match[1]!.trim()
-      spawnedTasks.value = [
-        ...spawnedTasks.value,
-        { id: genId(), description, status: 'pending' },
-      ]
-    }
-  }
-
-  // ─────────────────────── 清理 ───────────────────────
-
   onUnmounted(() => {
-    if (throttleTimer) {
-      clearTimeout(throttleTimer)
-      throttleTimer = null
+    cancelFlushTimer()
+    if (scrollRafId !== null) {
+      cancelAnimationFrame(scrollRafId)
+      scrollRafId = null
     }
-    if (_flushRafId !== null) { cancelAnimationFrame(_flushRafId); _flushRafId = null }
-    if (_scrollRafId !== null) { cancelAnimationFrame(_scrollRafId); _scrollRafId = null }
     clearWatchdog()
   })
 
   return {
-    // 状态
     messages,
     isStreaming,
     isLoading,
     error,
     totalTokens,
+    latestUsage,
     canSend,
-    /** 工作目录（Tool Use 安全边界） */
+    canLoadMoreHistory,
     workDir,
-    /** 自动压缩状态 */
+    historyLoadedRecords,
+    historyTotalRecords,
     isCompacting: autoCompact.isCompacting,
-    /** 可用的工作目录列表（工作区根） */
     availableWorkDirs,
-    /** 校验路径是否在工作区内 */
     isPathInWorkspace,
-    // Plan Gate
     planGateEnabled,
     planApproved,
     pendingPlan,
     awaitingPlanApproval,
     approvePlan,
     rejectPlan,
-    // Phase Tracking
     currentPhase,
-    // Dispatcher
     spawnedTasks,
-    // 操作
     loadHistory,
+    loadMoreHistory,
     send,
     abort,
     regenerate,
     removeLastError,
     clearMessages,
-    /** 手动压缩对话历史 */
     manualCompact: (provider: ProviderConfig, model: ModelConfig, apiKey: string) =>
       autoCompact.forceCompact(messages.value, sessionIdRef.value ?? '', provider, model, apiKey)
-        .then(compacted => { if (compacted) messages.value = compacted; return !!compacted }),
-    // 滚动
+        .then(compacted => {
+          if (compacted) messages.value = compacted
+          return !!compacted
+        }),
     handleScroll,
     scrollToBottom,
   }

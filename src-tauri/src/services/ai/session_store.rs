@@ -43,6 +43,8 @@ pub async fn init_tables(pool: &SqlitePool) -> Result<(), AppError> {
             tokens INTEGER DEFAULT 0,
             cost REAL DEFAULT 0,
             parent_id TEXT,
+            success INTEGER,
+            tool_name TEXT,
             created_at INTEGER NOT NULL,
             FOREIGN KEY (session_id) REFERENCES ai_sessions(id) ON DELETE CASCADE
         );
@@ -67,6 +69,14 @@ pub async fn init_tables(pool: &SqlitePool) -> Result<(), AppError> {
 
     // 迁移：为旧数据库添加 work_dir 列（忽略"列已存在"错误）
     sqlx::query("ALTER TABLE ai_sessions ADD COLUMN work_dir TEXT")
+        .execute(pool)
+        .await
+        .ok();
+    sqlx::query("ALTER TABLE ai_messages ADD COLUMN success INTEGER")
+        .execute(pool)
+        .await
+        .ok();
+    sqlx::query("ALTER TABLE ai_messages ADD COLUMN tool_name TEXT")
         .execute(pool)
         .await
         .ok();
@@ -201,9 +211,21 @@ pub async fn save_session(pool: &SqlitePool, session: &AiSession) -> Result<(), 
 
     sqlx::query(
         r#"
-        INSERT OR REPLACE INTO ai_sessions
+        INSERT INTO ai_sessions
         (id, title, provider_id, model, system_prompt, message_count, total_tokens, estimated_cost, tags, created_at, updated_at, work_dir)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            provider_id = excluded.provider_id,
+            model = excluded.model,
+            system_prompt = excluded.system_prompt,
+            message_count = excluded.message_count,
+            total_tokens = excluded.total_tokens,
+            estimated_cost = excluded.estimated_cost,
+            tags = excluded.tags,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at,
+            work_dir = excluded.work_dir
         "#,
     )
     .bind(&session.id)
@@ -305,8 +327,8 @@ pub async fn save_message(pool: &SqlitePool, msg: &AiMessageRecord) -> Result<()
     sqlx::query(
         r#"
         INSERT OR REPLACE INTO ai_messages
-        (id, session_id, role, content, content_type, tokens, cost, parent_id, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, session_id, role, content, content_type, tokens, cost, parent_id, success, tool_name, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(&msg.id)
@@ -317,10 +339,58 @@ pub async fn save_message(pool: &SqlitePool, msg: &AiMessageRecord) -> Result<()
     .bind(msg.tokens)
     .bind(msg.cost)
     .bind(&msg.parent_id)
+    .bind(msg.success.map(|value| if value { 1 } else { 0 }))
+    .bind(&msg.tool_name)
     .bind(msg.created_at)
     .execute(pool)
     .await
     .map_err(|e| AppError::Other(format!("保存消息失败: {e}")))?;
+
+    refresh_session_summary(pool, &msg.session_id).await?;
+
+    Ok(())
+}
+
+/// 刷新会话列表使用的聚合摘要，避免消息事实源和会话列表长期不一致。
+async fn refresh_session_summary(pool: &SqlitePool, session_id: &str) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+        UPDATE ai_sessions
+        SET
+            message_count = (
+                SELECT COUNT(*)
+                FROM ai_messages
+                WHERE session_id = ?
+                  AND NOT (role = 'tool' AND content_type = 'tool_result')
+            ),
+            total_tokens = (
+                SELECT COALESCE(SUM(tokens), 0)
+                FROM ai_messages
+                WHERE session_id = ?
+            ),
+            estimated_cost = (
+                SELECT COALESCE(SUM(cost), 0)
+                FROM ai_messages
+                WHERE session_id = ?
+            ),
+            updated_at = (
+                SELECT COALESCE(MAX(created_at), ai_sessions.updated_at)
+                FROM ai_messages
+                WHERE session_id = ?
+            )
+        WHERE id = ?
+          AND EXISTS (SELECT 1 FROM ai_messages WHERE session_id = ?)
+        "#,
+    )
+    .bind(session_id)
+    .bind(session_id)
+    .bind(session_id)
+    .bind(session_id)
+    .bind(session_id)
+    .bind(session_id)
+    .execute(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("refresh session summary failed: {e}")))?;
 
     Ok(())
 }
@@ -330,9 +400,9 @@ pub async fn get_messages(
     pool: &SqlitePool,
     session_id: &str,
 ) -> Result<Vec<AiMessageRecord>, AppError> {
-    let rows: Vec<(String, String, String, String, String, u32, f64, Option<String>, i64)> =
+    let rows: Vec<(String, String, String, String, String, u32, f64, Option<String>, Option<i32>, Option<String>, i64)> =
         sqlx::query_as(
-            "SELECT id, session_id, role, content, content_type, tokens, cost, parent_id, created_at FROM ai_messages WHERE session_id = ? ORDER BY created_at"
+            "SELECT id, session_id, role, content, content_type, tokens, cost, parent_id, success, tool_name, created_at FROM ai_messages WHERE session_id = ? ORDER BY created_at, id"
         )
         .bind(session_id)
         .fetch_all(pool)
@@ -342,7 +412,7 @@ pub async fn get_messages(
     let messages = rows
         .into_iter()
         .map(
-            |(id, session_id, role, content, content_type, tokens, cost, parent_id, created_at)| {
+            |(id, session_id, role, content, content_type, tokens, cost, parent_id, success, tool_name, created_at)| {
                 AiMessageRecord {
                     id,
                     session_id,
@@ -352,11 +422,75 @@ pub async fn get_messages(
                     tokens,
                     cost,
                     parent_id,
+                    success: success.map(|value| value != 0),
+                    tool_name,
                     created_at,
                 }
             },
         )
         .collect();
+
+    Ok(messages)
+}
+
+pub async fn count_messages(pool: &SqlitePool, session_id: &str) -> Result<u32, AppError> {
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM ai_messages WHERE session_id = ?")
+        .bind(session_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|e| AppError::Other(format!("查询消息总数失败: {e}")))?;
+
+    Ok(count.max(0) as u32)
+}
+
+pub async fn get_messages_recent(
+    pool: &SqlitePool,
+    session_id: &str,
+    limit: usize,
+) -> Result<Vec<AiMessageRecord>, AppError> {
+    let limit = limit.max(1) as i64;
+    let rows: Vec<(String, String, String, String, String, u32, f64, Option<String>, Option<i32>, Option<String>, i64)> =
+        sqlx::query_as(
+            r#"
+            SELECT id, session_id, role, content, content_type, tokens, cost, parent_id, success, tool_name, created_at
+            FROM ai_messages
+            WHERE session_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            "#,
+        )
+        .bind(session_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| AppError::Other(format!("查询最近消息失败: {e}")))?;
+
+    let mut messages: Vec<AiMessageRecord> = rows
+        .into_iter()
+        .map(
+            |(id, session_id, role, content, content_type, tokens, cost, parent_id, success, tool_name, created_at)| {
+                AiMessageRecord {
+                    id,
+                    session_id,
+                    role,
+                    content,
+                    content_type,
+                    tokens,
+                    cost,
+                    parent_id,
+                    success: success.map(|value| value != 0),
+                    tool_name,
+                    created_at,
+                }
+            },
+        )
+        .collect();
+
+    messages.sort_by(|left, right| {
+        left.created_at
+            .cmp(&right.created_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
 
     Ok(messages)
 }

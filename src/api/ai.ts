@@ -17,15 +17,19 @@ import type {
   ProviderConfig,
   AiSession,
   AiMessageRecord,
+  AiSessionDetail,
   DailyUsage,
   ToolDefinition,
   ToolExecResult,
+  ContentBlock,
 } from '@/types/ai'
 
 /** ChatMessage 结构（对应 Rust ChatMessage） */
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string | null
+  /** 新增：结构化内容块支持（多模态） */
+  contentBlocks?: ContentBlock[]
   /** 工具名称（tool 角色消息需要，部分 API 如 OpenAI 要求此字段） */
   name?: string
   /** 工具调用列表（assistant 角色携带） */
@@ -145,8 +149,8 @@ export function aiListSessions(): Promise<AiSession[]> {
  *
  * @returns [session, messages] 元组，会话不存在时返回 null
  */
-export function aiGetSession(id: string): Promise<[AiSession, AiMessageRecord[]] | null> {
-  return invokeCommand('ai_get_session', { id }, { source: 'AI' })
+export function aiGetSession(id: string, messageLimit?: number): Promise<AiSessionDetail | null> {
+  return invokeCommand('ai_get_session', { id, messageLimit: messageLimit ?? null }, { source: 'AI' })
 }
 
 /**

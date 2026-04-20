@@ -182,18 +182,33 @@ pub async fn ai_list_sessions(
 #[tauri::command]
 pub async fn ai_get_session(
     id: String,
+    message_limit: Option<u32>,
     storage: State<'_, Arc<Storage>>,
-) -> Result<Option<(AiSession, Vec<AiMessageRecord>)>, AppError> {
+) -> Result<Option<AiSessionDetail>, AppError> {
     let pool = storage.get_pool().await;
     let session = session_store::get_session(&pool, &id).await?;
+    let total_records = session_store::count_messages(&pool, &id).await?;
+    let requested_limit = message_limit
+        .map(|value| value.max(1) as usize)
+        .unwrap_or(0);
 
     match session {
         Some(s) => {
-            let messages = session_store::get_messages(&pool, &id).await?;
-            Ok(Some((s, messages)))
+            let messages = if requested_limit > 0 {
+                session_store::get_messages_recent(&pool, &id, requested_limit).await?
+            } else {
+                session_store::get_messages(&pool, &id).await?
+            };
+            let loaded_records = messages.len() as u32;
+            Ok(Some(AiSessionDetail {
+                session: s,
+                messages,
+                total_records,
+                loaded_records,
+                truncated: total_records > loaded_records,
+            }))
         }
         None => {
-            // session 行缺失（可能崩溃/中断导致），尝试从孤儿 messages 重建骨架
             let messages = session_store::get_messages(&pool, &id).await?;
             if messages.is_empty() {
                 return Ok(None);
@@ -205,12 +220,11 @@ pub async fn ai_get_session(
                     .as_millis() as i64
             });
             let last_ts = messages.last().map(|m| m.created_at).unwrap_or(first_ts);
-            // 用第一条用户消息前 20 字作标题
             let title = messages
                 .iter()
                 .find(|m| m.role == "user")
                 .map(|m| m.content.chars().take(20).collect::<String>())
-                .unwrap_or_else(|| "已恢复的对话".to_string());
+                .unwrap_or_else(|| "Recovered Session".to_string());
             let skeleton = AiSession {
                 id: id.clone(),
                 title,
@@ -225,9 +239,20 @@ pub async fn ai_get_session(
                 updated_at: last_ts,
                 work_dir: None,
             };
-            // 写回 DB，避免下次再走重建逻辑
             let _ = session_store::save_session(&pool, &skeleton).await;
-            Ok(Some((skeleton, messages)))
+            let loaded_messages = if requested_limit > 0 {
+                session_store::get_messages_recent(&pool, &id, requested_limit).await?
+            } else {
+                messages
+            };
+            let loaded_records = loaded_messages.len() as u32;
+            Ok(Some(AiSessionDetail {
+                session: skeleton,
+                messages: loaded_messages,
+                total_records,
+                loaded_records,
+                truncated: total_records > loaded_records,
+            }))
         }
     }
 }

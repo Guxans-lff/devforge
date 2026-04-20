@@ -1,5 +1,30 @@
 // AI 模块类型定义
 
+// ─────────────────────────────────── 多模态内容块 ───────────────────────────────────
+
+/** 多模态内容块类型 */
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
+
+/** 图片源数据 */
+export interface ImageSource {
+  type: 'base64'
+  media_type: string  // "image/png", "image/jpeg", etc.
+  data: string        // base64 编码数据
+}
+
+/** ChatMessage 接口（与后端通信） */
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string | null  // 保留现有字段用于向后兼容
+  contentBlocks?: ContentBlock[]  // 新增：结构化内容块
+  name?: string
+  toolCalls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>
+  toolCallId?: string
+  reasoningContent?: string
+}
+
 // ─────────────────────────────────── Provider 配置 ───────────────────────────────────
 
 /** Provider 类型 */
@@ -33,6 +58,8 @@ export interface ModelCapabilities {
   pricing?: ModelPricing
 }
 
+export type ThinkingEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
 /** 单个模型配置 */
 export interface ModelConfig {
   /** 模型 ID（API 调用使用） */
@@ -41,6 +68,7 @@ export interface ModelConfig {
   name: string
   /** 模型能力 */
   capabilities: ModelCapabilities
+  thinkingEffort?: ThinkingEffort
 }
 
 /** Provider 配置 */
@@ -105,7 +133,17 @@ export interface AiMessageRecord {
   tokens: number
   cost: number
   parentId?: string
+  success?: boolean
+  toolName?: string
   createdAt: number
+}
+
+export interface AiSessionDetail {
+  session: AiSession
+  messages: AiMessageRecord[]
+  totalRecords: number
+  loadedRecords: number
+  truncated: boolean
 }
 
 /** AI 对话消息（运行时 UI 使用） */
@@ -116,6 +154,10 @@ export interface AiMessage {
   thinking?: string
   timestamp: number
   tokens?: number
+  promptTokens?: number
+  completionTokens?: number
+  cacheReadTokens?: number
+  totalTokens?: number
   isStreaming?: boolean
   /** 工具调用列表（assistant 消息携带） */
   toolCalls?: ToolCallInfo[]
@@ -147,6 +189,8 @@ export interface ToolCallInfo {
   status: 'pending' | 'running' | 'success' | 'error' | 'streaming'
   /** 流式累积进度（status='streaming' 时实时增长，单位字符） */
   streamingChars?: number
+  /** 流式累积索引（OpenAI streaming tool_call index，仅流式阶段使用） */
+  streamingIndex?: number
   /** 执行结果 */
   result?: string
   /** 错误信息 */
@@ -230,10 +274,12 @@ export interface FileAttachment {
   path: string
   /** 文件大小（字节） */
   size: number
-  /** 文件文本内容（读取后填充） */
+  /** 文件内容（文本或 base64） */
   content?: string
-  /** 行数 */
+  /** 行数（文本文件有效，图片为 1） */
   lines?: number
+  /** 文件类型 */
+  type?: 'text' | 'image'
   /** 读取状态 */
   status: 'pending' | 'reading' | 'ready' | 'error'
   /** 错误信息 */

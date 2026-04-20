@@ -92,6 +92,7 @@ const MODE_SUFFIXES: Record<ChatMode, string> = {
   normal: '',
   plan: '\n\n【模式：规划模式】\n你现在处于规划模式。对于用户的任何请求：\n1. 先详细分析需求，列出关键点\n2. 提出实施方案（如有多个方案则对比优劣）\n3. 列出具体步骤计划\n4. 等待用户确认后才给出最终的代码或执行方案\n不要直接给出代码，先让用户审核你的计划。',
   auto: '\n\n【模式：全自动模式】\n你现在处于全自动模式。对于用户的请求：\n1. 直接完整地分析问题并给出最终解决方案\n2. 包括完整的代码实现、配置、命令等\n3. 主动考虑边界情况、错误处理、性能优化\n4. 给出可直接使用的结果，无需用户二次确认\n以最高效率给出完整、可执行的解决方案。',
+  dispatcher: '',
 }
 
 // ─────────────────────── 对话核心 ───────────────────────
@@ -380,6 +381,7 @@ const CHAT_MODE_CONFIG = {
   normal: { label: '普通对话', desc: '标准问答交互', icon: MessageSquareText, color: 'text-blue-500', bg: 'bg-blue-500/10' },
   plan: { label: '规划模式', desc: 'AI 先分析规划，确认后执行', icon: Sparkles, color: 'text-violet-500', bg: 'bg-violet-500/10' },
   auto: { label: '全自动', desc: 'AI 自主分析、决策、执行', icon: Zap, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+  dispatcher: { label: '调度模式', desc: 'AI 自动调度多步骤任务', icon: Zap, color: 'text-orange-500', bg: 'bg-orange-500/10' },
 } as const
 
 const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
@@ -498,7 +500,9 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
         <div class="flex items-center gap-2">
           <AiUsageBadge
             v-if="currentModel"
-            :prompt-tokens="chat.totalTokens.value"
+            :prompt-tokens="chat.latestUsage.value.promptTokens"
+            :completion-tokens="chat.latestUsage.value.completionTokens"
+            :cache-read-tokens="chat.latestUsage.value.cacheReadTokens"
             :max-context="currentModel.capabilities.maxContext"
             :pricing="currentModel.capabilities.pricing"
           />
@@ -564,10 +568,33 @@ const currentModeConfig = computed(() => CHAT_MODE_CONFIG[chatMode.value])
               v-for="vRow in virtualItems"
               :key="chat.messages.value[vRow.index]!.id + (chat.messages.value[vRow.index]!.isStreaming ? '-s' : '')"
               :data-index="vRow.index"
-              :ref="(el) => { if (el) { (virtualItemEls.value as HTMLElement[])[vRow.index] = el as HTMLElement; virtualizer.value.measureElement(el as HTMLElement) } }"
+              :ref="(el) => { if (el) { (virtualItemEls as HTMLElement[])[vRow.index] = el as HTMLElement; virtualizer.measureElement(el as HTMLElement) } }"
               class="px-4 py-0.5"
             >
+              <div
+                v-if="chat.messages.value[vRow.index]!.type === 'divider'"
+                class="flex items-center justify-center gap-3 py-1.5 select-none"
+              >
+                <div class="flex-1 h-px bg-border/40" />
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="text-[10px] text-muted-foreground/40 font-medium shrink-0">
+                    {{ chat.messages.value[vRow.index]!.dividerText }}
+                  </span>
+                  <Button
+                    v-if="chat.messages.value[vRow.index]!.id.startsWith('history-window-') && chat.canLoadMoreHistory.value"
+                    variant="ghost"
+                    size="sm"
+                    class="h-6 px-2 text-[10px] text-muted-foreground"
+                    :disabled="chat.isLoading.value"
+                    @click="chat.loadMoreHistory"
+                  >
+                    加载更早历史
+                  </Button>
+                </div>
+                <div class="flex-1 h-px bg-border/40" />
+              </div>
               <AiMessageBubble
+                v-else
                 :message="chat.messages.value[vRow.index]!"
                 :session-id="currentSessionId"
                 @continue="handleContinue"
