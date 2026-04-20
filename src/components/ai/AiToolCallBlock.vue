@@ -161,8 +161,8 @@ const persistedInfo = computed(() => {
   const sizeMatch = content.match(/Output too large \((\d+) chars\)/)
   const pathMatch = content.match(/saved to:\s+(.+)/)
   return {
-    totalChars: sizeMatch ? Number(sizeMatch[1]) : 0,
-    filepath: pathMatch ? pathMatch[1].trim() : '',
+    totalChars: sizeMatch ? Number(sizeMatch[1] ?? 0) : 0,
+    filepath: pathMatch ? (pathMatch[1] ?? '').trim() : '',
   }
 })
 
@@ -330,24 +330,6 @@ async function handleOpenFile() {
   }
 }
 
-/**
- * 审批匹配键：与 useToolApproval.requestApproval 的 trustKey 规则保持一致
- * - bash      → command 字面
- * - web_fetch → url
- * - 其他（write_file/edit_file） → path
- */
-const approvalMatchKey = computed<string>(() => {
-  // 兜底：流式累积期间 parsedArgs 可能尚未赋值，尝试解析 arguments 字符串
-  const args = props.toolCall.parsedArgs
-    ?? (() => {
-      try { return JSON.parse(props.toolCall.arguments || '{}') as Record<string, unknown> }
-      catch { return {} }
-    })()
-  if (props.toolCall.name === 'bash') return String(args.command ?? '').trim()
-  if (props.toolCall.name === 'web_fetch') return String(args.url ?? '').trim()
-  return String(args.path ?? '').trim()
-})
-
 /** 是否处于审批等待中（用于内嵌渲染 AiApprovalDialog） */
 const isAwaitingApproval = computed(() => props.toolCall.approvalState === 'awaiting')
 /** 审批已决策的留痕徽章 */
@@ -439,7 +421,7 @@ watch(isAwaitingApproval, (v) => { if (v) expanded.value = true }, { immediate: 
     <div v-if="expanded" class="border-t border-border/20">
       <!-- ===== 审批等待：独占渲染（不再与下方分支叠加） ===== -->
       <template v-if="isAwaitingApproval">
-        <AiApprovalDialog embedded />
+        <AiApprovalDialog :session-id="sessionId" embedded />
       </template>
       <!-- ===== todo_write：任务清单面板 ===== -->
       <template v-else-if="toolCall.name === 'todo_write' && Array.isArray(toolCall.parsedArgs?.todos)">

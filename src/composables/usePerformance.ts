@@ -16,13 +16,11 @@ const startTime = performance.now()
 
 export function usePerformance() {
   onMounted(() => {
-    // 记录启动时间
     metrics.value.startupTime = performance.now() - startTime
 
-    // 监控内存使用（如果浏览器支持）
     if (performance.memory) {
       const memory = performance.memory
-      metrics.value.memoryUsage = memory.usedJSHeapSize / 1024 / 1024 // MB
+      metrics.value.memoryUsage = memory.usedJSHeapSize / 1024 / 1024
     }
   })
 
@@ -42,7 +40,7 @@ export function usePerformance() {
         ([name, time]) => ({
           name,
           time: `${time.toFixed(2)}ms`,
-        })
+        }),
       ),
     }
   }
@@ -55,28 +53,36 @@ export function usePerformance() {
   }
 }
 
-// 全局性能监控
 export function startPerformanceMonitoring() {
-  // 监听页面加载性能
-  window.addEventListener('load', () => {
-    // 性能数据仅在开发模式下记录
-  })
-
-  // 监听资源加载性能
   const observer = new PerformanceObserver((list) => {
     for (const entry of list.getEntries()) {
-      if (entry.duration > 1000) {
-        // 慢资源加载：仅在开发模式下记录
-      }
+      if (entry.duration <= 1000) continue
+      console.warn('[Performance] slow entry', {
+        name: entry.name,
+        type: entry.entryType,
+        durationMs: Math.round(entry.duration),
+      })
     }
   })
 
-  observer.observe({ entryTypes: ['resource', 'measure'] })
+  const onLoad = () => {
+    const navEntry = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined
+    if (!navEntry) return
+    console.info('[Performance] navigation', {
+      domContentLoadedMs: Math.round(navEntry.domContentLoadedEventEnd - navEntry.startTime),
+      loadEventMs: Math.round(navEntry.loadEventEnd - navEntry.startTime),
+    })
+  }
 
-  // 页面卸载时自动清理 observer
-  window.addEventListener('beforeunload', () => {
+  const onBeforeUnload = () => {
     observer.disconnect()
-  })
+    window.removeEventListener('load', onLoad)
+    window.removeEventListener('beforeunload', onBeforeUnload)
+  }
+
+  window.addEventListener('load', onLoad, { once: true })
+  window.addEventListener('beforeunload', onBeforeUnload)
+  observer.observe({ entryTypes: ['resource', 'measure'] })
 
   return observer
 }

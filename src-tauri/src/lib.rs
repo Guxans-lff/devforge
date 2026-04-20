@@ -480,6 +480,7 @@ pub fn run() {
             file_editor::sftp_search_files,
             file_editor::sftp_cancel_search,
             file_editor::local_read_file_content,
+            file_editor::local_read_file_binary,
             // Directory sync
             sync::sync_compare,
             // App state KV storage

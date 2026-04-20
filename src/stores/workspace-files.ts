@@ -62,9 +62,19 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     return Math.abs(hash).toString(36).slice(0, 8)
   }
 
+  function normalizePath(path: string): string {
+    return path.replace(/\\/g, '/').replace(/\/+$/, '')
+  }
+
+  function parentPathOf(path: string): string {
+    const normalized = normalizePath(path)
+    const sep = normalized.lastIndexOf('/')
+    return sep > 0 ? normalized.slice(0, sep) : normalized
+  }
+
   // ─── Roots 管理 ───
   async function addRoot(path: string): Promise<void> {
-    const normalizedPath = path.replace(/\\/g, '/')
+    const normalizedPath = normalizePath(path)
     if (roots.value.some(r => r.path === normalizedPath)) return
 
     const name = normalizedPath.split('/').filter(Boolean).pop() || normalizedPath
@@ -108,6 +118,7 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
 
   function reorderRoots(fromIndex: number, toIndex: number): void {
     const item = roots.value.splice(fromIndex, 1)[0]
+    if (!item) return
     roots.value.splice(toIndex, 0, item)
     roots.value.forEach((r, i) => r.sortOrder = i)
   }
@@ -118,6 +129,7 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     absolutePath: string,
     depth: number,
   ): Promise<void> {
+    absolutePath = normalizePath(absolutePath)
     const entries: DirEntry[] = await invoke('ws_read_directory', { path: absolutePath })
     const root = roots.value.find(r => r.id === rootId)
     if (!root) return
@@ -257,8 +269,9 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
 
     while (true) {
       const children = nodeCache.value.get(current.absolutePath)
-      if (!children || children.length !== 1 || !children[0].isDirectory) break
-      current = children[0]
+      const firstChild = children?.[0]
+      if (!children || children.length !== 1 || !firstChild?.isDirectory) break
+      current = firstChild
       segments.push(current.name)
       lastAbsPath = current.absolutePath
     }
@@ -285,6 +298,7 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
    * CRUD 操作后必须自己刷新父目录以获得即时反馈。
    */
   async function refreshDirectory(absolutePath: string): Promise<void> {
+    absolutePath = normalizePath(absolutePath)
     // 若父目录还未加载过（未展开），无需刷新，展开时会懒加载
     if (!nodeCache.value.has(absolutePath)) {
       // 但根目录必须刷新
@@ -301,19 +315,22 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
   }
 
   async function createFile(parentPath: string, name: string): Promise<void> {
+    parentPath = normalizePath(parentPath)
     const fullPath = `${parentPath}/${name}`
     await invoke('ws_create_file', { path: fullPath })
     await refreshDirectory(parentPath)
   }
 
   async function createDirectory(parentPath: string, name: string): Promise<void> {
+    parentPath = normalizePath(parentPath)
     const fullPath = `${parentPath}/${name}`
     await invoke('ws_create_directory', { path: fullPath })
     await refreshDirectory(parentPath)
   }
 
   async function renameEntry(oldAbsPath: string, newName: string): Promise<void> {
-    const parent = oldAbsPath.split('/').slice(0, -1).join('/')
+    oldAbsPath = normalizePath(oldAbsPath)
+    const parent = parentPathOf(oldAbsPath)
     const newPath = `${parent}/${newName}`
     await invoke('ws_rename_entry', { oldPath: oldAbsPath, newPath })
     renamingNodeId.value = null
@@ -321,10 +338,10 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
   }
 
   async function deleteEntry(absolutePath: string, permanent = false): Promise<void> {
+    absolutePath = normalizePath(absolutePath)
     await invoke('ws_delete_entry', { path: absolutePath, permanent })
     // 从父目录缓存里直接移除该节点，避免整棵树重渲染
-    const sep = absolutePath.lastIndexOf('/')
-    const parent = sep > 0 ? absolutePath.slice(0, sep) : ''
+    const parent = parentPathOf(absolutePath)
     if (parent && nodeCache.value.has(parent)) {
       const filtered = nodeCache.value.get(parent)!.filter(n => n.absolutePath !== absolutePath)
       nodeCache.value.set(parent, filtered)
@@ -339,7 +356,9 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
   }
 
   async function moveEntry(source: string, targetDir: string): Promise<void> {
-    const sourceParent = source.split('/').slice(0, -1).join('/')
+    source = normalizePath(source)
+    targetDir = normalizePath(targetDir)
+    const sourceParent = parentPathOf(source)
     await invoke('ws_move_entry', { source, targetDir })
     if (sourceParent) await refreshDirectory(sourceParent)
     await refreshDirectory(targetDir)
@@ -372,16 +391,17 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
 
     const dirsToRefresh = new Set<string>()
     for (const change of changes) {
-      const parent = change.path.split('/').slice(0, -1).join('/')
+      const changePath = normalizePath(change.path)
+      const parent = parentPathOf(changePath)
       if (parent) dirsToRefresh.add(parent)
       if (change.newPath) {
-        const newParent = change.newPath.split('/').slice(0, -1).join('/')
+        const newParent = parentPathOf(change.newPath)
         if (newParent) dirsToRefresh.add(newParent)
       }
     }
 
     for (const dir of dirsToRefresh) {
-      if (nodeCache.value.has(dir)) {
+      if (nodeCache.value.has(dir) || roots.value.some(r => r.path === dir)) {
         const node = findNodeByAbsPath(dir)
         if (node) {
           await loadChildren(node.rootId, dir, node.depth + 1)
@@ -393,6 +413,7 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
   }
 
   function findNodeByAbsPath(absPath: string): FileNode | undefined {
+    absPath = normalizePath(absPath)
     for (const nodes of nodeCache.value.values()) {
       const found = nodes.find(n => n.absolutePath === absPath)
       if (found) return found
@@ -546,6 +567,7 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
 
   /** 刷新指定 root 的文件树（清缓存 + 重载第一层 + Git 状态） */
   async function refreshRoot(rootId: string): Promise<void> {
+    const root = roots.value.find(r => r.id === rootId)
     if (!root) return
 
     // 清缓存
@@ -584,6 +606,7 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     moveEntry,
     findNodeById,
     refreshGitDecorations,
+    refreshDirectory,
     refreshRoot,
     toggleSelect,
     rangeSelect,

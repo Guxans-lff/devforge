@@ -50,3 +50,11 @@ export function localReadFileContent(
 ): Promise<string> {
   return invokeCommand('local_read_file_content', { path, maxSize })
 }
+
+/** 读取本地文件二进制内容（返回 base64） */
+export function localReadFileBinary(
+  path: string,
+  maxSize?: number,
+): Promise<string> {
+  return invokeCommand('local_read_file_binary', { path, maxSize })
+}

@@ -23,7 +23,7 @@ import {
   FileText,
 } from 'lucide-vue-next'
 import type { TabType } from '@/types/workspace'
-import { parseEnvironment } from '@/api/connection'
+import { getEnvironment } from '@/api/connection'
 import { ENV_PRESETS } from '@/types/environment'
 import MessageCenter from './MessageCenter.vue'
 
@@ -125,7 +125,7 @@ function getTabEnvironmentColor(tab: { type: TabType; connectionId?: string }): 
   if (tab.type !== 'database' || !tab.connectionId) return null
   const conn = connectionStore.connections.get(tab.connectionId)
   if (!conn) return null
-  const env = parseEnvironment(conn.record.configJson)
+  const env = getEnvironment(conn.parsedConfig)
   if (!env) return null
   return ENV_PRESETS[env]?.color ?? null
 }

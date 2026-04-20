@@ -98,7 +98,7 @@ async function saveCompactRule() {
     else if (line.startsWith('P2')) rule.p2 = line.replace(/^P2[^:]*:\s*/, '')
     else if (line.includes('压缩比')) {
       const match = line.match(/(\d+)%/)
-      if (match) rule.ratio = parseInt(match[1]) / 100
+      if (match) rule.ratio = parseInt(match[1] ?? '0') / 100
     }
   }
   await memoryStore.saveCompactRule(rule)

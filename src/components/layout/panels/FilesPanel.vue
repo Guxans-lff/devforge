@@ -167,6 +167,7 @@ async function handleBatchDelete() {
 async function toolbarNewFile() {
   if (store.roots.length === 0) return
   const root = store.roots[0]
+  if (!root) return
   await store.createFile(root.path, '新建文件')
 }
 
@@ -261,7 +262,7 @@ function handleSearchSelect(node: FileNode) {
       <div :style="{ height: `${totalSize}px`, position: 'relative' }">
         <div
           v-for="item in virtualItems"
-          :key="item.key"
+          :key="String(item.key)"
           :style="{
             position: 'absolute',
             top: 0,
@@ -274,19 +275,19 @@ function handleSearchSelect(node: FileNode) {
           <!-- 根标题行 -->
           <WorkspaceRootHeader
             v-if="store.flatNodes[item.index]?.isRootHeader"
-            :root="store.roots.find(r => r.id === store.flatNodes[item.index].rootId)!"
-            @contextmenu="(ev: MouseEvent) => handleRootContextMenu(ev, store.roots.find(r => r.id === store.flatNodes[item.index].rootId)!)"
+            :root="store.roots.find(r => r.id === store.flatNodes[item.index]?.rootId)!"
+            @contextmenu="(ev: MouseEvent) => handleRootContextMenu(ev, store.roots.find(r => r.id === store.flatNodes[item.index]?.rootId)!)"
           />
           <!-- 文件行 -->
           <FileTreeRow
             v-else
-            :node="store.flatNodes[item.index]"
+            :node="store.flatNodes[item.index]!"
             :focused="focusedIndex === item.index"
             :selected="selectedNodeId === store.flatNodes[item.index]?.id"
             :drag-over="dragOverNodeId === store.flatNodes[item.index]?.id"
-            :multi-selected="store.selectedNodes.size > 0 ? store.selectedNodes.has(store.flatNodes[item.index]?.id) : undefined"
+            :multi-selected="store.selectedNodes.size > 0 ? store.selectedNodes.has(store.flatNodes[item.index]?.id ?? '') : undefined"
             @click="(ev: MouseEvent, node: FileNode) => handleRowClick(ev, node)"
-            @dblclick="handleRowDblClick(store.flatNodes[item.index])"
+            @dblclick="handleRowDblClick(store.flatNodes[item.index]!)"
             @contextmenu="handleContextMenu"
             @dragstart="handleDragStart"
             @dragover="handleDragOver"

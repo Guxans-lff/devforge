@@ -10,7 +10,7 @@
 export type MessageSegment =
   | { type: 'text'; content: string }
   | { type: 'code'; language: string; content: string }
-  | { type: 'file'; name: string; path: string; size: number; lines: number; content: string }
+  | { type: 'file'; name: string; path: string; size: number; lines: number; content: string; fileType?: 'text' | 'image' }
 
 // ─────────────────────── 白名单 ───────────────────────
 
@@ -34,12 +34,36 @@ const TEXT_EXTENSIONS = new Set([
   '.lock', '.log',
 ])
 
+/** 允许附件的图片文件扩展名 */
+const IMAGE_EXTENSIONS = new Set([
+  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico', '.tiff', '.tif'
+])
+
+/** 所有支持的文件扩展名（文本 + 图片） */
+const SUPPORTED_EXTENSIONS = new Set([...TEXT_EXTENSIONS, ...IMAGE_EXTENSIONS])
+
 /**
- * 检查文件扩展名是否为可接受的文本文件
+ * 检查文件扩展名是否为可接受的文件（文本或图片）
+ */
+export function isSupportedFile(filename: string): boolean {
+  const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase()
+  return SUPPORTED_EXTENSIONS.has(ext)
+}
+
+/**
+ * 检查文件是否为文本文件
  */
 export function isTextFile(filename: string): boolean {
   const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase()
   return TEXT_EXTENSIONS.has(ext)
+}
+
+/**
+ * 检查文件是否为图片文件
+ */
+export function isImageFile(filename: string): boolean {
+  const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase()
+  return IMAGE_EXTENSIONS.has(ext)
 }
 
 // ─────────────────────── 构建 <file> 标签 ───────────────────────
@@ -48,19 +72,24 @@ export function isTextFile(filename: string): boolean {
  * 将文件内容用 <file> 标签包裹，拼接到用户消息中
  *
  * @param text 用户输入的文本
- * @param files 文件附件数组 { name, path, size, content, lines }
+ * @param files 文件附件数组 { name, path, size, content, lines, type? }
  * @returns 拼接后的完整消息文本
  */
 export function buildFileMarkedContent(
   text: string,
-  files: Array<{ name: string; path: string; size: number; content: string; lines: number }>,
+  files: Array<{ name: string; path: string; size: number; content: string; lines: number; type?: 'text' | 'image' }>,
 ): string {
   if (files.length === 0) return text
 
   const fileParts = files.map(f => {
-    // 转义文件内容中的 </file> 以避免解析截断
-    const escapedContent = f.content.replace(/<\/file>/g, '<\\/file>')
-    return `<file name="${escapeAttr(f.name)}" path="${escapeAttr(f.path)}" size="${f.size}" lines="${f.lines}">\n${escapedContent}\n</file>`
+    if (f.type === 'image') {
+      // 图片文件：直接使用 base64 数据，不转义
+      return `<file name="${escapeAttr(f.name)}" path="${escapeAttr(f.path)}" size="${f.size}" lines="${f.lines}" type="image">\n${f.content}\n</file>`
+    } else {
+      // 文本文件：转义文件内容中的 </file> 以避免解析截断
+      const escapedContent = f.content.replace(/<\/file>/g, '<\\/file>')
+      return `<file name="${escapeAttr(f.name)}" path="${escapeAttr(f.path)}" size="${f.size}" lines="${f.lines}">\n${escapedContent}\n</file>`
+    }
   })
 
   return `${text}\n\n${fileParts.join('\n\n')}`
@@ -83,8 +112,8 @@ export function parseFileMarkers(text: string): MessageSegment[] {
   if (!text) return []
 
   const segments: MessageSegment[] = []
-  // 统一匹配 <file> 标签和代码块
-  const combinedRegex = /(?:<file\s+name="([^"]*?)"\s+path="([^"]*?)"\s+size="(\d+)"\s+lines="(\d+)">\n?([\s\S]*?)\n?<\/file>)|(?:```(\w*)\n([\s\S]*?)```)/g
+  // 统一匹配 <file> 标签和代码块，支持可选的 type 属性
+  const combinedRegex = /(?:<file\s+name="([^"]*?)"\s+path="([^"]*?)"\s+size="(\d+)"\s+lines="(\d+)"(?:\s+type="([^"]*?)")?>\n?([\s\S]*?)\n?<\/file>)|(?:```(\w*)\n([\s\S]*?)```)/g
 
   let lastIndex = 0
   let match: RegExpExecArray | null
@@ -98,8 +127,11 @@ export function parseFileMarkers(text: string): MessageSegment[] {
 
     if (match[1] !== undefined) {
       // <file> 标签匹配
-      // 反转义 <\/file> → </file>
-      const content = match[5]!.replace(/<\\\/file>/g, '</file>')
+      const fileType = match[5] as 'text' | 'image' | undefined
+      const content = fileType === 'image'
+        ? match[6]! // 图片不需要反转义
+        : match[6]!.replace(/<\\\/file>/g, '</file>') // 文本文件反转义
+
       segments.push({
         type: 'file',
         name: unescapeAttr(match[1]),
@@ -107,13 +139,14 @@ export function parseFileMarkers(text: string): MessageSegment[] {
         size: parseInt(match[3]!, 10),
         lines: parseInt(match[4]!, 10),
         content,
+        fileType,
       })
     } else {
       // 代码块匹配
       segments.push({
         type: 'code',
-        language: match[6] || 'text',
-        content: match[7]?.trimEnd() ?? '',
+        language: match[7] || 'text',
+        content: match[8]?.trimEnd() ?? '',
       })
     }
 

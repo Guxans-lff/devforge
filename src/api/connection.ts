@@ -1,4 +1,5 @@
 import { invokeCommand } from '@/api/base'
+import type { EnvironmentType } from '@/types/environment'
 
 export interface ConnectionRecord {
   id: string
@@ -22,48 +23,65 @@ export interface ConnectionGroupRecord {
   parentId: string | null
 }
 
-/** 从 configJson 中解析收藏状态 */
+export interface ParsedConnectionConfig {
+  isFavorite?: boolean
+  environment?: unknown
+  readOnly?: boolean
+  confirmDanger?: boolean
+  autoReconnect?: boolean
+  driver?: unknown
+  [key: string]: unknown
+}
+
+const VALID_ENVIRONMENTS: EnvironmentType[] = ['production', 'staging', 'development', 'testing', 'local']
+
+export function parseConnectionConfig(configJson: string): ParsedConnectionConfig {
+  try {
+    const config = JSON.parse(configJson)
+    return config && typeof config === 'object' ? config as ParsedConnectionConfig : {}
+  } catch {
+    return {}
+  }
+}
+
+export function getIsFavorite(config: ParsedConnectionConfig | null | undefined): boolean {
+  return config?.isFavorite === true
+}
+
 export function parseIsFavorite(configJson: string): boolean {
-  try {
-    const config = JSON.parse(configJson)
-    return config.isFavorite === true
-  } catch {
-    return false
-  }
+  return getIsFavorite(parseConnectionConfig(configJson))
 }
 
-/** 从 configJson 中解析环境类型 */
-export function parseEnvironment(configJson: string): import('@/types/environment').EnvironmentType {
-  try {
-    const config = JSON.parse(configJson)
-    const valid = ['production', 'staging', 'development', 'testing', 'local']
-    return valid.includes(config.environment) ? config.environment : 'development'
-  } catch {
-    return 'development'
-  }
+export function getEnvironment(config: ParsedConnectionConfig | null | undefined): EnvironmentType {
+  return VALID_ENVIRONMENTS.includes(config?.environment as EnvironmentType)
+    ? config?.environment as EnvironmentType
+    : 'development'
 }
 
-/** 从 configJson 中解析只读模式 */
+export function parseEnvironment(configJson: string): EnvironmentType {
+  return getEnvironment(parseConnectionConfig(configJson))
+}
+
+export function getReadOnly(config: ParsedConnectionConfig | null | undefined): boolean {
+  return config?.readOnly === true
+}
+
 export function parseReadOnly(configJson: string): boolean {
-  try {
-    const config = JSON.parse(configJson)
-    return config.readOnly === true
-  } catch {
-    return false
-  }
+  return getReadOnly(parseConnectionConfig(configJson))
 }
 
-/** 从 configJson 中解析危险操作确认开关 */
+export function getConfirmDanger(config: ParsedConnectionConfig | null | undefined): boolean {
+  if (typeof config?.confirmDanger === 'boolean') return config.confirmDanger
+  const env = config?.environment
+  return env === 'production' || env === 'staging'
+}
+
 export function parseConfirmDanger(configJson: string): boolean {
-  try {
-    const config = JSON.parse(configJson)
-    if (typeof config.confirmDanger === 'boolean') return config.confirmDanger
-    // 未显式设置时，production/staging 默认开启
-    const env = config.environment
-    return env === 'production' || env === 'staging'
-  } catch {
-    return false
-  }
+  return getConfirmDanger(parseConnectionConfig(configJson))
+}
+
+export function getAutoReconnect(config: ParsedConnectionConfig | null | undefined): boolean {
+  return config?.autoReconnect !== false
 }
 
 export interface CreateConnectionParams {
@@ -94,8 +112,6 @@ export interface TestResult {
   message: string
   latencyMs: number | null
 }
-
-// --- Connection CRUD ---
 
 export function createConnection(req: CreateConnectionParams): Promise<ConnectionRecord> {
   return invokeCommand('create_connection', { req })
@@ -136,8 +152,6 @@ export function testConnectionParams(params: {
   return invokeCommand('test_connection_params', params)
 }
 
-// --- Groups ---
-
 export function listGroups(): Promise<ConnectionGroupRecord[]> {
   return invokeCommand('list_groups')
 }
@@ -149,8 +163,6 @@ export function createGroup(name: string): Promise<ConnectionGroupRecord> {
 export function deleteGroup(id: string): Promise<boolean> {
   return invokeCommand('delete_group', { id })
 }
-
-// --- Credentials ---
 
 export function getCredential(id: string): Promise<string | null> {
   return invokeCommand('get_credential', { id })
@@ -164,24 +176,17 @@ export function deleteCredential(id: string): Promise<boolean> {
   return invokeCommand('delete_credential', { id })
 }
 
-// --- 分组与收藏管理 ---
-
-/** 移动连接到指定分组（null 表示移到根级） */
 export function moveConnection(connectionId: string, targetGroupId: string | null): Promise<boolean> {
   return invokeCommand('move_connection', { connectionId, targetGroupId })
 }
 
-/** 切换连接的收藏状态，返回切换后的状态 */
 export function toggleFavorite(connectionId: string): Promise<boolean> {
   return invokeCommand('toggle_favorite', { connectionId })
 }
 
-/** 更新分组信息（名称、父级分组） */
 export function updateGroup(groupId: string, name: string, parentId?: string | null): Promise<ConnectionGroupRecord> {
   return invokeCommand('update_group', { groupId, name, parentId: parentId ?? null })
 }
-
-// --- App ---
 
 export function getAppVersion(): Promise<string> {
   return invokeCommand('get_app_version')

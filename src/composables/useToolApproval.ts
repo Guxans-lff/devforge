@@ -7,7 +7,7 @@
  * - 按 sessionId 分区隔离，多 Tab 并发互不干扰
  */
 
-import { ref, readonly, watch, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('ai.approval')
@@ -98,15 +98,39 @@ export function setApprovalMode(mode: ApprovalMode, sessionId?: string): void {
 
 // ─────────────────────── 持久化信任集合 ───────────────────────
 
-const STORAGE_KEY = 'ai.trustedPaths'
-const trustedKeys = ref<Set<string>>(new Set())
+const STORAGE_KEY = 'ai.trustedKeysBySession'
+const LEGACY_STORAGE_KEY = 'ai.trustedPaths'
+const trustedKeysBySession = ref<Map<string, Set<string>>>(new Map())
+
+function getTrustedKeys(sessionId: string): Set<string> {
+  const existing = trustedKeysBySession.value.get(sessionId)
+  if (existing) return existing
+  const created = new Set<string>()
+  trustedKeysBySession.value.set(sessionId, created)
+  return created
+}
+
+function cloneTrustedState(): void {
+  trustedKeysBySession.value = new Map(trustedKeysBySession.value)
+}
 
 function loadTrusted(): void {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return
-    const arr = JSON.parse(raw) as string[]
-    if (Array.isArray(arr)) trustedKeys.value = new Set(arr)
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, string[]>
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        trustedKeysBySession.value = new Map(
+          Object.entries(parsed)
+            .filter(([, value]) => Array.isArray(value))
+            .map(([sessionId, value]) => [sessionId, new Set(value)]),
+        )
+      }
+    }
+
+    if (localStorage.getItem(LEGACY_STORAGE_KEY)) {
+      localStorage.removeItem(LEGACY_STORAGE_KEY)
+    }
   } catch (e) {
     log.warn('load_trusted_failed', {}, e)
   }
@@ -114,7 +138,13 @@ function loadTrusted(): void {
 
 function persistTrusted(): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(trustedKeys.value)))
+    const payload = Object.fromEntries(
+      Array.from(trustedKeysBySession.value.entries()).map(([sessionId, keys]) => [
+        sessionId,
+        Array.from(keys),
+      ]),
+    )
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
   } catch (e) {
     log.warn('persist_trusted_failed', {}, e)
   }
@@ -164,7 +194,7 @@ export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalD
     return Promise.resolve('deny')
   }
 
-  if (trustKey && trustedKeys.value.has(trustKey)) {
+  if (trustKey && getTrustedKeys(sessionId).has(trustKey)) {
     log.info('approval_auto_allow', { toolName: opts.toolName, trustKey, sessionId })
     return Promise.resolve('allow')
   }
@@ -210,12 +240,16 @@ export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalD
   if (!prev) return run()
   // 等 prev 解决后再排队
   return new Promise<ApprovalDecision>((resolve) => {
-    const unwatch = setInterval(() => {
-      if (!state.pending) {
-        clearInterval(unwatch)
-        run().then(resolve)
-      }
-    }, 50)
+    const stop = watch(
+      () => state.pending,
+      (pending) => {
+        if (!pending) {
+          stop()
+          run().then(resolve)
+        }
+      },
+      { flush: 'sync' },
+    )
   })
 }
 
@@ -234,7 +268,8 @@ export function resolveApproval(decision: ApprovalDecision, sessionId?: string):
   sessionStates.value = new Map(sessionStates.value)
 
   if (decision === 'trust' && cur.trustKey) {
-    trustedKeys.value.add(cur.trustKey)
+    getTrustedKeys(sid).add(cur.trustKey)
+    cloneTrustedState()
     persistTrusted()
     log.info('approval_trusted', { toolName: cur.toolName, trustKey: cur.trustKey, sessionId: sid })
     cur.resolve('allow')
@@ -254,9 +289,9 @@ export function cancelApproval(sessionId?: string): void {
 }
 
 /** 暴露只读 pending 给 UI（基于活跃 session） */
-export function usePendingApproval() {
+export function usePendingApproval(sessionId?: string) {
   return computed(() => {
-    const sid = activeSessionId.value
+    const sid = sessionId ?? activeSessionId.value
     if (!sid) return null
     return sessionStates.value.get(sid)?.pending ?? null
   })
@@ -269,13 +304,37 @@ export function useSessionPendingApproval(sessionId: string) {
 
 /** 清空信任集合（供设置页使用） */
 export function clearTrustedKeys(): void {
-  trustedKeys.value = new Set()
+  trustedKeysBySession.value = new Map()
   persistTrusted()
 }
 
 /** 查询当前信任列表（供设置页展示） */
-export function useTrustedKeys() {
-  return readonly(trustedKeys)
+export function useTrustedKeys(sessionId?: string) {
+  return computed(() => {
+    const sid = sessionId ?? activeSessionId.value
+    if (!sid) return new Set<string>()
+    return new Set(trustedKeysBySession.value.get(sid) ?? [])
+  })
+}
+
+export function useSessionTrustedKeys(sessionId: string) {
+  return computed(() => new Set(trustedKeysBySession.value.get(sessionId) ?? []))
+}
+
+export function clearTrustedKeysForSession(sessionId: string): void {
+  trustedKeysBySession.value.delete(sessionId)
+  cloneTrustedState()
+  persistTrusted()
+}
+
+export function clearApprovalStateForTests(): void {
+  for (const state of sessionStates.value.values()) {
+    if (state.timer) clearTimeout(state.timer)
+    if (state.pending) state.pending.resolve('deny')
+  }
+  sessionStates.value = new Map()
+  activeSessionId.value = ''
+  clearTrustedKeys()
 }
 
 /** 清理会话状态（会话关闭时调用） */

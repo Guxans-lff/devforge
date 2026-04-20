@@ -6,7 +6,6 @@
  * 点击会话打开对应 AI Tab。
  */
 import { computed, onMounted } from 'vue'
-import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -18,7 +17,6 @@ import {
   Sparkles,
 } from 'lucide-vue-next'
 
-const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const aiStore = useAiChatStore()
 

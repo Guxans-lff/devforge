@@ -61,14 +61,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (tab.type === 'file-editor' && tab.dirty) {
       const confirmed = window.confirm(`文件 "${tab.title}" 有未保存的修改，确定要关闭吗？`)
       if (!confirmed) return
-      const absPath = tab.meta?.absolutePath
+      const absPath = tab.meta?.absolutePath as string | undefined
       if (absPath) {
         import('@/stores/local-file-editor').then(({ useLocalFileEditorStore }) => {
           useLocalFileEditorStore().close(absPath)
         })
       }
     } else if (tab.type === 'file-editor') {
-      const absPath = tab.meta?.absolutePath
+      const absPath = tab.meta?.absolutePath as string | undefined
       if (absPath) {
         import('@/stores/local-file-editor').then(({ useLocalFileEditorStore }) => {
           useLocalFileEditorStore().close(absPath)
@@ -106,7 +106,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
     // 关闭 Git tab 时清理后端仓库缓存
     if (tab.type === 'git' && tab.meta?.repositoryPath) {
-      const repoPath = tab.meta.repositoryPath
+      const repoPath = tab.meta.repositoryPath as string
       import('@/api/git').then(({ gitClose }) => {
         gitClose(repoPath).catch((e: unknown) => console.warn('[Workspace] 关闭 Git 仓库失败:', e))
       })

@@ -20,7 +20,7 @@ import ConnectionDialog from '@/components/connection/ConnectionDialog.vue'
 import ConnectionItem from '@/components/layout/sidebar/ConnectionItem.vue'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useToast } from '@/composables/useToast'
-import { parseIsFavorite, updateConnection } from '@/api/connection'
+import { updateConnection } from '@/api/connection'
 import {
   Database,
   Terminal,
@@ -291,10 +291,6 @@ async function onDrop(event: DragEvent, targetConnectionId: string) {
 function onDragEnd() {
   draggedConnectionId.value = null
   dragOverConnectionId.value = null
-}
-
-function isFavorite(conn: ConnectionRecord): boolean {
-  return parseIsFavorite(conn.configJson)
 }
 
 /** 将非收藏连接按类型分组 */

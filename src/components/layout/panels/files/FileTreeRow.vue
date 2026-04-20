@@ -157,7 +157,7 @@ const gitPillClass = computed(() => {
       >
         <template v-if="(node as any).isCompressed && (node as any).compressedSegments">
           <span v-for="(seg, i) in (node as any).compressedSegments" :key="i">
-            <span v-if="i > 0" class="text-muted-foreground/30 mx-0.5">/</span>
+            <span v-if="(i as number) > 0" class="text-muted-foreground/30 mx-0.5">/</span>
             {{ seg }}
           </span>
         </template>

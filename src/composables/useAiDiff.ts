@@ -3,7 +3,7 @@
  *
  * 提供行级对齐 + 字符级差异高亮数据
  */
-import { diffLines, diffChars, type Change } from 'diff'
+import { diffLines, diffChars } from 'diff'
 
 /** 单行 diff 信息 */
 export interface DiffLine {
@@ -41,6 +41,7 @@ export function computeSideBySideDiff(oldText: string, newText: string): SideByS
 
   for (let i = 0; i < changes.length; i++) {
     const change = changes[i]
+    if (!change) continue
     const lines = change.value.replace(/\n$/, '').split('\n')
 
     if (!change.added && !change.removed) {
@@ -57,21 +58,23 @@ export function computeSideBySideDiff(oldText: string, newText: string): SideByS
 
         for (let j = 0; j < maxLen; j++) {
           if (j < removedLines.length && j < addedLines.length) {
-            const charChanges = diffChars(removedLines[j], addedLines[j])
+            const rLine = removedLines[j] ?? ''
+            const aLine = addedLines[j] ?? ''
+            const charChanges = diffChars(rLine, aLine)
             const leftChars = charChanges.filter(c => !c.added).map(c => ({
               value: c.value, type: (c.removed ? 'removed' : 'unchanged') as CharDiff['type'],
             }))
             const rightChars = charChanges.filter(c => !c.removed).map(c => ({
               value: c.value, type: (c.added ? 'added' : 'unchanged') as CharDiff['type'],
             }))
-            left.push({ type: 'removed', content: removedLines[j], lineNumber: leftLineNum++, charDiffs: leftChars })
-            right.push({ type: 'added', content: addedLines[j], lineNumber: rightLineNum++, charDiffs: rightChars })
+            left.push({ type: 'removed', content: rLine, lineNumber: leftLineNum++, charDiffs: leftChars })
+            right.push({ type: 'added', content: aLine, lineNumber: rightLineNum++, charDiffs: rightChars })
           } else if (j < removedLines.length) {
-            left.push({ type: 'removed', content: removedLines[j], lineNumber: leftLineNum++ })
+            left.push({ type: 'removed', content: removedLines[j] ?? '', lineNumber: leftLineNum++ })
             right.push({ type: 'empty', content: '', lineNumber: null })
           } else {
             left.push({ type: 'empty', content: '', lineNumber: null })
-            right.push({ type: 'added', content: addedLines[j], lineNumber: rightLineNum++ })
+            right.push({ type: 'added', content: addedLines[j] ?? '', lineNumber: rightLineNum++ })
           }
         }
         removed += removedLines.length

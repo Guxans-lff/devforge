@@ -8,7 +8,7 @@ setupMonacoLocale()
 
 // Monaco Editor Worker 配置
 // 使用 Vite 原生 ?worker 导入，确保 Worker 正确打包
-import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker&inline'
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
 
 self.MonacoEnvironment = {
   getWorker(_workerId: string, _label: string) {

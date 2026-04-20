@@ -223,6 +223,20 @@ export function useObjectTree(options: UseObjectTreeOptions) {
         const result = await fetchWithCache(
           `${connectionId.value}:databases`,
           () => dbApi.dbGetDatabases(connectionId.value),
+          {
+            onRefresh: (freshDatabases) => {
+              treeNodes.value = freshDatabases.map((db) => ({
+                id: `db-${db.name}`,
+                label: db.name,
+                type: 'database' as const,
+                children: [],
+                isExpanded: false,
+                isLoading: false,
+                meta: markRaw({ database: db.name }),
+              }))
+              onSchemaUpdated()
+            },
+          },
         )
         databases = result.data
       }
@@ -269,8 +283,8 @@ export function useObjectTree(options: UseObjectTreeOptions) {
       const cacheKey = `${connectionId.value}:${database}:${node.folderType}`
       switch (node.folderType) {
         case 'tables': {
-          const { data: tables } = await fetchWithCache(cacheKey, () => dbApi.dbGetTables(connectionId.value, database))
-          node.children = tables
+          const applyTables = (tables: Awaited<ReturnType<typeof dbApi.dbGetTables>>) => {
+            node.children = tables
             .filter(tbl => tbl.tableType !== 'VIEW')
             .map((tbl) => ({
               id: `tbl-${database}-${tbl.name}`,
@@ -281,11 +295,14 @@ export function useObjectTree(options: UseObjectTreeOptions) {
               isLoading: false,
               meta: markRaw({ database, table: tbl.name, comment: tbl.comment ?? undefined }),
             }))
+          }
+          const { data: tables } = await fetchWithCache(cacheKey, () => dbApi.dbGetTables(connectionId.value, database), { onRefresh: applyTables })
+          applyTables(tables)
           break
         }
         case 'views': {
-          const { data: views } = await fetchWithCache(cacheKey, () => dbApi.dbGetViews(connectionId.value, database))
-          node.children = views.map((v) => ({
+          const applyViews = (views: Awaited<ReturnType<typeof dbApi.dbGetViews>>) => {
+            node.children = views.map((v) => ({
             id: `view-${database}-${v.name}`,
             label: v.name,
             type: 'view' as const,
@@ -294,36 +311,48 @@ export function useObjectTree(options: UseObjectTreeOptions) {
             isLoading: false,
             meta: markRaw({ database, table: v.name, objectType: 'VIEW' }),
           }))
+          }
+          const { data: views } = await fetchWithCache(cacheKey, () => dbApi.dbGetViews(connectionId.value, database), { onRefresh: applyViews })
+          applyViews(views)
           break
         }
         case 'procedures': {
-          const { data: procs } = await fetchWithCache(cacheKey, () => dbApi.dbGetProcedures(connectionId.value, database))
-          node.children = procs.map((p) => ({
+          const applyProcedures = (procs: Awaited<ReturnType<typeof dbApi.dbGetProcedures>>) => {
+            node.children = procs.map((p) => ({
             id: `proc-${database}-${p.name}`,
             label: p.name,
             type: 'procedure' as const,
             meta: markRaw({ database, objectType: 'PROCEDURE', comment: p.comment ?? undefined, definer: p.definer ?? undefined, created: p.created ?? undefined }),
           }))
+          }
+          const { data: procs } = await fetchWithCache(cacheKey, () => dbApi.dbGetProcedures(connectionId.value, database), { onRefresh: applyProcedures })
+          applyProcedures(procs)
           break
         }
         case 'functions': {
-          const { data: funcs } = await fetchWithCache(cacheKey, () => dbApi.dbGetFunctions(connectionId.value, database))
-          node.children = funcs.map((f) => ({
+          const applyFunctions = (funcs: Awaited<ReturnType<typeof dbApi.dbGetFunctions>>) => {
+            node.children = funcs.map((f) => ({
             id: `func-${database}-${f.name}`,
             label: f.name,
             type: 'function' as const,
             meta: markRaw({ database, objectType: 'FUNCTION', comment: f.comment ?? undefined, definer: f.definer ?? undefined, created: f.created ?? undefined }),
           }))
+          }
+          const { data: funcs } = await fetchWithCache(cacheKey, () => dbApi.dbGetFunctions(connectionId.value, database), { onRefresh: applyFunctions })
+          applyFunctions(funcs)
           break
         }
         case 'triggers': {
-          const { data: triggers } = await fetchWithCache(cacheKey, () => dbApi.dbGetTriggers(connectionId.value, database))
-          node.children = triggers.map((tr) => ({
+          const applyTriggers = (triggers: Awaited<ReturnType<typeof dbApi.dbGetTriggers>>) => {
+            node.children = triggers.map((tr) => ({
             id: `trigger-${database}-${tr.name}`,
             label: tr.name,
             type: 'trigger' as const,
             meta: markRaw({ database, objectType: 'TRIGGER', event: tr.event, timing: tr.timing, table: tr.tableName }),
           }))
+          }
+          const { data: triggers } = await fetchWithCache(cacheKey, () => dbApi.dbGetTriggers(connectionId.value, database), { onRefresh: applyTriggers })
+          applyTriggers(triggers)
           break
         }
       }
@@ -345,13 +374,16 @@ export function useObjectTree(options: UseObjectTreeOptions) {
     node.isLoading = true
     try {
       const cacheKey = `${connectionId.value}:${database}:${table}:columns`
-      const { data: columns } = await fetchWithCache(cacheKey, () => dbApi.dbGetColumns(connectionId.value, database, table))
-      node.children = columns.map((col) => ({
+      const applyColumns = (columns: Awaited<ReturnType<typeof dbApi.dbGetColumns>>) => {
+        node.children = columns.map((col) => ({
         id: `col-${database}-${table}-${col.name}`,
         label: col.name,
         type: 'column' as const,
         meta: markRaw({ database, table, dataType: col.dataType, isPrimaryKey: col.isPrimaryKey, nullable: col.nullable, comment: col.comment ?? undefined }),
       }))
+      }
+      const { data: columns } = await fetchWithCache(cacheKey, () => dbApi.dbGetColumns(connectionId.value, database, table), { onRefresh: applyColumns })
+      applyColumns(columns)
     } catch (e) {
       node.children = []
       const msg = e instanceof Error ? e.message : String(e)

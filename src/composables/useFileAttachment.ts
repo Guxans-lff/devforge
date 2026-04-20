@@ -7,8 +7,8 @@
 
 import { ref, computed } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
-import { localReadFileContent } from '@/api/file-editor'
-import { isTextFile, MAX_FILE_SIZE, estimateTokens } from '@/utils/file-markers'
+import { localReadFileContent, localReadFileBinary } from '@/api/file-editor'
+import { isTextFile, isImageFile, isSupportedFile, MAX_FILE_SIZE, estimateTokens } from '@/utils/file-markers'
 import type { FileAttachment } from '@/types/ai'
 import { ensureErrorString } from '@/types/error'
 
@@ -65,14 +65,14 @@ export function useFileAttachment() {
     const name = filePath.split(/[\\/]/).pop() ?? filePath
 
     // 检查扩展名
-    if (!isTextFile(name)) {
+    if (!isSupportedFile(name)) {
       attachments.value = [...attachments.value, {
         id: genId(),
         name,
         path: filePath,
         size: 0,
         status: 'error',
-        error: '不支持的文件类型，仅支持文本文件',
+        error: '不支持的文件类型，仅支持文本文件和图片文件',
       }]
       return
     }
@@ -93,8 +93,19 @@ export function useFileAttachment() {
 
     // 异步读取文件内容
     try {
-      const content = await localReadFileContent(filePath, MAX_FILE_SIZE)
-      const size = new TextEncoder().encode(content).length
+      let content: string
+      let size: number
+
+      if (isImageFile(name)) {
+        // 图片文件：读取为 base64
+        const base64Data = await localReadFileBinary(filePath, MAX_FILE_SIZE)
+        content = `data:image/${getImageMimeType(name)};base64,${base64Data}`
+        size = new TextEncoder().encode(base64Data).length
+      } else {
+        // 文本文件：正常读取
+        content = await localReadFileContent(filePath, MAX_FILE_SIZE)
+        size = new TextEncoder().encode(content).length
+      }
 
       if (size > MAX_FILE_SIZE) {
         updateAttachment(attachment.id, {
@@ -105,12 +116,13 @@ export function useFileAttachment() {
         return
       }
 
-      const lines = content.split('\n').length
+      const lines = isTextFile(name) ? content.split('\n').length : 1
       updateAttachment(attachment.id, {
         status: 'ready',
         content,
         size,
         lines,
+        type: isImageFile(name) ? 'image' : 'text',
       })
     } catch (e) {
       updateAttachment(attachment.id, {
@@ -144,14 +156,14 @@ export function useFileAttachment() {
   async function addFileFromDom(file: File): Promise<void> {
     const name = file.name
 
-    if (!isTextFile(name)) {
+    if (!isSupportedFile(name)) {
       attachments.value = [...attachments.value, {
         id: genId(),
         name,
         path: name,
         size: 0,
         status: 'error',
-        error: '不支持的文件类型，仅支持文本文件',
+        error: '不支持的文件类型，仅支持文本文件和图片文件',
       }]
       return
     }
@@ -183,13 +195,25 @@ export function useFileAttachment() {
     attachments.value = [...attachments.value, attachment]
 
     try {
-      const content = await file.text()
-      const lines = content.split('\n').length
+      let content: string
+      let lines = 1
+
+      if (isImageFile(name)) {
+        // 图片文件：读取为 base64
+        const base64 = await fileToBase64(file)
+        content = base64
+      } else {
+        // 文本文件：正常读取
+        content = await file.text()
+        lines = content.split('\n').length
+      }
+
       updateAttachment(attachment.id, {
         status: 'ready',
         content,
         size: file.size,
         lines,
+        type: isImageFile(name) ? 'image' : 'text',
       })
     } catch (e) {
       updateAttachment(attachment.id, {
@@ -241,4 +265,38 @@ function formatSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/** 将 File 对象转为 base64 字符串 */
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+      } else {
+        reject(new Error('Failed to read file as base64'))
+      }
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+/** 从文件名获取图片 MIME 类型 */
+function getImageMimeType(filename: string): string {
+  const ext = filename.slice(filename.lastIndexOf('.')).toLowerCase()
+  const mimeMap: Record<string, string> = {
+    '.jpg': 'jpeg',
+    '.jpeg': 'jpeg',
+    '.png': 'png',
+    '.gif': 'gif',
+    '.webp': 'webp',
+    '.svg': 'svg+xml',
+    '.bmp': 'bmp',
+    '.ico': 'x-icon',
+    '.tiff': 'tiff',
+    '.tif': 'tiff'
+  }
+  return mimeMap[ext] || 'png'
 }

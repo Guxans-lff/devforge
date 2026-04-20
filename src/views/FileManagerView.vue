@@ -607,7 +607,7 @@ watch(
   },
   (newPath, _oldPath) => {
     if (newPath && newPath !== remotePath.value && status.value === 'connected') {
-      loadRemote(newPath)
+      loadRemote(newPath as string)
     }
   },
 )

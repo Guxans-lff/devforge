@@ -6,7 +6,7 @@ use crate::utils::error::AppError;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex as StdMutex;
+use std::sync::{Arc, Mutex as StdMutex};
 
 // 全局搜索取消标志
 static SEARCH_CANCEL_FLAGS: std::sync::OnceLock<StdMutex<HashMap<String, Arc<AtomicBool>>>> =
@@ -222,7 +222,6 @@ pub struct SearchDoneEvent {
 
 use russh_sftp::client::SftpSession;
 use std::collections::VecDeque;
-use std::sync::Arc;
 
 const MAX_RESULTS: u32 = 1000;
 const CONCURRENT_DIRS: usize = 8;
@@ -346,4 +345,31 @@ pub async fn local_read_file_content(
         .map_err(|e| format!("读取文件失败: {}", e))?;
 
     String::from_utf8(content).map_err(|_| "文件不是有效的 UTF-8 文本".to_string())
+}
+
+/// 读取本地文件二进制内容（返回 base64）
+#[tauri::command]
+pub async fn local_read_file_binary(
+    path: String,
+    max_size: Option<u64>,
+) -> Result<String, String> {
+    let metadata = tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| format!("获取文件信息失败: {}", e))?;
+
+    let max_allowed = max_size.unwrap_or(10 * 1024 * 1024);
+    if metadata.len() > max_allowed {
+        return Err(format!(
+            "文件过大 ({} bytes)，超过限制 ({} bytes)",
+            metadata.len(),
+            max_allowed
+        ));
+    }
+
+    let content = tokio::fs::read(&path)
+        .await
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+
+    use base64::{Engine as _, engine::general_purpose};
+    Ok(general_purpose::STANDARD.encode(&content))
 }

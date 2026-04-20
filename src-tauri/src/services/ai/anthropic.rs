@@ -50,6 +50,75 @@ impl AnthropicProvider {
         *guard = build_http_client();
     }
 
+    fn supports_adaptive_thinking(model: &str) -> bool {
+        let lower = model.to_lowercase();
+        lower.contains("claude-opus-4-7")
+            || lower.contains("claude-opus-4.7")
+            || lower.contains("claude-opus-4-6")
+            || lower.contains("claude-opus-4.6")
+            || lower.contains("claude-sonnet-4-6")
+            || lower.contains("claude-sonnet-4.6")
+    }
+
+    fn uses_opus_47_sampling_rules(model: &str) -> bool {
+        let lower = model.to_lowercase();
+        lower.contains("claude-opus-4-7") || lower.contains("claude-opus-4.7")
+    }
+
+    fn effort_for_thinking_budget(model: &str, budget: u32) -> &'static str {
+        let lower = model.to_lowercase();
+        let is_opus_47 =
+            lower.contains("claude-opus-4-7") || lower.contains("claude-opus-4.7");
+
+        match budget {
+            0..=4095 => "low",
+            4096..=8191 => "medium",
+            8192..=16383 => "high",
+            _ if is_opus_47 => "xhigh",
+            _ => "max",
+        }
+    }
+
+    fn summarize_request_messages(body: &serde_json::Value) -> String {
+        let Some(messages) = body.get("messages").and_then(|v| v.as_array()) else {
+            return "messages=<missing>".to_string();
+        };
+
+        messages
+            .iter()
+            .enumerate()
+            .map(|(idx, msg)| {
+                let role = msg.get("role").and_then(|v| v.as_str()).unwrap_or("?");
+                let content = msg.get("content");
+                let blocks = match content {
+                    Some(serde_json::Value::Array(items)) => items
+                        .iter()
+                        .map(|item| {
+                            let ty = item.get("type").and_then(|v| v.as_str()).unwrap_or("?");
+                            match ty {
+                                "tool_use" => format!(
+                                    "tool_use:{}",
+                                    item.get("id").and_then(|v| v.as_str()).unwrap_or("?")
+                                ),
+                                "tool_result" => format!(
+                                    "tool_result:{}",
+                                    item.get("tool_use_id").and_then(|v| v.as_str()).unwrap_or("?")
+                                ),
+                                other => other.to_string(),
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    Some(serde_json::Value::String(_)) => "text".to_string(),
+                    Some(_) => "other".to_string(),
+                    None => "<missing>".to_string(),
+                };
+                format!("#{idx}:{role}[{blocks}]")
+            })
+            .collect::<Vec<_>>()
+            .join(" | ")
+    }
+
     /// 构建 Anthropic Messages API 请求体
     fn build_request_body(
         &self,
@@ -59,22 +128,51 @@ impl AnthropicProvider {
         let mut api_messages: Vec<serde_json::Value> = Vec::new();
 
         // 对话消息（Anthropic 不允许 system 角色出现在 messages 中）
-        for msg in messages {
+        // 对 tool_result 的要求比 OpenAI 更严格：
+        // assistant(tool_use) 后必须紧跟一条 user 消息，且该消息聚合同轮全部 tool_result blocks。
+        let mut idx = 0usize;
+        while idx < messages.len() {
+            let msg = &messages[idx];
             match msg.role {
                 MessageRole::System => {
-                    // 跳过，system 通过顶级 system 字段传递
+                    idx += 1;
                 }
                 MessageRole::User => {
-                    api_messages.push(serde_json::json!({
-                        "role": "user",
-                        "content": msg.content.as_deref().unwrap_or("")
-                    }));
+                    if let Some(ref content_blocks) = msg.content_blocks {
+                        let api_blocks: Vec<serde_json::Value> = content_blocks
+                            .iter()
+                            .map(|block| match block {
+                                ContentBlock::Text { text } => {
+                                    serde_json::json!({ "type": "text", "text": text })
+                                }
+                                ContentBlock::Image { source } => {
+                                    serde_json::json!({
+                                        "type": "image",
+                                        "source": {
+                                            "type": source.source_type,
+                                            "media_type": source.media_type,
+                                            "data": source.data
+                                        }
+                                    })
+                                }
+                            })
+                            .collect();
+
+                        api_messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": api_blocks
+                        }));
+                    } else {
+                        api_messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": msg.content.as_deref().unwrap_or("")
+                        }));
+                    }
+                    idx += 1;
                 }
                 MessageRole::Assistant => {
-                    // Assistant 可能携带 tool_use content blocks
                     if let Some(ref tool_calls) = msg.tool_calls {
                         let mut content_blocks: Vec<serde_json::Value> = Vec::new();
-                        // 先加文本（如果有）
                         if let Some(ref text) = msg.content {
                             if !text.is_empty() {
                                 content_blocks.push(serde_json::json!({
@@ -83,7 +181,6 @@ impl AnthropicProvider {
                                 }));
                             }
                         }
-                        // 再加 tool_use blocks
                         for tc in tool_calls {
                             let args: serde_json::Value =
                                 serde_json::from_str(&tc.function.arguments)
@@ -105,16 +202,23 @@ impl AnthropicProvider {
                             "content": msg.content.as_deref().unwrap_or("")
                         }));
                     }
+                    idx += 1;
                 }
                 MessageRole::Tool => {
-                    // Anthropic: tool_result 是 user 角色的 content block
+                    let mut tool_results: Vec<serde_json::Value> = Vec::new();
+                    while idx < messages.len() && matches!(messages[idx].role, MessageRole::Tool) {
+                        let tool_msg = &messages[idx];
+                        tool_results.push(serde_json::json!({
+                            "type": "tool_result",
+                            "tool_use_id": tool_msg.tool_call_id.as_deref().unwrap_or(""),
+                            "content": tool_msg.content.as_deref().unwrap_or("")
+                        }));
+                        idx += 1;
+                    }
+
                     api_messages.push(serde_json::json!({
                         "role": "user",
-                        "content": [{
-                            "type": "tool_result",
-                            "tool_use_id": msg.tool_call_id.as_deref().unwrap_or(""),
-                            "content": msg.content.as_deref().unwrap_or("")
-                        }]
+                        "content": tool_results
                     }));
                 }
             }
@@ -152,11 +256,25 @@ impl AnthropicProvider {
             if budget >= 1024 {
                 let caps = self.capabilities(&config.model);
                 if caps.thinking {
-                    body["thinking"] = serde_json::json!({
-                        "type": "enabled",
-                        "budget_tokens": budget
-                    });
-                    body["temperature"] = serde_json::json!(1.0);
+                    if Self::supports_adaptive_thinking(&config.model) {
+                        body["thinking"] = serde_json::json!({
+                            "type": "adaptive"
+                        });
+                        body["output_config"] = serde_json::json!({
+                            "effort": Self::effort_for_thinking_budget(&config.model, budget)
+                        });
+                        if Self::uses_opus_47_sampling_rules(&config.model) {
+                            if let Some(obj) = body.as_object_mut() {
+                                obj.remove("temperature");
+                            }
+                        }
+                    } else {
+                        body["thinking"] = serde_json::json!({
+                            "type": "enabled",
+                            "budget_tokens": budget
+                        });
+                        body["temperature"] = serde_json::json!(1.0);
+                    }
                 }
             }
         }
@@ -290,6 +408,10 @@ impl AiProvider for AnthropicProvider {
         let url = format!("{}/v1/messages", endpoint.trim_end_matches('/'));
 
         log::info!("Anthropic 请求: {} model={}", url, config.model);
+        log::debug!(
+            "Anthropic request summary: {}",
+            Self::summarize_request_messages(&body)
+        );
 
         let response = super::http_retry::send_with_rebuild(
             || {
@@ -322,6 +444,14 @@ impl AiProvider for AnthropicProvider {
                         .map(|s| s.to_string())
                 })
                 .unwrap_or_else(|| error_body.chars().take(200).collect());
+
+            log::warn!(
+                "Anthropic API error status={} model={} summary={} body={}",
+                status.as_u16(),
+                config.model,
+                Self::summarize_request_messages(&body),
+                error_body
+            );
 
             let msg = format!("{} ({})", readable_msg, status.as_u16());
             let _ = on_event.send(AiStreamEvent::Error {

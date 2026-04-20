@@ -8,7 +8,7 @@ export interface Tab {
   connectionId?: string
   closable: boolean
   dirty?: boolean
-  meta?: Record<string, string>
+  meta?: Record<string, unknown>
 }
 
 /** Side Panel 面板 ID */

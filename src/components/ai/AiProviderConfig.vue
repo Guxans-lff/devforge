@@ -8,7 +8,7 @@
 import { ref, computed, reactive } from 'vue'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { saveCredential } from '@/api/connection'
-import type { ProviderConfig, ModelConfig, ProviderType } from '@/types/ai'
+import type { ProviderConfig, ModelConfig, ProviderType, ThinkingEffort } from '@/types/ai'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -46,7 +46,6 @@ import {
   Wrench,
   Brain,
   ImageIcon,
-  MessageSquare,
   Shield,
 } from 'lucide-vue-next'
 
@@ -55,6 +54,7 @@ const emit = defineEmits<{
 }>()
 
 const store = useAiChatStore()
+const THINKING_EFFORTS: ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 // ─────────────────────── 预设 Provider 模板 ───────────────────────
 
@@ -180,8 +180,19 @@ const PRESETS: Record<string, ProviderPreset> = {
     description: 'Claude 4.6 系列最新模型',
     models: [
       {
+        id: 'claude-opus-4-7',
+        name: 'Claude Opus 4.7',
+        thinkingEffort: 'high',
+        capabilities: {
+          streaming: true, vision: true, thinking: true, toolUse: true,
+          maxContext: 1000000, maxOutput: 32000,
+          pricing: { inputPer1m: 15, outputPer1m: 75, currency: 'USD' },
+        },
+      },
+      {
         id: 'claude-opus-4-6',
         name: 'Claude Opus 4.6',
+        thinkingEffort: 'high',
         capabilities: {
           streaming: true, vision: true, thinking: true, toolUse: true,
           maxContext: 1000000, maxOutput: 32000,
@@ -191,6 +202,7 @@ const PRESETS: Record<string, ProviderPreset> = {
       {
         id: 'claude-sonnet-4-6',
         name: 'Claude Sonnet 4.6',
+        thinkingEffort: 'high',
         capabilities: {
           streaming: true, vision: true, thinking: true, toolUse: true,
           maxContext: 200000, maxOutput: 16384,
@@ -294,6 +306,7 @@ const modelForm = reactive({
   streaming: true,
   vision: false,
   thinking: false,
+  thinkingEffort: 'high' as ThinkingEffort,
   toolUse: false,
   maxContext: 200000,
   maxOutput: 16384,
@@ -413,7 +426,16 @@ function getProviderBrand(provider: ProviderConfig) {
       // 无效 URL，跳过
     }
   }
-  return PRESETS.custom
+  return PRESETS.custom!
+}
+
+function getProviderBrandClasses(provider: ProviderConfig) {
+  const brand = getProviderBrand(provider)
+  return {
+    brandBg: brand.brandBg,
+    brandColor: brand.brandColor,
+    brandInitial: brand.brandInitial,
+  }
 }
 
 // ─────────────────────── 模型管理 ───────────────────────
@@ -425,6 +447,7 @@ function openAddModel() {
   modelForm.streaming = true
   modelForm.vision = false
   modelForm.thinking = false
+  modelForm.thinkingEffort = 'high'
   modelForm.toolUse = false
   modelForm.maxContext = 200000
   modelForm.maxOutput = 16384
@@ -444,6 +467,7 @@ function openEditModel(index: number) {
   modelForm.streaming = m.capabilities.streaming
   modelForm.vision = m.capabilities.vision
   modelForm.thinking = m.capabilities.thinking
+  modelForm.thinkingEffort = m.thinkingEffort ?? 'high'
   modelForm.toolUse = m.capabilities.toolUse
   modelForm.maxContext = m.capabilities.maxContext
   modelForm.maxOutput = m.capabilities.maxOutput
@@ -460,6 +484,7 @@ function saveModel() {
   const model: ModelConfig = {
     id: modelForm.id.trim(),
     name: modelForm.name.trim(),
+    thinkingEffort: modelForm.thinking ? modelForm.thinkingEffort : undefined,
     capabilities: {
       streaming: modelForm.streaming,
       vision: modelForm.vision,
@@ -526,12 +551,12 @@ const canSave = computed(() =>
               class="group relative rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm overflow-hidden transition-all duration-200 hover:border-border hover:shadow-sm"
             >
               <!-- 品牌色条 -->
-              <div class="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" :class="getProviderBrand(provider).brandBg.replace('/10', '')" />
+              <div class="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" :class="getProviderBrandClasses(provider).brandBg.replace('/10', '')" />
 
               <div class="flex items-center gap-4 pl-5 pr-4 py-3.5">
                 <!-- 品牌图标 -->
-                <div class="flex h-10 w-10 items-center justify-center rounded-xl shrink-0 text-sm font-bold" :class="[getProviderBrand(provider).brandBg, getProviderBrand(provider).brandColor]">
-                  {{ getProviderBrand(provider).brandInitial }}
+                <div class="flex h-10 w-10 items-center justify-center rounded-xl shrink-0 text-sm font-bold" :class="[getProviderBrandClasses(provider).brandBg, getProviderBrandClasses(provider).brandColor]">
+                  {{ getProviderBrandClasses(provider).brandInitial }}
                 </div>
 
                 <!-- 信息 -->
@@ -853,6 +878,30 @@ const canSave = computed(() =>
                 <span class="flex items-center gap-1.5"><Wrench class="h-3.5 w-3.5 text-muted-foreground" /> 工具调用</span>
               </label>
             </div>
+          </div>
+
+          <div v-if="modelForm.thinking" class="space-y-2">
+            <Label class="text-xs">Thinking effort</Label>
+            <Select
+              :model-value="modelForm.thinkingEffort"
+              @update:model-value="(v: unknown) => modelForm.thinkingEffort = String(v) as ThinkingEffort"
+            >
+              <SelectTrigger class="h-10 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="effort in THINKING_EFFORTS"
+                  :key="effort"
+                  :value="effort"
+                >
+                  {{ effort }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-[11px] text-muted-foreground">
+              Anthropic adaptive thinking uses this effort level.
+            </p>
           </div>
 
           <!-- 上下文限制 -->

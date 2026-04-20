@@ -16,17 +16,21 @@ import {
   toggleFavorite as apiToggleFavorite,
   updateGroup as apiUpdateGroup,
   reorderConnections as apiReorderConnections,
-  parseIsFavorite,
+  getAutoReconnect,
+  getIsFavorite,
+  parseConnectionConfig,
   type ConnectionRecord,
   type ConnectionGroupRecord,
   type CreateConnectionParams,
   type UpdateConnectionParams,
   type TestResult,
+  type ParsedConnectionConfig,
 } from '@/api/connection'
 import { sshTestConnection as apiSshTestConnection } from '@/api/ssh'
 
 export interface ConnectionState {
   record: ConnectionRecord
+  parsedConfig: ParsedConnectionConfig
   status: ConnectionStatus
   error?: string
   /** 当前重连尝试次数（仅 reconnecting 状态下有效） */
@@ -71,12 +75,12 @@ export const useConnectionStore = defineStore('connections', () => {
 
   /** 收藏的连接列表 */
   const favoriteConnections = computed(() =>
-    connectionList.value.filter((c) => parseIsFavorite(c.record.configJson)),
+    connectionList.value.filter((c) => getIsFavorite(c.parsedConfig)),
   )
 
   /** 非收藏的连接列表 */
   const nonFavoriteConnections = computed(() =>
-    connectionList.value.filter((c) => !parseIsFavorite(c.record.configJson)),
+    connectionList.value.filter((c) => !getIsFavorite(c.parsedConfig)),
   )
 
   /** 搜索过滤：支持按名称、主机、分组名匹配 */
@@ -102,12 +106,12 @@ export const useConnectionStore = defineStore('connections', () => {
 
   /** 过滤后的收藏连接 */
   const filteredFavorites = computed(() =>
-    filteredConnections.value.filter((c) => parseIsFavorite(c.record.configJson)),
+    filteredConnections.value.filter((c) => getIsFavorite(c.parsedConfig)),
   )
 
   /** 过滤后的非收藏连接 */
   const filteredNonFavorites = computed(() =>
-    filteredConnections.value.filter((c) => !parseIsFavorite(c.record.configJson)),
+    filteredConnections.value.filter((c) => !getIsFavorite(c.parsedConfig)),
   )
 
   async function loadConnections() {
@@ -124,6 +128,7 @@ export const useConnectionStore = defineStore('connections', () => {
         const existing = connections.value.get(record.id)
         newMap.set(record.id, {
           record,
+          parsedConfig: parseConnectionConfig(record.configJson),
           status: existing?.status ?? 'disconnected',
           error: existing?.error,
         })
@@ -141,6 +146,7 @@ export const useConnectionStore = defineStore('connections', () => {
     const record = await apiCreateConnection(params)
     connections.value.set(record.id, {
       record,
+      parsedConfig: parseConnectionConfig(record.configJson),
       status: 'disconnected',
     })
     triggerRef(connections)
@@ -152,6 +158,7 @@ export const useConnectionStore = defineStore('connections', () => {
     const existing = connections.value.get(id)
     connections.value.set(id, {
       record,
+      parsedConfig: parseConnectionConfig(record.configJson),
       status: existing?.status ?? 'disconnected',
       error: existing?.error,
     })
@@ -221,6 +228,7 @@ export const useConnectionStore = defineStore('connections', () => {
       connections.value.set(connectionId, {
         ...state,
         record: updatedRecord,
+        parsedConfig: parseConnectionConfig(updatedRecord.configJson),
       })
       triggerRef(connections)
     }
@@ -278,7 +286,7 @@ export const useConnectionStore = defineStore('connections', () => {
     if (state.record.type !== 'database') return null
 
     // 检查是否启用了自动重连
-    if (!parseAutoReconnect(state.record.configJson)) return null
+    if (!getAutoReconnect(state.parsedConfig)) return null
 
     // 防止并发重连
     if (reconnectingIds.value.has(connectionId)) return null
@@ -286,7 +294,7 @@ export const useConnectionStore = defineStore('connections', () => {
 
     try {
       // 解析连接配置，构建重连参数
-      const config = JSON.parse(state.record.configJson) as Record<string, unknown>
+      const config = state.parsedConfig
 
       // 获取存储的密码
       let password = ''

@@ -111,7 +111,7 @@ const activeTabProps = computed(() => {
     }
     // 文件管理器：传递初始远程路径（从终端 cwd 同步）
     if (tab.type === 'file-manager' && tab.meta?.initialRemotePath) {
-      base.initialRemotePath = tab.meta.initialRemotePath
+      base.initialRemotePath = tab.meta.initialRemotePath as string
     }
     return base
   }
@@ -156,19 +156,19 @@ const isZen = computed(() => workspace.panelState.zenMode)
 
     <div class="flex flex-1 min-h-0">
     <!-- Activity Bar + Side Panel（沉浸式 / Zen 下隐藏） -->
-    <ActivityBar v-show="!isImmersive && !isZen" />
-    <SidePanel v-show="!isImmersive && !isZen" />
+    <ActivityBar v-if="!isImmersive && !isZen" />
+    <SidePanel v-if="!isImmersive && !isZen" />
 
     <!-- Main Content Area: Floating and elevated -->
     <div class="flex flex-1 flex-col overflow-hidden bg-background transition-[border-radius] duration-300" :class="(isImmersive || isZen) ? '' : 'sm:rounded-tl-xl border-t border-l border-border/40 shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.15)] dark:shadow-[-8px_0_24px_-12px_rgba(0,0,0,0.6)]'" :style="{ position: 'relative', zIndex: 10 }">
       <!-- Tab Bar（沉浸式 / Zen 下隐藏） -->
-      <TabBar v-show="!isImmersive && !isZen" />
+      <TabBar v-if="!isImmersive && !isZen" />
 
       <!-- Workspace 主体 -->
       <div class="flex flex-1 min-h-0">
         <main class="flex-1 overflow-hidden min-w-0">
           <!-- Tab Content with KeepAlive for state preservation -->
-          <KeepAlive :max="10">
+          <KeepAlive :max="8">
             <component
               :is="activeTabComponent"
               v-if="activeTabComponent"
@@ -186,12 +186,12 @@ const isZen = computed(() => workspace.panelState.zenMode)
       </div>
 
       <!-- Bottom Panel（沉浸式 / Zen 下隐藏） -->
-      <BottomPanel v-show="!isImmersive && !isZen" />
+      <BottomPanel v-if="!isImmersive && !isZen" />
     </div>
     </div>
 
     <!-- Status Bar（沉浸式 / Zen 下隐藏） -->
-    <StatusBar v-show="!isImmersive && !isZen && workspace.panelState.showStatusBar" />
+    <StatusBar v-if="!isImmersive && !isZen && workspace.panelState.showStatusBar" />
 
     <!-- Command Palette -->
     <CommandPalette />

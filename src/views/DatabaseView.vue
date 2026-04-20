@@ -9,26 +9,26 @@ import QueryPanel from '@/components/database/QueryPanel.vue'
 import TableEditorPanel from '@/components/database/TableEditorPanel.vue'
 import ImportPanel from '@/components/database/ImportPanel.vue'
 import TableDataPanel from '@/components/database/TableDataPanel.vue'
-import SchemaComparePanel from '@/components/database/SchemaComparePanel.vue'
-import PerformanceDashboard from '@/components/database/PerformanceDashboard.vue'
-import UserManagementPanel from '@/components/database/UserManagementPanel.vue'
 import { defineAsyncComponent } from 'vue'
 
 /** 懒加载 ER 图面板（vue-flow + dagre 较大） */
 const ErDiagramPanel = defineAsyncComponent(() => import('@/components/database/ErDiagramPanel.vue'))
 /** 懒加载 SQL Builder 面板 */
 const SqlBuilderPanel = defineAsyncComponent(() => import('@/components/database/sql-builder/SqlBuilderPanel.vue'))
-import BackupDialog from '@/components/database/BackupDialog.vue'
-import RestoreDialog from '@/components/database/RestoreDialog.vue'
-import CreateDatabaseDialog from '@/components/database/CreateDatabaseDialog.vue'
-import EditDatabaseDialog from '@/components/database/EditDatabaseDialog.vue'
-import RoutineExecDialog from '@/components/database/RoutineExecDialog.vue'
-import ObjectEditorDialog from '@/components/database/ObjectEditorDialog.vue'
+const SchemaComparePanel = defineAsyncComponent(() => import('@/components/database/SchemaComparePanel.vue'))
+const PerformanceDashboard = defineAsyncComponent(() => import('@/components/database/PerformanceDashboard.vue'))
+const UserManagementPanel = defineAsyncComponent(() => import('@/components/database/UserManagementPanel.vue'))
+const BackupDialog = defineAsyncComponent(() => import('@/components/database/BackupDialog.vue'))
+const RestoreDialog = defineAsyncComponent(() => import('@/components/database/RestoreDialog.vue'))
+const CreateDatabaseDialog = defineAsyncComponent(() => import('@/components/database/CreateDatabaseDialog.vue'))
+const EditDatabaseDialog = defineAsyncComponent(() => import('@/components/database/EditDatabaseDialog.vue'))
+const RoutineExecDialog = defineAsyncComponent(() => import('@/components/database/RoutineExecDialog.vue'))
+const ObjectEditorDialog = defineAsyncComponent(() => import('@/components/database/ObjectEditorDialog.vue'))
+const DataSyncPanel = defineAsyncComponent(() => import('@/components/database/DataSyncPanel.vue'))
+const SchedulerPanel = defineAsyncComponent(() => import('@/components/database/SchedulerPanel.vue'))
 import ConfirmDialog from '@/components/ui/confirm-dialog/ConfirmDialog.vue'
 import EnvironmentBanner from '@/components/database/EnvironmentBanner.vue'
 import BreadcrumbNav from '@/components/database/BreadcrumbNav.vue'
-import DataSyncPanel from '@/components/database/DataSyncPanel.vue'
-import SchedulerPanel from '@/components/database/SchedulerPanel.vue'
 import { useConnectionStore } from '@/stores/connections'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useSchemaRegistryStore } from '@/stores/schema-registry'
@@ -40,7 +40,7 @@ import type { ObjectTreeExposed } from '@/types/component-exposed'
 import { useToast } from '@/composables/useToast'
 import { useSchemaCache } from '@/composables/useSchemaCache'
 import { useNotification } from '@/composables/useNotification'
-import { parseEnvironment, parseReadOnly, parseConfirmDanger } from '@/api/connection'
+import { getConfirmDanger, getEnvironment, getReadOnly } from '@/api/connection'
 import { parseBackendError, ensureErrorString } from '@/types/error'
 import type { EnvironmentType } from '@/types/environment'
 
@@ -69,27 +69,26 @@ const parsedConfig = computed(() => {
 })
 
 const driver = computed(() => {
-  const config = parsedConfig.value
-  return (config?.driver as string) ?? 'mysql'
+  return (parsedConfig.value?.driver as string) ?? 'mysql'
 })
 
 // 环境配置（从 configJson 解析）
 const environment = computed<EnvironmentType>(() => {
   const state = connectionStore.connections.get(props.connectionId)
   if (!state) return 'development'
-  return parseEnvironment(state.record.configJson)
+  return getEnvironment(state.parsedConfig)
 })
 
 const readOnly = computed(() => {
   const state = connectionStore.connections.get(props.connectionId)
   if (!state) return false
-  return parseReadOnly(state.record.configJson)
+  return getReadOnly(state.parsedConfig)
 })
 
 const confirmDanger = computed(() => {
   const state = connectionStore.connections.get(props.connectionId)
   if (!state) return false
-  return parseConfirmDanger(state.record.configJson)
+  return getConfirmDanger(state.parsedConfig)
 })
 
 const connectionHost = computed(() => {
@@ -158,6 +157,14 @@ onErrorCaptured((err) => {
 const poolStatus = ref<PoolStatus | null>(null)
 let poolStatusTimer: ReturnType<typeof setInterval> | null = null
 
+function handleVisibilityChange() {
+  if (document.hidden) {
+    stopPoolStatusPolling()
+  } else if (isConnected.value) {
+    startPoolStatusPolling()
+  }
+}
+
 /** 获取连接池状态 */
 async function fetchPoolStatus() {
   if (!isConnected.value) return
@@ -172,6 +179,7 @@ async function fetchPoolStatus() {
 function startPoolStatusPolling() {
   stopPoolStatusPolling()
   fetchPoolStatus()
+  if (document.hidden) return
   poolStatusTimer = setInterval(fetchPoolStatus, 10000) // 每 10 秒刷新
 }
 
@@ -268,6 +276,7 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 }
 
 onMounted(async () => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
   // 从 SQLite 恢复上次的标签页状态（首次调用，幂等）
   await dbWorkspaceStore.restoreState().catch((e: unknown) => console.warn('[DatabaseView]', e))
   // 确保该连接的 workspace 已初始化（副作用仅在此处执行一次）
@@ -319,6 +328,7 @@ onDeactivated(() => {
 })
 
 onBeforeUnmount(async () => {
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   disposeSchemaCache()
   schemaRegistry.unregisterSchema(props.connectionId)
   stopPoolStatusPolling()

@@ -30,15 +30,6 @@ const isLargeDiff = computed(() =>
   diff.value.stats.added + diff.value.stats.removed > 500
 )
 
-const FILE_COLORS: Record<string, string> = {
-  vue: '#42b883', ts: '#3178c6', js: '#f7df1e', java: '#e76f00',
-  py: '#3776ab', rs: '#dea584', css: '#264de4', html: '#e34f26',
-}
-
-const fileColor = computed(() => {
-  const ext = props.fileName.split('.').pop()?.toLowerCase() ?? ''
-  return FILE_COLORS[ext] ?? '#6b7280'
-})
 
 /** 复制新内容到剪贴板 */
 async function copyNewContent() {

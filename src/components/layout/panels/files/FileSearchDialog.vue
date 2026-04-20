@@ -36,7 +36,8 @@ function handleKeyDown(e: KeyboardEvent) {
     selectedIndex.value = Math.max(selectedIndex.value - 1, 0)
   } else if (e.key === 'Enter' && results.value.length > 0) {
     e.preventDefault()
-    emit('select', results.value[selectedIndex.value])
+    const selected = results.value[selectedIndex.value]
+    if (selected) emit('select', selected)
     emit('close')
   } else if (e.key === 'Escape') {
     emit('close')

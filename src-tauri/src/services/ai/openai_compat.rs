@@ -120,10 +120,44 @@ impl OpenAiCompatProvider {
                     }
                     api_messages.push(obj);
                 }
-                // System / User：普通消息
-                _ => {
+                // User：支持多模态内容块
+                MessageRole::User => {
+                    if let Some(ref content_blocks) = msg.content_blocks {
+                        // OpenAI 格式的内容块
+                        let api_content: Vec<serde_json::Value> = content_blocks
+                            .iter()
+                            .map(|block| match block {
+                                ContentBlock::Text { text } => {
+                                    serde_json::json!({ "type": "text", "text": text })
+                                }
+                                ContentBlock::Image { source } => {
+                                    serde_json::json!({
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": format!("data:{};base64,{}",
+                                                source.media_type, source.data)
+                                        }
+                                    })
+                                }
+                            })
+                            .collect();
+
+                        api_messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": api_content
+                        }));
+                    } else {
+                        // 保持现有的文本处理逻辑
+                        api_messages.push(serde_json::json!({
+                            "role": "user",
+                            "content": msg.content.as_deref().unwrap_or("")
+                        }));
+                    }
+                }
+                // System：普通文本消息
+                MessageRole::System => {
                     api_messages.push(serde_json::json!({
-                        "role": role,
+                        "role": "system",
                         "content": msg.content.as_deref().unwrap_or("")
                     }));
                 }

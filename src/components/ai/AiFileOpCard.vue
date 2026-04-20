@@ -8,7 +8,7 @@
 import { ref, computed } from 'vue'
 import { computeMiniDiff } from '@/composables/useAiDiff'
 import type { FileOperation } from '@/types/ai'
-import { ChevronRight, Check, X } from 'lucide-vue-next'
+import { ChevronRight, Check } from 'lucide-vue-next'
 import AiDiffViewer from './AiDiffViewer.vue'
 import {
   Sheet,

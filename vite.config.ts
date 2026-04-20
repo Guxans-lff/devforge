@@ -38,6 +38,8 @@ export default defineConfig({
           'monaco': ['monaco-editor'],
           'xterm': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
           'vue-vendor': ['vue', 'vue-router', 'pinia', 'vue-i18n'],
+          'shiki': ['shiki'],
+          'diff': ['diff'],
         },
       },
     },

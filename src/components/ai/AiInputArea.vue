@@ -6,7 +6,7 @@
  * 支持 Shift+Enter 换行、Enter 发送、自动增高。
  */
 import { ref, computed, nextTick, onMounted } from 'vue'
-import type { ProviderConfig, ModelConfig, FileAttachment } from '@/types/ai'
+import type { ProviderConfig, FileAttachment } from '@/types/ai'
 import type { FileNode } from '@/types/workspace-files'
 import AtMentionPopover from './AtMentionPopover.vue'
 import SlashCommandPopover, { type SlashCommand } from './SlashCommandPopover.vue'
@@ -34,7 +34,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 export type ChatMode = 'normal' | 'plan' | 'auto' | 'dispatcher'
 
@@ -95,6 +94,10 @@ const inputHistory = ref<string[]>([])
 const historyIndex = ref(-1)
 const savedDraft = ref('')
 
+// 输入撤销历史
+const undoStack = ref<string[]>([''])
+const undoIndex = ref(0)
+
 onMounted(() => {
   try {
     const saved = localStorage.getItem(INPUT_HISTORY_KEY)
@@ -137,6 +140,36 @@ function historyDown() {
     inputText.value = savedDraft.value
   }
   nextTick(adjustHeight)
+}
+
+/** 输入撤销功能 */
+function pushToUndoStack(value: string) {
+  if (undoStack.value[undoIndex.value] === value) return
+  // 清理重做历史
+  undoStack.value.splice(undoIndex.value + 1)
+  undoStack.value.push(value)
+  undoIndex.value = undoStack.value.length - 1
+  // 限制撤销栈大小
+  if (undoStack.value.length > 50) {
+    undoStack.value.shift()
+    undoIndex.value--
+  }
+}
+
+function undo() {
+  if (undoIndex.value > 0) {
+    undoIndex.value--
+    inputText.value = undoStack.value[undoIndex.value]!
+    nextTick(adjustHeight)
+  }
+}
+
+function redo() {
+  if (undoIndex.value < undoStack.value.length - 1) {
+    undoIndex.value++
+    inputText.value = undoStack.value[undoIndex.value]!
+    nextTick(adjustHeight)
+  }
 }
 
 // ─────────── 发送快捷键配置（G12） ───────────
@@ -386,6 +419,21 @@ function handleKeyDown(e: KeyboardEvent) {
     }
   }
 
+  // Ctrl+Z 撤销功能
+  if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
+    e.preventDefault()
+    undo()
+    return
+  }
+
+  // Ctrl+Y 或 Ctrl+Shift+Z 重做功能
+  if ((e.key === 'y' && (e.ctrlKey || e.metaKey)) ||
+      (e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey)) {
+    e.preventDefault()
+    redo()
+    return
+  }
+
   // 输入历史导航（仅在输入框无选区时，且非 Popover 状态）
   if (e.key === 'ArrowUp' && !e.shiftKey && (textareaRef.value?.selectionStart ?? 0) === 0) {
     e.preventDefault()
@@ -476,16 +524,15 @@ function handleDrop(e: DragEvent) {
   }
 }
 
-/** 切换 Provider 时自动选中第一个模型 */
-function selectProvider(providerId: string) {
-  emit('update:selectedProviderId', providerId)
-  const provider = props.providers.find(p => p.id === providerId)
-  if (provider) {
-    const firstModel = provider.models[0]
-    if (firstModel) {
-      emit('update:selectedModelId', firstModel.id)
-    }
+/** 粘贴处理 */
+function handlePaste(e: ClipboardEvent) {
+  const files = e.clipboardData?.files
+  if (files && files.length > 0) {
+    // 阻止默认粘贴行为，通过文件处理管道处理
+    e.preventDefault()
+    emit('dropFiles', files)
   }
+  // 如果没有文件，允许正常的文本粘贴
 }
 
 /** 选择具体模型（可能需要同时切换 Provider） */
@@ -538,7 +585,8 @@ defineExpose({ focus })
           class="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm leading-relaxed placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
           style="max-height: 200px"
           @keydown="handleKeyDown"
-          @input="adjustHeight(); detectAtMention(); detectSlashCommand()"
+          @input="adjustHeight(); detectAtMention(); detectSlashCommand(); pushToUndoStack(inputText)"
+          @paste="handlePaste"
         />
 
         <!-- 底部工具栏 -->

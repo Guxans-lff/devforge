@@ -25,9 +25,10 @@ const props = defineProps<{
   matchKey?: string
   /** 内嵌渲染：隐藏自身头部（外层 AiToolCallBlock 已显示工具名+路径+徽章） */
   embedded?: boolean
+  sessionId?: string
 }>()
 
-const pending = usePendingApproval()
+const pending = usePendingApproval(props.sessionId)
 
 /** 是否应当展示 */
 const shouldShow = computed(() => {
@@ -128,8 +129,8 @@ const previewMaxHeight = computed(() => (expanded.value ? '70vh' : '100px'))
     <div v-if="!embedded" class="flex items-center gap-2 px-3 py-1.5">
       <component :is="ToolIcon" class="h-3.5 w-3.5 text-amber-500/80 shrink-0" />
       <span class="text-[11px] font-medium text-amber-500/90">{{ toolLabel }}</span>
-      <span class="text-[11px] text-muted-foreground/50 truncate flex-1" :title="pending.target">
-        {{ pending.target }}
+      <span class="text-[11px] text-muted-foreground/50 truncate flex-1" :title="pending?.target">
+        {{ pending?.target }}
       </span>
       <span class="text-[10px] text-amber-500/60 shrink-0">需要确认</span>
     </div>
@@ -155,7 +156,7 @@ const previewMaxHeight = computed(() => (expanded.value ? '70vh' : '100px'))
           <!-- 非 diff：命令 / URL / 新文件预览 -->
           <div v-else class="px-3 py-2">
             <div class="text-[10px] font-medium text-muted-foreground/40 mb-0.5">
-              {{ pending.toolName === 'bash' ? '命令' : pending.toolName === 'web_fetch' ? 'URL' : '新文件内容' }}
+              {{ pending?.toolName === 'bash' ? '命令' : pending?.toolName === 'web_fetch' ? 'URL' : '新文件内容' }}
             </div>
             <pre class="text-[11px] font-mono whitespace-pre-wrap overflow-x-auto text-foreground/60">{{ previewLines }}</pre>
           </div>

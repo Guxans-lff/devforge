@@ -13,7 +13,7 @@ import {
   ContextMenuSeparator, ContextMenuTrigger,
 } from '@/components/ui/context-menu'
 import { ENV_PRESETS, type EnvironmentType } from '@/types/environment'
-import { parseEnvironment } from '@/api/connection'
+import { getEnvironment } from '@/api/connection'
 import type { ConnectionRecord } from '@/api/connection'
 import type { ConnectionState } from '@/stores/connections'
 import { useI18n } from 'vue-i18n'
@@ -85,9 +85,9 @@ function iconAnimClass(status: string): string {
 }
 
 /** 获取环境类型 */
-function getEnvironment(record: ConnectionRecord): EnvironmentType | null {
+function getRecordEnvironment(record: ConnectionRecord): EnvironmentType | null {
   if (record.type !== 'database') return null
-  return parseEnvironment(record.configJson) || null
+  return getEnvironment(props.conn.parsedConfig) || null
 }
 
 /** P0: 键盘 Enter/Space 打开连接 */
@@ -158,13 +158,13 @@ function onKeydown(e: KeyboardEvent) {
             <Star v-if="isFavorite" class="h-[10px] w-[10px] shrink-0 text-df-warning fill-df-warning" />
             <!-- 环境标记 -->
             <span
-              v-if="getEnvironment(conn.record)"
+              v-if="getRecordEnvironment(conn.record)"
               class="shrink-0 rounded-full px-1.5 h-3.5 text-[8px] font-extrabold uppercase tracking-widest inline-flex items-center justify-center ring-1 ring-inset ring-current/20 backdrop-blur-sm leading-none -translate-y-px"
               :style="{
-                color: ENV_PRESETS[getEnvironment(conn.record)!].color,
-                backgroundColor: ENV_PRESETS[getEnvironment(conn.record)!].color + '18',
+                color: ENV_PRESETS[getRecordEnvironment(conn.record)!].color,
+                backgroundColor: ENV_PRESETS[getRecordEnvironment(conn.record)!].color + '18',
               }"
-            >{{ ENV_SHORT_LABELS[getEnvironment(conn.record)!] }}</span>
+            >{{ ENV_SHORT_LABELS[getRecordEnvironment(conn.record)!] }}</span>
           </div>
           <p class="truncate text-[10px] font-medium text-muted-foreground font-mono tracking-[0.02em] leading-none">{{ conn.record.host }}</p>
         </div>

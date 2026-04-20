@@ -27,12 +27,6 @@ const formattedSize = computed(() => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 })
 
-/** 文件扩展名（用于推断语法高亮） */
-const extension = computed(() => {
-  const dot = props.name.lastIndexOf('.')
-  return dot >= 0 ? props.name.slice(dot + 1) : ''
-})
-
 /** 预览行数（折叠时显示前 5 行） */
 const previewLines = computed(() => {
   const allLines = props.content.split('\n')

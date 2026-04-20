@@ -26,7 +26,7 @@ function makeRecordCommand(label: string): monaco.languages.Command {
 }
 
 // SQL keywords for completion
-const SQL_KEYWORDS = [
+const SQL_KEYWORDS = Array.from(new Set([
   'SELECT', 'FROM', 'WHERE', 'AND', 'OR', 'NOT', 'IN', 'BETWEEN', 'LIKE',
   'IS', 'NULL', 'AS', 'ON', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER',
   'FULL', 'CROSS', 'UNION', 'ALL', 'DISTINCT', 'GROUP', 'BY', 'HAVING',
@@ -38,7 +38,7 @@ const SQL_KEYWORDS = [
   'USE', 'GRANT', 'REVOKE', 'COMMIT', 'ROLLBACK', 'BEGIN', 'TRANSACTION',
   'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'COALESCE', 'CAST', 'CONVERT',
   'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'HAVING', 'WITH', 'RECURSIVE',
-]
+]))
 
 const SQL_FUNCTIONS = [
   'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'COALESCE', 'IFNULL', 'NULLIF',

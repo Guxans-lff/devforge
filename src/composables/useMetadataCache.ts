@@ -1,123 +1,104 @@
 /**
- * 元数据缓存模块
+ * Metadata cache with stale-while-revalidate support.
  *
- * 基于 SWR（Stale-While-Revalidate）策略的内存缓存，
- * 用于侧栏树等高频元数据请求的加速。
- *
- * 策略：先返回缓存（立即渲染），后台静默刷新，刷新完毕后自动更新视图。
+ * `fetchWithCache` still returns stale data immediately when available. Callers
+ * can pass `onRefresh` to react to a successful background refresh.
  */
 
 interface CacheEntry<T> {
-    /** 缓存数据 */
-    data: T
-    /** 缓存写入时间戳（ms） */
-    timestamp: number
+  data: T
+  timestamp: number
 }
 
-/** 缓存配置 */
-interface CacheOptions {
-    /** 缓存有效期（ms），默认 60 秒 */
-    ttl?: number
+interface CacheOptions<T = unknown> {
+  ttl?: number
+  onRefresh?: (freshData: T) => void
 }
 
-const DEFAULT_TTL = 60_000 // 60 秒
+const DEFAULT_TTL = 60_000
 
-/** 全局内存缓存 Map */
 const cache = new Map<string, CacheEntry<unknown>>()
+const inflightRefreshes = new Map<string, Promise<unknown>>()
 
-/**
- * 获取缓存数据（如果存在且未过期）
- * @param key 缓存键
- * @returns 缓存数据或 null
- */
 export function getCached<T>(key: string): T | null {
-    const entry = cache.get(key) as CacheEntry<T> | undefined
-    if (!entry) return null
-    // 超过 TTL 仍然返回（SWR 策略），调用方自行决定是否后台刷新
-    return entry.data
+  const entry = cache.get(key) as CacheEntry<T> | undefined
+  return entry?.data ?? null
 }
 
-/**
- * 检查缓存是否新鲜（未过期）
- * @param key 缓存键
- * @param ttl 有效期（ms）
- */
 export function isFresh(key: string, ttl: number = DEFAULT_TTL): boolean {
-    const entry = cache.get(key)
-    if (!entry) return false
-    return Date.now() - entry.timestamp < ttl
+  const entry = cache.get(key)
+  if (!entry) return false
+  return Date.now() - entry.timestamp < ttl
 }
 
-/**
- * 写入缓存
- * @param key 缓存键
- * @param data 数据
- */
 export function setCache<T>(key: string, data: T): void {
-    cache.set(key, { data, timestamp: Date.now() })
+  cache.set(key, { data, timestamp: Date.now() })
 }
 
-/**
- * 删除指定缓存
- * @param key 缓存键
- */
 export function invalidate(key: string): void {
-    cache.delete(key)
+  cache.delete(key)
+  inflightRefreshes.delete(key)
 }
 
-/**
- * 删除所有以 prefix 开头的缓存（用于连接断开时清理）
- * @param prefix 缓存键前缀，如 connectionId
- */
 export function invalidateByPrefix(prefix: string): void {
-    for (const key of cache.keys()) {
-        if (key.startsWith(prefix)) {
-            cache.delete(key)
-        }
-    }
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) cache.delete(key)
+  }
+  for (const key of inflightRefreshes.keys()) {
+    if (key.startsWith(prefix)) inflightRefreshes.delete(key)
+  }
 }
 
-/**
- * 清空所有缓存
- */
 export function clearAllCache(): void {
-    cache.clear()
+  cache.clear()
+  inflightRefreshes.clear()
 }
 
-/**
- * SWR 风格的数据获取：优先返回缓存，后台静默刷新
- *
- * @param key 缓存键
- * @param fetcher 数据获取函数
- * @param options 缓存配置
- * @returns { data, fromCache } data 为获取到的数据，fromCache 表示是否来自缓存
- */
+function refreshInBackground<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  onRefresh?: (freshData: T) => void,
+): void {
+  const existing = inflightRefreshes.get(key) as Promise<T> | undefined
+  if (existing) {
+    existing.then(onRefresh).catch(() => {})
+    return
+  }
+
+  const refresh = fetcher()
+    .then((freshData) => {
+      setCache(key, freshData)
+      onRefresh?.(freshData)
+      return freshData
+    })
+    .finally(() => {
+      inflightRefreshes.delete(key)
+    })
+
+  inflightRefreshes.set(key, refresh)
+  refresh.catch(() => {
+    // Keep stale data when background refresh fails.
+  })
+}
+
 export async function fetchWithCache<T>(
-    key: string,
-    fetcher: () => Promise<T>,
-    options?: CacheOptions,
+  key: string,
+  fetcher: () => Promise<T>,
+  options?: CacheOptions<T>,
 ): Promise<{ data: T; fromCache: boolean }> {
-    const ttl = options?.ttl ?? DEFAULT_TTL
-    const cached = getCached<T>(key)
+  const ttl = options?.ttl ?? DEFAULT_TTL
+  const cached = getCached<T>(key)
 
-    if (cached !== null && isFresh(key, ttl)) {
-        // 缓存新鲜，直接返回
-        return { data: cached, fromCache: true }
-    }
+  if (cached !== null && isFresh(key, ttl)) {
+    return { data: cached, fromCache: true }
+  }
 
-    if (cached !== null) {
-        // 缓存过期但存在（SWR）：先返回旧数据，后台刷新
-        // 后台刷新不阻塞当前返回
-        fetcher().then((freshData) => {
-            setCache(key, freshData)
-        }).catch(() => {
-            // 后台刷新失败，静默处理，保留旧缓存
-        })
-        return { data: cached, fromCache: true }
-    }
+  if (cached !== null) {
+    refreshInBackground(key, fetcher, options?.onRefresh)
+    return { data: cached, fromCache: true }
+  }
 
-    // 无缓存，必须等待获取
-    const data = await fetcher()
-    setCache(key, data)
-    return { data, fromCache: false }
+  const data = await fetcher()
+  setCache(key, data)
+  return { data, fromCache: false }
 }

@@ -9,7 +9,6 @@ import { computed } from 'vue'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connections'
 import {
-  Database,
   Wifi,
   Circle,
 } from 'lucide-vue-next'

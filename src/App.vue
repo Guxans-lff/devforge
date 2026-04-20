@@ -46,7 +46,6 @@ async function showMainWindow() {
 }
 
 async function restoreStartupState() {
-  const settingsStore = useSettingsStore()
   const workspaceStore = useWorkspaceStore()
   const connectionStore = useConnectionStore()
 
