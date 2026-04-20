@@ -255,15 +255,24 @@ function renderBlock(text: string): string {
       style="padding: 10px 14px;"
     >
       <!-- 吸顶极简态：单行省略 + 展开按钮 -->
-      <div v-if="stickyCompact" class="flex items-center gap-2">
-        <span class="text-[12px] text-foreground/80 truncate flex-1 leading-tight">{{ message.content }}</span>
-        <button
-          class="shrink-0 flex items-center gap-0.5 text-[10px] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors ml-1"
+      <div v-if="stickyCompact" class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+        <span class="line-clamp-2 min-w-0 whitespace-pre-wrap break-words text-[12px] leading-[1.45] text-foreground/80">{{ message.content }}</span>
+        <div class="flex shrink-0 items-center gap-1">
+          <button
+            class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
+            :title="copied ? '已复制' : '快捷复制'"
+            @click.stop="copyContent"
+          >
+            <component :is="copied ? Check : Copy" class="h-3 w-3" />
+          </button>
+          <button
+            class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
           title="展开完整提问"
           @click.stop="userExpanded = !userExpanded"
         >
           <ChevronRight class="h-3 w-3" :class="userExpanded ? 'rotate-90' : 'rotate-0'" />
-        </button>
+          </button>
+        </div>
       </div>
 
       <!-- 吸顶展开态（点击展开按钮后） -->
@@ -347,7 +356,7 @@ function renderBlock(text: string): string {
     v-else
     class="group ai-prose relative"
     :class="inGroup ? 'my-0' : 'my-1'"
-    v-memo="[message.id, message.isStreaming, message.toolCalls?.length, message.content?.length, message.notice?.text, hideHeader, isGroupEnd]"
+    v-memo="[message.id, message.isStreaming, message.toolCalls, message.toolResults, message.content?.length, message.notice?.text, hideHeader, isGroupEnd]"
   >
     <!-- 左侧轨道竖线（组内条目持续存在） -->
     <div v-if="inGroup" class="timeline-track" :class="isGroupEnd ? 'timeline-track--end' : ''" />

@@ -18,41 +18,86 @@ export interface LoadedChatHistory {
   truncated: boolean
 }
 
+const historyCache = new Map<string, LoadedChatHistory>()
+const inflightRequests = new Map<string, Promise<LoadedChatHistory>>()
+
+function cacheKey(sessionId: string, windowSize: number): string {
+  return `${sessionId}:${windowSize}`
+}
+
 export async function loadChatHistoryWindow(
   sessionId: string,
   windowSize: number,
 ): Promise<LoadedChatHistory> {
-  const result = await aiGetSession(sessionId, windowSize)
+  const key = cacheKey(sessionId, windowSize)
+  const cached = historyCache.get(key)
+  if (cached) return cached
 
-  if (!result) {
+  const inflight = inflightRequests.get(key)
+  if (inflight) return inflight
+
+  const request = (async () => {
+    const result = await aiGetSession(sessionId, windowSize)
+
+    if (!result) {
+      return {
+        session: null,
+        messages: [],
+        window: {
+          windowSize,
+          loadedRecords: 0,
+          totalRecords: 0,
+        },
+        truncated: false,
+      }
+    }
+
+    const { session, messages: records, truncated, totalRecords, loadedRecords } = result
+    const restored = restoreMessagesFromRecords(records)
+
     return {
-      session: null,
-      messages: [],
+      session,
+      messages: buildHistoryMessages(sessionId, restored, {
+        truncated,
+        loadedRecords,
+        totalRecords,
+      }),
       window: {
         windowSize,
-        loadedRecords: 0,
-        totalRecords: 0,
+        loadedRecords,
+        totalRecords,
       },
-      truncated: false,
+      truncated,
     }
+  })()
+
+  inflightRequests.set(key, request)
+
+  try {
+    const loaded = await request
+    historyCache.set(key, loaded)
+    return loaded
+  } finally {
+    inflightRequests.delete(key)
+  }
+}
+
+export function invalidateChatHistoryCache(sessionId?: string): void {
+  if (!sessionId) {
+    historyCache.clear()
+    inflightRequests.clear()
+    return
   }
 
-  const { session, messages: records, truncated, totalRecords, loadedRecords } = result
-  const restored = restoreMessagesFromRecords(records)
-
-  return {
-    session,
-    messages: buildHistoryMessages(sessionId, restored, {
-      truncated,
-      loadedRecords,
-      totalRecords,
-    }),
-    window: {
-      windowSize,
-      loadedRecords,
-      totalRecords,
-    },
-    truncated,
+  for (const key of historyCache.keys()) {
+    if (key.startsWith(`${sessionId}:`)) {
+      historyCache.delete(key)
+    }
+  }
+  for (const key of inflightRequests.keys()) {
+    if (key.startsWith(`${sessionId}:`)) {
+      inflightRequests.delete(key)
+    }
   }
 }
 
@@ -82,7 +127,7 @@ function buildHistoryMessages(
       content: '',
       timestamp: restored[0]?.timestamp ?? Date.now(),
       type: 'divider',
-      dividerText: `已仅加载最近 ${metadata.loadedRecords} / ${metadata.totalRecords} 条历史记录`,
+      dividerText: `已加载最近 ${metadata.loadedRecords} / ${metadata.totalRecords} 条历史记录`,
     },
     ...restored,
   ]

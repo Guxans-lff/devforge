@@ -1,0 +1,137 @@
+import { mount } from '@vue/test-utils'
+import { describe, it, expect, vi } from 'vitest'
+import { defineComponent, h, nextTick } from 'vue'
+import AiMessageListVirtual from '@/components/ai/AiMessageListVirtual.vue'
+import type { AiMessage } from '@/types/ai'
+
+vi.mock('@tanstack/vue-virtual', () => ({
+  useVirtualizer: (optionsRef: { value: { count: number } }) => ({
+    value: {
+      getVirtualItems: () =>
+        Array.from({ length: optionsRef.value.count }, (_, index) => ({
+          index,
+          key: index,
+          start: index * 100,
+        })),
+      getTotalSize: () => optionsRef.value.count * 100,
+      measureElement: vi.fn(),
+    },
+  }),
+}))
+
+vi.mock('@/components/ai/AiMessageBubble.vue', () => ({
+  default: defineComponent({
+    name: 'AiMessageBubbleStub',
+    props: {
+      message: { type: Object, required: true },
+    },
+    emits: ['continue', 'bumpMaxOutput'],
+    setup(props, { emit }) {
+      return () =>
+        h('div', { class: 'bubble-stub' }, [
+          h('span', { class: 'message-id' }, (props.message as AiMessage).id),
+          h('button', { class: 'continue-btn', onClick: () => emit('continue') }, 'continue'),
+          h('button', { class: 'bump-btn', onClick: () => emit('bumpMaxOutput', 2048) }, 'bump'),
+        ])
+    },
+  }),
+}))
+
+function makeMessage(id: string, role: AiMessage['role'], extra: Partial<AiMessage> = {}): AiMessage {
+  return {
+    id,
+    role,
+    content: `${role}-${id}`,
+    timestamp: Date.now(),
+    ...extra,
+  }
+}
+
+describe('AiMessageListVirtual', () => {
+  it('renders messages and forwards bubble events', async () => {
+    const wrapper = mount(AiMessageListVirtual, {
+      props: {
+        items: [
+          { key: 'user-1', message: makeMessage('user-1', 'user') },
+          { key: 'assistant-1', message: makeMessage('assistant-1', 'assistant') },
+        ],
+        sessionId: 'session-1',
+      },
+    })
+
+    expect(wrapper.findAll('.bubble-stub')).toHaveLength(2)
+    expect(wrapper.findAll('.message-id').map(node => node.text())).toEqual(['user-1', 'assistant-1'])
+
+    await wrapper.find('.continue-btn').trigger('click')
+    await wrapper.find('.bump-btn').trigger('click')
+
+    expect(wrapper.emitted('continue')).toHaveLength(1)
+    expect(wrapper.emitted('bumpMaxOutput')?.[0]).toEqual([2048])
+  })
+
+  it('shows history load button for divider windows and emits loadMoreHistory', async () => {
+    const wrapper = mount(AiMessageListVirtual, {
+      props: {
+        items: [
+          {
+            key: 'divider-1',
+            message: makeMessage('history-window-1', 'assistant', {
+              type: 'divider',
+              dividerText: 'Older History',
+            }),
+          },
+        ],
+        canLoadMoreHistory: true,
+      },
+    })
+
+    const button = wrapper.find('button')
+    expect(button.exists()).toBe(true)
+
+    await button.trigger('click')
+    expect(wrapper.emitted('loadMoreHistory')).toHaveLength(1)
+  })
+
+  it('renders a sticky compact bubble for the latest user item', () => {
+    const wrapper = mount(AiMessageListVirtual, {
+      props: {
+        items: [
+          { key: 'user-1', message: makeMessage('user-1', 'user'), stickyCompact: true },
+          { key: 'assistant-1', message: makeMessage('assistant-1', 'assistant') },
+        ],
+      },
+    })
+
+    expect(wrapper.findAll('.bubble-stub')).toHaveLength(3)
+    expect(wrapper.findAll('.message-id').map(node => node.text())).toContain('user-1')
+  })
+
+  it('exposes scrollToBottom and scrollContainer', async () => {
+    const wrapper = mount(AiMessageListVirtual, {
+      attachTo: document.body,
+      props: {
+        items: [
+          { key: 'assistant-1', message: makeMessage('assistant-1', 'assistant') },
+        ],
+      },
+    })
+
+    const exposed = wrapper.vm as InstanceType<typeof AiMessageListVirtual>
+    const container = exposed.scrollContainer as HTMLElement | null
+    expect(container).not.toBeNull()
+
+    if (!container) return
+
+    Object.defineProperty(container, 'scrollHeight', {
+      value: 640,
+      configurable: true,
+    })
+    container.scrollTop = 0
+
+    exposed.scrollToBottom()
+    await nextTick()
+    await new Promise(resolve => requestAnimationFrame(resolve))
+
+    expect(container.scrollTop).toBe(640)
+  })
+})

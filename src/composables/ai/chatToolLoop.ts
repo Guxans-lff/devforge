@@ -95,10 +95,13 @@ export async function streamWithToolLoop({
     clearWatchdog()
     flushPendingDelta()
 
+    const hasCompleteToolCalls =
+      streamState.lastFinishReason === 'tool_calls' && streamState.pendingToolCalls.length > 0
+
     const finalMessageCheck = messages.value.find(message => message.id === streamState.streamingMessageId)
     if (finalMessageCheck && finalMessageCheck.role === 'assistant') {
       const noContent = !finalMessageCheck.content || finalMessageCheck.content.trim() === ''
-      const noToolCalls = streamState.pendingToolCalls.length === 0
+      const noToolCalls = !hasCompleteToolCalls
       if (noContent && noToolCalls) {
         const hasThinking = !!(finalMessageCheck.thinking && finalMessageCheck.thinking.trim())
         let errMsg: string
@@ -127,7 +130,7 @@ export async function streamWithToolLoop({
 
     const finalMessage = messages.value.find(message => message.id === streamState.streamingMessageId)
     if (finalMessage && finalMessage.role === 'assistant') {
-      const hasToolCalls = streamState.pendingToolCalls.length > 0
+      const hasToolCalls = hasCompleteToolCalls
       const assistantRecord: AiMessageRecord = {
         id: finalMessage.id,
         sessionId: sid,

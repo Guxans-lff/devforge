@@ -18,6 +18,19 @@ export interface ShortcutBinding {
 /** 主题调度模式 */
 export type ThemeScheduleMode = 'manual' | 'system' | 'schedule'
 
+export interface AiDiagnosticsThresholds {
+  firstTokenWarnMs: number
+  firstTokenDangerMs: number
+  responseWarnMs: number
+  responseDangerMs: number
+  historyWarnMs: number
+  historyDangerMs: number
+  toolQueueWarnCount: number
+  toolQueueDangerCount: number
+  toolRunWarnMs: number
+  toolRunDangerMs: number
+}
+
 export interface AppSettings {
   /** Editor font size in px */
   editorFontSize: number
@@ -57,6 +70,7 @@ export interface AppSettings {
   scheduleDark: string
   /** AI 对话密度：comfortable=舒适（默认），compact=紧凑 */
   aiDensity: 'comfortable' | 'compact'
+  aiDiagnosticsThresholds: AiDiagnosticsThresholds
 }
 
 const defaultShortcuts: ShortcutBinding[] = [
@@ -112,6 +126,19 @@ const defaultShortcuts: ShortcutBinding[] = [
   { id: 'screenshotOpen', keys: 'Ctrl+Shift+X', category: 'screenshot' },
 ]
 
+export const DEFAULT_AI_DIAGNOSTICS_THRESHOLDS: AiDiagnosticsThresholds = {
+  firstTokenWarnMs: 2000,
+  firstTokenDangerMs: 5000,
+  responseWarnMs: 15000,
+  responseDangerMs: 45000,
+  historyWarnMs: 500,
+  historyDangerMs: 2000,
+  toolQueueWarnCount: 0,
+  toolQueueDangerCount: 3,
+  toolRunWarnMs: 1000,
+  toolRunDangerMs: 4000,
+}
+
 const defaults: AppSettings = {
   editorFontSize: 14,
   editorTabSize: 4,
@@ -132,6 +159,7 @@ const defaults: AppSettings = {
   scheduleLight: '07:00',
   scheduleDark: '19:00',
   aiDensity: 'comfortable',
+  aiDiagnosticsThresholds: { ...DEFAULT_AI_DIAGNOSTICS_THRESHOLDS },
 }
 
 /** 合并快捷键：保留用户自定义的绑定，同时补充新增的默认快捷键 */
@@ -141,9 +169,21 @@ function mergeShortcuts(saved?: ShortcutBinding[]): ShortcutBinding[] {
   return defaultShortcuts.map(def => savedMap.get(def.id) ?? def)
 }
 
+function mergeSettings(saved?: Partial<AppSettings>): AppSettings {
+  return {
+    ...defaults,
+    ...saved,
+    shortcuts: mergeShortcuts(saved?.shortcuts),
+    aiDiagnosticsThresholds: {
+      ...DEFAULT_AI_DIAGNOSTICS_THRESHOLDS,
+      ...(saved?.aiDiagnosticsThresholds ?? {}),
+    },
+  }
+}
+
 export const useSettingsStore = defineStore('settings', () => {
   // 先用默认值初始化（同步），后续 restoreState() 异步覆盖
-  const settings = ref<AppSettings>({ ...defaults })
+  const settings = ref<AppSettings>(mergeSettings())
 
   // ===== SQLite 持久化 =====
   const persistence = usePersistence<AppSettings>({
@@ -152,7 +192,7 @@ export const useSettingsStore = defineStore('settings', () => {
     debounce: 300,
     serialize: () => settings.value,
     deserialize: (data) => {
-      const merged = { ...defaults, ...data, shortcuts: mergeShortcuts(data.shortcuts) }
+      const merged = mergeSettings(data)
       settings.value = merged
     },
   })
@@ -172,7 +212,7 @@ export const useSettingsStore = defineStore('settings', () => {
       const raw = localStorage.getItem(LEGACY_STORAGE_KEY)
       if (!raw) return false
       const saved = JSON.parse(raw) as Partial<AppSettings>
-      const merged = { ...defaults, ...saved, shortcuts: mergeShortcuts(saved.shortcuts) }
+      const merged = mergeSettings(saved)
       settings.value = merged
       // 立即写入 SQLite
       await persistence.saveImmediate()
@@ -199,7 +239,7 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   function reset() {
-    settings.value = { ...defaults }
+    settings.value = mergeSettings()
   }
 
   function resetShortcuts() {

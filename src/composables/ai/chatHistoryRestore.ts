@@ -26,6 +26,7 @@ function normalizeToolCalls(content: string): ToolCallInfo[] {
       result: raw.result,
       error: raw.error,
       approvalState: raw.approvalState,
+      execution: raw.execution,
     }
   })
 }

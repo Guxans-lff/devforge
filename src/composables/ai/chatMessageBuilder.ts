@@ -1,6 +1,9 @@
 import type { ChatMessage } from '@/api/ai'
-import type { AiMessage } from '@/types/ai'
+import type { AiMessage, ToolCallInfo, ToolResultInfo } from '@/types/ai'
 import { containsImages, parseContentBlocks } from './chatContentBlocks'
+import { tryParseJson } from './chatHelpers'
+
+const INTERRUPTED_ASSISTANT_MESSAGE = '[previous response was interrupted or incomplete]'
 
 export function sanitizeLoadedMessages(msgs: AiMessage[]): AiMessage[] {
   if (msgs.length === 0) return msgs
@@ -16,7 +19,7 @@ export function sanitizeLoadedMessages(msgs: AiMessage[]): AiMessage[] {
         out[i] = {
           ...m,
           role: 'error',
-          content: '[上一轮回复未完成或已中断]',
+          content: INTERRUPTED_ASSISTANT_MESSAGE,
           isStreaming: false,
         }
       }
@@ -24,6 +27,57 @@ export function sanitizeLoadedMessages(msgs: AiMessage[]): AiMessage[] {
     }
   }
   return out
+}
+
+function hasValidToolArguments(toolCall: ToolCallInfo): boolean {
+  const parsed = tryParseJson(toolCall.arguments)
+  return !!parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+}
+
+function resolveToolResult(
+  toolCall: ToolCallInfo,
+  resultsById: Map<string, ToolResultInfo>,
+): ToolResultInfo | null {
+  const explicitResult = resultsById.get(toolCall.id)
+  if (explicitResult) return explicitResult
+
+  if (toolCall.status === 'success' && toolCall.result) {
+    return {
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      success: true,
+      content: toolCall.result,
+    }
+  }
+
+  const failureContent = toolCall.error ?? toolCall.result
+  if (toolCall.status === 'error' && failureContent) {
+    return {
+      toolCallId: toolCall.id,
+      toolName: toolCall.name,
+      success: false,
+      content: failureContent,
+    }
+  }
+
+  return null
+}
+
+function getReplayableToolEntries(msg: AiMessage): Array<{
+  toolCall: ToolCallInfo
+  toolResult: ToolResultInfo
+}> {
+  const resultsById = new Map((msg.toolResults ?? []).map(result => [result.toolCallId, result]))
+
+  return (msg.toolCalls ?? [])
+    .filter(hasValidToolArguments)
+    .map(toolCall => ({
+      toolCall,
+      toolResult: resolveToolResult(toolCall, resultsById),
+    }))
+    .filter((entry): entry is { toolCall: ToolCallInfo, toolResult: ToolResultInfo } =>
+      entry.toolResult !== null,
+    )
 }
 
 export function buildChatMessages(msgs: AiMessage[], hasVision = false): ChatMessage[] {
@@ -44,42 +98,41 @@ export function buildChatMessages(msgs: AiMessage[], hasVision = false): ChatMes
       } else {
         result.push({ role: 'user', content: msg.content })
       }
-    } else if (msg.role === 'assistant') {
-      const hasContent = !!(msg.content && msg.content.trim())
-      const hasToolCalls = !!(msg.toolCalls && msg.toolCalls.length > 0)
-      if (!hasContent && !hasToolCalls) continue
+      continue
+    }
 
-      const chatMsg: ChatMessage = {
-        role: 'assistant',
-        content: msg.content || null,
-      }
-      if (msg.thinking && msg.thinking.trim() && msg.toolCalls && msg.toolCalls.length > 0) {
-        chatMsg.reasoningContent = msg.thinking
-      }
+    if (msg.role !== 'assistant') continue
 
-      if (msg.toolCalls && msg.toolCalls.length > 0) {
-        chatMsg.toolCalls = msg.toolCalls.map(tc => ({
-          id: tc.id,
-          type: 'function',
-          function: { name: tc.name, arguments: tc.arguments },
-        }))
-      }
+    const hasContent = !!(msg.content && msg.content.trim())
+    const replayableToolEntries = getReplayableToolEntries(msg)
+    const hasToolCalls = replayableToolEntries.length > 0
+    if (!hasContent && !hasToolCalls) continue
 
-      result.push(chatMsg)
+    const chatMsg: ChatMessage = {
+      role: 'assistant',
+      content: msg.content || null,
+    }
+    if (msg.thinking && msg.thinking.trim() && hasToolCalls) {
+      chatMsg.reasoningContent = msg.thinking
+    }
 
-      if (msg.toolCalls && msg.toolCalls.length > 0) {
-        const existingResults = msg.toolResults ?? []
-        const resultsById = new Map(existingResults.map(tr => [tr.toolCallId, tr]))
-        for (const tc of msg.toolCalls) {
-          const tr = resultsById.get(tc.id)
-          result.push({
-            role: 'tool',
-            content: tr?.content ?? '[工具调用被用户中断，未执行]',
-            toolCallId: tc.id,
-            name: tc.name,
-          })
-        }
-      }
+    if (hasToolCalls) {
+      chatMsg.toolCalls = replayableToolEntries.map(({ toolCall }) => ({
+        id: toolCall.id,
+        type: 'function',
+        function: { name: toolCall.name, arguments: toolCall.arguments },
+      }))
+    }
+
+    result.push(chatMsg)
+
+    for (const { toolCall, toolResult } of replayableToolEntries) {
+      result.push({
+        role: 'tool',
+        content: toolResult.content,
+        toolCallId: toolCall.id,
+        name: toolCall.name,
+      })
     }
   }
 

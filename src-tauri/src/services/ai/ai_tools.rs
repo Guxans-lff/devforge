@@ -535,7 +535,7 @@ pub async fn execute_tool(
         "list_directory" => exec_list_directory(arguments, work_dir).await,
         "search_files" => exec_search_files(arguments, work_dir).await,
         "write_file" => exec_write_file(arguments, work_dir, session_id, tool_call_id, app_data_dir).await,
-        "edit_file" => exec_edit_file(arguments, work_dir).await,
+        "edit_file" => exec_edit_file_resilient(arguments, work_dir).await,
         "bash" => super::exec_bash::exec_bash(arguments, work_dir).await,
         "web_search" => super::exec_web::exec_web_search(arguments).await,
         "web_fetch" => super::exec_web::exec_web_fetch(arguments).await,
@@ -1024,6 +1024,59 @@ struct EditFileArgs {
     replace_all: Option<bool>,
 }
 
+fn has_lone_lf(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    bytes
+        .iter()
+        .enumerate()
+        .any(|(index, byte)| *byte == b'\n' && (index == 0 || bytes[index - 1] != b'\r'))
+}
+
+fn replace_with_normalized_newlines(
+    original: &str,
+    old_string: &str,
+    new_string: &str,
+    replace_all: bool,
+) -> Option<(String, usize)> {
+    if !original.contains("\r\n") || has_lone_lf(original) {
+        return None;
+    }
+
+    let normalized_original = original.replace("\r\n", "\n");
+    let normalized_old = old_string.replace("\r\n", "\n");
+    let normalized_new = new_string.replace("\r\n", "\n");
+    let occurrences = normalized_original.matches(&normalized_old).count();
+
+    if occurrences == 0 || (occurrences > 1 && !replace_all) {
+        return None;
+    }
+
+    let updated = if replace_all {
+        normalized_original.replace(&normalized_old, &normalized_new)
+    } else {
+        normalized_original.replacen(&normalized_old, &normalized_new, 1)
+    };
+
+    Some((updated.replace('\n', "\r\n"), occurrences))
+}
+
+fn patch_already_applied(original: &str, old_string: &str, new_string: &str) -> bool {
+    if old_string.is_empty() || new_string.is_empty() || old_string == new_string {
+        return false;
+    }
+    if original.contains(old_string) {
+        return false;
+    }
+    if original.matches(new_string).count() == 1 {
+        return true;
+    }
+
+    let normalized_original = original.replace("\r\n", "\n");
+    let normalized_old = old_string.replace("\r\n", "\n");
+    let normalized_new = new_string.replace("\r\n", "\n");
+    !normalized_original.contains(&normalized_old) && normalized_original.matches(&normalized_new).count() == 1
+}
+
 async fn exec_edit_file(arguments: &str, work_dir: &str) -> Result<String, AppError> {
     let args: EditFileArgs = serde_json::from_str(arguments)
         .map_err(|e| AppError::Other(format!("参数解析失败: {e}")))?;
@@ -1090,6 +1143,112 @@ async fn exec_edit_file(arguments: &str, work_dir: &str) -> Result<String, AppEr
 }
 
 // ──────────────── read_tool_result ────────────────
+
+/*
+async fn exec_edit_file_resilient(arguments: &str, work_dir: &str) -> Result<String, AppError> {
+    match exec_edit_file(arguments, work_dir).await {
+        Ok(result) => Ok(result),
+        Err(AppError::Other(message)) if message.contains("old_string") => {
+            let args: EditFileArgs = serde_json::from_str(arguments)
+                .map_err(|e| AppError::Other(format!("鍙傛暟瑙ｆ瀽澶辫触: {e}")))?;
+
+            let path = validate_path(&args.path, work_dir)?;
+            let original = tokio::fs::read_to_string(&path).await
+                .map_err(|e| AppError::Other(format!("璇诲彇鏂囦欢澶辫触: {e}")))?;
+            let replace_all = args.replace_all.unwrap_or(false);
+
+            if let Some((updated, occurrences)) = replace_with_normalized_newlines(
+                &original,
+                &args.old_string,
+                &args.new_string,
+                replace_all,
+            ) {
+                if occurrences > 1 && !replace_all {
+                    return Err(AppError::Other(format!(
+                        "old_string 鍦ㄦ枃浠朵腑鍖归厤鍒?{} 澶勶紙鎹㈣褰㈠紡宸紓鍚庯級锛岃鎻愪緵鏇村涓婁笅鏂囦娇鍏跺敮涓€锛屾垨璁剧疆 replace_all=true",
+                        occurrences
+                    )));
+                }
+
+                if updated == original {
+                    return Ok(format!("鏂囦欢鏈彉鍖? {}锛坥ld_string 涓?new_string 鐩稿悓锛?, path.display()));
+                }
+
+                tokio::fs::write(&path, &updated).await
+                    .map_err(|e| AppError::Other(format!("鍐欏叆鏂囦欢澶辫触: {e}")))?;
+
+                let delta = updated.len() as i64 - original.len() as i64;
+                let sign = if delta >= 0 { "+" } else { "" };
+                return Ok(format!("宸茬紪杈?{} ({}{} 瀛楄妭)", path.display(), sign, delta));
+            }
+
+            if patch_already_applied(&original, &args.old_string, &args.new_string) {
+                return Ok(format!(
+                    "鏂囦欢鏈彉鍖? {}锛屽綋鍓嶅唴瀹瑰凡鍖呭惈 new_string锛屾湰娆?edit_file 鎸夊凡搴旂敤澶勭悊",
+                    path.display()
+                ));
+            }
+
+            Err(AppError::Other(
+                "old_string 鏈湪鏂囦欢涓壘鍒般€傚彲鑳芥槸鎹㈣/绌虹櫧涓嶄竴鑷达紝鎴栨枃浠跺凡琚笂涓€杞?edit_file 淇敼銆傝鍏堢敤 read_file 閲嶈鏈€鏂板唴瀹癸紝鍐嶅甫 3-5 琛屼笂涓嬫枃閲嶈瘯".to_string(),
+            ))
+        }
+        Err(other) => Err(other),
+    }
+}
+
+*/
+
+async fn exec_edit_file_resilient(arguments: &str, work_dir: &str) -> Result<String, AppError> {
+    match exec_edit_file(arguments, work_dir).await {
+        Ok(result) => Ok(result),
+        Err(AppError::Other(message)) if message.contains("old_string") => {
+            let args: EditFileArgs = serde_json::from_str(arguments)
+                .map_err(|e| AppError::Other(format!("failed to parse edit_file args: {e}")))?;
+
+            let path = validate_path(&args.path, work_dir)?;
+            let original = tokio::fs::read_to_string(&path).await
+                .map_err(|e| AppError::Other(format!("failed to read file: {e}")))?;
+            let replace_all = args.replace_all.unwrap_or(false);
+
+            if let Some((updated, occurrences)) = replace_with_normalized_newlines(
+                &original,
+                &args.old_string,
+                &args.new_string,
+                replace_all,
+            ) {
+                if occurrences > 1 && !replace_all {
+                    return Err(AppError::Other(format!(
+                        "old_string matched {occurrences} locations after newline normalization. Provide more context or set replace_all=true."
+                    )));
+                }
+
+                if updated == original {
+                    return Ok(format!("file unchanged: {} (old_string and new_string are identical)", path.display()));
+                }
+
+                tokio::fs::write(&path, &updated).await
+                    .map_err(|e| AppError::Other(format!("failed to write file: {e}")))?;
+
+                let delta = updated.len() as i64 - original.len() as i64;
+                let sign = if delta >= 0 { "+" } else { "" };
+                return Ok(format!("edited {} ({}{delta} bytes)", path.display(), sign));
+            }
+
+            if patch_already_applied(&original, &args.old_string, &args.new_string) {
+                return Ok(format!(
+                    "file unchanged: {} already contains new_string; edit_file treated as already applied",
+                    path.display()
+                ));
+            }
+
+            Err(AppError::Other(
+                "old_string was not found. The file may have changed, or whitespace/newlines differ. Re-read the file and retry with 3-5 lines of exact context.".to_string(),
+            ))
+        }
+        Err(other) => Err(other),
+    }
+}
 
 #[derive(Deserialize)]
 struct ReadToolResultArgs {
@@ -1325,6 +1484,43 @@ mod tests {
         });
         let err = exec_edit_file(&args.to_string(), &work).await;
         assert!(err.is_err(), "非唯一匹配应报错");
+    }
+
+    #[tokio::test]
+    async fn edit_file_resilient_matches_lf_patch_against_crlf_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("crlf.txt");
+        tokio::fs::write(&file, "foo=1\r\nbar=2\r\n").await.unwrap();
+
+        let work = dir.path().to_string_lossy().to_string();
+        let args = serde_json::json!({
+            "path": "crlf.txt",
+            "old_string": "foo=1\nbar=2\n",
+            "new_string": "foo=42\nbar=2\n",
+        });
+        exec_edit_file_resilient(&args.to_string(), &work).await.unwrap();
+
+        let after = tokio::fs::read_to_string(&file).await.unwrap();
+        assert_eq!(after, "foo=42\r\nbar=2\r\n");
+    }
+
+    #[tokio::test]
+    async fn edit_file_resilient_treats_existing_new_string_as_already_applied() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("done.txt");
+        tokio::fs::write(&file, "foo=42\nbar=2\n").await.unwrap();
+
+        let work = dir.path().to_string_lossy().to_string();
+        let args = serde_json::json!({
+            "path": "done.txt",
+            "old_string": "foo=1",
+            "new_string": "foo=42",
+        });
+        let out = exec_edit_file_resilient(&args.to_string(), &work).await.unwrap();
+
+        assert!(out.contains("new_string"));
+        let after = tokio::fs::read_to_string(&file).await.unwrap();
+        assert_eq!(after, "foo=42\nbar=2\n");
     }
 
     #[tokio::test]

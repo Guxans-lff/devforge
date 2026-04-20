@@ -203,6 +203,8 @@ export interface ToolCallInfo {
    * - undefined: 无需审批 / 尚未进入审批流
    */
   approvalState?: 'awaiting' | 'allowed' | 'denied'
+  /** Scheduler/runtime metadata for diagnostics and performance tuning. */
+  execution?: ToolExecutionMetadata
 }
 
 /** AI 文件操作信息 */
@@ -231,6 +233,44 @@ export interface ToolResultInfo {
   toolName: string
   success: boolean
   content: string
+  metadata?: ToolResultMetadata
+}
+
+export type ToolExecutionClass = 'write' | 'bash' | 'web' | 'read' | 'other'
+
+export interface ToolExecutionMetadata {
+  class: ToolExecutionClass
+  queue: 'read-other' | 'web' | 'write' | 'bash'
+  lockKey?: string
+  queuedAt: number
+  startedAt?: number
+  finishedAt?: number
+  durationMs?: number
+  waitMs?: number
+  attempt: number
+  maxAttempts: number
+  retryCount: number
+  timeoutMs: number
+  hardTimeout: boolean
+  timedOut?: boolean
+  cancelled?: boolean
+  errorKind?: 'timeout' | 'cancelled' | 'tool_error' | 'exception' | 'circuit_open' | 'user_rejected'
+}
+
+export interface ToolResultMetadata {
+  class: ToolExecutionClass
+  queue: ToolExecutionMetadata['queue']
+  lockKey?: string
+  startedAt?: number
+  finishedAt?: number
+  durationMs?: number
+  waitMs?: number
+  attempts: number
+  retryCount: number
+  timeoutMs: number
+  timedOut?: boolean
+  cancelled?: boolean
+  errorKind?: ToolExecutionMetadata['errorKind']
 }
 
 /** 工具定义（后端返回） */

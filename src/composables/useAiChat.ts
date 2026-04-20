@@ -6,11 +6,13 @@ import {
   canExpandHistoryWindow,
   getExpandedHistoryWindowSize,
   HISTORY_RECENT_RECORD_LIMIT,
+  invalidateChatHistoryCache,
   loadChatHistoryWindow,
 } from '@/composables/ai/chatHistoryLoad'
 import { finalizeSend } from '@/composables/ai/chatSendFinalize'
 import { prepareSendContext } from '@/composables/ai/chatSendPreparation'
 import { handleSendFailure } from '@/composables/ai/chatSendRecovery'
+import { useAiChatObservability } from '@/composables/ai/useAiChatObservability'
 import {
   parseAndWriteJournalSections as writeJournalSectionsFromText,
   parseSpawnedTasks as collectSpawnedTasks,
@@ -52,6 +54,7 @@ export function useAiChat(options: UseAiChatOptions) {
   const aiStore = useAiChatStore()
   const memoryStore = useAiMemoryStore()
   const autoCompact = useAutoCompact()
+  const observability = useAiChatObservability()
   const filesStore = useWorkspaceFilesStore()
 
   const messages = ref<AiMessage[]>([])
@@ -86,6 +89,7 @@ export function useAiChat(options: UseAiChatOptions) {
   let watchdogTimer: ReturnType<typeof setTimeout> | null = null
   let watchdogWarnTimer: ReturnType<typeof setTimeout> | null = null
   let loadSeq = 0
+  let lastLoadedHistoryKey = ''
   let streamingMessageIndex = -1
 
   const toolFailureCounter = new Map<string, number>()
@@ -290,6 +294,12 @@ export function useAiChat(options: UseAiChatOptions) {
   }
 
   function handleIncomingStreamEvent(event: import('@/types/ai').AiStreamEvent): void {
+    if (event.type === 'TextDelta' || event.type === 'ThinkingDelta') {
+      observability.markFirstToken()
+    }
+    if (event.type === 'ToolCall') {
+      observability.updatePendingToolQueueLength(streamState.pendingToolCalls.length + 1)
+    }
     applyStreamEvent({
       event,
       sessionId: sessionIdRef.value,
@@ -307,10 +317,14 @@ export function useAiChat(options: UseAiChatOptions) {
       scheduleFlush,
       updateStreamingMessage,
     })
+    if (event.type === 'ToolCall' || event.type === 'ToolCallDelta' || event.type === 'Done') {
+      observability.updatePendingToolQueueLength(streamState.pendingToolCalls.length)
+    }
   }
 
   async function executeToolCalls(toolCalls: ToolCallInfo[], sessionId: string) {
-    return runToolCalls({
+    observability.updatePendingToolQueueLength(toolCalls.length)
+    const results = await runToolCalls({
       sessionId,
       workDir: workDir.value,
       toolCalls,
@@ -323,6 +337,9 @@ export function useAiChat(options: UseAiChatOptions) {
       updateStreamingMessage,
       refreshWorkspaceDirectoryForToolPath,
     })
+    observability.recordToolRun(toolCalls, results)
+    observability.updatePendingToolQueueLength(0)
+    return results
   }
 
   function parseAndWriteJournalSections(text: string, workDirPath: string): void {
@@ -371,6 +388,7 @@ export function useAiChat(options: UseAiChatOptions) {
 
   async function loadHistory(overrideSessionId?: string, options?: { windowSize?: number }): Promise<void> {
     const seq = ++loadSeq
+    observability.markHistoryLoadStart()
 
     if (isStreaming.value) {
       isStreaming.value = false
@@ -387,6 +405,15 @@ export function useAiChat(options: UseAiChatOptions) {
 
     const sid = overrideSessionId ?? sessionIdRef.value
     const requestedWindowSize = options?.windowSize ?? historyWindowSize.value
+    const requestKey = `${sid}:${requestedWindowSize}`
+    if (!sid) {
+      observability.markHistoryLoadComplete(messages.value.length)
+      return
+    }
+    if (requestKey === lastLoadedHistoryKey && messages.value.length > 0 && !options?.windowSize) {
+      observability.markHistoryLoadComplete(messages.value.length)
+      return
+    }
     isLoading.value = true
     error.value = null
 
@@ -409,8 +436,14 @@ export function useAiChat(options: UseAiChatOptions) {
         workDir.value = result.session.workDir
       }
 
-      messages.value = result.messages
-      streamingMessageIndex = -1
+      const currentIds = messages.value.map(message => message.id).join('|')
+      const nextIds = result.messages.map(message => message.id).join('|')
+      if (currentIds !== nextIds) {
+        messages.value = result.messages
+        streamingMessageIndex = -1
+      }
+      lastLoadedHistoryKey = requestKey
+      observability.markHistoryLoadComplete(result.messages.length)
     } catch (err) {
       error.value = ensureErrorString(err)
       log.error('load_history_failed', { sessionId: sid }, err)
@@ -431,11 +464,13 @@ export function useAiChat(options: UseAiChatOptions) {
 
     const sid = sessionIdRef.value
     if (!sid) {
-      error.value = '浼氳瘽 ID 鏃犳晥'
+      error.value = '会话 ID 无效，无法发送消息。'
       return
     }
 
     error.value = null
+    invalidateChatHistoryCache(sid)
+    observability.markSendStart()
 
     const {
       chatMessages,
@@ -490,6 +525,7 @@ export function useAiChat(options: UseAiChatOptions) {
         streamWithToolLoop,
       })
     } finally {
+      observability.markResponseComplete()
       finalizeSend({
         sessionId: sid,
         provider,
@@ -504,7 +540,13 @@ export function useAiChat(options: UseAiChatOptions) {
         clearWatchdog,
         updateStreamingMessage,
         aiStore,
-        autoCompact,
+        autoCompact: {
+          checkAndCompact: async (...args) => {
+            const compacted = await autoCompact.checkAndCompact(...args)
+            if (compacted) observability.markCompactTriggered()
+            return compacted
+          },
+        },
         log,
       })
     }
@@ -571,6 +613,8 @@ export function useAiChat(options: UseAiChatOptions) {
     historyLoadedRecords.value = 0
     historyTotalRecords.value = 0
     historyWindowSize.value = HISTORY_RECENT_RECORD_LIMIT
+    lastLoadedHistoryKey = ''
+    invalidateChatHistoryCache(sessionIdRef.value)
     currentPhase.value = null
     streamState.streamingMessageId = ''
     streamingMessageIndex = -1
@@ -583,6 +627,7 @@ export function useAiChat(options: UseAiChatOptions) {
     clearWatchdog()
     toolFailureCounter.clear()
     autoCompact.resetCircuitBreaker()
+    observability.reset()
   }
 
   async function loadMoreHistory(): Promise<void> {
@@ -633,6 +678,7 @@ export function useAiChat(options: UseAiChatOptions) {
     workDir,
     historyLoadedRecords,
     historyTotalRecords,
+    observability: observability.metrics,
     isCompacting: autoCompact.isCompacting,
     availableWorkDirs,
     isPathInWorkspace,
@@ -654,7 +700,10 @@ export function useAiChat(options: UseAiChatOptions) {
     manualCompact: (provider: ProviderConfig, model: ModelConfig, apiKey: string) =>
       autoCompact.forceCompact(messages.value, sessionIdRef.value ?? '', provider, model, apiKey)
         .then(compacted => {
-          if (compacted) messages.value = compacted
+          if (compacted) {
+            messages.value = compacted
+            observability.markCompactTriggered()
+          }
           return !!compacted
         }),
     handleScroll,
