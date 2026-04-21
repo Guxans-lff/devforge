@@ -52,6 +52,9 @@ export async function streamWithToolLoop({
   parseSpawnedTasks,
 }: StreamWithToolLoopParams): Promise<void> {
   let loopCount = 0
+  let lastExecutedToolSignature = ''
+  let lastExecutedResultSignature = ''
+  let repeatedExecutionStreak = 0
   log.info('stream_start', { sessionId: sid, model: model.id, enableTools, msgCount: chatMessages.length })
 
   const disableAnthropicThinkingForToolLoop = provider.providerType === 'anthropic' && enableTools
@@ -98,6 +101,7 @@ export async function streamWithToolLoop({
     const validToolCalls = streamState.pendingToolCalls.filter(toolCall =>
       !!toolCall.parsedArgs && typeof toolCall.parsedArgs === 'object' && !Array.isArray(toolCall.parsedArgs),
     )
+    const currentToolSignature = buildToolCallSignature(validToolCalls)
     const hasCompleteToolCalls =
       streamState.lastFinishReason === 'tool_calls' && validToolCalls.length > 0
 
@@ -148,6 +152,11 @@ export async function streamWithToolLoop({
     }
 
     const finalMessage = messages.value.find(message => message.id === streamState.streamingMessageId)
+    const canContinueToolLoop =
+      finalMessage?.role === 'assistant'
+      && streamState.lastFinishReason === 'tool_calls'
+      && validToolCalls.length > 0
+
     if (finalMessage && finalMessage.role === 'assistant') {
       const hasToolCalls = hasCompleteToolCalls
       const assistantRecord: AiMessageRecord = {
@@ -170,7 +179,10 @@ export async function streamWithToolLoop({
       })
     }
 
-    if (streamState.lastFinishReason !== 'tool_calls' || validToolCalls.length === 0) {
+    if (!canContinueToolLoop) {
+      repeatedExecutionStreak = 0
+      lastExecutedToolSignature = ''
+      lastExecutedResultSignature = ''
       if (workDir.value) {
         const latestAssistant = messages.value.find(message => message.id === streamState.streamingMessageId)
         if (latestAssistant?.role === 'assistant' && latestAssistant.content) {
@@ -178,6 +190,27 @@ export async function streamWithToolLoop({
           parseSpawnedTasks(latestAssistant.content)
         }
       }
+      break
+    }
+
+    if (
+      repeatedExecutionStreak >= 1
+      && currentToolSignature
+      && currentToolSignature === lastExecutedToolSignature
+    ) {
+      const errMsg = '[工具循环疑似卡住] 模型连续两轮输出了相同的工具调用，且先前工具结果未变化。为避免空转，本轮已中止。请重试，或调整提示词/工具返回格式。'
+      log.warn('tool_loop_repeated_signature', {
+        sessionId: sid,
+        toolSignature: currentToolSignature,
+        repeatedExecutionStreak,
+      })
+      updateStreamingMessage(message => ({
+        ...message,
+        role: 'error',
+        content: errMsg,
+        isStreaming: false,
+        toolCalls: validToolCalls,
+      }))
       break
     }
 
@@ -199,6 +232,7 @@ export async function streamWithToolLoop({
 
     log.info('tool_exec_start', { sessionId: sid, tools: validToolCalls.map(tool => tool.name) })
     const toolResults = await executeToolCalls(validToolCalls, sid)
+    const currentResultSignature = buildToolResultSignature(toolResults)
     log.info('tool_exec_done', {
       sessionId: sid,
       resultCount: toolResults.length,
@@ -209,11 +243,41 @@ export async function streamWithToolLoop({
       })),
     })
 
+    if (toolResults.length < validToolCalls.length) {
+      const errMsg = `[工具执行结果缺失] 预期 ${validToolCalls.length} 个工具结果，但只收到 ${toolResults.length} 个。为避免 tool loop 空转或协议失配，本轮已中止。请重试。`
+      log.warn('tool_result_missing', {
+        sessionId: sid,
+        expectedResults: validToolCalls.length,
+        actualResults: toolResults.length,
+      })
+      updateStreamingMessage(message => ({
+        ...message,
+        role: 'error',
+        content: errMsg,
+        isStreaming: false,
+        toolCalls: validToolCalls,
+        toolResults,
+      }))
+      break
+    }
+
     updateStreamingMessage(message => ({
       ...message,
       toolCalls: validToolCalls,
       toolResults,
     }))
+
+    if (
+      currentToolSignature
+      && currentToolSignature === lastExecutedToolSignature
+      && currentResultSignature === lastExecutedResultSignature
+    ) {
+      repeatedExecutionStreak += 1
+    } else {
+      repeatedExecutionStreak = 0
+    }
+    lastExecutedToolSignature = currentToolSignature
+    lastExecutedResultSignature = currentResultSignature
 
     const assistantTurnMessage: ChatMessage = {
       role: 'assistant',
@@ -256,4 +320,16 @@ export async function streamWithToolLoop({
     streamState.streamingMessageId = ''
     log.info('tool_loop_next', { sessionId: sid, loopCount, newMsgCount: chatMessages.length })
   }
+}
+
+function buildToolCallSignature(toolCalls: ToolCallInfo[]): string {
+  return toolCalls
+    .map(toolCall => `${toolCall.name}:${toolCall.arguments}`)
+    .join('|')
+}
+
+function buildToolResultSignature(toolResults: ToolResultInfo[]): string {
+  return toolResults
+    .map(result => `${result.toolName}:${result.success ? 'ok' : 'err'}:${result.content}`)
+    .join('|')
 }

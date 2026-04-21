@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
     memoryStore: null as any,
     settingsStore: null as any,
     fileAttachment: null as any,
+    shellDraft: '',
   },
   getCredentialMock: vi.fn(),
   setApprovalModeMock: vi.fn(),
@@ -117,12 +118,74 @@ const AiSessionDrawerStub = defineComponent({
 
 const AiSpawnedTasksPanelStub = defineComponent({
   name: 'AiSpawnedTasksPanel',
-  emits: ['run', 'retry', 'open', 'complete'],
+  emits: ['run', 'run-batch', 'retry', 'retry-batch', 'open', 'complete', 'cancel', 'cancel-batch', 'synthesize'],
   setup(_props, { emit }) {
     return () => h('div', { class: 'ai-spawned-tasks-panel-stub' }, [
       h('button', { class: 'run-task', onClick: () => emit('run', 'task-1') }, 'run-task'),
+      h('button', { class: 'run-task-batch', onClick: () => emit('run-batch', ['task-1', 'task-2']) }, 'run-task-batch'),
+      h('button', { class: 'retry-task-batch', onClick: () => emit('retry-batch', ['task-1', 'task-2']) }, 'retry-task-batch'),
       h('button', { class: 'open-task', onClick: () => emit('open', 'task-1') }, 'open-task'),
       h('button', { class: 'complete-task', onClick: () => emit('complete', 'task-1') }, 'complete-task'),
+      h('button', { class: 'cancel-task', onClick: () => emit('cancel', 'task-1') }, 'cancel-task'),
+      h('button', { class: 'cancel-task-batch', onClick: () => emit('cancel-batch', ['task-1', 'task-2']) }, 'cancel-task-batch'),
+      h('button', { class: 'synthesize-tasks', onClick: () => emit('synthesize') }, 'synthesize-tasks'),
+    ])
+  },
+})
+
+const AiChatShellStub = defineComponent({
+  name: 'AiChatShell',
+  emits: [
+    'update:showSessionDrawer',
+    'update:showMemoryDrawer',
+    'update:showFilePicker',
+    'primaryAction',
+    'secondaryAction',
+    'openConfig',
+    'selectWorkDir',
+    'setWorkDir',
+    'continue',
+    'bumpMaxOutput',
+    'loadMoreHistory',
+    'scrollMessages',
+    'send',
+    'abort',
+    'clearSession',
+    'update:selectedProviderId',
+    'update:selectedModelId',
+    'update:chatMode',
+    'dropFiles',
+    'dropFilePath',
+    'removeAttachment',
+    'mentionFile',
+    'compact',
+    'selectSession',
+    'createSession',
+    'deleteSession',
+    'preloadSession',
+    'filePickerConfirm',
+    'exitImmersive',
+  ],
+  setup(_props, { emit, expose, slots }) {
+    expose({
+      scrollContainer: document.createElement('div'),
+      setInputDraft: (value: string) => {
+        mocks.state.shellDraft = value
+      },
+      focusInput: vi.fn(),
+    })
+    return () => h('div', { class: 'ai-chat-shell-stub' }, [
+      h('button', { class: 'select-session', onClick: () => emit('selectSession', 'session-2') }, 'select-session'),
+      h('button', { class: 'preload-session', onMouseenter: () => emit('preloadSession', 'session-2') }, 'preload-session'),
+      h('button', { class: 'create-session', onClick: () => emit('createSession') }, 'create-session'),
+      h('button', { class: 'send-first', onClick: () => emit('send', 'first request') }, 'send-first'),
+      h('button', { class: 'send-second', onClick: () => emit('send', 'second request') }, 'send-second'),
+      h('button', { class: 'emit-continue', onClick: () => emit('continue') }, 'continue'),
+      h('button', { class: 'emit-bump', onClick: () => emit('bumpMaxOutput', 4096) }, 'bump'),
+      h('button', { class: 'emit-history', onClick: () => emit('loadMoreHistory') }, 'history'),
+      slots['empty-state-extra']?.(),
+      slots['after-compact']?.(),
+      slots['before-input']?.(),
     ])
   },
 })
@@ -175,6 +238,9 @@ function createChatMock(messages: AiMessage[] = []) {
     isStreaming: ref(false),
     isLoading: ref(false),
     canLoadMoreHistory: ref(false),
+    historyRemainingRecords: ref(0),
+    historyLoadMorePending: ref(false),
+    historyLoadMoreError: ref(null),
     workDir: ref(''),
     error: ref<string | null>(null),
     totalTokens: ref(0),
@@ -245,6 +311,7 @@ function mountView() {
   return mount(AiChatView, {
     global: {
       stubs: {
+        AiChatShell: AiChatShellStub,
         AiInputArea: AiInputAreaStub,
         AiMessageListVirtual: AiMessageListVirtualStub,
         AiUsageBadge: true,
@@ -291,6 +358,7 @@ function mountView() {
 
 describe('AiChatView interaction', () => {
   beforeEach(() => {
+    mocks.state.shellDraft = ''
     const provider = makeProvider()
     mocks.state.chat = createChatMock()
     mocks.state.aiStore = {
@@ -415,7 +483,7 @@ describe('AiChatView interaction', () => {
 
     mocks.state.chat.loadHistory.mockClear()
 
-    wrapper.findComponent(AiSessionDrawerStub).vm.$emit('select', 'session-2')
+    await wrapper.find('.select-session').trigger('click')
     await flushPromises()
     await new Promise(resolve => setTimeout(resolve, 80))
 
@@ -470,6 +538,232 @@ describe('AiChatView interaction', () => {
     await wrapper.find('.complete-task').trigger('click')
     expect(mocks.state.chat.spawnedTasks.value[0].status).toBe('done')
     expect(mocks.state.chat.spawnedTasks.value[0].durationMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('runs spawned tasks in batch from the dispatcher panel', async () => {
+    mocks.state.chat.spawnedTasks.value = [
+      {
+        id: 'task-1',
+        description: 'inspect scheduler',
+        status: 'pending',
+        createdAt: 1000,
+        retryCount: 0,
+      },
+      {
+        id: 'task-2',
+        description: 'collect logs',
+        status: 'pending',
+        createdAt: 1001,
+        retryCount: 0,
+      },
+    ]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.run-task-batch').trigger('click')
+
+    expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledTimes(2)
+    expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({ status: 'running' })
+    expect(mocks.state.chat.spawnedTasks.value[1]).toMatchObject({ status: 'running' })
+  })
+
+  it('synthesizes spawned task results into the parent input draft', async () => {
+    mocks.state.chat.spawnedTasks.value = [
+      {
+        id: 'task-1',
+        description: 'inspect scheduler',
+        status: 'done',
+        createdAt: 1000,
+        retryCount: 0,
+        sourceMessageId: 'assistant-1',
+        lastSummary: 'Scheduler queue is healthy after retry.',
+      },
+      {
+        id: 'task-2',
+        description: 'collect logs',
+        status: 'cancelled',
+        createdAt: 1001,
+        retryCount: 1,
+        sourceMessageId: 'assistant-1',
+        dependsOn: ['task-1'],
+        lastError: 'cancelled by user',
+        lastSummary: 'Collected the latest worker logs before failure.',
+      },
+    ]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.synthesize-tasks').trigger('click')
+
+    expect(mocks.state.shellDraft).toContain('Please synthesize the spawned task results')
+    expect(mocks.state.shellDraft).toContain('Source Group #1')
+    expect(mocks.state.shellDraft).toContain('inspect scheduler')
+    expect(mocks.state.shellDraft).toContain('Scheduler queue is healthy after retry.')
+    expect(mocks.state.shellDraft).toContain('Depends on: inspect scheduler')
+    expect(mocks.state.shellDraft).toContain('cancelled by user')
+  })
+
+  it('does not run a task whose explicit dependency is unresolved', async () => {
+    mocks.state.chat.spawnedTasks.value = [
+      {
+        id: 'task-1',
+        description: 'inspect scheduler',
+        status: 'running',
+        createdAt: 1000,
+        retryCount: 0,
+        sourceMessageId: 'assistant-1',
+      },
+      {
+        id: 'task-2',
+        description: 'collect logs',
+        status: 'pending',
+        createdAt: 1001,
+        retryCount: 0,
+        sourceMessageId: 'assistant-1',
+        dependsOn: ['task-1'],
+      },
+    ]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.run-task-batch').trigger('click')
+
+    expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledTimes(1)
+    expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({ status: 'running' })
+    expect(mocks.state.chat.spawnedTasks.value[1]).toMatchObject({ status: 'pending' })
+  })
+
+  it('requests cancellation for a running spawned task tab', async () => {
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: 'inspect scheduler',
+      status: 'running',
+      createdAt: 1000,
+      startedAt: 1200,
+      taskTabId: 'ai-task-task-1',
+      taskSessionId: 'session-task-task-1',
+      retryCount: 0,
+      lastSummary: 'Collected partial scheduler info',
+    }]
+    mocks.state.workspaceStore.tabs.push({
+      id: 'ai-task-task-1',
+      type: 'ai-chat',
+      title: '[Task] inspect scheduler',
+      closable: true,
+      meta: {
+        sessionId: 'session-task-task-1',
+        sourceTaskId: 'task-1',
+        taskStatus: 'running',
+      },
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.cancel-task').trigger('click')
+
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenCalledWith('ai-task-task-1', {
+      taskCancelRequested: true,
+      taskStatus: 'cancelled',
+      taskError: 'ai.tasks.taskCancelled',
+      taskSummary: 'Collected partial scheduler info',
+    })
+  })
+
+  it('requests cancellation for all running spawned task tabs in batch', async () => {
+    mocks.state.chat.spawnedTasks.value = [
+      {
+        id: 'task-1',
+        description: 'inspect scheduler',
+        status: 'running',
+        createdAt: 1000,
+        startedAt: 1200,
+        taskTabId: 'ai-task-task-1',
+        taskSessionId: 'session-task-task-1',
+        retryCount: 0,
+        lastSummary: 'Collected partial scheduler info',
+      },
+      {
+        id: 'task-2',
+        description: 'collect logs',
+        status: 'running',
+        createdAt: 1001,
+        startedAt: 1250,
+        taskTabId: 'ai-task-task-2',
+        taskSessionId: 'session-task-task-2',
+        retryCount: 0,
+      },
+    ]
+    mocks.state.workspaceStore.tabs.push(
+      {
+        id: 'ai-task-task-1',
+        type: 'ai-chat',
+        title: '[Task] inspect scheduler',
+        closable: true,
+        meta: {
+          sessionId: 'session-task-task-1',
+          sourceTaskId: 'task-1',
+          taskStatus: 'running',
+        },
+      },
+      {
+        id: 'ai-task-task-2',
+        type: 'ai-chat',
+        title: '[Task] collect logs',
+        closable: true,
+        meta: {
+          sessionId: 'session-task-task-2',
+          sourceTaskId: 'task-2',
+          taskStatus: 'running',
+        },
+      },
+    )
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.cancel-task-batch').trigger('click')
+
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenCalledWith('ai-task-task-1', {
+      taskCancelRequested: true,
+      taskStatus: 'cancelled',
+      taskError: 'ai.tasks.taskCancelled',
+      taskSummary: 'Collected partial scheduler info',
+    })
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenCalledWith('ai-task-task-2', {
+      taskCancelRequested: true,
+      taskStatus: 'cancelled',
+      taskError: 'ai.tasks.taskCancelled',
+      taskSummary: undefined,
+    })
+  })
+
+  it('aborts and marks a task tab as cancelled when cancellation is requested', async () => {
+    mocks.state.chat.isStreaming.value = true
+    mocks.state.workspaceStore.tabs = [{
+      id: 'ai-tab-1',
+      type: 'ai-chat',
+      title: 'Task Tab',
+      closable: true,
+      meta: {
+        sessionId: 'session-task-task-1',
+        sourceTaskId: 'task-1',
+        taskCancelRequested: true,
+      },
+    }]
+
+    mountView()
+    await flushPromises()
+
+    expect(mocks.state.chat.abort).toHaveBeenCalledTimes(1)
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenCalledWith('ai-tab-1', {
+      taskStatus: 'cancelled',
+      taskError: 'ai.tasks.taskCancelled',
+      taskSummary: undefined,
+    })
   })
 
   it('marks running spawned tasks as closed when their task tab disappears', async () => {

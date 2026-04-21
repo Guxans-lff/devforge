@@ -213,4 +213,94 @@ describe('chatToolLoop', () => {
     expect(params.messages.value[0]?.role).toBe('error')
     expect(params.messages.value[0]?.content).toContain('工具调用参数不完整')
   })
+
+  it('does not execute any tool calls when valid and invalid streamed tool calls are mixed together', async () => {
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      onEvent({ type: 'ToolCallDelta', index: 0, id: 'tool-1', name: 'read_file', arguments_delta: '{"path":"src/a.ts"}' })
+      onEvent({ type: 'ToolCallDelta', index: 1, id: 'tool-2', name: 'search_files', arguments_delta: '{"query":"todo"' })
+      onEvent({ type: 'Done', finish_reason: 'tool_calls' })
+    })
+
+    const params = makeParams({
+      onStreamEvent: vi.fn((event: AiStreamEvent) => {
+        if (event.type === 'ToolCallDelta') {
+          let tool = params.streamState.pendingToolCalls.find(item => item.streamingIndex === event.index)
+          if (!tool && event.id && event.name) {
+            tool = {
+              id: event.id,
+              name: event.name,
+              arguments: '',
+              status: 'streaming',
+              streamingChars: 0,
+              streamingIndex: event.index,
+            }
+            params.streamState.pendingToolCalls.push(tool)
+          }
+          if (tool) {
+            tool.arguments += event.arguments_delta
+            try {
+              tool.parsedArgs = JSON.parse(tool.arguments) as Record<string, unknown>
+            } catch {
+              tool.parsedArgs = undefined
+            }
+          }
+        }
+        if (event.type === 'Done') {
+          params.streamState.lastFinishReason = event.finish_reason
+        }
+      }),
+    })
+
+    await streamWithToolLoop(params)
+
+    expect(params.executeToolCalls).not.toHaveBeenCalled()
+    expect(params.messages.value).toHaveLength(1)
+    expect(params.messages.value[0]?.role).toBe('error')
+    expect(params.messages.value[0]?.content).toContain('工具调用参数不完整')
+    expect(params.parseAndWriteJournalSections).not.toHaveBeenCalled()
+    expect(params.parseSpawnedTasks).not.toHaveBeenCalled()
+  })
+
+  it('stops the tool loop when tool execution returns no results for pending tool calls', async () => {
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      onEvent({ type: 'ToolCall', id: 'tool-1', name: 'read_file', arguments: '{"path":"src/a.ts"}' })
+      onEvent({ type: 'Done', finish_reason: 'tool_calls' })
+    })
+
+    const params = makeParams({
+      executeToolCalls: vi.fn(async () => []),
+    })
+
+    await streamWithToolLoop(params)
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(1)
+    expect(params.executeToolCalls).toHaveBeenCalledTimes(1)
+    expect(params.messages.value).toHaveLength(1)
+    expect(params.messages.value[0]?.role).toBe('error')
+    expect(params.messages.value[0]?.content).toContain('工具执行结果缺失')
+  })
+
+  it('breaks early when the model repeats the same tool call batch after identical tool results', async () => {
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      onEvent({ type: 'ToolCall', id: `tool-${aiChatStreamMock.mock.calls.length}`, name: 'read_file', arguments: '{"path":"src/a.ts"}' })
+      onEvent({ type: 'Done', finish_reason: 'tool_calls' })
+    })
+
+    const params = makeParams({
+      maxToolLoops: 5,
+      executeToolCalls: vi.fn(async () => [{
+        toolCallId: 'tool-fixed',
+        toolName: 'read_file',
+        success: true,
+        content: 'same-result',
+      }]),
+    })
+
+    await streamWithToolLoop(params)
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(3)
+    expect(params.executeToolCalls).toHaveBeenCalledTimes(2)
+    expect(params.messages.value.at(-1)?.role).toBe('error')
+    expect(params.messages.value.at(-1)?.content).toContain('工具循环疑似卡住')
+  })
 })

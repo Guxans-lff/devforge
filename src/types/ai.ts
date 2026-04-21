@@ -169,6 +169,13 @@ export interface AiMessage {
   type?: 'divider'
   /** 分割线显示文本 */
   dividerText?: string
+  /** 分割线元数据（历史恢复窗口等） */
+  dividerMeta?: {
+    kind: 'history-window'
+    loadedRecords: number
+    totalRecords: number
+    remainingRecords: number
+  }
   /** 系统提示横幅（如工具调用超限、流被中断等），独立于 content 渲染 */
   notice?: {
     kind: 'warn' | 'error' | 'info'
@@ -344,6 +351,12 @@ export interface WorkspaceConfig {
   planGateEnabled?: boolean
   /** Dispatcher 模式系统提示覆盖 */
   dispatcherPrompt?: string
+  /** Dispatcher 最大并发数，默认 3 */
+  dispatcherMaxParallel?: number
+  /** Dispatcher 自动重试次数，默认 1 */
+  dispatcherAutoRetryCount?: number
+  /** Dispatcher 默认执行形态，默认 headless */
+  dispatcherDefaultMode?: 'headless' | 'tab'
 }
 
 

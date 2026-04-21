@@ -77,19 +77,82 @@ describe('AiMessageListVirtual', () => {
             key: 'divider-1',
             message: makeMessage('history-window-1', 'assistant', {
               type: 'divider',
-              dividerText: 'Older History',
+              dividerMeta: {
+                kind: 'history-window',
+                loadedRecords: 300,
+                totalRecords: 700,
+                remainingRecords: 400,
+              },
             }),
           },
         ],
         canLoadMoreHistory: true,
+        historyRemainingRecords: 400,
       },
     })
+
+    expect(wrapper.text()).toContain('ai.history.windowLoaded')
+    expect(wrapper.text()).toContain('ai.history.loadMore')
 
     const button = wrapper.find('button')
     expect(button.exists()).toBe(true)
 
     await button.trigger('click')
     expect(wrapper.emitted('loadMoreHistory')).toHaveLength(1)
+  })
+
+  it('disables the history load button while loading more records', () => {
+    const wrapper = mount(AiMessageListVirtual, {
+      props: {
+        items: [
+          {
+            key: 'divider-1',
+            message: makeMessage('history-window-1', 'assistant', {
+              type: 'divider',
+              dividerMeta: {
+                kind: 'history-window',
+                loadedRecords: 300,
+                totalRecords: 700,
+                remainingRecords: 400,
+              },
+            }),
+          },
+        ],
+        canLoadMoreHistory: true,
+        historyRemainingRecords: 400,
+        historyLoadMorePending: true,
+      },
+    })
+
+    const button = wrapper.find('button')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.text()).toContain('ai.history.loadingMore')
+  })
+
+  it('shows a localized error hint when loading earlier history fails', () => {
+    const wrapper = mount(AiMessageListVirtual, {
+      props: {
+        items: [
+          {
+            key: 'divider-1',
+            message: makeMessage('history-window-1', 'assistant', {
+              type: 'divider',
+              dividerMeta: {
+                kind: 'history-window',
+                loadedRecords: 300,
+                totalRecords: 700,
+                remainingRecords: 400,
+              },
+            }),
+          },
+        ],
+        canLoadMoreHistory: true,
+        historyRemainingRecords: 400,
+        historyLoadMoreError: 'load more failed',
+      },
+    })
+
+    expect(wrapper.text()).toContain('ai.history.loadMoreFailed')
   })
 
   it('renders a sticky compact bubble for the latest user item', () => {

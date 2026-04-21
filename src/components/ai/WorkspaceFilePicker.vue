@@ -9,6 +9,7 @@
  * @emits close   - 关闭对话框
  */
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { open } from '@tauri-apps/plugin-dialog'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import { fuzzyFilter } from '@/utils/fuzzyMatch'
@@ -36,6 +37,7 @@ const emit = defineEmits<{
   close: []
 }>()
 
+const { t } = useI18n()
 const store = useWorkspaceFilesStore()
 const searchQuery = ref('')
 const selectedPaths = ref<Set<string>>(new Set())
@@ -116,7 +118,7 @@ function handleConfirm() {
 async function browseSystem() {
   const result = await open({
     multiple: true,
-    filters: [{ name: '文本文件', extensions: ['*'] }],
+    filters: [{ name: t('ai.workspaceFilePicker.systemFilterName'), extensions: ['*'] }],
   })
   if (!result) return
   const paths = Array.isArray(result) ? result : [result]
@@ -144,8 +146,8 @@ for (const root of store.roots) {
   <Dialog :open="true" @update:open="(val: boolean) => !val && emit('close')">
     <DialogContent class="sm:max-w-[480px] max-h-[70vh] flex flex-col">
       <DialogHeader>
-        <DialogTitle>选择工作区文件</DialogTitle>
-        <DialogDescription>勾选文件添加到 AI 对话上下文</DialogDescription>
+        <DialogTitle>{{ t('ai.workspaceFilePicker.title') }}</DialogTitle>
+        <DialogDescription>{{ t('ai.workspaceFilePicker.description') }}</DialogDescription>
       </DialogHeader>
 
       <!-- 搜索框 -->
@@ -154,7 +156,7 @@ for (const root of store.roots) {
         <input
           v-model="searchQuery"
           type="text"
-          placeholder="搜索文件..."
+          :placeholder="t('ai.workspaceFilePicker.searchPlaceholder')"
           class="w-full rounded-md border bg-transparent py-2 pl-10 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
         />
       </div>
@@ -164,7 +166,7 @@ for (const root of store.roots) {
         v-if="!hasRoots"
         class="flex-1 flex items-center justify-center py-10 text-sm text-muted-foreground"
       >
-        请先在文件面板添加工作区文件夹
+        {{ t('ai.workspaceFilePicker.noRoots') }}
       </div>
 
       <!-- 搜索结果模式 -->
@@ -176,7 +178,7 @@ for (const root of store.roots) {
           v-if="searchResults.length === 0"
           class="py-8 text-center text-sm text-muted-foreground"
         >
-          未找到匹配文件
+          {{ t('ai.workspaceFilePicker.noMatches') }}
         </div>
         <div
           v-for="node in searchResults"
@@ -244,14 +246,14 @@ for (const root of store.roots) {
       <DialogFooter class="flex items-center justify-between sm:justify-between">
         <Button variant="ghost" size="sm" @click="browseSystem">
           <ExternalLink class="h-3.5 w-3.5 mr-1.5" />
-          浏览其他文件...
+          {{ t('ai.workspaceFilePicker.browseOther') }}
         </Button>
         <div class="flex items-center gap-2">
           <Button variant="outline" size="sm" @click="emit('close')">
-            取消
+            {{ t('common.cancel') }}
           </Button>
           <Button size="sm" :disabled="selectedCount === 0" @click="handleConfirm">
-            确定{{ selectedCount > 0 ? ` (${selectedCount})` : '' }}
+            {{ t('common.confirm') }}{{ selectedCount > 0 ? ` (${selectedCount})` : '' }}
           </Button>
         </div>
       </DialogFooter>

@@ -6,6 +6,7 @@
  * 包含压缩规则编辑入口。
  */
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAiMemoryStore, DEFAULT_COMPACT_RULE } from '@/stores/ai-memory'
 import AiMemoryEditor from './AiMemoryEditor.vue'
 import type { AiMemory, CompactRule } from '@/types/ai'
@@ -30,6 +31,7 @@ const emit = defineEmits<{
   'update:open': [value: boolean]
 }>()
 
+const { t } = useI18n()
 const memoryStore = useAiMemoryStore()
 
 const searchQuery = ref('')
@@ -60,9 +62,9 @@ const filteredGroups = computed(() => {
 })
 
 const groupConfig = [
-  { key: 'knowledge' as const, label: '知识', icon: BookOpen, color: 'text-blue-500' },
-  { key: 'summary' as const, label: '摘要', icon: FileText, color: 'text-green-500' },
-  { key: 'preference' as const, label: '偏好', icon: Settings2, color: 'text-amber-500' },
+  { key: 'knowledge' as const, labelKey: 'ai.memoryDrawer.typeKnowledge', icon: BookOpen, color: 'text-blue-500' },
+  { key: 'summary' as const, labelKey: 'ai.memoryDrawer.typeSummary', icon: FileText, color: 'text-green-500' },
+  { key: 'preference' as const, labelKey: 'ai.memoryDrawer.typePreference', icon: Settings2, color: 'text-amber-500' },
 ]
 
 function handleNew() {
@@ -85,7 +87,12 @@ async function handleSave(memory: AiMemory) {
 
 function openCompactRuleEditor() {
   const rule = memoryStore.compactRule
-  compactRuleText.value = `P0-必须保留: ${rule.p0}\nP1-尽量保留: ${rule.p1}\nP2-立即丢弃: ${rule.p2}\n压缩比目标: ${Math.round(rule.ratio * 100)}%`
+  compactRuleText.value = [
+    `${t('ai.memoryDrawer.compactP0')}: ${rule.p0}`,
+    `${t('ai.memoryDrawer.compactP1')}: ${rule.p1}`,
+    `${t('ai.memoryDrawer.compactP2')}: ${rule.p2}`,
+    `${t('ai.memoryDrawer.compactRatio')}: ${Math.round(rule.ratio * 100)}%`,
+  ].join('\n')
   showCompactRuleEditor.value = true
 }
 
@@ -96,7 +103,7 @@ async function saveCompactRule() {
     if (line.startsWith('P0')) rule.p0 = line.replace(/^P0[^:]*:\s*/, '')
     else if (line.startsWith('P1')) rule.p1 = line.replace(/^P1[^:]*:\s*/, '')
     else if (line.startsWith('P2')) rule.p2 = line.replace(/^P2[^:]*:\s*/, '')
-    else if (line.includes('压缩比')) {
+    else if (line.includes(t('ai.memoryDrawer.compactRatio')) || /ratio/i.test(line)) {
       const match = line.match(/(\d+)%/)
       if (match) rule.ratio = parseInt(match[1] ?? '0') / 100
     }
@@ -108,7 +115,7 @@ async function saveCompactRule() {
 /** 清理无效记忆 */
 async function cleanOrphanMemories() {
   // TODO: 需要后端路径存在性检查支持
-  console.warn('[Memory] 清理无效记忆功能待完善（需要后端路径检查支持）')
+  console.warn('[Memory] orphan memory cleanup is not implemented yet (requires backend path existence checks)')
 }
 
 /** 格式化时间 */
@@ -145,7 +152,7 @@ function formatTime(ts: number): string {
         <div class="flex items-center justify-between px-4 py-3 border-b shrink-0">
           <div class="flex items-center gap-2">
             <Brain class="h-4 w-4 text-primary" />
-            <span class="text-sm font-semibold">项目记忆</span>
+            <span class="text-sm font-semibold">{{ t('ai.memoryDrawer.title') }}</span>
             <span class="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
               {{ memoryStore.memories.length }}
             </span>
@@ -167,7 +174,7 @@ function formatTime(ts: number): string {
             <input
               v-model="searchQuery"
               class="flex-1 bg-transparent text-xs focus:outline-none placeholder:text-muted-foreground/50"
-              placeholder="搜索记忆…"
+              :placeholder="t('ai.memoryDrawer.searchPlaceholder')"
             />
           </div>
         </div>
@@ -179,7 +186,7 @@ function formatTime(ts: number): string {
               <div class="flex items-center gap-1.5 mb-2">
                 <component :is="group.icon" class="h-3.5 w-3.5" :class="group.color" />
                 <span class="text-[11px] font-medium text-muted-foreground uppercase tracking-wider">
-                  {{ group.label }} ({{ filteredGroups[group.key].length }})
+                  {{ t(group.labelKey) }} ({{ filteredGroups[group.key].length }})
                 </span>
               </div>
 
@@ -191,7 +198,7 @@ function formatTime(ts: number): string {
                 >
                   <div class="flex items-start justify-between gap-2">
                     <div class="flex-1 min-w-0">
-                      <p class="text-xs font-medium truncate">{{ memory.title || '(无标题)' }}</p>
+                      <p class="text-xs font-medium truncate">{{ memory.title || t('ai.memoryDrawer.untitled') }}</p>
                       <p class="text-[11px] text-muted-foreground line-clamp-2 mt-0.5">
                         {{ memory.content }}
                       </p>
@@ -230,8 +237,8 @@ function formatTime(ts: number): string {
             class="flex flex-col items-center justify-center py-12 text-center"
           >
             <Brain class="h-8 w-8 text-muted-foreground/30 mb-3" />
-            <p class="text-xs text-muted-foreground">暂无记忆</p>
-            <p class="text-[10px] text-muted-foreground/60 mt-1">点击 + 添加项目知识</p>
+            <p class="text-xs text-muted-foreground">{{ t('ai.memoryDrawer.empty') }}</p>
+            <p class="text-[10px] text-muted-foreground/60 mt-1">{{ t('ai.memoryDrawer.emptyHint') }}</p>
           </div>
         </div>
 
@@ -242,14 +249,14 @@ function formatTime(ts: number): string {
             @click="openCompactRuleEditor"
           >
             <Settings2 class="h-3.5 w-3.5" />
-            编辑压缩规则
+            {{ t('ai.memoryDrawer.editCompactRule') }}
           </button>
           <button
             class="w-full flex items-center gap-2 rounded-md px-3 py-2 text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
             @click="cleanOrphanMemories"
           >
             <Trash2 class="h-3.5 w-3.5" />
-            清理无效记忆
+            {{ t('ai.memoryDrawer.cleanOrphans') }}
           </button>
         </div>
 
@@ -264,15 +271,15 @@ function formatTime(ts: number): string {
             <div v-if="showCompactRuleEditor" class="fixed inset-0 z-[60] flex items-center justify-center">
               <div class="absolute inset-0 bg-black/50" @click="showCompactRuleEditor = false" />
               <div class="relative w-[500px] rounded-xl border bg-background shadow-xl p-5">
-                <h3 class="text-sm font-semibold mb-3">压缩规则</h3>
+                <h3 class="text-sm font-semibold mb-3">{{ t('ai.memoryDrawer.compactRuleTitle') }}</h3>
                 <textarea
                   v-model="compactRuleText"
                   rows="8"
                   class="w-full rounded-md border bg-transparent px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-1 focus:ring-primary"
                 />
                 <div class="flex justify-end gap-2 mt-3">
-                  <Button variant="ghost" size="sm" @click="showCompactRuleEditor = false">取消</Button>
-                  <Button size="sm" @click="saveCompactRule">保存</Button>
+                  <Button variant="ghost" size="sm" @click="showCompactRuleEditor = false">{{ t('common.cancel') }}</Button>
+                  <Button size="sm" @click="saveCompactRule">{{ t('common.save') }}</Button>
                 </div>
               </div>
             </div>

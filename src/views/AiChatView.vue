@@ -16,12 +16,15 @@ import { useAiChat } from '@/composables/useAiChat'
 import { useAiChatViewState } from '@/composables/useAiChatViewState'
 import { useFileAttachment } from '@/composables/useFileAttachment'
 import {
+  analyzeSpawnedTasks,
   markSpawnedTaskClosed,
   markSpawnedTaskDone,
-  markSpawnedTaskRunning,
+  normalizeSpawnedTask,
   resetSpawnedTaskForRetry,
   syncSpawnedTaskFromTabMeta,
+  type SpawnedTask,
 } from '@/composables/ai/chatSideEffects'
+import { createChatTaskDispatcher } from '@/composables/ai/chatTaskDispatcher'
 import { setActiveSessionId } from '@/composables/useToolApproval'
 import { getCredential } from '@/api/connection'
 import type { AiMessage } from '@/types/ai'
@@ -42,6 +45,12 @@ interface MessageGroup {
   isGroupEnd: boolean
   groupSize: number
   msg: AiMessage
+}
+
+interface AiChatShellExposed {
+  scrollContainer: HTMLElement | null
+  focusInput?: () => void
+  setInputDraft?: (value: string, options?: { append?: boolean; focus?: boolean }) => void
 }
 
 const { t } = useI18n()
@@ -99,7 +108,7 @@ const showSessionDrawer = ref(false)
 const showMemoryDrawer = ref(false)
 const showFilePicker = ref(false)
 
-const chatShellRef = ref<InstanceType<typeof AiChatShell> | null>(null)
+const chatShellRef = ref<AiChatShellExposed | null>(null)
 const scrollContainer = computed(() => chatShellRef.value?.scrollContainer ?? null)
 
 const ownTabId = workspace.activeTabId
@@ -107,6 +116,9 @@ const ownTab = workspace.tabs.find(tab => tab.id === ownTabId)
 const sourceTaskId = typeof ownTab?.meta?.sourceTaskId === 'string'
   ? ownTab.meta.sourceTaskId
   : null
+const taskCancelRequested = computed(() => Boolean(
+  sourceTaskId && workspace.tabs.find(tab => tab.id === ownTabId)?.meta?.taskCancelRequested,
+))
 
 const currentSessionId = ref<string>(
   (ownTab?.meta?.sessionId as string | undefined)
@@ -200,7 +212,9 @@ watch(currentSessionId, (sessionId, oldSessionId) => {
 watch(
   () => ({
     taskStatus: sourceTaskId
-      ? chat.error.value
+      ? taskCancelRequested.value
+        ? 'cancelled'
+        : chat.error.value
         ? 'error'
         : chat.isStreaming.value || chat.isLoading.value
           ? 'running'
@@ -208,7 +222,7 @@ watch(
             ? 'done'
             : 'running'
       : null,
-    taskError: chat.error.value,
+    taskError: taskCancelRequested.value ? t('ai.tasks.taskCancelled') : chat.error.value,
     taskSummary: latestAssistantSummary.value,
   }),
   ({ taskStatus, taskError, taskSummary }) => {
@@ -222,9 +236,24 @@ watch(
   { deep: true },
 )
 
+watch(taskCancelRequested, (cancelRequested) => {
+  if (!sourceTaskId || !cancelRequested) return
+
+  if (chat.isStreaming.value || chat.isLoading.value) {
+    void chat.abort()
+  }
+
+  workspace.updateTabMeta(ownTabId, {
+    taskStatus: 'cancelled',
+    taskError: t('ai.tasks.taskCancelled'),
+    taskSummary: latestAssistantSummary.value ?? undefined,
+  })
+}, { immediate: true })
+
 watch(
   () => workspace.tabs.map(tab => ({
     id: tab.id,
+    sessionId: tab.meta?.sessionId,
     taskStatus: tab.meta?.taskStatus,
     taskError: tab.meta?.taskError,
     taskSummary: tab.meta?.taskSummary,
@@ -239,6 +268,19 @@ watch(
       const tab = taskTabs.find(item => item.id === task.taskTabId)
       if (!tab) {
         chat.spawnedTasks.value[index] = markSpawnedTaskClosed(task, t('ai.tasks.taskClosed'))
+        const waiter = tabTaskWaiters.get(task.id)
+        if (waiter) {
+          waiter({
+            status: 'error',
+            error: t('ai.tasks.taskClosed'),
+            summary: task.lastSummary,
+            sessionId: task.taskSessionId,
+            taskTabId: task.taskTabId,
+            startedAt: task.startedAt ?? Date.now(),
+            finishedAt: Date.now(),
+          })
+          tabTaskWaiters.delete(task.id)
+        }
         continue
       }
 
@@ -247,6 +289,22 @@ watch(
         taskError: tab.taskError || t('ai.tasks.taskFailed'),
         taskSummary: tab.taskSummary,
       })
+
+      if (tab.taskStatus === 'done' || tab.taskStatus === 'error' || tab.taskStatus === 'cancelled') {
+        const waiter = tabTaskWaiters.get(task.id)
+        if (waiter) {
+          waiter({
+            status: tab.taskStatus,
+            error: typeof tab.taskError === 'string' ? tab.taskError : undefined,
+            summary: typeof tab.taskSummary === 'string' ? tab.taskSummary : undefined,
+            sessionId: typeof tab.sessionId === 'string' ? tab.sessionId : task.taskSessionId,
+            taskTabId: tab.id,
+            startedAt: task.startedAt ?? Date.now(),
+            finishedAt: Date.now(),
+          })
+          tabTaskWaiters.delete(task.id)
+        }
+      }
     }
   },
   { deep: true, immediate: true },
@@ -352,6 +410,123 @@ onActivated(async () => {
 
 const messageQueue = ref<string[]>([])
 const queueAttachments = ref<ReturnType<typeof fileAttachment.getReadyAttachments>[]>([])
+const headlessCancelledTaskIds = new Set<string>()
+const tabTaskWaiters = new Map<string, (result: {
+  status: 'done' | 'error' | 'cancelled'
+  summary?: string
+  error?: string
+  sessionId?: string
+  taskTabId?: string
+  startedAt: number
+  finishedAt: number
+}) => void>()
+
+function getDispatcherMaxParallel(): number {
+  return Math.max(1, store.currentWorkspaceConfig?.dispatcherMaxParallel ?? 3)
+}
+
+function getDispatcherAutoRetryCount(): number {
+  return Math.max(0, store.currentWorkspaceConfig?.dispatcherAutoRetryCount ?? 1)
+}
+
+function getDispatcherDefaultMode(): 'headless' | 'tab' {
+  return store.currentWorkspaceConfig?.dispatcherDefaultMode ?? 'headless'
+}
+
+function appendDispatcherNotice(kind: 'warn' | 'error' | 'info', text: string): void {
+  chat.messages.value.push({
+    id: `dispatcher-notice-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    role: 'system',
+    content: '',
+    timestamp: Date.now(),
+    notice: { kind, text },
+  })
+}
+
+async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
+  status: 'done' | 'error' | 'cancelled'
+  summary?: string
+  error?: string
+  sessionId?: string
+  startedAt: number
+  finishedAt: number
+  retryable?: boolean
+}> {
+  const startedAt = Date.now()
+  const taskSessionId = task.taskSessionId ?? `session-headless-${task.id}-${startedAt}`
+  const summary = `[Headless V1 placeholder] ${task.description}`
+
+  if (headlessCancelledTaskIds.has(task.id)) {
+    return {
+      status: 'cancelled',
+      error: t('ai.tasks.taskCancelled'),
+      sessionId: taskSessionId,
+      startedAt,
+      finishedAt: Date.now(),
+    }
+  }
+
+  return {
+    status: 'done',
+    summary,
+    sessionId: taskSessionId,
+    startedAt,
+    finishedAt: Date.now(),
+  }
+}
+
+const taskDispatcher = createChatTaskDispatcher({
+  getTasks: () => chat.spawnedTasks.value,
+  setTasks: (tasks) => {
+    chat.spawnedTasks.value = tasks
+  },
+  maxParallel: getDispatcherMaxParallel,
+  autoRetryCount: getDispatcherAutoRetryCount,
+  defaultExecutionMode: getDispatcherDefaultMode,
+  executors: {
+    headless: {
+      mode: 'headless',
+      prepare: (task) => ({
+        taskSessionId: task.taskSessionId ?? `session-headless-${task.id}-${Date.now()}`,
+      }),
+      run: runHeadlessSpawnedTask,
+      cancel: (task) => {
+        headlessCancelledTaskIds.add(task.id)
+      },
+    },
+    tab: {
+      mode: 'tab',
+      prepare: (task) => ({
+        taskTabId: task.taskTabId ?? `ai-task-${task.id}-${Date.now()}`,
+        taskSessionId: task.taskSessionId ?? `session-task-${task.id}-${Date.now()}`,
+      }),
+      run: async (task) => new Promise((resolve) => {
+        tabTaskWaiters.set(task.id, resolve)
+      }),
+      cancel: (task) => {
+        if (task.taskTabId) {
+          workspace.updateTabMeta(task.taskTabId, {
+            taskCancelRequested: true,
+            taskStatus: 'cancelled',
+            taskError: t('ai.tasks.taskCancelled'),
+            taskSummary: task.lastSummary,
+          })
+        }
+      },
+    },
+  },
+  onEvent: (event) => {
+    if (event.type === 'blocked') {
+      appendDispatcherNotice('warn', event.message)
+      return
+    }
+    if (event.type === 'failed') {
+      appendDispatcherNotice('error', event.message)
+      return
+    }
+    appendDispatcherNotice('info', event.message)
+  },
+})
 
 async function handleSend(content: string): Promise<void> {
   if (!currentProvider.value || !currentModel.value) return
@@ -378,6 +553,7 @@ async function doSend(
   content: string,
   attachments: ReturnType<typeof fileAttachment.getReadyAttachments>,
 ): Promise<void> {
+  const beforeTaskIds = new Set(chat.spawnedTasks.value.map(task => task.id))
   await sendMessageNow(content, attachments, (cleanContent) => {
     const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
     if (!tab) return
@@ -388,6 +564,18 @@ async function doSend(
     const shortTitle = meaningful.replace(/\s+/g, ' ').slice(0, 12)
     workspace.updateTabTitle(tab.id, shortTitle)
   })
+  const nextTasks = chat.spawnedTasks.value.map(task => normalizeSpawnedTask(task, {
+    executionMode: getDispatcherDefaultMode(),
+    autoRetryBudget: getDispatcherAutoRetryCount(),
+  }))
+  chat.spawnedTasks.value = nextTasks
+  const newTasks = nextTasks.filter(task => !beforeTaskIds.has(task.id))
+  if (newTasks.length > 0) {
+    taskDispatcher.enqueue(newTasks)
+    await taskDispatcher.drain()
+  } else {
+    taskDispatcher.syncTasks(nextTasks)
+  }
 }
 
 async function handlePlanApprove(): Promise<void> {
@@ -414,39 +602,65 @@ function handlePlanReject(): void {
 }
 
 async function handleSpawnRun(taskId: string): Promise<void> {
-  if (!currentProvider.value || !currentModel.value) return
-
   const task = chat.spawnedTasks.value.find(item => item.id === taskId)
   if (!task) return
-
-  const tabId = task.taskTabId ?? `ai-task-${task.id}-${Date.now()}`
-  const taskSessionId = task.taskSessionId ?? `session-task-${task.id}-${Date.now()}`
-  const taskIndex = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
-  if (taskIndex !== -1) {
-    chat.spawnedTasks.value[taskIndex] = markSpawnedTaskRunning(chat.spawnedTasks.value[taskIndex]!, {
-      taskTabId: tabId,
-      taskSessionId,
+  if ((task.executionMode ?? getDispatcherDefaultMode()) === 'tab') {
+    const tabId = task.taskTabId ?? `ai-task-${task.id}-${Date.now()}`
+    const taskSessionId = task.taskSessionId ?? `session-task-${task.id}-${Date.now()}`
+    workspace.addTab({
+      id: tabId,
+      type: 'ai-chat',
+      title: `[Task] ${task.description.slice(0, 20)}`,
+      closable: true,
+      meta: {
+        sessionId: taskSessionId,
+        initialMessage: task.description,
+        sourceTaskId: task.id,
+        taskExecutionMode: 'tab',
+        taskAutoStarted: true,
+      },
     })
   }
+  void taskDispatcher.runTask(taskId, { startedByDispatcher: false })
+}
 
-  workspace.addTab({
-    id: tabId,
-    type: 'ai-chat',
-    title: `[Task] ${task.description.slice(0, 20)}`,
-    closable: true,
-    meta: {
-      sessionId: taskSessionId,
-      initialMessage: task.description,
-      sourceTaskId: task.id,
-    },
-  })
+async function handleSpawnRunBatch(taskIds: string[]): Promise<void> {
+  for (const taskId of taskIds) {
+    const task = chat.spawnedTasks.value.find(item => item.id === taskId)
+    if (!task) continue
+    if ((task.executionMode ?? getDispatcherDefaultMode()) === 'tab') {
+      const tabId = task.taskTabId ?? `ai-task-${task.id}-${Date.now()}`
+      const taskSessionId = task.taskSessionId ?? `session-task-${task.id}-${Date.now()}`
+      workspace.addTab({
+        id: tabId,
+        type: 'ai-chat',
+        title: `[Task] ${task.description.slice(0, 20)}`,
+        closable: true,
+        meta: {
+          sessionId: taskSessionId,
+          initialMessage: task.description,
+          sourceTaskId: task.id,
+          taskExecutionMode: 'tab',
+          taskAutoStarted: true,
+        },
+      })
+    }
+  }
+  void taskDispatcher.runReadyTasks(taskIds)
 }
 
 function handleSpawnRetry(taskId: string): void {
   const index = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
   if (index === -1) return
   chat.spawnedTasks.value[index] = resetSpawnedTaskForRetry(chat.spawnedTasks.value[index]!)
+  taskDispatcher.syncTasks(chat.spawnedTasks.value)
   void handleSpawnRun(taskId)
+}
+
+function handleSpawnRetryBatch(taskIds: string[]): void {
+  for (const taskId of taskIds) {
+    handleSpawnRetry(taskId)
+  }
 }
 
 function handleSpawnOpen(taskId: string): void {
@@ -459,6 +673,87 @@ function handleSpawnComplete(taskId: string): void {
   const index = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
   if (index === -1) return
   chat.spawnedTasks.value[index] = markSpawnedTaskDone(chat.spawnedTasks.value[index]!)
+  taskDispatcher.syncTasks(chat.spawnedTasks.value)
+}
+
+function handleSpawnCancel(taskId: string): void {
+  const index = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
+  if (index === -1) return
+
+  const task = chat.spawnedTasks.value[index]!
+  if (task.taskTabId) {
+    workspace.updateTabMeta(task.taskTabId, {
+      taskCancelRequested: true,
+      taskStatus: 'cancelled',
+      taskError: t('ai.tasks.taskCancelled'),
+      taskSummary: task.lastSummary,
+    })
+  }
+  void taskDispatcher.cancelTask(taskId, t('ai.tasks.taskCancelled'))
+}
+
+function handleSpawnCancelBatch(taskIds: string[]): void {
+  for (const taskId of taskIds) {
+    handleSpawnCancel(taskId)
+  }
+}
+
+function buildSpawnedTasksSynthesisPrompt(): string {
+  const analysis = analyzeSpawnedTasks(chat.spawnedTasks.value)
+
+  const lines: string[] = [
+    'Please synthesize the spawned task results into a single final answer for the parent conversation.',
+    '',
+    'Requirements:',
+    '- Merge overlapping findings and remove repetition.',
+    '- Prefer summarizing by source group so related spawned tasks stay together.',
+    '- Call out unresolved gaps or failed subtasks explicitly.',
+    '- If some subtasks are still running or pending, mention that clearly before giving the best partial answer.',
+    '- End with a concise next-step recommendation.',
+    '',
+  ]
+
+  for (const sourceGroup of analysis.sourceGroups) {
+    lines.push(sourceGroup.sourceMessageId
+      ? `Source Group #${sourceGroup.sourceGroupNumber} (${sourceGroup.sourceMessageId.slice(0, 8)}):`
+      : 'Standalone Tasks:')
+    for (const task of sourceGroup.tasks) {
+      const relation = analysis.relations.get(task.id)
+      lines.push(`- [${task.status}] ${task.description}`)
+      if (relation?.displayDependencyDescriptions.length) {
+        lines.push(`  Depends on: ${relation.displayDependencyDescriptions.join(', ')}`)
+      }
+      if (relation?.displayMissingDependencyIds.length) {
+        lines.push(`  Missing dependencies: ${relation.displayMissingDependencyIds.join(', ')}`)
+      }
+      if (task.status === 'done') {
+        lines.push(`  Summary: ${task.lastSummary?.trim() || 'No summary captured.'}`)
+      }
+      if (task.status === 'error') {
+        lines.push(`  Error: ${task.lastError?.trim() || 'Unknown error.'}`)
+        if (task.lastSummary?.trim()) {
+          lines.push(`  Partial summary: ${task.lastSummary.trim()}`)
+        }
+      }
+      if (task.status === 'cancelled') {
+        lines.push(`  Reason: ${task.lastError?.trim() || 'Cancelled by user.'}`)
+        if (task.lastSummary?.trim()) {
+          lines.push(`  Partial summary: ${task.lastSummary.trim()}`)
+        }
+      }
+      if (task.status === 'running' && task.lastSummary?.trim()) {
+        lines.push(`  Latest summary: ${task.lastSummary.trim()}`)
+      }
+    }
+    lines.push('')
+  }
+
+  return lines.join('\n').trim()
+}
+
+function handleSpawnSynthesize(): void {
+  const prompt = buildSpawnedTasksSynthesisPrompt()
+  chatShellRef.value?.setInputDraft?.(prompt, { focus: true })
 }
 
 function handleNewAiTab(): void {
@@ -657,6 +952,9 @@ async function switchSession(
     :is-streaming="chat.isStreaming.value"
     :is-loading="chat.isLoading.value"
     :can-load-more-history="chat.canLoadMoreHistory.value"
+    :history-remaining-records="chat.historyRemainingRecords.value"
+    :history-load-more-pending="chat.historyLoadMorePending.value"
+    :history-load-more-error="chat.historyLoadMoreError.value"
     :work-dir="chat.workDir.value"
     :available-work-dirs="chat.availableWorkDirs.value"
     :work-dir-display="workDirDisplay"
@@ -747,9 +1045,14 @@ async function switchSession(
         <AiSpawnedTasksPanel
           :tasks="chat.spawnedTasks.value"
           @run="handleSpawnRun"
+          @run-batch="handleSpawnRunBatch"
           @retry="handleSpawnRetry"
+          @retry-batch="handleSpawnRetryBatch"
           @open="handleSpawnOpen"
           @complete="handleSpawnComplete"
+          @cancel="handleSpawnCancel"
+          @cancel-batch="handleSpawnCancelBatch"
+          @synthesize="handleSpawnSynthesize"
         />
       </div>
     </template>

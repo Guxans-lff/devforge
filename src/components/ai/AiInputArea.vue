@@ -553,7 +553,21 @@ function focus() {
   textareaRef.value?.focus()
 }
 
-defineExpose({ focus })
+function setDraft(value: string, options?: { append?: boolean; focus?: boolean }) {
+  const nextValue = options?.append && inputText.value.trim()
+    ? `${inputText.value.replace(/\s+$/, '')}\n\n${value}`
+    : value
+  inputText.value = nextValue
+  pushToUndoStack(nextValue)
+  nextTick(() => {
+    adjustHeight()
+    if (options?.focus !== false) {
+      textareaRef.value?.focus()
+    }
+  })
+}
+
+defineExpose({ focus, setDraft })
 </script>
 
 <template>

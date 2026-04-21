@@ -48,6 +48,98 @@ const InputStub = defineComponent({
 })
 
 describe('AiSessionDrawer', () => {
+  it('preloads the most recent non-active sessions when the drawer opens', async () => {
+    vi.setSystemTime(new Date('2026-04-21T10:00:00Z'))
+
+    const wrapper = mount(AiSessionDrawer, {
+      props: {
+        open: false,
+        activeSessionId: 'session-1',
+        sessions: [
+          {
+            id: 'session-1',
+            title: 'Active task',
+            providerId: 'provider-1',
+            model: 'gpt-5',
+            messageCount: 1,
+            totalTokens: 0,
+            estimatedCost: 0,
+            createdAt: Date.now() - 30_000,
+            updatedAt: Date.now() - 30_000,
+          },
+          {
+            id: 'session-2',
+            title: 'Newest other task',
+            providerId: 'provider-1',
+            model: 'gpt-5',
+            messageCount: 1,
+            totalTokens: 0,
+            estimatedCost: 0,
+            createdAt: Date.now() - 60_000,
+            updatedAt: Date.now() - 60_000,
+          },
+          {
+            id: 'session-3',
+            title: 'Second recent task',
+            providerId: 'provider-1',
+            model: 'gpt-5',
+            messageCount: 1,
+            totalTokens: 0,
+            estimatedCost: 0,
+            createdAt: Date.now() - 120_000,
+            updatedAt: Date.now() - 120_000,
+          },
+          {
+            id: 'session-4',
+            title: 'Third recent task',
+            providerId: 'provider-1',
+            model: 'gpt-5',
+            messageCount: 1,
+            totalTokens: 0,
+            estimatedCost: 0,
+            createdAt: Date.now() - 180_000,
+            updatedAt: Date.now() - 180_000,
+          },
+          {
+            id: 'session-5',
+            title: 'Older task',
+            providerId: 'provider-1',
+            model: 'gpt-5',
+            messageCount: 1,
+            totalTokens: 0,
+            estimatedCost: 0,
+            createdAt: Date.now() - 240_000,
+            updatedAt: Date.now() - 240_000,
+          },
+        ],
+      },
+      global: {
+        stubs: {
+          Sheet: SheetStub,
+          SheetContent: PassThroughStub,
+          SheetHeader: PassThroughStub,
+          SheetTitle: PassThroughStub,
+          SheetDescription: PassThroughStub,
+          Input: InputStub,
+          Button: PassThroughStub,
+          ScrollArea: PassThroughStub,
+          MessageSquare: true,
+          Trash2: true,
+          Search: true,
+          Plus: true,
+        },
+      },
+    })
+
+    await wrapper.setProps({ open: true })
+
+    expect(wrapper.emitted('preload')).toEqual([
+      ['session-2'],
+      ['session-3'],
+      ['session-4'],
+    ])
+  })
+
   it('filters sessions and emits preload/select/delete actions', async () => {
     vi.setSystemTime(new Date('2026-04-21T10:00:00Z'))
 

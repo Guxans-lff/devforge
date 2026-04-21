@@ -72,6 +72,9 @@ const props = withDefaults(defineProps<{
   isStreaming?: boolean
   isLoading?: boolean
   canLoadMoreHistory?: boolean
+  historyRemainingRecords?: number
+  historyLoadMorePending?: boolean
+  historyLoadMoreError?: string | null
   workDir?: string
   availableWorkDirs?: Array<{ label: string; value: string }>
   workDirDisplay?: string
@@ -99,6 +102,9 @@ const props = withDefaults(defineProps<{
   isStreaming: false,
   isLoading: false,
   canLoadMoreHistory: false,
+  historyRemainingRecords: 0,
+  historyLoadMorePending: false,
+  historyLoadMoreError: null,
   workDir: '',
   availableWorkDirs: () => [],
   workDirDisplay: '',
@@ -148,10 +154,13 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const messageListRef = ref<InstanceType<typeof AiMessageListVirtual> | null>(null)
+const inputAreaRef = ref<InstanceType<typeof AiInputArea> | null>(null)
 const shellClass = computed(() => ['flex h-full min-h-0 flex-col', props.backgroundClass].filter(Boolean).join(' '))
 
 defineExpose({
   scrollContainer: computed(() => messageListRef.value?.scrollContainer ?? null),
+  focusInput: () => inputAreaRef.value?.focus(),
+  setInputDraft: (value: string, options?: { append?: boolean; focus?: boolean }) => inputAreaRef.value?.setDraft(value, options),
 })
 </script>
 
@@ -318,6 +327,9 @@ defineExpose({
           :session-id="sessionId"
           :is-loading="isLoading"
           :can-load-more-history="canLoadMoreHistory"
+          :history-remaining-records="historyRemainingRecords"
+          :history-load-more-pending="historyLoadMorePending"
+          :history-load-more-error="historyLoadMoreError"
           @continue="emit('continue')"
           @bump-max-output="emit('bumpMaxOutput', $event)"
           @load-more-history="emit('loadMoreHistory')"
@@ -339,6 +351,7 @@ defineExpose({
 
       <div class="mx-auto w-full max-w-4xl px-5">
         <AiInputArea
+          ref="inputAreaRef"
           :is-streaming="isStreaming"
           :disabled="!hasProviders || !currentModel"
           :loading="isLoading"

@@ -4,7 +4,7 @@
  *
  * 从左侧滑出，展示历史对话列表，支持搜索、切换、删除。
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiSession } from '@/types/ai'
 import {
@@ -35,6 +35,7 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const searchQuery = ref('')
+const SESSION_DRAWER_PRELOAD_COUNT = 3
 
 /** 待确认删除的会话 ID */
 const deleteConfirmId = ref<string | null>(null)
@@ -69,6 +70,26 @@ function handleCreate() {
   emit('create')
   emit('update:open', false)
 }
+
+function preloadRecentSessions(): void {
+  const recentSessions = [...props.sessions]
+    .filter(session => session.id !== props.activeSessionId)
+    .sort((left, right) => right.updatedAt - left.updatedAt)
+    .slice(0, SESSION_DRAWER_PRELOAD_COUNT)
+
+  for (const session of recentSessions) {
+    emit('preload', session.id)
+  }
+}
+
+watch(
+  () => props.open,
+  (isOpen, wasOpen) => {
+    if (isOpen && !wasOpen) {
+      preloadRecentSessions()
+    }
+  },
+)
 </script>
 
 <template>

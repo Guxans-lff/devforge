@@ -49,6 +49,10 @@ interface MemoryStoreLike {
 
 interface WorkspaceConfigLike {
   preferredModel?: string
+  dispatcherPrompt?: string
+  dispatcherMaxParallel?: number
+  dispatcherAutoRetryCount?: number
+  dispatcherDefaultMode?: 'headless' | 'tab'
 }
 
 interface AiStoreLike {
@@ -84,7 +88,7 @@ const DEFAULT_MODE_SUFFIXES: Record<ChatMode, string> = {
   normal: '',
   plan: '\n\n[Mode: Plan]\nAnalyze first, propose a concrete implementation plan, and wait for confirmation before giving final code or execution steps.',
   auto: '\n\n[Mode: Auto]\nProvide a complete executable solution directly, including implementation details, edge cases, and practical next steps.',
-  dispatcher: '\n\n[Mode: Dispatcher]\nBreak the work into independent subtasks, coordinate them clearly, and then synthesize the final result.',
+  dispatcher: '\n\n[Mode: Dispatcher]\nBreak the work into independent subtasks that can run in parallel. Output child tasks only with [SPAWN:...] markers. Use depends=... only for real prerequisites. Default to mode=headless and use mode=tab only when human observation, long-running interaction, or visual tracing is necessary. Prefer independent tasks first, then synthesize the final result by source group and dependency tree.',
 }
 
 function defaultApprovalMode(mode: ChatMode): ApprovalMode {
@@ -126,7 +130,10 @@ export function useAiChatViewState({
 
   const effectiveSystemPrompt = computed(() => {
     const base = systemPrompt.value ?? ''
-    const suffix = resolvedModeSuffixes[chatMode.value]
+    const workspaceDispatcherPrompt = chatMode.value === 'dispatcher'
+      ? store.currentWorkspaceConfig?.dispatcherPrompt?.trim()
+      : ''
+    const suffix = workspaceDispatcherPrompt || resolvedModeSuffixes[chatMode.value]
     const enableTools = currentModel.value?.capabilities.toolUse && !!chat.workDir.value
     const toolGuide = enableTools
       ? buildToolGuide({

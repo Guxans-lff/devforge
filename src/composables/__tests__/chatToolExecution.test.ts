@@ -238,4 +238,61 @@ describe('chatToolExecution', () => {
     expect(results[1]?.content).toContain('[cancelled]')
     expect(results[1]?.metadata?.cancelled).toBe(true)
   })
+
+  it('allows an immediate re-entry run after a cancelled execution', async () => {
+    const firstBatch = [
+      makeToolCall('bash-1', 'list_files', { path: 'src' }),
+      makeToolCall('bash-2', 'bash', { command: 'echo second' }),
+    ]
+    const secondBatch = [
+      makeToolCall('bash-3', 'list_files', { path: 'src' }),
+      makeToolCall('bash-4', 'bash', { command: 'echo fourth' }),
+    ]
+
+    const firstController = new AbortController()
+    let releaseFirst!: () => void
+    const firstGate = new Promise<void>(resolve => {
+      releaseFirst = resolve
+    })
+    const started: string[] = []
+
+    aiExecuteToolMock.mockImplementation(async (_name: string, _args: string, _workDir: string, _sessionId: string, toolCallId: string) => {
+      started.push(toolCallId)
+      if (toolCallId === 'bash-1') {
+        await firstGate
+      }
+      return {
+        success: true,
+        content: toolCallId,
+      }
+    })
+
+    const firstParams = makeParams(firstBatch)
+    firstParams.signal = firstController.signal
+
+    const firstPending = executeToolCalls(firstParams)
+    await Promise.resolve()
+    firstController.abort()
+    releaseFirst()
+    const firstResults = await firstPending
+
+    expect(firstResults.map(item => item.toolCallId)).toEqual(['bash-1', 'bash-2'])
+    expect(firstResults[1]?.success).toBe(false)
+    expect(firstResults[1]?.metadata?.cancelled).toBe(true)
+    expect(firstParams.setInToolExec).toHaveBeenNthCalledWith(1, true)
+    expect(firstParams.setInToolExec).toHaveBeenLastCalledWith(false)
+
+    const secondParams = makeParams(secondBatch)
+    const secondResults = await executeToolCalls(secondParams)
+
+    expect(secondResults.map(item => item.toolCallId)).toEqual(['bash-3', 'bash-4'])
+    expect(secondResults.every(item => item.success)).toBe(true)
+    expect(started).toEqual(['bash-1', 'bash-3', 'bash-4'])
+    expect(secondBatch[0]?.status).toBe('success')
+    expect(secondBatch[1]?.status).toBe('success')
+    expect(secondBatch[0]?.execution?.cancelled).toBe(false)
+    expect(secondBatch[1]?.execution?.cancelled).toBe(false)
+    expect(secondParams.setInToolExec).toHaveBeenNthCalledWith(1, true)
+    expect(secondParams.setInToolExec).toHaveBeenLastCalledWith(false)
+  })
 })

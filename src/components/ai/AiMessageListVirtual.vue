@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef, type ComponentPublicInstance } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
+import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import AiMessageBubble from '@/components/ai/AiMessageBubble.vue'
 import type { AiMessage } from '@/types/ai'
@@ -19,10 +20,16 @@ const props = withDefaults(defineProps<{
   sessionId?: string
   isLoading?: boolean
   canLoadMoreHistory?: boolean
+  historyRemainingRecords?: number
+  historyLoadMorePending?: boolean
+  historyLoadMoreError?: string | null
 }>(), {
   sessionId: undefined,
   isLoading: false,
   canLoadMoreHistory: false,
+  historyRemainingRecords: 0,
+  historyLoadMorePending: false,
+  historyLoadMoreError: null,
 })
 
 const emit = defineEmits<{
@@ -34,6 +41,7 @@ const emit = defineEmits<{
 
 const scrollContainer = ref<HTMLElement | null>(null)
 const virtualItemEls = shallowRef<HTMLElement[]>([])
+const { t } = useI18n()
 
 function estimateItemHeight(item: MessageListItem): number {
   if (item.message.type === 'divider') return 44
@@ -85,6 +93,22 @@ function scrollToBottom(): void {
   })
 }
 
+function getDividerText(message: AiMessage): string {
+  if (message.dividerMeta?.kind === 'history-window') {
+    return t('ai.history.windowLoaded', {
+      loaded: message.dividerMeta.loadedRecords,
+      total: message.dividerMeta.totalRecords,
+    })
+  }
+  return message.dividerText ?? ''
+}
+
+const loadMoreButtonText = computed(() =>
+  props.historyLoadMorePending
+    ? t('ai.history.loadingMore')
+    : t('ai.history.loadMore', { count: props.historyRemainingRecords }),
+)
+
 defineExpose({
   scrollToBottom,
   measureAllVisible,
@@ -131,18 +155,24 @@ defineExpose({
             <div class="flex-1 h-px bg-border/40" />
             <div class="flex items-center gap-2 shrink-0">
               <span class="text-[10px] text-muted-foreground/40 font-medium shrink-0">
-                {{ items[virtualRow.index]!.message.dividerText }}
+                {{ getDividerText(items[virtualRow.index]!.message) }}
               </span>
               <Button
-                v-if="items[virtualRow.index]!.message.id.startsWith('history-window-') && canLoadMoreHistory"
+                v-if="items[virtualRow.index]!.message.dividerMeta?.kind === 'history-window' && canLoadMoreHistory"
                 variant="ghost"
                 size="sm"
                 class="h-6 px-2 text-[10px] text-muted-foreground"
-                :disabled="isLoading"
+                :disabled="isLoading || historyLoadMorePending"
                 @click="emit('loadMoreHistory')"
               >
-                加载更早历史
+                {{ loadMoreButtonText }}
               </Button>
+              <span
+                v-if="items[virtualRow.index]!.message.dividerMeta?.kind === 'history-window' && historyLoadMoreError"
+                class="text-[10px] text-destructive/80"
+              >
+                {{ t('ai.history.loadMoreFailed') }}
+              </span>
             </div>
             <div class="flex-1 h-px bg-border/40" />
           </div>

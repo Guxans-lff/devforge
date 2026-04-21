@@ -5,6 +5,7 @@
  * 接收原始提示词，调用 AI 生成优化版本，左右对比展示，支持接受/拒绝。
  */
 import { ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ProviderConfig, ModelConfig } from '@/types/ai'
 import { aiChatStream } from '@/api/ai'
 import { getCredential } from '@/api/connection'
@@ -30,6 +31,7 @@ const emit = defineEmits<{
   accept: [text: string]
 }>()
 
+const { t } = useI18n()
 const enhancedText = ref('')
 const isLoading = ref(false)
 const error = ref('')
@@ -60,11 +62,11 @@ const ENHANCE_PROMPT = `你是提示词优化引擎。将用户输入的提示�
 
 async function runEnhance() {
   if (!props.provider || !props.model) {
-    error.value = '请先选择模型'
+    error.value = t('ai.promptEnhancer.selectModelFirst')
     return
   }
   if (!props.originalText.trim()) {
-    error.value = '输入内容为空'
+    error.value = t('ai.promptEnhancer.emptyInput')
     return
   }
   isLoading.value = true
@@ -74,7 +76,7 @@ async function runEnhance() {
   try {
     const apiKey = await getCredential(`ai-provider-${props.provider.id}`) ?? ''
     if (!apiKey) {
-      error.value = '未配置 API Key，请在设置中配置'
+      error.value = t('ai.promptEnhancer.apiKeyMissing')
       return
     }
     await aiChatStream(
@@ -132,17 +134,17 @@ function handleClose() {
       <!-- 头部 -->
       <DialogHeader class="flex-row items-center gap-2 px-5 py-4 border-b border-border/40 space-y-0">
         <Sparkles class="h-4 w-4 text-violet-500 shrink-0" />
-        <DialogTitle class="text-sm font-semibold leading-none">提示词优化</DialogTitle>
-        <span class="text-xs text-muted-foreground/50">AI 将重写你的提示词，使其更清晰有效</span>
+        <DialogTitle class="text-sm font-semibold leading-none">{{ t('ai.promptEnhancer.title') }}</DialogTitle>
+        <span class="text-xs text-muted-foreground/50">{{ t('ai.promptEnhancer.subtitle') }}</span>
       </DialogHeader>
 
       <!-- 对比区 -->
       <div class="grid grid-cols-2 divide-x divide-border/40 min-h-[240px]">
         <!-- 原始 -->
-        <div class="flex flex-col">
-          <div class="px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/50 border-b border-border/30 bg-muted/10">
-            原始
-          </div>
+          <div class="flex flex-col">
+            <div class="px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/50 border-b border-border/30 bg-muted/10">
+              {{ t('ai.promptEnhancer.original') }}
+            </div>
           <div class="flex-1 p-4 text-xs leading-relaxed whitespace-pre-wrap break-words text-muted-foreground overflow-y-auto max-h-[320px]">
             {{ originalText }}
           </div>
@@ -151,14 +153,14 @@ function handleClose() {
         <!-- 优化后 -->
         <div class="flex flex-col">
           <div class="flex items-center justify-between px-4 py-2 border-b border-border/30 bg-muted/10">
-            <div class="text-[10px] font-medium uppercase tracking-wider text-violet-500/70">优化后</div>
+            <div class="text-[10px] font-medium uppercase tracking-wider text-violet-500/70">{{ t('ai.promptEnhancer.enhanced') }}</div>
             <button
               v-if="!isLoading && (enhancedText || error)"
               class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
               @click="runEnhance"
             >
               <RefreshCw class="h-3 w-3" />
-              重新生成
+              {{ t('ai.promptEnhancer.regenerate') }}
             </button>
           </div>
           <div class="flex-1 p-4 text-xs leading-relaxed break-words overflow-y-auto max-h-[320px]">
@@ -170,7 +172,7 @@ function handleClose() {
             <!-- 流式输出中（纯文本，不 diff） -->
             <div v-else-if="isLoading" class="whitespace-pre-wrap text-foreground/80">
               <span v-if="!enhancedText" class="flex items-center gap-2 text-muted-foreground/50">
-                <Loader2 class="h-3.5 w-3.5 animate-spin" />优化中…
+                <Loader2 class="h-3.5 w-3.5 animate-spin" />{{ t('ai.promptEnhancer.loading') }}
               </span>
               <template v-else>{{ enhancedText }}</template>
             </div>
@@ -188,7 +190,7 @@ function handleClose() {
       <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-border/40 bg-muted/10">
         <Button variant="ghost" size="sm" @click="handleClose">
           <X class="mr-1 h-3.5 w-3.5" />
-          取消
+          {{ t('common.cancel') }}
         </Button>
         <Button
           size="sm"
@@ -196,7 +198,7 @@ function handleClose() {
           @click="handleAccept"
         >
           <Check class="mr-1 h-3.5 w-3.5" />
-          使用优化版本
+          {{ t('ai.promptEnhancer.useEnhanced') }}
         </Button>
       </div>
     </DialogContent>

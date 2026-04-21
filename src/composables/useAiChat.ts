@@ -67,6 +67,8 @@ export function useAiChat(options: UseAiChatOptions) {
   const historyLoadedRecords = ref(0)
   const historyTotalRecords = ref(0)
   const historyWindowSize = ref(HISTORY_RECENT_RECORD_LIMIT)
+  const historyLoadMorePending = ref(false)
+  const historyLoadMoreError = ref<string | null>(null)
 
   const planGateEnabled = ref(false)
   const planApproved = ref(false)
@@ -141,6 +143,9 @@ export function useAiChat(options: UseAiChatOptions) {
       loadedRecords: historyLoadedRecords.value,
       totalRecords: historyTotalRecords.value,
     }),
+  )
+  const historyRemainingRecords = computed(() =>
+    Math.max(0, historyTotalRecords.value - historyLoadedRecords.value),
   )
 
   watch(
@@ -660,12 +665,25 @@ export function useAiChat(options: UseAiChatOptions) {
 
   async function loadMoreHistory(): Promise<void> {
     if (!canLoadMoreHistory.value) return
+    if (historyLoadMorePending.value) return
     const expandedWindowSize = getExpandedHistoryWindowSize(historyWindowSize.value)
-    await loadHistory(sessionIdRef.value, {
-      windowSize: historyTotalRecords.value > 0
-        ? Math.min(expandedWindowSize, historyTotalRecords.value)
-        : expandedWindowSize,
-    })
+    historyLoadMorePending.value = true
+    historyLoadMoreError.value = null
+    const previousError = error.value
+    try {
+      await loadHistory(sessionIdRef.value, {
+        windowSize: historyTotalRecords.value > 0
+          ? Math.min(expandedWindowSize, historyTotalRecords.value)
+          : expandedWindowSize,
+      })
+      historyLoadMoreError.value = error.value && error.value !== previousError
+        ? error.value
+        : null
+    } catch (err) {
+      historyLoadMoreError.value = ensureErrorString(err)
+    } finally {
+      historyLoadMorePending.value = false
+    }
   }
 
   async function preloadHistory(overrideSessionId?: string, options?: { windowSize?: number }): Promise<void> {
@@ -712,9 +730,12 @@ export function useAiChat(options: UseAiChatOptions) {
     latestUsage,
     canSend,
     canLoadMoreHistory,
+    historyLoadMorePending,
+    historyLoadMoreError,
     workDir,
     historyLoadedRecords,
     historyTotalRecords,
+    historyRemainingRecords,
     observability: observability.metrics,
     isCompacting: autoCompact.isCompacting,
     availableWorkDirs,

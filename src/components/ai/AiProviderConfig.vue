@@ -6,6 +6,7 @@
  * 支持预设常用 Provider 和自定义配置，品牌卡片式设计。
  */
 import { ref, computed, reactive } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { saveCredential } from '@/api/connection'
 import type { ProviderConfig, ModelConfig, ProviderType, ThinkingEffort } from '@/types/ai'
@@ -54,6 +55,7 @@ const emit = defineEmits<{
 }>()
 
 const store = useAiChatStore()
+const { t } = useI18n()
 const THINKING_EFFORTS: ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
 // ─────────────────────── 预设 Provider 模板 ───────────────────────
@@ -438,6 +440,26 @@ function getProviderBrandClasses(provider: ProviderConfig) {
   }
 }
 
+function getProviderTypeLabel(providerType: ProviderType) {
+  return providerType === 'anthropic'
+    ? t('ai.providerConfig.providerTypes.anthropic')
+    : t('ai.providerConfig.providerTypes.openaiCompat')
+}
+
+function getPresetTitle(presetKey: string, preset: ProviderPreset) {
+  if (presetKey === 'custom') {
+    return t('ai.providerConfig.presets.custom.name')
+  }
+  if (presetKey === 'zhipu') {
+    return t('ai.providerConfig.presets.zhipu.name')
+  }
+  return preset.name
+}
+
+function getPresetDescription(presetKey: string) {
+  return t(`ai.providerConfig.presets.${presetKey}.description`)
+}
+
 // ─────────────────────── 模型管理 ───────────────────────
 
 function openAddModel() {
@@ -528,8 +550,8 @@ const canSave = computed(() =>
         <ArrowLeft class="h-4 w-4" />
       </Button>
       <div>
-        <h2 class="text-base font-semibold">AI 服务商配置</h2>
-        <p class="text-[11px] text-muted-foreground mt-0.5">管理 AI 模型服务商的连接和 API 密钥</p>
+        <h2 class="text-base font-semibold">{{ t('ai.providerConfig.title') }}</h2>
+        <p class="text-[11px] text-muted-foreground mt-0.5">{{ t('ai.providerConfig.subtitle') }}</p>
       </div>
     </div>
 
@@ -540,8 +562,8 @@ const canSave = computed(() =>
         <section v-if="store.providers.length > 0" class="space-y-3">
           <div class="flex items-center gap-2">
             <div class="h-1 w-1 rounded-full bg-emerald-500" />
-            <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">已启用</h3>
-            <span class="text-[10px] text-muted-foreground/60">{{ store.providers.length }} 个服务商</span>
+            <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{{ t('ai.providerConfig.enabledTitle') }}</h3>
+            <span class="text-[10px] text-muted-foreground/60">{{ t('ai.providerConfig.providerCount', { count: store.providers.length }) }}</span>
           </div>
 
           <div class="space-y-2">
@@ -564,15 +586,15 @@ const canSave = computed(() =>
                   <div class="flex items-center gap-2">
                     <span class="text-sm font-semibold">{{ provider.name }}</span>
                     <Badge v-if="provider.isDefault" variant="outline" class="h-4 px-1.5 text-[9px] border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/5">
-                      默认
+                      {{ t('ai.providerConfig.defaultBadge') }}
                     </Badge>
                     <Badge variant="secondary" class="h-4 px-1.5 text-[9px]">
-                      {{ provider.providerType === 'anthropic' ? 'Anthropic' : 'OpenAI 兼容' }}
+                      {{ getProviderTypeLabel(provider.providerType) }}
                     </Badge>
                   </div>
                   <div class="flex items-center gap-3 mt-1">
                     <span class="text-[11px] text-muted-foreground font-mono truncate">{{ provider.endpoint }}</span>
-                    <span class="text-[10px] text-muted-foreground/60">{{ provider.models.length }} 个模型</span>
+                    <span class="text-[10px] text-muted-foreground/60">{{ t('ai.providerConfig.modelCount', { count: provider.models.length }) }}</span>
                   </div>
                 </div>
 
@@ -583,7 +605,7 @@ const canSave = computed(() =>
                     variant="ghost"
                     size="icon"
                     class="h-8 w-8 text-muted-foreground hover:text-amber-500"
-                    title="设为默认"
+                    :title="t('ai.providerConfig.actions.setDefault')"
                     @click="setDefault(provider)"
                   >
                     <Star class="h-3.5 w-3.5" />
@@ -592,7 +614,7 @@ const canSave = computed(() =>
                     variant="ghost"
                     size="icon"
                     class="h-8 w-8 text-muted-foreground"
-                    title="编辑"
+                    :title="t('common.edit')"
                     @click="editProvider(provider)"
                   >
                     <Pencil class="h-3.5 w-3.5" />
@@ -602,7 +624,7 @@ const canSave = computed(() =>
                     variant="ghost"
                     size="icon"
                     class="h-8 w-8 text-muted-foreground hover:text-destructive"
-                    title="删除"
+                    :title="t('common.delete')"
                     @click="deleteConfirm = provider.id"
                   >
                     <Trash2 class="h-3.5 w-3.5" />
@@ -614,7 +636,7 @@ const canSave = computed(() =>
                     class="h-8 text-[11px] px-3"
                     @click="handleDelete(provider.id)"
                   >
-                    确认删除
+                    {{ t('ai.providerConfig.actions.confirmDelete') }}
                   </Button>
                 </div>
               </div>
@@ -626,7 +648,7 @@ const canSave = computed(() =>
         <section class="space-y-3">
           <div class="flex items-center gap-2">
             <div class="h-1 w-1 rounded-full bg-primary" />
-            <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">添加服务商</h3>
+            <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{{ t('ai.providerConfig.addTitle') }}</h3>
           </div>
 
           <div class="grid grid-cols-3 gap-3">
@@ -656,17 +678,17 @@ const canSave = computed(() =>
               <!-- 名称 & 描述 -->
               <div>
                 <p class="text-sm font-semibold">
-                  {{ (key as string) === 'custom' ? '自定义' : preset.name }}
+                  {{ getPresetTitle(key as string, preset) }}
                 </p>
                 <p class="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
-                  {{ preset.description }}
+                  {{ getPresetDescription(key as string) }}
                 </p>
               </div>
 
               <!-- 模型数量 -->
               <div v-if="preset.models.length > 0" class="flex items-center gap-1 text-[10px] text-muted-foreground/60">
                 <Cpu class="h-3 w-3" />
-                {{ preset.models.length }} 个预设模型
+                {{ t('ai.providerConfig.presetModelCount', { count: preset.models.length }) }}
               </div>
             </button>
           </div>
@@ -678,8 +700,8 @@ const canSave = computed(() =>
     <Dialog :open="showEditDialog" @update:open="showEditDialog = $event">
       <DialogContent class="sm:max-w-[640px] gap-0 p-0">
         <DialogHeader class="px-7 pt-6 pb-5 border-b border-border/20">
-          <DialogTitle class="text-base">{{ editMode === 'create' ? '添加服务商' : '编辑服务商' }}</DialogTitle>
-          <DialogDescription class="text-xs mt-1.5">配置 AI 服务商的连接信息和可用模型。</DialogDescription>
+          <DialogTitle class="text-base">{{ editMode === 'create' ? t('ai.providerConfig.dialog.addProviderTitle') : t('ai.providerConfig.dialog.editProviderTitle') }}</DialogTitle>
+          <DialogDescription class="text-xs mt-1.5">{{ t('ai.providerConfig.dialog.providerDescription') }}</DialogDescription>
         </DialogHeader>
 
         <ScrollArea class="max-h-[65vh]">
@@ -690,15 +712,15 @@ const canSave = computed(() =>
                 <div class="flex h-6 w-6 items-center justify-center rounded-md bg-primary/8">
                   <Globe class="h-3.5 w-3.5 text-primary/70" />
                 </div>
-                连接配置
+                {{ t('ai.providerConfig.sections.connection') }}
               </div>
               <div class="grid grid-cols-2 gap-4 pl-8">
                 <div class="space-y-2">
-                  <Label class="text-xs">服务商名称</Label>
-                  <Input v-model="form.name" placeholder="如 DeepSeek" class="h-10 text-sm" />
+                  <Label class="text-xs">{{ t('ai.providerConfig.fields.providerName') }}</Label>
+                  <Input v-model="form.name" :placeholder="t('ai.providerConfig.placeholders.providerName')" class="h-10 text-sm" />
                 </div>
                 <div class="space-y-2">
-                  <Label class="text-xs">协议类型</Label>
+                  <Label class="text-xs">{{ t('ai.providerConfig.fields.providerType') }}</Label>
                   <Select
                     :model-value="form.providerType"
                     @update:model-value="(v: unknown) => form.providerType = String(v) as ProviderType"
@@ -707,15 +729,15 @@ const canSave = computed(() =>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="openai_compat">OpenAI 兼容</SelectItem>
-                      <SelectItem value="anthropic">Anthropic</SelectItem>
+                      <SelectItem value="openai_compat">{{ t('ai.providerConfig.providerTypes.openaiCompat') }}</SelectItem>
+                      <SelectItem value="anthropic">{{ t('ai.providerConfig.providerTypes.anthropic') }}</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
               </div>
 
               <div class="space-y-2 pl-8">
-                <Label class="text-xs">API 端点</Label>
+                <Label class="text-xs">{{ t('ai.providerConfig.fields.endpoint') }}</Label>
                 <Input v-model="form.endpoint" placeholder="https://api.example.com/v1" class="h-10 text-sm font-mono" />
               </div>
             </div>
@@ -726,7 +748,7 @@ const canSave = computed(() =>
                 <div class="flex h-6 w-6 items-center justify-center rounded-md bg-amber-500/8">
                   <Shield class="h-3.5 w-3.5 text-amber-600/70 dark:text-amber-400/70" />
                 </div>
-                认证信息
+                {{ t('ai.providerConfig.sections.auth') }}
               </div>
               <div class="space-y-2 pl-8">
                 <Label class="text-xs">API Key</Label>
@@ -745,14 +767,14 @@ const canSave = computed(() =>
                   </button>
                 </div>
                 <p class="text-[11px] text-muted-foreground mt-1">
-                  {{ editMode === 'edit' ? '留空保持原有 Key 不变' : 'Key 将安全存储在系统密钥环中' }}
+                  {{ editMode === 'edit' ? t('ai.providerConfig.apiKeyKeepHint') : t('ai.providerConfig.apiKeySaveHint') }}
                 </p>
               </div>
 
               <div class="flex items-center gap-3 pl-8 pt-1">
                 <Switch v-model="form.isDefault" />
                 <Label class="text-xs cursor-pointer" @click="form.isDefault = !form.isDefault">
-                  设为默认服务商
+                  {{ t('ai.providerConfig.fields.setDefault') }}
                 </Label>
               </div>
             </div>
@@ -764,18 +786,18 @@ const canSave = computed(() =>
                   <div class="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-500/8">
                     <Cpu class="h-3.5 w-3.5 text-emerald-600/70 dark:text-emerald-400/70" />
                   </div>
-                  模型列表
+                  {{ t('ai.providerConfig.sections.models') }}
                   <span class="text-[10px] text-muted-foreground/50">({{ form.models.length }})</span>
                 </div>
                 <Button variant="outline" size="sm" class="h-8 text-xs gap-1.5" @click="openAddModel">
                   <Plus class="h-3.5 w-3.5" />
-                  添加模型
+                  {{ t('ai.providerConfig.actions.addModel') }}
                 </Button>
               </div>
 
               <div v-if="form.models.length === 0" class="ml-8 rounded-lg border border-dashed border-border/40 p-8 text-center">
                 <Cpu class="h-7 w-7 text-muted-foreground/20 mx-auto mb-2.5" />
-                <p class="text-xs text-muted-foreground">暂无模型，请添加至少一个模型</p>
+                <p class="text-xs text-muted-foreground">{{ t('ai.providerConfig.emptyModels') }}</p>
               </div>
 
               <div v-else class="pl-8 space-y-2">
@@ -792,19 +814,19 @@ const canSave = computed(() =>
                     <div class="flex items-center gap-1.5 mt-1.5">
                       <Badge v-if="model.capabilities.thinking" variant="outline" class="h-[18px] px-1.5 text-[9px] border-violet-500/20 text-violet-500 bg-violet-500/5">
                         <Brain class="h-2.5 w-2.5 mr-0.5" />
-                        思考
+                        {{ t('ai.providerConfig.capabilities.thinking') }}
                       </Badge>
                       <Badge v-if="model.capabilities.vision" variant="outline" class="h-[18px] px-1.5 text-[9px] border-blue-500/20 text-blue-500 bg-blue-500/5">
                         <ImageIcon class="h-2.5 w-2.5 mr-0.5" />
-                        视觉
+                        {{ t('ai.providerConfig.capabilities.vision') }}
                       </Badge>
                       <Badge v-if="model.capabilities.toolUse" variant="outline" class="h-[18px] px-1.5 text-[9px] border-green-500/20 text-green-500 bg-green-500/5">
                         <Wrench class="h-2.5 w-2.5 mr-0.5" />
-                        工具
+                        {{ t('ai.providerConfig.capabilities.tools') }}
                       </Badge>
                       <Badge v-if="model.capabilities.streaming" variant="outline" class="h-[18px] px-1.5 text-[9px] border-border/40 text-muted-foreground bg-muted/30">
                         <Zap class="h-2.5 w-2.5 mr-0.5" />
-                        流式
+                        {{ t('ai.providerConfig.capabilities.streaming') }}
                       </Badge>
                       <span class="text-[10px] text-muted-foreground/50 ml-1">{{ (model.capabilities.maxContext / 1000).toFixed(0) }}K</span>
                     </div>
@@ -828,9 +850,9 @@ const canSave = computed(() =>
             <X class="h-3 w-3" />
             <span class="truncate max-w-[280px]">{{ saveError }}</span>
           </div>
-          <Button variant="outline" size="sm" class="h-9" @click="showEditDialog = false">取消</Button>
+          <Button variant="outline" size="sm" class="h-9" @click="showEditDialog = false">{{ t('common.cancel') }}</Button>
           <Button size="sm" class="h-9 min-w-[80px]" :disabled="!canSave || saving" @click="handleSave">
-            {{ saving ? '保存中…' : '保存' }}
+            {{ saving ? t('ai.providerConfig.saving') : t('common.save') }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -840,48 +862,48 @@ const canSave = computed(() =>
     <Dialog :open="showModelDialog" @update:open="showModelDialog = $event">
       <DialogContent class="sm:max-w-[540px] gap-0 p-0">
         <DialogHeader class="px-7 pt-6 pb-5 border-b border-border/20">
-          <DialogTitle class="text-base">{{ editingModelIndex >= 0 ? '编辑模型' : '添加模型' }}</DialogTitle>
-          <DialogDescription class="text-xs mt-1.5">配置模型的 ID、能力和定价信息。</DialogDescription>
+          <DialogTitle class="text-base">{{ editingModelIndex >= 0 ? t('ai.providerConfig.dialog.editModelTitle') : t('ai.providerConfig.dialog.addModelTitle') }}</DialogTitle>
+          <DialogDescription class="text-xs mt-1.5">{{ t('ai.providerConfig.dialog.modelDescription') }}</DialogDescription>
         </DialogHeader>
 
         <div class="px-7 py-6 space-y-6">
           <!-- 基本信息 -->
           <div class="grid grid-cols-2 gap-4">
             <div class="space-y-2">
-              <Label class="text-xs">模型 ID</Label>
+              <Label class="text-xs">{{ t('ai.providerConfig.fields.modelId') }}</Label>
               <Input v-model="modelForm.id" placeholder="model-name" class="h-10 text-sm font-mono" />
             </div>
             <div class="space-y-2">
-              <Label class="text-xs">显示名称</Label>
-              <Input v-model="modelForm.name" placeholder="Model Name" class="h-10 text-sm" />
+              <Label class="text-xs">{{ t('ai.providerConfig.fields.displayName') }}</Label>
+              <Input v-model="modelForm.name" :placeholder="t('ai.providerConfig.placeholders.modelName')" class="h-10 text-sm" />
             </div>
           </div>
 
           <!-- 模型能力 -->
           <div class="space-y-3.5">
-            <Label class="text-xs font-semibold text-foreground/70">模型能力</Label>
+            <Label class="text-xs font-semibold text-foreground/70">{{ t('ai.providerConfig.sections.modelCapabilities') }}</Label>
             <div class="grid grid-cols-2 gap-x-6 gap-y-3.5">
               <label class="flex items-center gap-3 text-sm cursor-pointer">
                 <Switch v-model="modelForm.streaming" />
-                <span class="flex items-center gap-1.5"><Zap class="h-3.5 w-3.5 text-muted-foreground" /> 流式输出</span>
+                <span class="flex items-center gap-1.5"><Zap class="h-3.5 w-3.5 text-muted-foreground" /> {{ t('ai.providerConfig.capabilityToggles.streaming') }}</span>
               </label>
               <label class="flex items-center gap-3 text-sm cursor-pointer">
                 <Switch v-model="modelForm.vision" />
-                <span class="flex items-center gap-1.5"><ImageIcon class="h-3.5 w-3.5 text-muted-foreground" /> 图片输入</span>
+                <span class="flex items-center gap-1.5"><ImageIcon class="h-3.5 w-3.5 text-muted-foreground" /> {{ t('ai.providerConfig.capabilityToggles.vision') }}</span>
               </label>
               <label class="flex items-center gap-3 text-sm cursor-pointer">
                 <Switch v-model="modelForm.thinking" />
-                <span class="flex items-center gap-1.5"><Brain class="h-3.5 w-3.5 text-muted-foreground" /> 思考过程</span>
+                <span class="flex items-center gap-1.5"><Brain class="h-3.5 w-3.5 text-muted-foreground" /> {{ t('ai.providerConfig.capabilityToggles.thinking') }}</span>
               </label>
               <label class="flex items-center gap-3 text-sm cursor-pointer">
                 <Switch v-model="modelForm.toolUse" />
-                <span class="flex items-center gap-1.5"><Wrench class="h-3.5 w-3.5 text-muted-foreground" /> 工具调用</span>
+                <span class="flex items-center gap-1.5"><Wrench class="h-3.5 w-3.5 text-muted-foreground" /> {{ t('ai.providerConfig.capabilityToggles.tools') }}</span>
               </label>
             </div>
           </div>
 
           <div v-if="modelForm.thinking" class="space-y-2">
-            <Label class="text-xs">Thinking effort</Label>
+            <Label class="text-xs">{{ t('ai.providerConfig.fields.thinkingEffort') }}</Label>
             <Select
               :model-value="modelForm.thinkingEffort"
               @update:model-value="(v: unknown) => modelForm.thinkingEffort = String(v) as ThinkingEffort"
@@ -900,18 +922,18 @@ const canSave = computed(() =>
               </SelectContent>
             </Select>
             <p class="text-[11px] text-muted-foreground">
-              Anthropic adaptive thinking uses this effort level.
+              {{ t('ai.providerConfig.thinkingEffortHint') }}
             </p>
           </div>
 
           <!-- 上下文限制 -->
           <div class="grid grid-cols-2 gap-4">
             <div class="space-y-2">
-              <Label class="text-xs">最大上下文</Label>
+              <Label class="text-xs">{{ t('ai.providerConfig.fields.maxContext') }}</Label>
               <Input v-model.number="modelForm.maxContext" type="number" class="h-10 text-sm" />
             </div>
             <div class="space-y-2">
-              <Label class="text-xs">最大输出</Label>
+              <Label class="text-xs">{{ t('ai.providerConfig.fields.maxOutput') }}</Label>
               <Input v-model.number="modelForm.maxOutput" type="number" class="h-10 text-sm" />
             </div>
           </div>
@@ -920,19 +942,19 @@ const canSave = computed(() =>
           <div class="space-y-3.5">
             <label class="flex items-center gap-3 text-sm cursor-pointer">
               <Switch v-model="modelForm.pricingEnabled" />
-              启用定价计费
+              {{ t('ai.providerConfig.fields.enablePricing') }}
             </label>
             <div v-if="modelForm.pricingEnabled" class="grid grid-cols-3 gap-3 pl-8">
               <div class="space-y-2">
-                <Label class="text-[11px]">输入/百万 Token</Label>
+                <Label class="text-[11px]">{{ t('ai.providerConfig.fields.inputPer1m') }}</Label>
                 <Input v-model.number="modelForm.inputPer1m" type="number" step="0.01" class="h-9 text-sm" />
               </div>
               <div class="space-y-2">
-                <Label class="text-[11px]">输出/百万 Token</Label>
+                <Label class="text-[11px]">{{ t('ai.providerConfig.fields.outputPer1m') }}</Label>
                 <Input v-model.number="modelForm.outputPer1m" type="number" step="0.01" class="h-9 text-sm" />
               </div>
               <div class="space-y-2">
-                <Label class="text-[11px]">币种</Label>
+                <Label class="text-[11px]">{{ t('ai.providerConfig.fields.currency') }}</Label>
                 <Select
                   :model-value="modelForm.currency"
                   @update:model-value="(v: unknown) => modelForm.currency = String(v)"
@@ -951,9 +973,9 @@ const canSave = computed(() =>
         </div>
 
         <DialogFooter class="px-7 py-4 border-t border-border/20">
-          <Button variant="outline" size="sm" class="h-9" @click="showModelDialog = false">取消</Button>
+          <Button variant="outline" size="sm" class="h-9" @click="showModelDialog = false">{{ t('common.cancel') }}</Button>
           <Button size="sm" class="h-9 min-w-[80px]" :disabled="!modelForm.id.trim() || !modelForm.name.trim()" @click="saveModel">
-            {{ editingModelIndex >= 0 ? '更新' : '添加' }}
+            {{ editingModelIndex >= 0 ? t('ai.providerConfig.actions.updateModel') : t('common.add') }}
           </Button>
         </DialogFooter>
       </DialogContent>

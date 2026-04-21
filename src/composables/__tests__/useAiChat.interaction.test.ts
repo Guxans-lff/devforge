@@ -120,7 +120,14 @@ describe('useAiChat interaction behavior', () => {
     expect(aiGetSessionMock).toHaveBeenNthCalledWith(2, 'session-1', 600)
     expect(chat.historyLoadedRecords.value).toBe(600)
     expect(chat.historyTotalRecords.value).toBe(700)
+    expect(chat.historyRemainingRecords.value).toBe(100)
     expect(chat.messages.value[0]?.type).toBe('divider')
+    expect(chat.messages.value[0]?.dividerMeta).toMatchObject({
+      kind: 'history-window',
+      loadedRecords: 600,
+      totalRecords: 700,
+      remainingRecords: 100,
+    })
     expect(chat.observability.value.historyRestoreCount).toBe(chat.messages.value.length)
     expect(chat.observability.value.loadHistoryDurationMs).not.toBeNull()
   })
@@ -153,6 +160,8 @@ describe('useAiChat interaction behavior', () => {
     await Promise.resolve()
 
     const loadMorePromise = chat.loadMoreHistory()
+    const secondLoadMorePromise = chat.loadMoreHistory()
+    await secondLoadMorePromise
     expect(aiGetSessionMock).toHaveBeenCalledTimes(2)
 
     resolveWarmup?.(makeSessionDetail(600, 700, 600))
@@ -175,6 +184,25 @@ describe('useAiChat interaction behavior', () => {
     await chat.loadMoreHistory()
 
     expect(aiGetSessionMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the current history window intact when loadMoreHistory fails', async () => {
+    aiGetSessionMock
+      .mockResolvedValueOnce(makeSessionDetail(300, 700, 300))
+      .mockRejectedValueOnce(new Error('load more failed'))
+
+    const chat = useAiChat({ sessionId: ref('session-1') })
+
+    await chat.loadHistory()
+    const beforeIds = chat.messages.value.map(message => message.id)
+
+    await chat.loadMoreHistory()
+
+    expect(chat.historyLoadMorePending.value).toBe(false)
+    expect(chat.historyLoadMoreError.value).toBe('load more failed')
+    expect(chat.historyLoadedRecords.value).toBe(300)
+    expect(chat.historyTotalRecords.value).toBe(700)
+    expect(chat.messages.value.map(message => message.id)).toEqual(beforeIds)
   })
 
   it('reuses cached history for the same session window', async () => {

@@ -4,6 +4,8 @@ import { restoreMessagesFromRecords } from './chatHistoryRestore'
 
 export const HISTORY_RECENT_RECORD_LIMIT = 300
 export const HISTORY_LOAD_STEP = 300
+export const HISTORY_CACHE_TTL_MS = 5 * 60 * 1000
+export const HISTORY_CACHE_MAX_ENTRIES = 24
 
 export interface ChatHistoryWindow {
   windowSize: number
@@ -18,7 +20,12 @@ export interface LoadedChatHistory {
   truncated: boolean
 }
 
-const historyCache = new Map<string, LoadedChatHistory>()
+interface HistoryCacheEntry {
+  value: LoadedChatHistory
+  expiresAt: number
+}
+
+const historyCache = new Map<string, HistoryCacheEntry>()
 const inflightRequests = new Map<string, Promise<LoadedChatHistory>>()
 
 function cacheKey(sessionId: string, windowSize: number): string {
@@ -30,7 +37,7 @@ export async function loadChatHistoryWindow(
   windowSize: number,
 ): Promise<LoadedChatHistory> {
   const key = cacheKey(sessionId, windowSize)
-  const cached = historyCache.get(key)
+  const cached = readHistoryCache(key)
   if (cached) return cached
 
   const inflight = inflightRequests.get(key)
@@ -75,7 +82,7 @@ export async function loadChatHistoryWindow(
 
   try {
     const loaded = await request
-    historyCache.set(key, loaded)
+    writeHistoryCache(key, loaded)
     return loaded
   } finally {
     inflightRequests.delete(key)
@@ -122,6 +129,48 @@ export function getExpandedHistoryWindowSize(currentWindowSize: number): number 
   return currentWindowSize + HISTORY_LOAD_STEP
 }
 
+function readHistoryCache(key: string): LoadedChatHistory | null {
+  purgeExpiredHistoryCacheEntries()
+
+  const entry = historyCache.get(key)
+  if (!entry) return null
+
+  historyCache.delete(key)
+  historyCache.set(key, {
+    value: entry.value,
+    expiresAt: Date.now() + HISTORY_CACHE_TTL_MS,
+  })
+
+  return entry.value
+}
+
+function writeHistoryCache(key: string, value: LoadedChatHistory): void {
+  purgeExpiredHistoryCacheEntries()
+
+  if (historyCache.has(key)) {
+    historyCache.delete(key)
+  }
+
+  historyCache.set(key, {
+    value,
+    expiresAt: Date.now() + HISTORY_CACHE_TTL_MS,
+  })
+
+  while (historyCache.size > HISTORY_CACHE_MAX_ENTRIES) {
+    const oldestKey = historyCache.keys().next().value
+    if (!oldestKey) break
+    historyCache.delete(oldestKey)
+  }
+}
+
+function purgeExpiredHistoryCacheEntries(now = Date.now()): void {
+  for (const [key, entry] of historyCache.entries()) {
+    if (entry.expiresAt <= now) {
+      historyCache.delete(key)
+    }
+  }
+}
+
 function buildHistoryMessages(
   sessionId: string,
   restored: AiMessage[],
@@ -140,7 +189,12 @@ function buildHistoryMessages(
       content: '',
       timestamp: restored[0]?.timestamp ?? Date.now(),
       type: 'divider',
-      dividerText: `已加载最近 ${metadata.loadedRecords} / ${metadata.totalRecords} 条历史记录`,
+      dividerMeta: {
+        kind: 'history-window',
+        loadedRecords: metadata.loadedRecords,
+        totalRecords: metadata.totalRecords,
+        remainingRecords: Math.max(0, metadata.totalRecords - metadata.loadedRecords),
+      },
     },
     ...restored,
   ]
