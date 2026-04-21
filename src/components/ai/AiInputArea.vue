@@ -6,6 +6,7 @@
  * 支持 Shift+Enter 换行、Enter 发送、自动增高。
  */
 import { ref, computed, nextTick, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { ProviderConfig, FileAttachment } from '@/types/ai'
 import type { FileNode } from '@/types/workspace-files'
 import AtMentionPopover from './AtMentionPopover.vue'
@@ -58,7 +59,7 @@ const props = withDefaults(defineProps<{
   isStreaming: false,
   disabled: false,
   loading: false,
-  placeholder: '发送消息…',
+  placeholder: '',
   providers: () => [],
   selectedProviderId: null,
   selectedModelId: null,
@@ -83,6 +84,7 @@ const emit = defineEmits<{
   compact: []
 }>()
 
+const { t } = useI18n()
 const inputText = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>()
 const isDragOver = ref(false)
@@ -180,7 +182,10 @@ function toggleSendMode() {
   sendMode.value = sendMode.value === 'enter' ? 'cmd' : 'enter'
   localStorage.setItem(SEND_MODE_KEY, sendMode.value)
 }
-const sendHint = computed(() => sendMode.value === 'enter' ? 'Enter 发送 · Shift+Enter 换行' : 'Cmd+Enter 发送 · Enter 换行')
+const sendHint = computed(() => sendMode.value === 'enter'
+  ? t('ai.input.sendHintEnter')
+  : t('ai.input.sendHintCmd'))
+const inputPlaceholder = computed(() => props.placeholder || t('ai.input.placeholder'))
 
 /** @ 引用相关状态 */
 const showAtPopover = ref(false)
@@ -217,42 +222,42 @@ const currentModel = computed(() =>
 )
 
 /** 模式配置 */
-const CHAT_MODES = {
+const CHAT_MODES = computed(() => ({
   normal: {
-    label: '普通对话',
-    shortLabel: '普通',
-    desc: '标准问答交互',
+    label: t('ai.chat.normalChat'),
+    shortLabel: t('ai.input.modeShortNormal'),
+    desc: t('ai.chat.normalChatDesc'),
     icon: MessageSquareText,
     color: 'text-blue-500',
     bg: 'bg-blue-500/10',
   },
   plan: {
-    label: '规划模式',
-    shortLabel: '规划',
-    desc: 'AI 先分析规划，确认后执行',
+    label: t('ai.chat.planMode'),
+    shortLabel: t('ai.input.modeShortPlan'),
+    desc: t('ai.chat.planModeDesc'),
     icon: Sparkles,
     color: 'text-violet-500',
     bg: 'bg-violet-500/10',
   },
   auto: {
-    label: '全自动',
-    shortLabel: '自动',
-    desc: 'AI 自主分析、决策、执行',
+    label: t('ai.chat.autoMode'),
+    shortLabel: t('ai.input.modeShortAuto'),
+    desc: t('ai.chat.autoModeDesc'),
     icon: Zap,
     color: 'text-amber-500',
     bg: 'bg-amber-500/10',
   },
   dispatcher: {
-    label: 'Dispatcher',
-    shortLabel: '调度',
-    desc: 'AI 分解任务，编排子任务执行',
+    label: t('ai.chat.dispatcher'),
+    shortLabel: t('ai.input.modeShortDispatcher'),
+    desc: t('ai.chat.dispatcherDesc'),
     icon: Network,
     color: 'text-sky-500',
     bg: 'bg-sky-500/10',
   },
-} as const
+} as const))
 
-const currentModeConfig = computed(() => CHAT_MODES[props.chatMode])
+const currentModeConfig = computed(() => CHAT_MODES.value[props.chatMode])
 
 /**
  * 使用 mirror div 技术计算 textarea 中指定位置的光标坐标
@@ -567,7 +572,7 @@ defineExpose({ focus })
           v-if="isDragOver"
           class="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-primary/5 pointer-events-none"
         >
-          <span class="text-xs text-primary font-medium">松开以添加文件</span>
+          <span class="text-xs text-primary font-medium">{{ t('ai.input.dropFiles') }}</span>
         </div>
 
         <!-- 文件预览条 -->
@@ -576,10 +581,10 @@ defineExpose({ focus })
           @remove="emit('removeAttachment', $event)"
         />
         <!-- 文本输入 -->
-        <textarea
+          <textarea
           ref="textareaRef"
           v-model="inputText"
-          :placeholder="placeholder"
+          :placeholder="inputPlaceholder"
           :disabled="disabled"
           rows="1"
           class="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm leading-relaxed placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
@@ -601,7 +606,7 @@ defineExpose({ focus })
                 >
                   <AtSign class="h-3 w-3" />
                   <span v-if="currentModel" class="max-w-[120px] truncate">{{ currentModel.name }}</span>
-                  <span v-else>选择模型</span>
+                  <span v-else>{{ t('ai.input.selectModel') }}</span>
                   <ChevronDown class="h-3 w-3 opacity-50" />
                 </button>
               </DropdownMenuTrigger>
@@ -620,8 +625,8 @@ defineExpose({ focus })
                     <div class="flex items-center gap-2">
                       <span class="text-xs">{{ model.name }}</span>
                       <div class="flex gap-0.5">
-                        <span v-if="model.capabilities.thinking" class="text-[8px] px-1 rounded bg-violet-500/10 text-violet-500">思考</span>
-                        <span v-if="model.capabilities.vision" class="text-[8px] px-1 rounded bg-blue-500/10 text-blue-500">视觉</span>
+                        <span v-if="model.capabilities.thinking" class="text-[8px] px-1 rounded bg-violet-500/10 text-violet-500">{{ t('ai.input.capabilityThinking') }}</span>
+                        <span v-if="model.capabilities.vision" class="text-[8px] px-1 rounded bg-blue-500/10 text-blue-500">{{ t('ai.input.capabilityVision') }}</span>
                       </div>
                     </div>
                     <span v-if="selectedModelId === model.id && selectedProviderId === provider.id" class="text-[10px] text-primary">
@@ -632,7 +637,7 @@ defineExpose({ focus })
                 </template>
                 <DropdownMenuItem class="text-xs text-muted-foreground" @click="emit('openConfig')">
                   <Settings class="h-3 w-3 mr-2" />
-                  管理服务商…
+                  {{ t('ai.messages.providerSettings') }}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -675,7 +680,7 @@ defineExpose({ focus })
             <button
               class="flex items-center justify-center h-7 w-7 rounded-lg text-muted-foreground/60 hover:text-foreground hover:bg-muted/50 transition-colors"
               :disabled="disabled"
-              title="添加文件"
+              :title="t('ai.input.addFile')"
               @click="emit('selectFiles')"
             >
               <Paperclip class="h-3.5 w-3.5" />
@@ -685,7 +690,7 @@ defineExpose({ focus })
             <div
               v-if="contextUsagePercent > 0"
               class="flex items-center justify-center h-7 w-7 shrink-0"
-              :title="`上下文已用 ${Math.round(contextUsagePercent)}%`"
+              :title="t('ai.input.contextUsage', { percent: Math.round(contextUsagePercent) })"
             >
               <svg width="18" height="18" viewBox="0 0 18 18" class="rotate-[-90deg]">
                 <circle cx="9" cy="9" r="7" fill="none" stroke-width="2"
@@ -705,7 +710,7 @@ defineExpose({ focus })
               class="flex items-center justify-center h-7 w-7 rounded-lg transition-colors"
               :class="inputText.trim() ? 'text-violet-500/70 hover:text-violet-500 hover:bg-violet-500/10' : 'text-muted-foreground/25 cursor-not-allowed'"
               :disabled="!inputText.trim() || disabled"
-              title="优化提示词"
+              :title="t('ai.input.enhancePrompt')"
               @click="openEnhancer"
             >
               <Sparkles class="h-3.5 w-3.5" />
@@ -758,11 +763,13 @@ defineExpose({ focus })
     <!-- 底部提示 -->
     <div class="flex items-center justify-between px-4 pb-2">
       <p class="text-[10px] text-muted-foreground/40">
-        {{ sendHint }} · AI 回复仅供参考
+        {{ sendHint }} · {{ t('ai.input.replyDisclaimer') }}
       </p>
       <button
         class="text-[10px] text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors px-1.5 py-0.5 rounded hover:bg-muted/30"
-        :title="`切换发送方式（当前：${sendMode === 'enter' ? 'Enter 发送' : 'Cmd+Enter 发送'}）`"
+        :title="t('ai.input.toggleSendMode', {
+          mode: sendMode === 'enter' ? t('ai.input.sendModeEnter') : t('ai.input.sendModeCmd'),
+        })"
         @click="toggleSendMode"
       >
         ⌨ {{ sendMode === 'enter' ? 'Enter' : '⌘↵' }}

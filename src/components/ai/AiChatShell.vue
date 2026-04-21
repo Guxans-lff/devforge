@@ -140,6 +140,7 @@ const emit = defineEmits<{
   (e: 'selectSession', id: string): void
   (e: 'createSession'): void
   (e: 'deleteSession', id: string): void
+  (e: 'preloadSession', id: string): void
   (e: 'filePickerConfirm', paths: string[]): void
   (e: 'exitImmersive'): void
 }>()
@@ -374,6 +375,7 @@ defineExpose({
       @select="emit('selectSession', $event)"
       @create="emit('createSession')"
       @delete="emit('deleteSession', $event)"
+      @preload="emit('preloadSession', $event)"
     />
 
     <WorkspaceFilePicker

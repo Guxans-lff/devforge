@@ -5,6 +5,7 @@
  * 显示所有对话会话，支持搜索、新建、切换、删除。
  */
 import { ref, computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { AiSession } from '@/types/ai'
 import { Plus, MessageSquare, Trash2, Search } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -22,6 +23,7 @@ const emit = defineEmits<{
   delete: [id: string]
 }>()
 
+const { t } = useI18n()
 const searchQuery = ref('')
 
 const filteredSessions = computed(() => {
@@ -36,12 +38,12 @@ const filteredSessions = computed(() => {
 function formatRelativeTime(ts: number): string {
   const diff = Date.now() - ts
   const minutes = Math.floor(diff / 60000)
-  if (minutes < 1) return '刚刚'
-  if (minutes < 60) return `${minutes}分钟前`
+  if (minutes < 1) return t('ai.sessions.justNow')
+  if (minutes < 60) return t('ai.sessions.minutesAgo', { count: minutes })
   const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}小时前`
+  if (hours < 24) return t('ai.sessions.hoursAgo', { count: hours })
   const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}天前`
+  if (days < 30) return t('ai.sessions.daysAgo', { count: days })
   return new Date(ts).toLocaleDateString('zh-CN')
 }
 </script>
@@ -54,7 +56,7 @@ function formatRelativeTime(ts: number): string {
         <Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
           v-model="searchQuery"
-          placeholder="搜索会话…"
+          :placeholder="t('ai.sessions.searchPlaceholder')"
           class="h-8 pl-8 text-xs"
         />
       </div>
@@ -62,7 +64,7 @@ function formatRelativeTime(ts: number): string {
         variant="ghost"
         size="icon"
         class="h-8 w-8 shrink-0"
-        title="新建对话"
+        :title="t('ai.sessions.newChat')"
         @click="emit('create')"
       >
         <Plus class="h-4 w-4" />
@@ -79,7 +81,7 @@ function formatRelativeTime(ts: number): string {
         >
           <MessageSquare class="h-8 w-8 text-muted-foreground/30 mb-2" />
           <p class="text-xs text-muted-foreground">
-            {{ searchQuery ? '未找到匹配会话' : '暂无对话' }}
+            {{ searchQuery ? t('ai.sessions.emptySearch') : t('ai.sessions.emptyList') }}
           </p>
           <Button
             v-if="!searchQuery"
@@ -89,7 +91,7 @@ function formatRelativeTime(ts: number): string {
             @click="emit('create')"
           >
             <Plus class="mr-1 h-3 w-3" />
-            开始新对话
+            {{ t('ai.sessions.startNewChat') }}
           </Button>
         </div>
 
@@ -112,7 +114,7 @@ function formatRelativeTime(ts: number): string {
           <!-- 删除按钮 -->
           <button
             class="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/10 hover:text-destructive transition-all"
-            title="删除会话"
+            :title="t('ai.sessions.deleteSession')"
             @click.stop="emit('delete', session.id)"
           >
             <Trash2 class="h-3 w-3" />

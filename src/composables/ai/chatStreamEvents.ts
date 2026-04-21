@@ -163,6 +163,7 @@ export function handleStreamEvent({
       if (existing) {
         existing.arguments += event.arguments_delta
         existing.streamingChars = existing.arguments.length
+        existing.parsedArgs = tryParseJson(existing.arguments)
       }
       break
     }

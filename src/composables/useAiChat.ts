@@ -8,6 +8,7 @@ import {
   HISTORY_RECENT_RECORD_LIMIT,
   invalidateChatHistoryCache,
   loadChatHistoryWindow,
+  preloadChatHistoryWindow,
 } from '@/composables/ai/chatHistoryLoad'
 import { finalizeSend } from '@/composables/ai/chatSendFinalize'
 import { prepareSendContext } from '@/composables/ai/chatSendPreparation'
@@ -161,6 +162,14 @@ export function useAiChat(options: UseAiChatOptions) {
     planApproved.value = false
     awaitingPlanApproval.value = false
     pendingPlan.value = ''
+  }
+
+  function resetSessionEphemeralState(): void {
+    pendingPlan.value = ''
+    awaitingPlanApproval.value = false
+    planApproved.value = false
+    currentPhase.value = null
+    spawnedTasks.value = []
   }
 
   function normalizeWorkspacePath(targetPath: string): string {
@@ -347,7 +356,15 @@ export function useAiChat(options: UseAiChatOptions) {
   }
 
   function parseSpawnedTasks(text: string): void {
-    const tasks = collectSpawnedTasks(text)
+    let sourceMessageId: string | undefined
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const message = messages.value[i]
+      if (message?.role === 'assistant') {
+        sourceMessageId = message.id
+        break
+      }
+    }
+    const tasks = collectSpawnedTasks(text, { sourceMessageId })
     if (tasks.length === 0) return
     spawnedTasks.value = [...spawnedTasks.value, ...tasks]
   }
@@ -432,8 +449,9 @@ export function useAiChat(options: UseAiChatOptions) {
       historyWindowSize.value = result.window.windowSize
       historyLoadedRecords.value = result.window.loadedRecords
       historyTotalRecords.value = result.window.totalRecords
-      if (result.session?.workDir) {
-        workDir.value = result.session.workDir
+      if (!options?.windowSize) {
+        resetSessionEphemeralState()
+        workDir.value = result.session?.workDir ?? ''
       }
 
       const currentIds = messages.value.map(message => message.id).join('|')
@@ -444,12 +462,22 @@ export function useAiChat(options: UseAiChatOptions) {
       }
       lastLoadedHistoryKey = requestKey
       observability.markHistoryLoadComplete(result.messages.length)
+      scheduleHistoryPreload(sid, result.window)
     } catch (err) {
       error.value = ensureErrorString(err)
       log.error('load_history_failed', { sessionId: sid }, err)
     } finally {
       isLoading.value = false
     }
+  }
+
+  function scheduleHistoryPreload(sid: string, window: { loadedRecords: number; totalRecords: number; windowSize: number }): void {
+    if (!canExpandHistoryWindow(window)) return
+    const nextWindowSize = Math.min(
+      getExpandedHistoryWindowSize(window.windowSize),
+      window.totalRecords,
+    )
+    void preloadChatHistoryWindow(sid, nextWindowSize)
   }
 
   async function send(
@@ -615,7 +643,6 @@ export function useAiChat(options: UseAiChatOptions) {
     historyWindowSize.value = HISTORY_RECENT_RECORD_LIMIT
     lastLoadedHistoryKey = ''
     invalidateChatHistoryCache(sessionIdRef.value)
-    currentPhase.value = null
     streamState.streamingMessageId = ''
     streamingMessageIndex = -1
     streamState.pendingTextDelta = ''
@@ -628,13 +655,23 @@ export function useAiChat(options: UseAiChatOptions) {
     toolFailureCounter.clear()
     autoCompact.resetCircuitBreaker()
     observability.reset()
+    resetSessionEphemeralState()
   }
 
   async function loadMoreHistory(): Promise<void> {
     if (!canLoadMoreHistory.value) return
+    const expandedWindowSize = getExpandedHistoryWindowSize(historyWindowSize.value)
     await loadHistory(sessionIdRef.value, {
-      windowSize: getExpandedHistoryWindowSize(historyWindowSize.value),
+      windowSize: historyTotalRecords.value > 0
+        ? Math.min(expandedWindowSize, historyTotalRecords.value)
+        : expandedWindowSize,
     })
+  }
+
+  async function preloadHistory(overrideSessionId?: string, options?: { windowSize?: number }): Promise<void> {
+    const sid = overrideSessionId ?? sessionIdRef.value
+    if (!sid) return
+    await preloadChatHistoryWindow(sid, options?.windowSize ?? HISTORY_RECENT_RECORD_LIMIT)
   }
 
   function scrollToBottom(): void {
@@ -692,6 +729,7 @@ export function useAiChat(options: UseAiChatOptions) {
     spawnedTasks,
     loadHistory,
     loadMoreHistory,
+    preloadHistory,
     send,
     abort,
     regenerate,

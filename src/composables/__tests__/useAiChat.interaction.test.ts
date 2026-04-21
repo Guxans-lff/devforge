@@ -45,10 +45,12 @@ function makeSessionDetail(
   loadedRecords: number,
   totalRecords: number,
   messageLimit: number,
+  options?: { sessionId?: string; workDir?: string },
 ): AiSessionDetail {
+  const sessionId = options?.sessionId ?? 'session-1'
   return {
     session: {
-      id: 'session-1',
+      id: sessionId,
       title: 'Session',
       providerId: 'provider-1',
       model: 'model-1',
@@ -57,11 +59,11 @@ function makeSessionDetail(
       estimatedCost: 0,
       createdAt: 1,
       updatedAt: 2,
-      workDir: 'D:/workspace',
+      workDir: options?.workDir,
     },
     messages: Array.from({ length: loadedRecords }, (_, index) => ({
       id: `record-${messageLimit}-${index}`,
-      sessionId: 'session-1',
+      sessionId,
       role: index % 2 === 0 ? 'user' : 'assistant',
       content: `message-${index}`,
       contentType: 'text',
@@ -123,6 +125,45 @@ describe('useAiChat interaction behavior', () => {
     expect(chat.observability.value.loadHistoryDurationMs).not.toBeNull()
   })
 
+  it('preloads the next history window after restoring a truncated session', async () => {
+    aiGetSessionMock
+      .mockResolvedValueOnce(makeSessionDetail(300, 700, 300))
+      .mockResolvedValueOnce(makeSessionDetail(600, 700, 600))
+
+    const chat = useAiChat({ sessionId: ref('session-1') })
+
+    await chat.loadHistory()
+    await Promise.resolve()
+
+    expect(aiGetSessionMock).toHaveBeenNthCalledWith(1, 'session-1', 300)
+    expect(aiGetSessionMock).toHaveBeenNthCalledWith(2, 'session-1', 600)
+  })
+
+  it('reuses the inflight preloaded history request when loadMoreHistory is triggered', async () => {
+    let resolveWarmup: ((value: AiSessionDetail) => void) | null = null
+    aiGetSessionMock
+      .mockResolvedValueOnce(makeSessionDetail(300, 700, 300))
+      .mockImplementationOnce(() => new Promise<AiSessionDetail>((resolve) => {
+        resolveWarmup = resolve
+      }))
+
+    const chat = useAiChat({ sessionId: ref('session-1') })
+
+    await chat.loadHistory()
+    await Promise.resolve()
+
+    const loadMorePromise = chat.loadMoreHistory()
+    expect(aiGetSessionMock).toHaveBeenCalledTimes(2)
+
+    resolveWarmup?.(makeSessionDetail(600, 700, 600))
+    await loadMorePromise
+
+    expect(aiGetSessionMock).toHaveBeenCalledTimes(3)
+    expect(aiGetSessionMock).toHaveBeenLastCalledWith('session-1', 700)
+    expect(chat.historyLoadedRecords.value).toBe(600)
+    expect(chat.messages.value[0]?.type).toBe('divider')
+  })
+
   it('does not load more history when the current window is complete', async () => {
     aiGetSessionMock.mockResolvedValueOnce(makeSessionDetail(120, 120, 300))
 
@@ -146,6 +187,61 @@ describe('useAiChat interaction behavior', () => {
 
     expect(aiGetSessionMock).toHaveBeenCalledTimes(1)
     expect(chat.messages.value).toHaveLength(120)
+  })
+
+  it('preloads history for another session without mutating current chat state', async () => {
+    aiGetSessionMock.mockResolvedValueOnce(makeSessionDetail(120, 120, 300, { sessionId: 'session-2' }))
+
+    const chat = useAiChat({ sessionId: ref('session-1') })
+    chat.messages.value = [{
+      id: 'existing',
+      role: 'assistant',
+      content: 'keep current state',
+      timestamp: 1,
+    }]
+
+    await chat.preloadHistory('session-2')
+
+    expect(aiGetSessionMock).toHaveBeenCalledWith('session-2', 300)
+    expect(chat.messages.value).toEqual([{
+      id: 'existing',
+      role: 'assistant',
+      content: 'keep current state',
+      timestamp: 1,
+    }])
+  })
+
+  it('clears session-scoped runtime state when restoring another session', async () => {
+    aiGetSessionMock
+      .mockResolvedValueOnce(makeSessionDetail(2, 2, 300, { sessionId: 'session-1', workDir: 'D:/workspace-a' }))
+      .mockResolvedValueOnce(makeSessionDetail(1, 1, 300, { sessionId: 'session-2', workDir: undefined }))
+
+    const sessionId = ref('session-1')
+    const chat = useAiChat({ sessionId })
+
+    await chat.loadHistory()
+    expect(chat.workDir.value).toBe('D:/workspace-a')
+
+    chat.planApproved.value = true
+    chat.pendingPlan.value = 'old plan'
+    chat.awaitingPlanApproval.value = true
+    chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: 'old task',
+      status: 'pending',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+
+    sessionId.value = 'session-2'
+    await chat.loadHistory('session-2')
+
+    expect(chat.workDir.value).toBe('')
+    expect(chat.planApproved.value).toBe(false)
+    expect(chat.pendingPlan.value).toBe('')
+    expect(chat.awaitingPlanApproval.value).toBe(false)
+    expect(chat.spawnedTasks.value).toEqual([])
+    expect(chat.messages.value).toHaveLength(1)
   })
 
   it('scrollToBottom uses the shared scroll container ref', async () => {

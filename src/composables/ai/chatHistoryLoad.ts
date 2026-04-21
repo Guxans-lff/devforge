@@ -82,6 +82,19 @@ export async function loadChatHistoryWindow(
   }
 }
 
+export async function preloadChatHistoryWindow(
+  sessionId: string,
+  windowSize: number,
+): Promise<void> {
+  if (!sessionId || windowSize <= 0) return
+
+  try {
+    await loadChatHistoryWindow(sessionId, windowSize)
+  } catch {
+    // Best-effort warmup: ignore cache preloading failures.
+  }
+}
+
 export function invalidateChatHistoryCache(sessionId?: string): void {
   if (!sessionId) {
     historyCache.clear()

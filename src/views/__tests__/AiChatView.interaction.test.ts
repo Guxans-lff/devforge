@@ -1,5 +1,5 @@
 import { mount, flushPromises } from '@vue/test-utils'
-import { computed, defineComponent, h, nextTick, ref } from 'vue'
+import { computed, defineComponent, h, nextTick, reactive, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiMessage, ModelConfig, ProviderConfig } from '@/types/ai'
 import AiChatView from '@/views/AiChatView.vue'
@@ -103,6 +103,30 @@ const AiMessageListVirtualStub = defineComponent({
   },
 })
 
+const AiSessionDrawerStub = defineComponent({
+  name: 'AiSessionDrawer',
+  emits: ['select', 'create', 'delete', 'preload', 'update:open'],
+  setup(_props, { emit }) {
+    return () => h('div', { class: 'ai-session-drawer-stub' }, [
+      h('button', { class: 'select-session', onClick: () => emit('select', 'session-2') }, 'select-session'),
+      h('button', { class: 'preload-session', onMouseenter: () => emit('preload', 'session-2') }, 'preload-session'),
+      h('button', { class: 'create-session', onClick: () => emit('create') }, 'create-session'),
+    ])
+  },
+})
+
+const AiSpawnedTasksPanelStub = defineComponent({
+  name: 'AiSpawnedTasksPanel',
+  emits: ['run', 'retry', 'open', 'complete'],
+  setup(_props, { emit }) {
+    return () => h('div', { class: 'ai-spawned-tasks-panel-stub' }, [
+      h('button', { class: 'run-task', onClick: () => emit('run', 'task-1') }, 'run-task'),
+      h('button', { class: 'open-task', onClick: () => emit('open', 'task-1') }, 'open-task'),
+      h('button', { class: 'complete-task', onClick: () => emit('complete', 'task-1') }, 'complete-task'),
+    ])
+  },
+})
+
 const GenericStub = defineComponent({
   name: 'GenericStub',
   setup(_props, { slots }) {
@@ -202,6 +226,7 @@ function createChatMock(messages: AiMessage[] = []) {
     planApproved: ref(false),
     loadHistory: vi.fn().mockResolvedValue(undefined),
     loadMoreHistory: vi.fn().mockResolvedValue(undefined),
+    preloadHistory: vi.fn().mockResolvedValue(undefined),
     send: vi.fn().mockResolvedValue(undefined),
     abort: vi.fn().mockResolvedValue(undefined),
     regenerate: vi.fn().mockResolvedValue(undefined),
@@ -224,7 +249,7 @@ function mountView() {
         AiMessageListVirtual: AiMessageListVirtualStub,
         AiUsageBadge: true,
         AiProviderConfig: true,
-        AiSessionDrawer: true,
+        AiSessionDrawer: AiSessionDrawerStub,
         AiMemoryDrawer: true,
         AiCompactBanner: true,
         AiDiagnosticsPanel: defineComponent({
@@ -235,7 +260,7 @@ function mountView() {
         }),
         AiPlanGateBar: true,
         AiPhaseBar: true,
-        AiSpawnedTasksPanel: true,
+        AiSpawnedTasksPanel: AiSpawnedTasksPanelStub,
         WorkspaceFilePicker: true,
         Button: GenericStub,
         Tooltip: GenericStub,
@@ -271,7 +296,7 @@ describe('AiChatView interaction', () => {
     mocks.state.aiStore = {
       providers: [provider],
       defaultProvider: provider,
-      sessions: [],
+      sessions: [{ id: 'session-2', title: 'Session 2' }],
       activeSessionId: null,
       currentWorkspaceConfig: null,
       init: vi.fn().mockResolvedValue(undefined),
@@ -281,7 +306,7 @@ describe('AiChatView interaction', () => {
       removeSession: vi.fn().mockResolvedValue(undefined),
       setActiveSession: vi.fn(),
     }
-    mocks.state.workspaceStore = {
+    mocks.state.workspaceStore = reactive({
       activeTabId: 'ai-tab-1',
       tabs: [
         {
@@ -297,7 +322,7 @@ describe('AiChatView interaction', () => {
       updateTabMeta: vi.fn(),
       addTab: vi.fn(),
       setActiveTab: vi.fn(),
-    }
+    })
     mocks.state.workspaceFilesStore = {
       roots: [],
       activeEditor: null,
@@ -382,6 +407,117 @@ describe('AiChatView interaction', () => {
     await wrapper.find('.emit-history').trigger('click')
 
     expect(mocks.state.chat.loadMoreHistory).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads history once when selecting another session', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    mocks.state.chat.loadHistory.mockClear()
+
+    wrapper.findComponent(AiSessionDrawerStub).vm.$emit('select', 'session-2')
+    await flushPromises()
+    await new Promise(resolve => setTimeout(resolve, 80))
+
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenCalledWith('ai-tab-1', { sessionId: 'session-2' })
+    expect(mocks.state.aiStore.setActiveSession).toHaveBeenCalledWith('session-2')
+    expect(mocks.state.chat.loadHistory).toHaveBeenCalledTimes(1)
+    expect(mocks.state.chat.loadHistory).toHaveBeenCalledWith('session-2')
+  })
+
+  it('preloads a session when the session drawer requests it', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.preload-session').trigger('mouseenter')
+
+    expect(mocks.state.chat.preloadHistory).toHaveBeenCalledWith('session-2')
+  })
+
+  it('dispatches spawned tasks into tabs and marks them complete explicitly', async () => {
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: 'inspect scheduler',
+      status: 'pending',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.run-task').trigger('click')
+
+    expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.stringContaining('ai-task-task-1-'),
+      type: 'ai-chat',
+      title: '[Task] inspect scheduler',
+      meta: expect.objectContaining({
+        initialMessage: 'inspect scheduler',
+        sourceTaskId: 'task-1',
+      }),
+    }))
+    expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({
+      status: 'running',
+      taskTabId: expect.stringContaining('ai-task-task-1-'),
+      taskSessionId: expect.stringContaining('session-task-task-1-'),
+    })
+
+    const taskTabId = mocks.state.chat.spawnedTasks.value[0].taskTabId
+    await wrapper.find('.open-task').trigger('click')
+    expect(mocks.state.workspaceStore.setActiveTab).toHaveBeenCalledWith(taskTabId)
+
+    await wrapper.find('.complete-task').trigger('click')
+    expect(mocks.state.chat.spawnedTasks.value[0].status).toBe('done')
+    expect(mocks.state.chat.spawnedTasks.value[0].durationMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('marks running spawned tasks as closed when their task tab disappears', async () => {
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: 'inspect scheduler',
+      status: 'running',
+      createdAt: 1000,
+      startedAt: 1200,
+      taskTabId: 'ai-task-task-1',
+      taskSessionId: 'session-task-task-1',
+      retryCount: 0,
+      lastSummary: 'Collected partial scheduler info',
+    }]
+    mocks.state.workspaceStore.tabs = [
+      {
+        id: 'ai-tab-1',
+        type: 'ai-chat',
+        title: 'Chat Tab',
+        closable: true,
+        meta: { sessionId: 'session-1' },
+      },
+      {
+        id: 'ai-task-task-1',
+        type: 'ai-chat',
+        title: '[Task] inspect scheduler',
+        closable: true,
+        meta: {
+          sessionId: 'session-task-task-1',
+          sourceTaskId: 'task-1',
+          taskStatus: 'running',
+          taskSummary: 'Collected partial scheduler info',
+        },
+      },
+    ]
+
+    mountView()
+    await flushPromises()
+
+    mocks.state.workspaceStore.tabs = mocks.state.workspaceStore.tabs.filter((tab: any) => tab.id !== 'ai-task-task-1')
+    await nextTick()
+    await flushPromises()
+
+    expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({
+      status: 'error',
+      lastError: 'ai.tasks.taskClosed',
+      lastSummary: 'Collected partial scheduler info',
+    })
   })
 
   it('forwards the shared message list continue event to chat.regenerate', async () => {

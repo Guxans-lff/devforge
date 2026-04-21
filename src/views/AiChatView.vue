@@ -15,6 +15,13 @@ import { useSettingsStore } from '@/stores/settings'
 import { useAiChat } from '@/composables/useAiChat'
 import { useAiChatViewState } from '@/composables/useAiChatViewState'
 import { useFileAttachment } from '@/composables/useFileAttachment'
+import {
+  markSpawnedTaskClosed,
+  markSpawnedTaskDone,
+  markSpawnedTaskRunning,
+  resetSpawnedTaskForRetry,
+  syncSpawnedTaskFromTabMeta,
+} from '@/composables/ai/chatSideEffects'
 import { setActiveSessionId } from '@/composables/useToolApproval'
 import { getCredential } from '@/api/connection'
 import type { AiMessage } from '@/types/ai'
@@ -38,6 +45,8 @@ interface MessageGroup {
 }
 
 const { t } = useI18n()
+const defaultChatTitle = computed(() => t('ai.messages.title'))
+const newChatTitle = computed(() => t('ai.messages.primaryActionStandalone'))
 
 const CHAT_MODE_CONFIG: Record<ChatMode, {
   label: string
@@ -95,12 +104,16 @@ const scrollContainer = computed(() => chatShellRef.value?.scrollContainer ?? nu
 
 const ownTabId = workspace.activeTabId
 const ownTab = workspace.tabs.find(tab => tab.id === ownTabId)
+const sourceTaskId = typeof ownTab?.meta?.sourceTaskId === 'string'
+  ? ownTab.meta.sourceTaskId
+  : null
 
 const currentSessionId = ref<string>(
   (ownTab?.meta?.sessionId as string | undefined)
     ?? localStorage.getItem(LAST_SESSION_KEY)
     ?? `session-${crypto.randomUUID()}`,
 )
+const pendingSessionLoadId = ref<string | null>(null)
 
 watch(
   () => workspace.tabs.find(tab => tab.id === ownTabId)?.meta?.sessionId,
@@ -114,6 +127,16 @@ watch(
 const chat = useAiChat({
   sessionId: currentSessionId,
   scrollContainer,
+})
+
+const latestAssistantSummary = computed(() => {
+  for (let index = chat.messages.value.length - 1; index >= 0; index -= 1) {
+    const message = chat.messages.value[index]
+    if (message?.role === 'assistant' && message.content.trim()) {
+      return message.content.slice(0, 120)
+    }
+  }
+  return undefined
 })
 
 const {
@@ -163,12 +186,71 @@ watch(currentSessionId, (sessionId, oldSessionId) => {
     if (watchLoadTimer) clearTimeout(watchLoadTimer)
     watchLoadTimer = setTimeout(() => {
       watchLoadTimer = null
+      if (pendingSessionLoadId.value === sessionId) {
+        pendingSessionLoadId.value = null
+        return
+      }
       chat.loadHistory(sessionId).catch((error) => {
         console.warn('[AiChatView] watch loadHistory failed:', error)
       })
     }, 50)
   }
 }, { immediate: true })
+
+watch(
+  () => ({
+    taskStatus: sourceTaskId
+      ? chat.error.value
+        ? 'error'
+        : chat.isStreaming.value || chat.isLoading.value
+          ? 'running'
+          : chat.messages.value.some(message => message.role === 'assistant' && message.content.trim())
+            ? 'done'
+            : 'running'
+      : null,
+    taskError: chat.error.value,
+    taskSummary: latestAssistantSummary.value,
+  }),
+  ({ taskStatus, taskError, taskSummary }) => {
+    if (!sourceTaskId || !taskStatus) return
+    workspace.updateTabMeta(ownTabId, {
+      taskStatus,
+      taskError: taskError ?? undefined,
+      taskSummary: taskSummary ?? undefined,
+    })
+  },
+  { deep: true },
+)
+
+watch(
+  () => workspace.tabs.map(tab => ({
+    id: tab.id,
+    taskStatus: tab.meta?.taskStatus,
+    taskError: tab.meta?.taskError,
+    taskSummary: tab.meta?.taskSummary,
+  })),
+  (taskTabs) => {
+    for (const task of chat.spawnedTasks.value) {
+      if (task.status !== 'running' || !task.taskTabId) continue
+
+      const index = chat.spawnedTasks.value.findIndex(item => item.id === task.id)
+      if (index === -1) continue
+
+      const tab = taskTabs.find(item => item.id === task.taskTabId)
+      if (!tab) {
+        chat.spawnedTasks.value[index] = markSpawnedTaskClosed(task, t('ai.tasks.taskClosed'))
+        continue
+      }
+
+      chat.spawnedTasks.value[index] = syncSpawnedTaskFromTabMeta(task, {
+        taskStatus: tab.taskStatus,
+        taskError: tab.taskError || t('ai.tasks.taskFailed'),
+        taskSummary: tab.taskSummary,
+      })
+    }
+  },
+  { deep: true, immediate: true },
+)
 
 const groupedMessages = computed<MessageGroup[]>(() => {
   const result: MessageGroup[] = []
@@ -226,7 +308,7 @@ onMounted(async () => {
   try {
     await store.init()
   } catch (error) {
-    chat.error.value = 'Initialization failed. Please refresh and try again.'
+    chat.error.value = t('ai.messages.initFailed')
     console.error('[AiChatView] init failed:', error)
     return
   }
@@ -299,7 +381,7 @@ async function doSend(
   await sendMessageNow(content, attachments, (cleanContent) => {
     const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
     if (!tab) return
-    if (tab.title !== 'AI Chat' && tab.title !== 'AI 对话') return
+    if (!isDefaultAiTabTitle(tab.title)) return
     if (!cleanContent.trim()) return
 
     const meaningful = cleanContent.trim().replace(/^[A-Za-z]:\\[^\s]*/g, '').trim() || cleanContent.trim()
@@ -313,7 +395,7 @@ async function handlePlanApprove(): Promise<void> {
 
   const apiKey = await getCredential(`ai-provider-${currentProvider.value.id}`) ?? ''
   if (!apiKey) {
-    chat.error.value = 'API key is not configured.'
+    chat.error.value = t('ai.messages.apiKeyNotConfigured')
     return
   }
 
@@ -337,41 +419,53 @@ async function handleSpawnRun(taskId: string): Promise<void> {
   const task = chat.spawnedTasks.value.find(item => item.id === taskId)
   if (!task) return
 
+  const tabId = task.taskTabId ?? `ai-task-${task.id}-${Date.now()}`
+  const taskSessionId = task.taskSessionId ?? `session-task-${task.id}-${Date.now()}`
   const taskIndex = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
   if (taskIndex !== -1) {
-    chat.spawnedTasks.value[taskIndex] = {
-      ...chat.spawnedTasks.value[taskIndex]!,
-      status: 'running',
-    }
+    chat.spawnedTasks.value[taskIndex] = markSpawnedTaskRunning(chat.spawnedTasks.value[taskIndex]!, {
+      taskTabId: tabId,
+      taskSessionId,
+    })
   }
 
   workspace.addTab({
-    id: `ai-chat-${Date.now()}`,
+    id: tabId,
     type: 'ai-chat',
     title: `[Task] ${task.description.slice(0, 20)}`,
     closable: true,
     meta: {
-      sessionId: `session-${Date.now()}`,
+      sessionId: taskSessionId,
       initialMessage: task.description,
+      sourceTaskId: task.id,
     },
   })
+}
 
-  setTimeout(() => {
-    const index = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
-    if (index !== -1) {
-      chat.spawnedTasks.value[index] = {
-        ...chat.spawnedTasks.value[index]!,
-        status: 'done',
-      }
-    }
-  }, 500)
+function handleSpawnRetry(taskId: string): void {
+  const index = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
+  if (index === -1) return
+  chat.spawnedTasks.value[index] = resetSpawnedTaskForRetry(chat.spawnedTasks.value[index]!)
+  void handleSpawnRun(taskId)
+}
+
+function handleSpawnOpen(taskId: string): void {
+  const task = chat.spawnedTasks.value.find(item => item.id === taskId)
+  if (!task?.taskTabId) return
+  workspace.setActiveTab(task.taskTabId)
+}
+
+function handleSpawnComplete(taskId: string): void {
+  const index = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
+  if (index === -1) return
+  chat.spawnedTasks.value[index] = markSpawnedTaskDone(chat.spawnedTasks.value[index]!)
 }
 
 function handleNewAiTab(): void {
   workspace.addTab({
     id: `ai-chat-${Date.now()}`,
     type: 'ai-chat',
-    title: 'AI Chat',
+    title: defaultChatTitle.value,
     closable: true,
     meta: { sessionId: `session-${Date.now()}` },
   })
@@ -389,7 +483,7 @@ function handleModelChange(newModelId: string): void {
     id: `divider-${Date.now()}`,
     role: 'system',
     type: 'divider',
-    dividerText: `Model changed · ${modelLabel}`,
+    dividerText: t('ai.messages.modelChanged', { modelLabel }),
     content: '',
     timestamp: Date.now(),
   })
@@ -400,13 +494,13 @@ async function handleCompact(): Promise<void> {
 
   const apiKey = await getCredential(`ai-provider-${currentProvider.value.id}`) ?? ''
   if (!apiKey) {
-    chat.error.value = 'API key is not configured.'
+    chat.error.value = t('ai.messages.apiKeyNotConfigured')
     return
   }
 
   const compacted = await chat.manualCompact(currentProvider.value, currentModel.value, apiKey)
   if (!compacted) {
-    chat.error.value = 'Compaction failed: not enough messages or the model is unavailable.'
+    chat.error.value = t('ai.messages.compactionFailed')
     return
   }
 
@@ -418,28 +512,18 @@ function handleCreateSession(): void {
   const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
   if (tab) {
     workspace.updateTabMeta(tab.id, { sessionId })
-    workspace.updateTabTitle(tab.id, 'AI Chat')
+    workspace.updateTabTitle(tab.id, defaultChatTitle.value)
   }
-  currentSessionId.value = sessionId
-  store.setActiveSession(sessionId)
   chat.clearMessages()
-  currentView.value = 'chat'
+  void switchSession(sessionId, { loadHistory: false })
 }
 
 async function handleSelectSession(id: string): Promise<void> {
-  const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
-  if (tab) {
-    workspace.updateTabMeta(tab.id, { sessionId: id })
-  }
+  await switchSession(id, { persistToTab: true, loadHistory: true })
+}
 
-  currentSessionId.value = id
-  store.setActiveSession(id)
-  currentView.value = 'chat'
-  await chat.loadHistory(id)
-
-  if (chat.workDir.value) {
-    await memoryStore.setWorkspace(chat.workDir.value)
-  }
+function handlePreloadSession(id: string): void {
+  void chat.preloadHistory(id)
 }
 
 async function handleDeleteSession(id: string): Promise<void> {
@@ -493,7 +577,7 @@ async function persistWorkDir(dir: string): Promise<void> {
 
   await store.saveSession({
     id: sessionId,
-    title: 'New Chat',
+    title: newChatTitle.value,
     providerId: currentProvider.value.id,
     model: currentModel.value.id,
     systemPrompt: systemPrompt.value,
@@ -506,6 +590,45 @@ async function persistWorkDir(dir: string): Promise<void> {
   }).catch((error) => {
     console.warn('[AI] failed to persist work directory:', error)
   })
+}
+
+function isDefaultAiTabTitle(title: string): boolean {
+  return title === defaultChatTitle.value
+    || title === newChatTitle.value
+    || title === 'AI Chat'
+    || title === 'AI 对话'
+    || title === 'New Chat'
+    || title === '新建对话'
+}
+
+async function switchSession(
+  sessionId: string,
+  options?: { persistToTab?: boolean; loadHistory?: boolean; resetView?: boolean },
+): Promise<void> {
+  if (!sessionId) return
+
+  if (options?.persistToTab) {
+    const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
+    if (tab) {
+      workspace.updateTabMeta(tab.id, { sessionId })
+    }
+  }
+
+  currentSessionId.value = sessionId
+  store.setActiveSession(sessionId)
+
+  if (options?.resetView ?? true) {
+    currentView.value = 'chat'
+  }
+
+  if (options?.loadHistory) {
+    pendingSessionLoadId.value = sessionId
+    await chat.loadHistory(sessionId)
+
+    if (chat.workDir.value) {
+      await memoryStore.setWorkspace(chat.workDir.value)
+    }
+  }
 }
 </script>
 
@@ -576,6 +699,7 @@ async function persistWorkDir(dir: string): Promise<void> {
     @select-session="handleSelectSession"
     @create-session="handleCreateSession"
     @delete-session="handleDeleteSession"
+    @preload-session="handlePreloadSession"
     @file-picker-confirm="handleFilePickerConfirm"
     @exit-immersive="exitImmersive"
   >
@@ -623,6 +747,9 @@ async function persistWorkDir(dir: string): Promise<void> {
         <AiSpawnedTasksPanel
           :tasks="chat.spawnedTasks.value"
           @run="handleSpawnRun"
+          @retry="handleSpawnRetry"
+          @open="handleSpawnOpen"
+          @complete="handleSpawnComplete"
         />
       </div>
     </template>
@@ -634,19 +761,17 @@ async function persistWorkDir(dir: string): Promise<void> {
       >
         <div class="flex items-center gap-2 rounded-lg border border-border/30 bg-muted/30 px-2 py-1 text-[10px] text-muted-foreground/60">
           <span v-if="fileAttachment.attachments.value.length > 0">
-            {{ fileAttachment.attachments.value.length }} attached file(s)
+            {{ t('ai.messages.attachedFiles', { count: fileAttachment.attachments.value.length }) }}
           </span>
           <span v-if="messageQueue.length > 0" class="ml-auto text-amber-500">
-            {{ messageQueue.length }} queued
+            {{ t('ai.messages.queued', { count: messageQueue.length }) }}
           </span>
         </div>
-      </div>
-      <div
-        v-else-if="messageQueue.length > 0"
-        class="mx-auto mb-0.5 w-full max-w-4xl px-5"
-      >
-        <div class="flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-600 dark:text-amber-400">
-          {{ messageQueue.length }} message(s) are queued and will be sent automatically.
+        <div
+          v-if="messageQueue.length > 0"
+          class="mt-1 flex items-center gap-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-600 dark:text-amber-400"
+        >
+          {{ t('ai.messages.queuedMessages', { count: messageQueue.length }) }}
         </div>
       </div>
     </template>

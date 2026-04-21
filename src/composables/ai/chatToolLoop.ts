@@ -95,14 +95,33 @@ export async function streamWithToolLoop({
     clearWatchdog()
     flushPendingDelta()
 
+    const validToolCalls = streamState.pendingToolCalls.filter(toolCall =>
+      !!toolCall.parsedArgs && typeof toolCall.parsedArgs === 'object' && !Array.isArray(toolCall.parsedArgs),
+    )
     const hasCompleteToolCalls =
-      streamState.lastFinishReason === 'tool_calls' && streamState.pendingToolCalls.length > 0
+      streamState.lastFinishReason === 'tool_calls' && validToolCalls.length > 0
 
     const finalMessageCheck = messages.value.find(message => message.id === streamState.streamingMessageId)
     if (finalMessageCheck && finalMessageCheck.role === 'assistant') {
       const noContent = !finalMessageCheck.content || finalMessageCheck.content.trim() === ''
       const noToolCalls = !hasCompleteToolCalls
-      if (noContent && noToolCalls) {
+      const hasInvalidToolCalls =
+        streamState.lastFinishReason === 'tool_calls'
+        && streamState.pendingToolCalls.length !== validToolCalls.length
+      if (hasInvalidToolCalls) {
+        const errMsg = '[工具调用参数不完整] 模型输出了不完整的工具参数 JSON，本轮已中止，避免执行半成品工具调用。请重试，或要求模型重新整理后再调用工具。'
+        log.warn('invalid_tool_call_filtered', {
+          sessionId: sid,
+          totalToolCalls: streamState.pendingToolCalls.length,
+          validToolCalls: validToolCalls.length,
+        })
+        messages.value = messages.value.map(message =>
+          message.id === streamState.streamingMessageId
+            ? { ...message, role: 'error' as const, content: errMsg, isStreaming: false }
+            : message,
+        )
+        streamState.pendingToolCalls = []
+      } else if (noContent && noToolCalls) {
         const hasThinking = !!(finalMessageCheck.thinking && finalMessageCheck.thinking.trim())
         let errMsg: string
         if (streamState.lastFinishReason === 'length') {
@@ -135,7 +154,7 @@ export async function streamWithToolLoop({
         id: finalMessage.id,
         sessionId: sid,
         role: 'assistant',
-        content: hasToolCalls ? JSON.stringify(streamState.pendingToolCalls) : finalMessage.content,
+        content: hasToolCalls ? JSON.stringify(validToolCalls) : finalMessage.content,
         contentType: hasToolCalls ? 'tool_calls' : 'text',
         tokens: finalMessage.totalTokens ?? finalMessage.tokens ?? 0,
         cost: 0,
@@ -151,10 +170,10 @@ export async function streamWithToolLoop({
       })
     }
 
-    if (streamState.lastFinishReason !== 'tool_calls' || streamState.pendingToolCalls.length === 0) {
+    if (streamState.lastFinishReason !== 'tool_calls' || validToolCalls.length === 0) {
       if (workDir.value) {
         const latestAssistant = messages.value.find(message => message.id === streamState.streamingMessageId)
-        if (latestAssistant?.content) {
+        if (latestAssistant?.role === 'assistant' && latestAssistant.content) {
           parseAndWriteJournalSections(latestAssistant.content, workDir.value)
           parseSpawnedTasks(latestAssistant.content)
         }
@@ -163,7 +182,7 @@ export async function streamWithToolLoop({
     }
 
     loopCount++
-    log.info('tool_loop', { sessionId: sid, loopCount, toolCount: streamState.pendingToolCalls.length })
+    log.info('tool_loop', { sessionId: sid, loopCount, toolCount: validToolCalls.length })
     if (loopCount > maxToolLoops) {
       log.warn('tool_loop_exceeded', { sessionId: sid, max: maxToolLoops })
       updateStreamingMessage(message => ({
@@ -178,8 +197,8 @@ export async function streamWithToolLoop({
 
     updateStreamingMessage(message => ({ ...message, isStreaming: false }))
 
-    log.info('tool_exec_start', { sessionId: sid, tools: streamState.pendingToolCalls.map(tool => tool.name) })
-    const toolResults = await executeToolCalls(streamState.pendingToolCalls, sid)
+    log.info('tool_exec_start', { sessionId: sid, tools: validToolCalls.map(tool => tool.name) })
+    const toolResults = await executeToolCalls(validToolCalls, sid)
     log.info('tool_exec_done', {
       sessionId: sid,
       resultCount: toolResults.length,
@@ -192,14 +211,14 @@ export async function streamWithToolLoop({
 
     updateStreamingMessage(message => ({
       ...message,
-      toolCalls: streamState.pendingToolCalls,
+      toolCalls: validToolCalls,
       toolResults,
     }))
 
     const assistantTurnMessage: ChatMessage = {
       role: 'assistant',
       content: finalMessage?.content || null,
-      toolCalls: streamState.pendingToolCalls.map(toolCall => ({
+      toolCalls: validToolCalls.map(toolCall => ({
         id: toolCall.id,
         type: 'function',
         function: { name: toolCall.name, arguments: toolCall.arguments },

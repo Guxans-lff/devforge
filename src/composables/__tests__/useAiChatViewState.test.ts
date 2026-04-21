@@ -177,7 +177,16 @@ describe('useAiChatViewState', () => {
     await state.sendMessageNow('hello', [])
 
     expect(chat.send).not.toHaveBeenCalled()
-    expect(chat.error.value).toContain('API key is not configured')
+    expect(chat.error.value).toBe('ai.messages.apiKeyNotConfigured')
+  })
+
+  it('adds dispatcher mode guidance to the effective system prompt', () => {
+    const { state } = makeHarness()
+
+    state.syncDefaultProviderSelection()
+    state.chatMode.value = 'dispatcher'
+
+    expect(state.effectiveSystemPrompt.value).toContain('[Mode: Dispatcher]')
   })
 
   it('persists work directory changes and updates memory workspace', async () => {

@@ -92,5 +92,11 @@ export async function abortChat({
     content: `${message.content}\n\n${ABORTED_MESSAGE_SUFFIX}`,
     isStreaming: false,
   }))
+  streamState.streamingMessageId = ''
+  streamState.pendingTextDelta = ''
+  streamState.pendingThinkingDelta = ''
+  streamState.pendingToolCalls = []
+  streamState.lastFinishReason = ''
+  streamState.inToolExec = false
   isStreaming.value = false
 }

@@ -1,17 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useSettingsStore } from '@/stores/settings'
+import { DEFAULT_AI_DIAGNOSTICS_THRESHOLDS, useSettingsStore, type AiDiagnosticsThresholds } from '@/stores/settings'
 import { useToast } from '@/composables/useToast'
 import { getAppVersion } from '@/api/connection'
 import { listCrashLogs, readCrashLog, clearCrashLogs } from '@/api/diagnostics'
 import type { CrashLogEntry } from '@/api/diagnostics'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
-import { Activity, Bug, FileText, Trash2, ChevronDown, ChevronRight, Loader2 } from 'lucide-vue-next'
+import { Activity, Bug, FileText, Gauge, Trash2, ChevronDown, ChevronRight, Loader2, RotateCcw } from 'lucide-vue-next'
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -29,6 +30,31 @@ const logContentLoading = ref<Record<string, boolean>>({})
 
 // 清除确认弹窗
 const showClearConfirm = ref(false)
+
+const thresholdItems: Array<{
+  key: keyof AiDiagnosticsThresholds
+  unit: 'ms' | 'count'
+}> = [
+  { key: 'firstTokenWarnMs', unit: 'ms' },
+  { key: 'firstTokenDangerMs', unit: 'ms' },
+  { key: 'responseWarnMs', unit: 'ms' },
+  { key: 'responseDangerMs', unit: 'ms' },
+  { key: 'historyWarnMs', unit: 'ms' },
+  { key: 'historyDangerMs', unit: 'ms' },
+  { key: 'toolQueueWarnCount', unit: 'count' },
+  { key: 'toolQueueDangerCount', unit: 'count' },
+  { key: 'toolRunWarnMs', unit: 'ms' },
+  { key: 'toolRunDangerMs', unit: 'ms' },
+]
+
+const thresholdSummary = computed(() => {
+  const thresholds = settingsStore.settings.aiDiagnosticsThresholds
+  return [
+    `${t('settings.aiDiagnosticsFirstToken')}: ${thresholds.firstTokenWarnMs}/${thresholds.firstTokenDangerMs} ms`,
+    `${t('settings.aiDiagnosticsResponse')}: ${thresholds.responseWarnMs}/${thresholds.responseDangerMs} ms`,
+    `${t('settings.aiDiagnosticsToolQueue')}: ${thresholds.toolQueueWarnCount}/${thresholds.toolQueueDangerCount}`,
+  ].join(' · ')
+})
 
 /** 格式化文件大小 */
 function formatSize(bytes: number): string {
@@ -90,6 +116,27 @@ function handleDevModeToggle(value: boolean) {
   settingsStore.update({ devMode: value })
 }
 
+function thresholdLabel(key: keyof AiDiagnosticsThresholds): string {
+  return t(`settings.aiDiagnosticsThresholds.${key}`)
+}
+
+function updateThreshold(key: keyof AiDiagnosticsThresholds, value: string | number) {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  const nextValue = Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0
+  settingsStore.update({
+    aiDiagnosticsThresholds: {
+      ...settingsStore.settings.aiDiagnosticsThresholds,
+      [key]: nextValue,
+    },
+  })
+}
+
+function resetAiDiagnosticsThresholds() {
+  settingsStore.update({
+    aiDiagnosticsThresholds: { ...DEFAULT_AI_DIAGNOSTICS_THRESHOLDS },
+  })
+}
+
 onMounted(async () => {
   // 并行加载版本号和崩溃日志
   const [version] = await Promise.allSettled([
@@ -135,6 +182,54 @@ onMounted(async () => {
       <span class="px-3 py-1.5 rounded-xl bg-background border border-border/20 text-xs font-black text-primary/80 tracking-tight shadow-sm">
         v{{ appVersion }}
       </span>
+    </div>
+
+    <!-- AI 诊断阈值 -->
+    <div class="group p-5 bg-muted/10 border border-border/10 rounded-2xl transition-[background-color,border-color] hover:bg-muted/20 hover:border-border/30">
+      <div class="flex items-start justify-between gap-4">
+        <div class="flex items-start gap-4">
+          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/5 text-primary/50 transition-colors group-hover:bg-primary/10 group-hover:text-primary/80">
+            <Gauge class="h-5 w-5" />
+          </div>
+          <div class="space-y-0.5">
+            <p class="text-[15px] font-bold tracking-tight">{{ t('settings.aiDiagnosticsThresholdsTitle') }}</p>
+            <p class="text-xs text-muted-foreground/60 font-medium">{{ t('settings.aiDiagnosticsThresholdsDesc') }}</p>
+            <p class="text-[11px] text-muted-foreground/45 font-mono">{{ thresholdSummary }}</p>
+          </div>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          class="h-8 gap-1.5 rounded-xl border-border/30 text-[11px] font-bold"
+          @click="resetAiDiagnosticsThresholds"
+        >
+          <RotateCcw class="h-3 w-3" />
+          {{ t('settings.aiDiagnosticsResetThresholds') }}
+        </Button>
+      </div>
+
+      <div class="mt-4 grid gap-3 md:grid-cols-2">
+        <label
+          v-for="item in thresholdItems"
+          :key="item.key"
+          class="rounded-xl border border-border/10 bg-background/45 px-3 py-2.5 transition-[background-color,border-color] hover:bg-background/70 hover:border-border/30"
+        >
+          <div class="mb-1.5 flex items-center justify-between gap-2">
+            <span class="text-[11px] font-bold text-foreground/75">{{ thresholdLabel(item.key) }}</span>
+            <span class="text-[10px] font-mono text-muted-foreground/45">
+              {{ item.unit === 'ms' ? 'ms' : t('settings.aiDiagnosticsCountUnit') }}
+            </span>
+          </div>
+          <Input
+            type="number"
+            min="0"
+            step="1"
+            class="h-8 font-mono text-xs"
+            :model-value="settingsStore.settings.aiDiagnosticsThresholds[item.key]"
+            @update:model-value="updateThreshold(item.key, $event)"
+          />
+        </label>
+      </div>
     </div>
 
     <!-- 崩溃日志 -->

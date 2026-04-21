@@ -1,4 +1,5 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { getCredential } from '@/api/connection'
 import type { FileAttachment, ModelConfig, ProviderConfig } from '@/types/ai'
@@ -104,6 +105,7 @@ export function useAiChatViewState({
   onModeChanged,
   onPersistWorkDir,
 }: UseAiChatViewStateOptions) {
+  const { t } = useI18n()
   const selectedProviderId = ref<string | null>(null)
   const selectedModelId = ref<string | null>(null)
   const systemPrompt = ref<string | undefined>(undefined)
@@ -204,7 +206,7 @@ export function useAiChatViewState({
     const cleanContent = stripMentionMarkers(content)
     const apiKey = await getCredential(`ai-provider-${currentProvider.value.id}`) ?? ''
     if (!apiKey) {
-      chat.error.value = 'API key is not configured. Please set it in provider settings.'
+      chat.error.value = t('ai.messages.apiKeyNotConfigured')
       return
     }
 
@@ -232,7 +234,7 @@ export function useAiChatViewState({
     if (!currentProvider.value || !currentModel.value) return
     const apiKey = await getCredential(`ai-provider-${currentProvider.value.id}`) ?? ''
     if (!apiKey) {
-      chat.error.value = 'API key is not configured. Please set it in provider settings.'
+      chat.error.value = t('ai.messages.apiKeyNotConfigured')
       return
     }
     await chat.regenerate(
@@ -247,7 +249,7 @@ export function useAiChatViewState({
     if (!currentProvider.value || !currentModel.value) return
     const apiKey = await getCredential(`ai-provider-${currentProvider.value.id}`) ?? ''
     if (!apiKey) {
-      chat.error.value = 'API key is not configured. Please set it in provider settings.'
+      chat.error.value = t('ai.messages.apiKeyNotConfigured')
       return
     }
 

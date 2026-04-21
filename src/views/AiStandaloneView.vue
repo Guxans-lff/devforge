@@ -27,45 +27,46 @@ import {
   Zap,
 } from 'lucide-vue-next'
 
-const CHAT_MODE_CONFIG: Record<ChatMode, {
+const route = useRoute()
+const { t } = useI18n()
+
+const CHAT_MODE_CONFIG = computed<Record<ChatMode, {
   label: string
   desc: string
   icon: unknown
   color: string
   bg: string
-}> = {
+}>>(() => ({
   normal: {
-    label: 'Normal Chat',
-    desc: 'Standard Q&A interaction',
+    label: t('ai.chat.normalChat'),
+    desc: t('ai.chat.normalChatDesc'),
     icon: MessageSquareText,
     color: 'text-blue-500',
     bg: 'bg-blue-500/10',
   },
   plan: {
-    label: 'Plan Mode',
-    desc: 'Analyze first, execute after confirmation',
+    label: t('ai.chat.planMode'),
+    desc: t('ai.chat.planModeDesc'),
     icon: Sparkles,
     color: 'text-violet-500',
     bg: 'bg-violet-500/10',
   },
   auto: {
-    label: 'Auto Mode',
-    desc: 'AI analyzes and delivers directly',
+    label: t('ai.chat.autoMode'),
+    desc: t('ai.chat.autoModeDesc'),
     icon: Zap,
     color: 'text-amber-500',
     bg: 'bg-amber-500/10',
   },
   dispatcher: {
-    label: 'Dispatcher',
-    desc: 'Coordinate multi-step tasks automatically',
+    label: t('ai.chat.dispatcher'),
+    desc: t('ai.chat.dispatcherDesc'),
     icon: Zap,
     color: 'text-orange-500',
     bg: 'bg-orange-500/10',
   },
-}
+}))
 
-const route = useRoute()
-const { t } = useI18n()
 const store = useAiChatStore()
 const wsFiles = useWorkspaceFilesStore()
 const memoryStore = useAiMemoryStore()
@@ -83,7 +84,7 @@ const userPickedSession = ref(false)
 
 watch(windowId, (value) => {
   if (userPickedSession.value) return
-  currentSessionId.value = `session-${value}`
+  void switchSession(`session-${value}`, { loadHistory: true, updateUserPicked: false })
 })
 
 const chatShellRef = ref<InstanceType<typeof AiChatShell> | null>(null)
@@ -115,7 +116,7 @@ const {
   chat,
   memoryStore,
   wsFiles,
-  modeConfigs: CHAT_MODE_CONFIG,
+  modeConfigs: CHAT_MODE_CONFIG.value,
   modeSuffixes: {
     normal: '',
     plan: '\n\n[Mode: Plan]\nAnalyze first, propose a concrete implementation plan, and wait for confirmation before giving final code or execution steps.',
@@ -144,18 +145,18 @@ watch(() => chat.workDir.value, async (dir) => {
   const appWindow = getCurrentWebviewWindow()
   if (dir) {
     const parts = dir.replace(/\\/g, '/').split('/').filter(Boolean)
-    const name = parts[parts.length - 1] || 'AI'
-    await appWindow.setTitle(`AI - ${name}`)
+    const name = parts[parts.length - 1] || t('ai.messages.title')
+    await appWindow.setTitle(`${t('ai.messages.title')} - ${name}`)
     return
   }
-  await appWindow.setTitle('AI Chat')
+  await appWindow.setTitle(t('ai.messages.title'))
 }, { immediate: true })
 
 onMounted(async () => {
   try {
     await store.init()
   } catch (error) {
-    chat.error.value = 'Initialization failed. Please refresh and try again.'
+    chat.error.value = t('ai.messages.initFailed')
     console.error('[AiStandaloneView] init failed:', error)
     return
   }
@@ -192,7 +193,7 @@ async function saveCurrentSession(): Promise<void> {
 
   const session: AiSession = {
     id: currentSessionId.value,
-    title: chat.messages.value.find(message => message.role === 'user')?.content?.slice(0, 30) || 'New Chat',
+    title: chat.messages.value.find(message => message.role === 'user')?.content?.slice(0, 30) || t('ai.messages.primaryActionStandalone'),
     providerId: currentProvider.value.id,
     model: currentModel.value.id,
     systemPrompt: systemPrompt.value,
@@ -218,24 +219,17 @@ async function handleSend(content: string): Promise<void> {
 
 function handleCreateSession(): void {
   const nextSessionId = `session-${windowId.value}-${Date.now()}`
-  currentSessionId.value = nextSessionId
-  userPickedSession.value = true
-  store.setActiveSession(nextSessionId)
   chat.clearMessages()
   chat.workDir.value = ''
-  currentView.value = 'chat'
+  void switchSession(nextSessionId, { loadHistory: false, updateUserPicked: true })
 }
 
 async function handleSelectSession(id: string): Promise<void> {
-  currentSessionId.value = id
-  userPickedSession.value = true
-  store.setActiveSession(id)
-  currentView.value = 'chat'
-  await chat.loadHistory(id)
+  await switchSession(id, { loadHistory: true, updateUserPicked: true })
+}
 
-  if (chat.workDir.value) {
-    await memoryStore.setWorkspace(chat.workDir.value)
-  }
+function handlePreloadSession(id: string): void {
+  void chat.preloadHistory(id)
 }
 
 async function handleDeleteSession(id: string): Promise<void> {
@@ -264,6 +258,31 @@ function handleFilePickerConfirm(paths: string[]): void {
 
 function openProviderConfig(): void {
   currentView.value = 'provider-config'
+}
+
+async function switchSession(
+  sessionId: string,
+  options?: { loadHistory?: boolean; updateUserPicked?: boolean; resetView?: boolean },
+): Promise<void> {
+  if (!sessionId) return
+
+  currentSessionId.value = sessionId
+  if (options?.updateUserPicked !== undefined) {
+    userPickedSession.value = options.updateUserPicked
+  }
+  store.setActiveSession(sessionId)
+
+  if (options?.resetView ?? true) {
+    currentView.value = 'chat'
+  }
+
+  if (options?.loadHistory) {
+    await chat.loadHistory(sessionId)
+
+    if (chat.workDir.value) {
+      await memoryStore.setWorkspace(chat.workDir.value)
+    }
+  }
 }
 </script>
 
@@ -334,6 +353,7 @@ function openProviderConfig(): void {
     @select-session="handleSelectSession"
     @create-session="handleCreateSession"
     @delete-session="handleDeleteSession"
+    @preload-session="handlePreloadSession"
     @file-picker-confirm="handleFilePickerConfirm"
   >
     <template #after-compact>

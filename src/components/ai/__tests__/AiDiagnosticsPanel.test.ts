@@ -1,9 +1,25 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it } from 'vitest'
 import AiDiagnosticsPanel from '@/components/ai/AiDiagnosticsPanel.vue'
+import { setupTestPinia } from '@/__tests__/helpers'
+import { useSettingsStore } from '@/stores/settings'
 
 describe('AiDiagnosticsPanel', () => {
   it('renders localized diagnostics and expands to show trend, history, and export action', async () => {
+    setupTestPinia()
+    const settingsStore = useSettingsStore()
+    settingsStore.update({
+      aiDiagnosticsThresholds: {
+        ...settingsStore.settings.aiDiagnosticsThresholds,
+        firstTokenWarnMs: 5000,
+        firstTokenDangerMs: 7000,
+        responseWarnMs: 40000,
+        responseDangerMs: 50000,
+        toolQueueWarnCount: 3,
+        toolQueueDangerCount: 5,
+      },
+    })
+
     const wrapper = mount(AiDiagnosticsPanel, {
       props: {
         metrics: {
@@ -19,11 +35,11 @@ describe('AiDiagnosticsPanel', () => {
           pendingToolQueueLength: 4,
           lastToolRun: {
             totalCalls: 4,
-            successCount: 3,
-            errorCount: 1,
+            successCount: 4,
+            errorCount: 0,
             cancelledCount: 0,
-            timeoutCount: 1,
-            retryCount: 1,
+            timeoutCount: 0,
+            retryCount: 0,
             totalDurationMs: 980,
             maxDurationMs: 420,
             averageDurationMs: 245,
@@ -57,7 +73,7 @@ describe('AiDiagnosticsPanel', () => {
     })
 
     expect(wrapper.text()).toContain('ai.diagnostics.title')
-    expect(wrapper.text()).toContain('ai.diagnostics.critical')
+    expect(wrapper.text()).toContain('ai.diagnostics.watch')
     expect(wrapper.text()).toContain('6.20 s')
     expect(wrapper.text()).toContain('ai.diagnostics.avg')
     expect(wrapper.text()).not.toContain('ai.diagnostics.lastToolRun')

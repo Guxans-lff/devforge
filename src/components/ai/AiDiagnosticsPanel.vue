@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiChatMetricsSnapshot } from '@/composables/ai/useAiChatObservability'
+import { useSettingsStore } from '@/stores/settings'
 import { Activity, ChevronRight, Clock3, Copy, History, ShieldAlert, TrendingUp, Wrench } from 'lucide-vue-next'
 
 type Tone = 'ok' | 'warn' | 'danger'
@@ -11,8 +12,10 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const settingsStore = useSettingsStore()
 const expanded = ref(false)
 const copied = ref(false)
+const thresholds = computed(() => settingsStore.settings.aiDiagnosticsThresholds)
 
 const metricCards = computed(() => [
   {
@@ -21,7 +24,7 @@ const metricCards = computed(() => [
     value: formatMs(props.metrics.firstTokenLatencyMs),
     hint: props.metrics.firstTokenAt ? t('ai.diagnostics.streamStarted') : t('ai.diagnostics.waiting'),
     icon: Clock3,
-    tone: toneForMs(props.metrics.firstTokenLatencyMs, 2000, 5000),
+    tone: toneForMs(props.metrics.firstTokenLatencyMs, thresholds.value.firstTokenWarnMs, thresholds.value.firstTokenDangerMs),
   },
   {
     key: 'response',
@@ -29,7 +32,7 @@ const metricCards = computed(() => [
     value: formatMs(props.metrics.responseDurationMs),
     hint: props.metrics.responseCompletedAt ? t('ai.diagnostics.completed') : t('ai.diagnostics.idle'),
     icon: Activity,
-    tone: toneForMs(props.metrics.responseDurationMs, 15000, 45000),
+    tone: toneForMs(props.metrics.responseDurationMs, thresholds.value.responseWarnMs, thresholds.value.responseDangerMs),
   },
   {
     key: 'history',
@@ -37,7 +40,7 @@ const metricCards = computed(() => [
     value: formatMs(props.metrics.loadHistoryDurationMs),
     hint: t('ai.diagnostics.restoredCount', { count: props.metrics.historyRestoreCount }),
     icon: History,
-    tone: toneForMs(props.metrics.loadHistoryDurationMs, 500, 2000),
+    tone: toneForMs(props.metrics.loadHistoryDurationMs, thresholds.value.historyWarnMs, thresholds.value.historyDangerMs),
   },
   {
     key: 'tool-queue',
@@ -45,7 +48,7 @@ const metricCards = computed(() => [
     value: String(props.metrics.pendingToolQueueLength),
     hint: t('ai.diagnostics.pendingCalls'),
     icon: Wrench,
-    tone: toneForCount(props.metrics.pendingToolQueueLength, 0, 3),
+    tone: toneForCount(props.metrics.pendingToolQueueLength, thresholds.value.toolQueueWarnCount, thresholds.value.toolQueueDangerCount),
   },
 ])
 
@@ -62,21 +65,21 @@ const trendCards = computed(() => [
     label: t('ai.diagnostics.avgFirstToken'),
     value: formatMs(props.metrics.trend.firstTokenAverageMs),
     hint: formatDelta(props.metrics.trend.lastFirstTokenDeltaMs),
-    tone: toneForMs(props.metrics.trend.firstTokenAverageMs, 2000, 5000),
+    tone: toneForMs(props.metrics.trend.firstTokenAverageMs, thresholds.value.firstTokenWarnMs, thresholds.value.firstTokenDangerMs),
   },
   {
     key: 'trend-response',
     label: t('ai.diagnostics.avgResponse'),
     value: formatMs(props.metrics.trend.responseAverageMs),
     hint: formatDelta(props.metrics.trend.lastResponseDeltaMs),
-    tone: toneForMs(props.metrics.trend.responseAverageMs, 15000, 45000),
+    tone: toneForMs(props.metrics.trend.responseAverageMs, thresholds.value.responseWarnMs, thresholds.value.responseDangerMs),
   },
   {
     key: 'trend-tool',
     label: t('ai.diagnostics.avgToolRun'),
     value: formatMs(props.metrics.trend.toolRunAverageMs),
     hint: formatDelta(props.metrics.trend.lastToolRunDeltaMs),
-    tone: toneForMs(props.metrics.trend.toolRunAverageMs, 1000, 4000),
+    tone: toneForMs(props.metrics.trend.toolRunAverageMs, thresholds.value.toolRunWarnMs, thresholds.value.toolRunDangerMs),
   },
 ])
 
@@ -114,15 +117,15 @@ const overallTone = computed<Tone>(() => {
   if (
     props.metrics.lastToolRun.timeoutCount > 0
     || props.metrics.lastToolRun.errorCount > 0
-    || props.metrics.pendingToolQueueLength > 3
-    || toneForMs(props.metrics.responseDurationMs, 15000, 45000) === 'danger'
+    || props.metrics.pendingToolQueueLength > thresholds.value.toolQueueDangerCount
+    || toneForMs(props.metrics.responseDurationMs, thresholds.value.responseWarnMs, thresholds.value.responseDangerMs) === 'danger'
   ) {
     return 'danger'
   }
   if (
-    props.metrics.pendingToolQueueLength > 0
-    || toneForMs(props.metrics.firstTokenLatencyMs, 2000, 5000) !== 'ok'
-    || toneForMs(props.metrics.responseDurationMs, 15000, 45000) !== 'ok'
+    props.metrics.pendingToolQueueLength > thresholds.value.toolQueueWarnCount
+    || toneForMs(props.metrics.firstTokenLatencyMs, thresholds.value.firstTokenWarnMs, thresholds.value.firstTokenDangerMs) !== 'ok'
+    || toneForMs(props.metrics.responseDurationMs, thresholds.value.responseWarnMs, thresholds.value.responseDangerMs) !== 'ok'
   ) {
     return 'warn'
   }
