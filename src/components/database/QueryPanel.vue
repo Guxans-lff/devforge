@@ -22,6 +22,7 @@ const props = defineProps<{
   connectionName?: string
   tabId: string
   isConnected: boolean
+  ensureConnected?: () => Promise<boolean>
   schemaCache: SchemaCache | null
   isLoadingSchema?: boolean
   driver: string
@@ -80,6 +81,7 @@ const execution = useQueryExecution({
   connectionName: toRef(props, 'connectionName'),
   tabId: toRef(props, 'tabId'),
   isConnected: toRef(props, 'isConnected'),
+  ensureConnected: props.ensureConnected,
   environment: toRef(props, 'environment'),
   readOnly: computed(() => props.readOnly ?? false),
   confirmDanger: computed(() => props.confirmDanger ?? false),
@@ -151,7 +153,7 @@ async function handleExecuteWithEmit(sql: string) {
 }
 
 function handleExecuteAll(sql: string) {
-  if (!sql.trim() || !props.isConnected || execution.isExecuting.value) return
+  if (!sql.trim() || execution.isExecuting.value) return
   handleExecuteWithEmit(sql)
 }
 

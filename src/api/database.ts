@@ -139,6 +139,10 @@ export function dbCancelQuery(connectionId: string): Promise<boolean> {
   return invokeCommand('db_cancel_query', { connectionId })
 }
 
+export function dbCancelQueryOnSession(connectionId: string, tabId: string): Promise<boolean> {
+  return invokeCommand('db_cancel_query_on_session', { connectionId, tabId })
+}
+
 export function dbGetViews(connectionId: string, database: string): Promise<ViewInfo[]> {
   return invokeCommand('db_get_views', { connectionId, database })
 }
@@ -397,6 +401,30 @@ export async function dbExecuteMultiV2(
   const successCount = results.filter(r => !r.result.isError).length
   const failCount = results.length - successCount
   logStore.debug('DATABASE', `多语句执行完成: 共 ${results.length} 条，成功 ${successCount}，失败 ${failCount}`)
+  return results
+}
+
+export async function dbExecuteMultiV2OnSession(
+  connectionId: string,
+  tabId: string,
+  sql: string,
+  database?: string,
+  errorStrategy?: ErrorStrategy,
+  timeoutSecs?: number,
+): Promise<StatementResult[]> {
+  const logStore = useLogStore()
+  logStore.debug('DATABASE', `Session multi-statement execute: ${sql.slice(0, 80)}${sql.length > 80 ? '...' : ''}`)
+  const results = await invokeCommand<StatementResult[]>('db_execute_multi_v2_on_session', {
+    connectionId,
+    tabId,
+    sql,
+    database: database ?? null,
+    errorStrategy: errorStrategy ?? null,
+    timeoutSecs: timeoutSecs ?? null,
+  }, { source: 'DATABASE' })
+  const successCount = results.filter(r => !r.result.isError).length
+  const failCount = results.length - successCount
+  logStore.debug('DATABASE', `Session multi-statement completed: total ${results.length}, success ${successCount}, failed ${failCount}`)
   return results
 }
 // ===== SQL File Stream API =====

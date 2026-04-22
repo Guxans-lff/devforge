@@ -12,6 +12,64 @@ use crate::utils::error::AppError;
 use crate::commands::connection::StorageState;
 use super::DbEngineState;
 
+async fn execute_multi_statements(
+    app: &AppHandle,
+    connection_id: String,
+    database: Option<String>,
+    error_strategy: Option<String>,
+    statements: Vec<String>,
+    timeout_secs: Option<u64>,
+    run_statement: impl Fn(String, Option<String>, Option<u64>) -> std::pin::Pin<Box<dyn std::future::Future<Output = QueryResult> + Send>>,
+) -> Vec<StatementResult> {
+    let stop_on_error = match error_strategy.as_deref() {
+        Some("continueOnError") => false,
+        _ => true,
+    };
+
+    let mut results: Vec<StatementResult> = Vec::new();
+
+    for (idx, stmt) in statements.into_iter().enumerate() {
+        let trimmed = stmt.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let stmt_type = detect_statement_type(trimmed);
+        let index = (idx + 1) as u32;
+        let query_result = run_statement(trimmed.to_string(), database.clone(), timeout_secs).await;
+        let has_error = query_result.is_error;
+
+        if audit_log::classify_operation(trimmed).is_some() {
+            let storage = app.state::<StorageState>().inner().clone();
+            let sql_clone = trimmed.to_string();
+            let cid = connection_id.clone();
+            let db = database.clone();
+            let is_err = query_result.is_error;
+            let err_msg = query_result.error.clone();
+            let affected = query_result.affected_rows as i64;
+            tokio::spawn(async move {
+                let _ = audit_log::record(
+                    &storage, &cid, None, db.as_deref(), &sql_clone,
+                    affected, 0, is_err, err_msg.as_deref(),
+                ).await;
+            });
+        }
+
+        results.push(StatementResult {
+            index,
+            sql: trimmed.to_string(),
+            statement_type: stmt_type,
+            result: query_result,
+        });
+
+        if has_error && stop_on_error {
+            break;
+        }
+    }
+
+    results
+}
+
 #[command]
 pub async fn db_execute_query(
     app: AppHandle,
@@ -162,71 +220,31 @@ pub async fn db_execute_multi_v2(
         return Ok(vec![]);
     }
 
-    let stop_on_error = match error_strategy.as_deref() {
-        Some("continueOnError") => false,
-        _ => true,
-    };
-
-    let mut results: Vec<StatementResult> = Vec::new();
-
-    for (idx, stmt) in statements.into_iter().enumerate() {
-        let trimmed = stmt.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-
-        let stmt_type = detect_statement_type(trimmed);
-        let index = (idx + 1) as u32;
-
-        let query_result = if let Some(ref db) = database {
-            match engine.clone().execute_query_in_database(
-                connection_id.clone(),
-                db.clone(),
-                trimmed.to_string(),
-                timeout_secs,
-            ).await {
-                Ok(r) => r,
-                Err(e) => QueryResult::error(e.to_string(), 0),
-            }
-        } else {
-            match engine.clone().execute_query(connection_id.clone(), None, trimmed.to_string(), timeout_secs).await {
-                Ok(r) => r,
-                Err(e) => QueryResult::error(e.to_string(), 0),
-            }
-        };
-
-        let has_error = query_result.is_error;
-
-        // 审计记录
-        if audit_log::classify_operation(trimmed).is_some() {
-            let storage = app.state::<StorageState>().inner().clone();
-            let sql_clone = trimmed.to_string();
-            let cid = connection_id.clone();
-            let db = database.clone();
-            let is_err = query_result.is_error;
-            let err_msg = query_result.error.clone();
-            let affected = query_result.affected_rows as i64;
-            tokio::spawn(async move {
-                let _ = audit_log::record(
-                    &storage, &cid, None, db.as_deref(), &sql_clone,
-                    affected, 0, is_err, err_msg.as_deref(),
-                ).await;
-            });
-        }
-
-        results.push(StatementResult {
-            index,
-            sql: trimmed.to_string(),
-            statement_type: stmt_type,
-            result: query_result,
-        });
-
-        if has_error && stop_on_error {
-            break;
-        }
-    }
-
-    Ok(results)
+    Ok(execute_multi_statements(
+        &app,
+        connection_id.clone(),
+        database,
+        error_strategy,
+        statements,
+        timeout_secs,
+        move |stmt, db, timeout| {
+            let engine = engine.clone();
+            let connection_id = connection_id.clone();
+            Box::pin(async move {
+                if let Some(db_name) = db {
+                    match engine.execute_query_in_database(connection_id, db_name, stmt, timeout).await {
+                        Ok(r) => r,
+                        Err(e) => QueryResult::error(e.to_string(), 0),
+                    }
+                } else {
+                    match engine.execute_query(connection_id, None, stmt, timeout).await {
+                        Ok(r) => r,
+                        Err(e) => QueryResult::error(e.to_string(), 0),
+                    }
+                }
+            })
+        },
+    ).await)
 }
 
 #[command]
@@ -236,6 +254,18 @@ pub async fn db_cancel_query(
 ) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
     engine.clone().cancel_query(connection_id)
+        .await?;
+    Ok(true)
+}
+
+#[command]
+pub async fn db_cancel_query_on_session(
+    app: AppHandle,
+    connection_id: String,
+    tab_id: String,
+) -> Result<bool, AppError> {
+    let engine = app.state::<DbEngineState>().inner().clone();
+    engine.clone().cancel_query_on_session(connection_id, tab_id)
         .await?;
     Ok(true)
 }
@@ -357,4 +387,43 @@ pub async fn db_execute_query_stream_on_session(
             ch.send(chunk).map_err(|e| e.to_string())
         }),
     ).await
+}
+
+#[command]
+pub async fn db_execute_multi_v2_on_session(
+    app: AppHandle,
+    connection_id: String,
+    tab_id: String,
+    sql: String,
+    database: Option<String>,
+    error_strategy: Option<String>,
+    timeout_secs: Option<u64>,
+) -> Result<Vec<StatementResult>, AppError> {
+    let engine = app.state::<DbEngineState>().inner().clone();
+    use crate::services::sql_splitter;
+
+    let statements: Vec<String> = sql_splitter::split_sql_statements(&sql).into_iter().map(|s| s.to_string()).collect();
+    if statements.is_empty() {
+        return Ok(vec![]);
+    }
+
+    Ok(execute_multi_statements(
+        &app,
+        connection_id.clone(),
+        database,
+        error_strategy,
+        statements,
+        timeout_secs,
+        move |stmt, db, timeout| {
+            let engine = engine.clone();
+            let connection_id = connection_id.clone();
+            let tab_id = tab_id.clone();
+            Box::pin(async move {
+                match engine.execute_query_on_session(connection_id, tab_id, db, stmt, timeout).await {
+                    Ok(r) => r,
+                    Err(e) => QueryResult::error(e.to_string(), 0),
+                }
+            })
+        },
+    ).await)
 }

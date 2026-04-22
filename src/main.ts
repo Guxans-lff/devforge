@@ -1,20 +1,12 @@
 import { setupMonacoLocale } from '@/utils/monacoLocale'
+import { setupMonacoEnvironment } from '@/utils/monacoSetup'
 
 // 调试：输出当前窗口 URL
 if (import.meta.env.DEV) console.log('[main.ts] window.location:', window.location.href)
 
 // 必须在 Monaco Editor 加载之前初始化中文语言包
 setupMonacoLocale()
-
-// Monaco Editor Worker 配置
-// 使用 Vite 原生 ?worker 导入，确保 Worker 正确打包
-import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker'
-
-self.MonacoEnvironment = {
-  getWorker(_workerId: string, _label: string) {
-    return new EditorWorker()
-  },
-}
+setupMonacoEnvironment()
 
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'

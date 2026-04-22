@@ -334,6 +334,7 @@ async function switchSession(
     @primary-action="handleCreateSession"
     @secondary-action="handleNewWindow"
     @open-config="openProviderConfig"
+    @close-config="currentView = 'chat'"
     @select-work-dir="handleSelectWorkDir"
     @set-work-dir="setWorkDir($event)"
     @continue="handleContinue"

@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
 import { shallowRef, triggerRef } from 'vue'
 import { readTextFile, writeTextFile } from '@/api/database'
-import { inferLanguageFromPath, isTextFile } from '@/utils/file-markers'
+import { localReadFileBinary } from '@/api/file-editor'
+import { inferLanguageFromPath, isImageFile, isTextFile, MAX_FILE_SIZE } from '@/utils/file-markers'
 
 /** 将任意错误值转为人类可读的字符串 */
 function formatError(e: unknown): string {
@@ -36,8 +37,17 @@ const MONACO_LANG_ALIAS: Record<string, string> = {
   tsx: 'typescript',
   js: 'javascript',
   jsx: 'javascript',
+  vue: 'html',
   rust: 'rust',
+  java: 'java',
   python: 'python',
+  markdown: 'markdown',
+  yaml: 'yaml',
+  html: 'html',
+  css: 'css',
+  scss: 'scss',
+  sql: 'sql',
+  xml: 'xml',
   bash: 'shell',
   toml: 'ini',
   text: 'plaintext',
@@ -54,6 +64,8 @@ export interface LocalOpenFile {
   content: string
   originalContent: string
   language: string
+  previewType: 'text' | 'image'
+  previewSrc?: string
   isLoading: boolean
   isSaving: boolean
   loadError: string | null
@@ -61,6 +73,23 @@ export interface LocalOpenFile {
 
 function extractFileName(absolutePath: string): string {
   return absolutePath.split(/[/\\]/).pop() ?? absolutePath
+}
+
+function getImageMimeType(filePath: string): string {
+  const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase()
+  const mimeMap: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.bmp': 'image/bmp',
+    '.ico': 'image/x-icon',
+    '.tiff': 'image/tiff',
+    '.tif': 'image/tiff',
+  }
+  return mimeMap[ext] ?? 'image/png'
 }
 
 export const useLocalFileEditorStore = defineStore('localFileEditor', () => {
@@ -86,12 +115,40 @@ export const useLocalFileEditorStore = defineStore('localFileEditor', () => {
       content: '',
       originalContent: '',
       language: toMonacoLanguage(absolutePath),
+      previewType: 'text',
       isLoading: true,
       isSaving: false,
       loadError: null,
     }
     openFiles.value.set(absolutePath, placeholder)
     triggerRef(openFiles)
+
+    if (isImageFile(absolutePath)) {
+      try {
+        const base64Data = await localReadFileBinary(absolutePath, MAX_FILE_SIZE)
+        const imagePreview: LocalOpenFile = {
+          ...placeholder,
+          language: 'image',
+          previewType: 'image',
+          previewSrc: `data:${getImageMimeType(absolutePath)};base64,${base64Data}`,
+          isLoading: false,
+        }
+        openFiles.value.set(absolutePath, imagePreview)
+        triggerRef(openFiles)
+        return imagePreview
+      } catch (e) {
+        const failed: LocalOpenFile = {
+          ...placeholder,
+          language: 'image',
+          previewType: 'image',
+          isLoading: false,
+          loadError: formatError(e),
+        }
+        openFiles.value.set(absolutePath, failed)
+        triggerRef(openFiles)
+        return failed
+      }
+    }
 
     // 前置拦截：非文本扩展名直接报错，避免把二进制 Blob 灌进 Monaco
     if (!isTextFile(absolutePath)) {
@@ -111,6 +168,7 @@ export const useLocalFileEditorStore = defineStore('localFileEditor', () => {
         ...placeholder,
         content,
         originalContent: content,
+        previewType: 'text',
         isLoading: false,
       }
       openFiles.value.set(absolutePath, loaded)

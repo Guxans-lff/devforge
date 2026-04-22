@@ -139,6 +139,7 @@ const emit = defineEmits<{
   (e: 'primaryAction'): void
   (e: 'secondaryAction'): void
   (e: 'openConfig'): void
+  (e: 'closeConfig'): void
   (e: 'selectWorkDir'): void
   (e: 'setWorkDir', value: string): void
   (e: 'continue'): void
@@ -183,7 +184,7 @@ defineExpose({
 <template>
   <div :class="shellClass">
     <template v-if="currentView === 'provider-config'">
-      <AiProviderConfig @back="emit('openConfig')" />
+      <AiProviderConfig @back="emit('closeConfig')" />
     </template>
 
     <template v-else>

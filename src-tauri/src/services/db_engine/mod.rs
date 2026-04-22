@@ -456,6 +456,51 @@ impl DbEngine {
         Ok(())
     }
 
+    pub async fn cancel_query_on_session(
+        self: Arc<Self>,
+        connection_id: String,
+        tab_id: String,
+    ) -> Result<(), AppError> {
+        let pool = {
+            let mysql_pools = self.mysql_pools.read().await;
+            mysql_pools.get(&connection_id).cloned()
+        };
+        let pool = match pool {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+
+        let session_keys = [
+            format!("{}:{}", connection_id, tab_id),
+            format!("{}:{}:stream", connection_id, tab_id),
+        ];
+
+        let queries: Vec<(String, u64)> = {
+            let rq = self.running_queries.read().await;
+            session_keys.iter()
+                .filter_map(|key| rq.get(key).map(|query| (key.clone(), query.mysql_conn_id)))
+                .collect()
+        };
+
+        for (key, mysql_conn_id) in &queries {
+            let kill_sql = format!("KILL QUERY {}", mysql_conn_id);
+            if let Err(e) = sqlx::query(&kill_sql).execute(&pool).await {
+                log::warn!("KILL QUERY {} failed for session {}: {}", mysql_conn_id, key, e);
+            } else {
+                log::info!("cancelled session query: key={}, mysql_conn_id={}", key, mysql_conn_id);
+            }
+        }
+
+        if !queries.is_empty() {
+          let mut rq = self.running_queries.write().await;
+          for (key, _) in &queries {
+              rq.remove(key);
+          }
+        }
+
+        Ok(())
+    }
+
     /// 注册 pool 模式的活跃查询（从池中临时获取连接取 CONNECTION_ID）
     async fn register_mysql_query(&self, pool: &sqlx::MySqlPool, query_key: &str, connection_id: &str) {
         // 尝试获取当前执行连接的 MySQL connection_id，失败时静默跳过

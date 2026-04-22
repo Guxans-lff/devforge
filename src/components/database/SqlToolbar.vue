@@ -57,7 +57,7 @@ function handleDbSelect(db: string) {
 }
 
 const executeDisabledReason = computed(() => {
-  if (!props.isConnected) return t('database.notConnected')
+  if (!props.isConnected) return t('database.reconnect')
   if (props.isExecuting) return t('database.executing')
   return ''
 })
@@ -86,7 +86,6 @@ const timeoutModel = computed({
               size="sm"
               :aria-label="t('database.execute') + ' (Ctrl+Enter)'"
               class="h-7 gap-1.5 px-3 text-[11px] font-bold"
-              :disabled="!isConnected"
               @click="emit('execute')"
             >
               <Play class="h-3 w-3" />

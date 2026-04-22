@@ -455,6 +455,13 @@ watch(
   () => chat.spawnedTasks.value.map(task => task.id),
   (taskIds) => {
     expandedTaskCardIds.value = expandedTaskCardIds.value.filter(taskId => taskIds.includes(taskId))
+    if (focusedTaskId.value && !taskIds.includes(focusedTaskId.value)) {
+      workspace.updateTabMeta(ownTabId, {
+        focusedTaskId: null,
+        focusedTaskPaths: [],
+        focusedTaskLabel: null,
+      })
+    }
   },
   { deep: true },
 )
@@ -1598,6 +1605,7 @@ async function switchSession(
     @primary-action="handleNewAiTab"
     @secondary-action="handleNewAiWindow"
     @open-config="openProviderConfig"
+    @close-config="currentView = 'chat'"
     @select-work-dir="handleSelectWorkDir"
     @set-work-dir="setWorkDir($event)"
     @continue="handleContinue"

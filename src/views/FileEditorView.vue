@@ -14,7 +14,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { useToast } from '@/composables/useToast'
 import { revealInFolder } from '@/api/system'
 import { Button } from '@/components/ui/button'
-import { Save, Loader2, AlertCircle, RotateCw, FileText, Copy, FolderOpen } from 'lucide-vue-next'
+import { Save, Loader2, AlertCircle, RotateCw, FileText, Copy, FolderOpen, Image as ImageIcon } from 'lucide-vue-next'
 
 const props = defineProps<{
   tabId: string
@@ -32,7 +32,17 @@ const containerRef = ref<HTMLDivElement | null>(null)
 let editor: monaco.editor.IStandaloneCodeEditor | null = null
 
 const file = computed(() => store.openFiles.get(props.absolutePath))
-const dirty = computed(() => store.isDirty(props.absolutePath))
+const isImagePreview = computed(() => file.value?.previewType === 'image')
+const dirty = computed(() => !isImagePreview.value && store.isDirty(props.absolutePath))
+const imagePreviewLabel = computed(() => {
+  const fileName = file.value?.fileName ?? ''
+  const ext = fileName.includes('.')
+    ? fileName.split('.').pop()?.toLowerCase() ?? ''
+    : ''
+
+  if (ext === 'jpeg') return 'JPG'
+  return ext ? ext.toUpperCase() : 'IMAGE'
+})
 
 /** 面包屑片段（最后一段为文件名） */
 const pathSegments = computed(() => {
@@ -42,6 +52,13 @@ const pathSegments = computed(() => {
 /** 编辑器统计（行数 / 字符数 / 大小） */
 const stats = computed(() => {
   const content = file.value?.content ?? ''
+  if (isImagePreview.value) {
+    return {
+      lines: 0,
+      chars: 0,
+      size: '预览模式',
+    }
+  }
   const bytes = new Blob([content]).size
   const lines = content === '' ? 0 : content.split('\n').length
   return {
@@ -112,6 +129,7 @@ function createEditor() {
   if (!containerRef.value || editor) return
   const f = file.value
   if (!f) return
+  if (f.previewType !== 'text') return
 
   editor = monaco.editor.create(containerRef.value, {
     value: f.content,
@@ -152,6 +170,7 @@ function reportEditorContext(): void {
   if (!editor) return
   const f = file.value
   if (!f) return
+  if (f.previewType !== 'text') return
   const pos = editor.getPosition()
   const sel = editor.getSelection()
   const selectedText = sel && !sel.isEmpty()
@@ -184,7 +203,7 @@ async function handleReload() {
 onMounted(async () => {
   await store.ensureOpen(props.absolutePath)
   await nextTick()
-  if (file.value && !file.value.loadError) {
+  if (file.value && !file.value.loadError && file.value.previewType === 'text') {
     createEditor()
   }
 })
@@ -201,7 +220,7 @@ onDeactivated(() => {
 watch(
   () => file.value?.isLoading,
   async (loading, wasLoading) => {
-    if (wasLoading && !loading && !file.value?.loadError) {
+    if (wasLoading && !loading && !file.value?.loadError && file.value?.previewType === 'text') {
       await nextTick()
       createEditor()
     }
@@ -259,7 +278,8 @@ onBeforeUnmount(() => {
       <!-- 面包屑 -->
       <div class="flex min-w-0 flex-1 items-center gap-1.5 text-xs">
         <div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-primary/10">
-          <FileText class="h-3 w-3 text-primary" />
+          <ImageIcon v-if="isImagePreview" class="h-3 w-3 text-primary" />
+          <FileText v-else class="h-3 w-3 text-primary" />
         </div>
         <div class="flex min-w-0 items-center gap-1 overflow-hidden">
           <template v-for="(seg, i) in pathSegments" :key="i">
@@ -311,7 +331,7 @@ onBeforeUnmount(() => {
         </button>
         <div class="mx-1 h-4 w-px bg-border/60" />
         <Button
-          :disabled="!dirty || file?.isSaving"
+          :disabled="isImagePreview || !dirty || file?.isSaving"
           variant="ghost"
           size="sm"
           class="h-6 gap-1 px-2 text-xs"
@@ -347,6 +367,20 @@ onBeforeUnmount(() => {
     </div>
 
     <!-- 编辑器 -->
+    <div v-else-if="isImagePreview" class="min-h-0 flex-1 overflow-auto bg-[radial-gradient(circle_at_center,rgba(148,163,184,0.08)_0,transparent_38%),linear-gradient(45deg,rgba(148,163,184,0.04)_25%,transparent_25%),linear-gradient(-45deg,rgba(148,163,184,0.04)_25%,transparent_25%)] bg-[length:100%_100%,24px_24px,24px_24px]">
+      <div class="flex min-h-full items-center justify-center p-8">
+        <div class="max-w-full rounded-2xl border border-border/60 bg-card/80 p-3 shadow-2xl shadow-black/30">
+          <img
+            v-if="file?.previewSrc"
+            :src="file.previewSrc"
+            :alt="file.fileName"
+            class="block max-h-[calc(100vh-190px)] max-w-full rounded-xl object-contain"
+            draggable="false"
+          />
+        </div>
+      </div>
+    </div>
+
     <div v-else class="relative min-h-0 flex-1 overflow-hidden">
       <div ref="containerRef" class="absolute inset-0 select-text" />
     </div>
@@ -365,18 +399,23 @@ onBeforeUnmount(() => {
           {{ dirty ? '已修改' : '已保存' }}
         </span>
         <span class="text-muted-foreground/30">·</span>
-        <span>{{ stats.lines }} 行</span>
-        <span class="text-muted-foreground/30">·</span>
-        <span>{{ stats.chars }} 字符</span>
-        <span class="text-muted-foreground/30">·</span>
+        <template v-if="!isImagePreview">
+          <span>{{ stats.lines }} 行</span>
+          <span class="text-muted-foreground/30">·</span>
+          <span>{{ stats.chars }} 字符</span>
+          <span class="text-muted-foreground/30">·</span>
+        </template>
         <span>{{ stats.size }}</span>
       </div>
       <div class="flex items-center gap-3">
         <span class="rounded bg-muted/60 px-1.5 py-[1px] font-mono text-[10px] uppercase tracking-wide text-foreground/70">
-          {{ file.language }}
+          {{ isImagePreview ? imagePreviewLabel : file.language }}
         </span>
-        <span>UTF-8</span>
-        <span>LF</span>
+        <template v-if="!isImagePreview">
+          <span>UTF-8</span>
+          <span>LF</span>
+        </template>
+        <span v-else>只读预览</span>
       </div>
     </div>
   </div>

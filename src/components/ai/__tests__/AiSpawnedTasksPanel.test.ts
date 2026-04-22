@@ -232,4 +232,55 @@ describe('AiSpawnedTasksPanel', () => {
 
     expect(wrapper.emitted('run-batch')).toEqual([[['task-2']]])
   })
+
+  it('treats pending tasks after failed or cancelled dependencies as blocked', async () => {
+    const tasks: SpawnedTask[] = [
+      {
+        id: 'task-1',
+        description: 'failed prerequisite',
+        status: 'error',
+        createdAt: 1000,
+        retryCount: 0,
+        sourceMessageId: 'assistant-1',
+      },
+      {
+        id: 'task-2',
+        description: 'after failed prerequisite',
+        status: 'pending',
+        dispatchStatus: 'blocked',
+        createdAt: 1001,
+        retryCount: 0,
+        sourceMessageId: 'assistant-1',
+        dependsOn: ['task-1'],
+      },
+      {
+        id: 'task-3',
+        description: 'cancelled prerequisite',
+        status: 'cancelled',
+        createdAt: 1002,
+        retryCount: 0,
+        sourceMessageId: 'assistant-1',
+      },
+      {
+        id: 'task-4',
+        description: 'after cancelled prerequisite',
+        status: 'pending',
+        dispatchStatus: 'blocked',
+        createdAt: 1003,
+        retryCount: 0,
+        sourceMessageId: 'assistant-1',
+        dependsOn: ['task-3'],
+      },
+    ]
+
+    const wrapper = mount(AiSpawnedTasksPanel, {
+      props: { tasks },
+    })
+
+    expect(wrapper.text()).toContain('ai.tasks.blockedCount')
+    expect(wrapper.text()).toContain('ai.tasks.runBlockedBy')
+
+    const batchRunButton = wrapper.findAll('button').find(button => button.text().includes('ai.tasks.batchRun'))
+    expect(batchRunButton).toBeUndefined()
+  })
 })

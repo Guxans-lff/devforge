@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { WorkspaceRoot } from '@/types/workspace-files'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import {
@@ -15,6 +16,7 @@ const props = defineProps<{
   aiReferencedActive?: boolean
   taskReferencedActive?: boolean
   focusedActive?: boolean
+  pathActive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -22,6 +24,10 @@ const emit = defineEmits<{
 }>()
 
 const store = useWorkspaceFilesStore()
+
+const isPathOnly = computed(() =>
+  Boolean(props.pathActive || props.taskReferencedActive || props.aiReferencedActive),
+)
 
 function toggleCollapse() {
   props.root.collapsed = !props.root.collapsed
@@ -42,14 +48,12 @@ function refresh() {
     :class="[
       focusedActive
         ? 'bg-orange-500/10 ring-1 ring-orange-500/22 hover:bg-orange-500/13'
-        : taskReferencedActive
-          ? 'bg-amber-500/7 ring-1 ring-amber-500/14 hover:bg-amber-500/10'
         : aiActive
           ? 'bg-primary/8 ring-1 ring-primary/15 hover:bg-primary/10'
         : editorActive
           ? 'bg-emerald-500/7 ring-1 ring-emerald-500/14 hover:bg-emerald-500/10'
-        : aiReferencedActive
-          ? 'bg-sky-500/6 ring-1 ring-sky-500/12 hover:bg-sky-500/9'
+        : isPathOnly
+          ? 'bg-muted/22 ring-1 ring-border/45 hover:bg-muted/30'
         : root.collapsed
           ? 'hover:bg-muted/30'
           : 'bg-muted/20 hover:bg-muted/30',
@@ -70,36 +74,6 @@ function refresh() {
     </div>
     <span class="flex-1 truncate text-[12px] font-semibold text-foreground/90 tracking-tight">
       {{ root.name }}
-    </span>
-    <span
-      v-if="focusedActive"
-      class="rounded-full border border-orange-500/20 bg-orange-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-orange-300"
-    >
-      当前
-    </span>
-    <span
-      v-else-if="taskReferencedActive"
-      class="rounded-full border border-amber-500/16 bg-amber-500/7 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-amber-400"
-    >
-      相关
-    </span>
-    <span
-      v-else-if="aiActive"
-      class="rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-primary"
-    >
-      当前
-    </span>
-    <span
-      v-else-if="aiReferencedActive"
-      class="rounded-full border border-sky-500/14 bg-sky-500/6 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-sky-400/90"
-    >
-      相关
-    </span>
-    <span
-      v-else-if="editorActive"
-      class="rounded-full border border-emerald-500/16 bg-emerald-500/7 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-emerald-400"
-    >
-      当前
     </span>
     <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
       <button

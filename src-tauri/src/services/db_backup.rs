@@ -681,3 +681,46 @@ fn escape_postgres_value_into(buf: &mut String, row: &sqlx::postgres::PgRow, col
         _ => buf.push_str("NULL"),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::sql_splitter::split_sql_statements;
+
+    #[test]
+    fn filters_mysql_base_tables_and_views_consistently() {
+        assert!(is_base_table("BASE TABLE"));
+        assert!(is_base_table("table"));
+        assert!(!is_base_table("VIEW"));
+        assert!(!is_base_table("SYSTEM VIEW"));
+    }
+
+    #[test]
+    fn detects_binary_mysql_types_from_plain_and_suffixed_names() {
+        assert!(is_binary_mysql_type("blob"));
+        assert!(is_binary_mysql_type("VARBINARY(255)"));
+        assert!(is_binary_mysql_type(" mediumblob "));
+        assert!(!is_binary_mysql_type("varchar(255)"));
+        assert!(!is_binary_mysql_type("json"));
+    }
+
+    #[test]
+    fn escapes_mysql_strings_in_backup_output_that_restore_splitter_can_parse() {
+        let mut sql = String::new();
+        sql.push_str("-- DevForge Database Backup\n");
+        sql.push_str("SET NAMES utf8mb4;\n");
+        sql.push_str("INSERT INTO `notes` (`content`) VALUES\n");
+        push_mysql_escaped_str(&mut sql, "line1\nline2\\path's end");
+        sql.push_str(";\n");
+        sql.push_str("SET FOREIGN_KEY_CHECKS = 1;\n");
+
+        assert!(sql.contains("'line1\\nline2\\\\path\\'s end'"));
+
+        let statements = split_sql_statements(&sql);
+        assert_eq!(statements.len(), 3);
+        assert!(statements[0].contains("SET NAMES utf8mb4"));
+        assert!(statements[0].contains("-- DevForge Database Backup"));
+        assert_eq!(statements[1], "INSERT INTO `notes` (`content`) VALUES\n'line1\\nline2\\\\path\\'s end'");
+        assert_eq!(statements[2], "SET FOREIGN_KEY_CHECKS = 1");
+    }
+}

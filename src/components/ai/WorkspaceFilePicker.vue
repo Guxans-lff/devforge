@@ -144,115 +144,118 @@ for (const root of store.roots) {
 
 <template>
   <Dialog :open="true" @update:open="(val: boolean) => !val && emit('close')">
-    <DialogContent class="sm:max-w-[480px] max-h-[70vh] flex flex-col">
-      <DialogHeader>
-        <DialogTitle>{{ t('ai.workspaceFilePicker.title') }}</DialogTitle>
-        <DialogDescription>{{ t('ai.workspaceFilePicker.description') }}</DialogDescription>
+    <DialogContent class="w-[min(760px,calc(100vw-2rem))] max-w-none max-h-[78vh] overflow-hidden gap-0 border-border/50 bg-card/98 p-0 shadow-2xl backdrop-blur-xl sm:max-w-none">
+      <DialogHeader class="border-b border-border/40 px-6 py-5 pr-12">
+        <DialogTitle class="text-lg font-semibold tracking-tight">{{ t('ai.workspaceFilePicker.title') }}</DialogTitle>
+        <DialogDescription class="mt-1 text-sm text-muted-foreground">{{ t('ai.workspaceFilePicker.description') }}</DialogDescription>
       </DialogHeader>
 
-      <!-- 搜索框 -->
-      <div class="relative">
-        <Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <input
-          v-model="searchQuery"
-          type="text"
-          :placeholder="t('ai.workspaceFilePicker.searchPlaceholder')"
-          class="w-full rounded-md border bg-transparent py-2 pl-10 pr-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-        />
-      </div>
-
-      <!-- 无工作区提示 -->
-      <div
-        v-if="!hasRoots"
-        class="flex-1 flex items-center justify-center py-10 text-sm text-muted-foreground"
-      >
-        {{ t('ai.workspaceFilePicker.noRoots') }}
-      </div>
-
-      <!-- 搜索结果模式 -->
-      <div
-        v-else-if="isSearching"
-        class="flex-1 overflow-y-auto min-h-0 max-h-[360px] border rounded-md"
-      >
-        <div
-          v-if="searchResults.length === 0"
-          class="py-8 text-center text-sm text-muted-foreground"
-        >
-          {{ t('ai.workspaceFilePicker.noMatches') }}
-        </div>
-        <div
-          v-for="node in searchResults"
-          :key="node.id"
-          class="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-muted/50 text-sm"
-          @click="toggleSelect(node)"
-        >
+      <div class="flex min-h-0 flex-1 flex-col px-6 py-4">
+        <!-- 搜索框 -->
+        <div class="relative">
+          <Search class="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <input
-            type="checkbox"
-            :checked="selectedPaths.has(node.absolutePath)"
-            class="h-4 w-4 rounded border-muted-foreground/30"
-            @click.stop="toggleSelect(node)"
+            v-model="searchQuery"
+            type="text"
+            :placeholder="t('ai.workspaceFilePicker.searchPlaceholder')"
+            class="h-11 w-full rounded-xl border border-border/70 bg-background/70 py-2 pl-10 pr-3 text-sm shadow-inner shadow-black/5 placeholder:text-muted-foreground/70 transition-colors focus:border-primary/60 focus:outline-none focus:ring-2 focus:ring-primary/20"
           />
-          <File class="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div class="flex flex-col min-w-0">
-            <span class="truncate font-medium leading-tight">{{ node.name }}</span>
-            <span class="truncate text-xs text-muted-foreground leading-tight">{{ node.path }}</span>
+        </div>
+
+        <!-- 无工作区提示 -->
+        <div
+          v-if="!hasRoots"
+          class="mt-4 flex min-h-[260px] flex-1 items-center justify-center rounded-xl border border-dashed border-border/60 bg-muted/10 px-6 py-10 text-center text-sm text-muted-foreground"
+        >
+          {{ t('ai.workspaceFilePicker.noRoots') }}
+        </div>
+
+        <!-- 搜索结果模式 -->
+        <div
+          v-else-if="isSearching"
+          class="mt-4 min-h-[280px] flex-1 overflow-y-auto rounded-xl border border-border/60 bg-background/45"
+        >
+          <div
+            v-if="searchResults.length === 0"
+            class="flex min-h-[260px] items-center justify-center px-6 py-8 text-center text-sm text-muted-foreground"
+          >
+            {{ t('ai.workspaceFilePicker.noMatches') }}
+          </div>
+          <div
+            v-for="node in searchResults"
+            :key="node.id"
+            class="group flex cursor-pointer items-center gap-3 border-b border-border/35 px-3.5 py-2.5 text-sm last:border-b-0 hover:bg-muted/40"
+            @click="toggleSelect(node)"
+          >
+            <input
+              type="checkbox"
+              :checked="selectedPaths.has(node.absolutePath)"
+              class="h-4 w-4 rounded border-muted-foreground/30"
+              @click.stop="toggleSelect(node)"
+            />
+            <File class="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-foreground/70" />
+            <div class="flex min-w-0 flex-1 flex-col">
+              <span class="truncate font-medium leading-tight text-foreground/90">{{ node.name }}</span>
+              <span class="mt-0.5 truncate text-xs leading-tight text-muted-foreground">{{ node.path }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 树形浏览模式 -->
+        <div
+          v-else
+          class="mt-4 min-h-[280px] flex-1 overflow-y-auto rounded-xl border border-border/60 bg-background/45"
+        >
+          <div
+            v-for="node in treeNodes"
+            :key="node.id"
+            class="group flex min-h-10 cursor-pointer items-center gap-2 border-b border-border/30 px-3 py-2 text-sm last:border-b-0 hover:bg-muted/40"
+            :class="node.isRootHeader ? 'bg-muted/20' : ''"
+            :style="{ paddingLeft: node.isRootHeader ? '14px' : `${(node.depth + 1) * 18 + 14}px` }"
+            @click="node.isDirectory ? toggleExpand(node) : toggleSelect(node)"
+          >
+            <!-- 根标题 -->
+            <template v-if="node.isRootHeader">
+              <FolderOpen class="h-4 w-4 shrink-0 text-blue-400" />
+              <span class="truncate text-xs font-bold uppercase tracking-wide text-muted-foreground">{{ node.name }}</span>
+            </template>
+
+            <!-- 目录 -->
+            <template v-else-if="node.isDirectory">
+              <ChevronRight
+                class="h-3 w-3 shrink-0 text-muted-foreground transition-transform"
+                :class="{ 'rotate-90': localExpanded.has(node.id) }"
+              />
+              <Folder class="h-4 w-4 shrink-0 text-blue-400" />
+              <span class="truncate text-foreground/85">{{ node.name }}</span>
+            </template>
+
+            <!-- 文件 -->
+            <template v-else>
+              <input
+                type="checkbox"
+                :checked="selectedPaths.has(node.absolutePath)"
+                class="h-4 w-4 shrink-0 rounded border-muted-foreground/30"
+                @click.stop="toggleSelect(node)"
+              />
+              <File class="h-4 w-4 shrink-0 text-muted-foreground group-hover:text-foreground/70" />
+              <span class="truncate text-foreground/85">{{ node.name }}</span>
+            </template>
           </div>
         </div>
       </div>
 
-      <!-- 树形浏览模式 -->
-      <div
-        v-else
-        class="flex-1 overflow-y-auto min-h-0 max-h-[360px] border rounded-md"
-      >
-        <div
-          v-for="node in treeNodes"
-          :key="node.id"
-          class="flex items-center gap-1.5 px-2 py-1.5 cursor-pointer hover:bg-muted/50 text-sm"
-          :style="{ paddingLeft: node.isRootHeader ? '8px' : `${(node.depth + 1) * 16 + 8}px` }"
-          @click="node.isDirectory ? toggleExpand(node) : toggleSelect(node)"
-        >
-          <!-- 根标题 -->
-          <template v-if="node.isRootHeader">
-            <FolderOpen class="h-4 w-4 text-blue-400 shrink-0" />
-            <span class="font-bold text-xs uppercase text-muted-foreground truncate">{{ node.name }}</span>
-          </template>
-
-          <!-- 目录 -->
-          <template v-else-if="node.isDirectory">
-            <ChevronRight
-              class="h-3 w-3 shrink-0 text-muted-foreground transition-transform"
-              :class="{ 'rotate-90': localExpanded.has(node.id) }"
-            />
-            <Folder class="h-4 w-4 shrink-0 text-blue-400" />
-            <span class="truncate">{{ node.name }}</span>
-          </template>
-
-          <!-- 文件 -->
-          <template v-else>
-            <input
-              type="checkbox"
-              :checked="selectedPaths.has(node.absolutePath)"
-              class="h-4 w-4 rounded border-muted-foreground/30 shrink-0"
-              @click.stop="toggleSelect(node)"
-            />
-            <File class="h-4 w-4 shrink-0 text-muted-foreground" />
-            <span class="truncate">{{ node.name }}</span>
-          </template>
-        </div>
-      </div>
-
       <!-- 底部 -->
-      <DialogFooter class="flex items-center justify-between sm:justify-between">
-        <Button variant="ghost" size="sm" @click="browseSystem">
+      <DialogFooter class="flex-row items-center justify-between gap-3 border-t border-border/40 bg-muted/10 px-6 py-4 sm:justify-between">
+        <Button variant="ghost" size="sm" class="h-9" @click="browseSystem">
           <ExternalLink class="h-3.5 w-3.5 mr-1.5" />
           {{ t('ai.workspaceFilePicker.browseOther') }}
         </Button>
         <div class="flex items-center gap-2">
-          <Button variant="outline" size="sm" @click="emit('close')">
+          <Button variant="outline" size="sm" class="h-9 min-w-20" @click="emit('close')">
             {{ t('common.cancel') }}
           </Button>
-          <Button size="sm" :disabled="selectedCount === 0" @click="handleConfirm">
+          <Button size="sm" class="h-9 min-w-20" :disabled="selectedCount === 0" @click="handleConfirm">
             {{ t('common.confirm') }}{{ selectedCount > 0 ? ` (${selectedCount})` : '' }}
           </Button>
         </div>

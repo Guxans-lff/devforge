@@ -117,6 +117,7 @@ const isEditorParent = computed(() =>
   && !isEditorNode.value
   && isSameOrParentPath(normalizedNodePath.value, normalizedEditorPath.value),
 )
+
 </script>
 
 <template>
@@ -233,56 +234,6 @@ const isEditorParent = computed(() =>
         <template v-else>{{ node.name }}</template>
       </span>
     </template>
-
-    <!-- 目录子项数 badge -->
-    <span
-      v-if="focusedTask"
-      class="flex-shrink-0 rounded-full border border-orange-500/25 bg-orange-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-orange-300"
-    >
-      当前
-    </span>
-    <span
-      v-else-if="focusedTaskParent"
-      class="flex-shrink-0 rounded-full border border-orange-500/12 bg-orange-500/5 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-orange-300/75"
-    >
-      相关
-    </span>
-    <span
-      v-else-if="taskReferenced"
-      class="flex-shrink-0 rounded-full border border-amber-500/18 bg-amber-500/8 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-amber-400"
-    >
-      相关
-    </span>
-    <span
-      v-else-if="taskReferencedParent"
-      class="flex-shrink-0 rounded-full border border-amber-500/12 bg-amber-500/4 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-amber-300/70"
-    >
-      相关
-    </span>
-    <span
-      v-else-if="isAiWorkdirNode"
-      class="flex-shrink-0 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-primary"
-    >
-      当前
-    </span>
-    <span
-      v-else-if="isEditorNode"
-      class="flex-shrink-0 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-emerald-400"
-    >
-      当前
-    </span>
-    <span
-      v-else-if="aiReferenced"
-      class="flex-shrink-0 rounded-full border border-sky-500/16 bg-sky-500/7 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-sky-400/90"
-    >
-      相关
-    </span>
-    <span
-      v-else-if="aiReferencedParent"
-      class="flex-shrink-0 rounded-full border border-sky-500/10 bg-sky-500/3 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-sky-300/65"
-    >
-      相关
-    </span>
 
     <span
       v-if="node.isDirectory && !node.isExpanded && (node as any).childCount"

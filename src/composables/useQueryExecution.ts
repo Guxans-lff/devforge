@@ -5,6 +5,7 @@
  */
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useConnectionStore } from '@/stores/connections'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useNotification } from '@/composables/useNotification'
 import { useExecutionTimer } from '@/composables/useExecutionTimer'
@@ -15,7 +16,7 @@ import { useTransactionControl } from '@/composables/useTransactionControl'
 import * as dbApi from '@/api/database'
 import * as historyApi from '@/api/query-history'
 import type { QueryResult, QueryChunk, ErrorStrategy } from '@/types/database'
-import type { QueryTabContext, ResultTab, SubStatementResult } from '@/types/database-workspace'
+import type { QueryTabContext, SubStatementResult } from '@/types/database-workspace'
 import { isMultiStatement, extractTableName } from '@/utils/sqlParser'
 import type { EnvironmentType } from '@/types/environment'
 import { parseBackendError, ensureErrorString } from '@/types/error'
@@ -26,6 +27,7 @@ export interface UseQueryExecutionOptions {
   connectionName: Ref<string | undefined>
   tabId: Ref<string>
   isConnected: Ref<boolean>
+  ensureConnected?: () => Promise<boolean>
   environment: Ref<EnvironmentType | undefined>
   readOnly: Ref<boolean>
   confirmDanger: Ref<boolean>
@@ -45,11 +47,13 @@ const MAX_RESULT_TABS = 10
 export function useQueryExecution(options: UseQueryExecutionOptions) {
   const {
     connectionId, connectionName, tabId, isConnected,
+    ensureConnected,
     environment, readOnly, confirmDanger,
     addResultTab, tabContext,
   } = options
 
   const { t } = useI18n()
+  const connectionStore = useConnectionStore()
   const store = useDatabaseWorkspaceStore()
   const notification = useNotification()
   const executionTimer = useExecutionTimer()
@@ -92,31 +96,125 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   })
 
   // ===== 参数化查询 =====
-  /** 检测 SQL 中的 :paramName 占位符 */
-  const PARAM_REGEX = /(?<!')(?::([a-zA-Z_]\w*))(?!')/g
   const paramDialogOpen = ref(false)
   const paramNames = ref<string[]>([])
   const paramValues = ref<Record<string, string>>({})
   const paramPendingSql = ref('')
 
+  function scanSqlParams(
+    sql: string,
+    visitor: (name: string, start: number, end: number) => void,
+  ) {
+    let inSingleQuote = false
+    let inDoubleQuote = false
+    let inBacktick = false
+    let inLineComment = false
+    let inBlockComment = false
+
+    for (let i = 0; i < sql.length; i++) {
+      const ch = sql[i]
+      const next = sql[i + 1]
+      const prev = sql[i - 1]
+
+      if (inLineComment) {
+        if (ch === '\n') inLineComment = false
+        continue
+      }
+
+      if (inBlockComment) {
+        if (ch === '*' && next === '/') {
+          inBlockComment = false
+          i++
+        }
+        continue
+      }
+
+      if (inSingleQuote) {
+        if (ch === '\\' && next) {
+          i++
+          continue
+        }
+        if (ch === '\'' && next === '\'') {
+          i++
+          continue
+        }
+        if (ch === '\'') inSingleQuote = false
+        continue
+      }
+
+      if (inDoubleQuote) {
+        if (ch === '"') inDoubleQuote = false
+        continue
+      }
+
+      if (inBacktick) {
+        if (ch === '`') inBacktick = false
+        continue
+      }
+
+      if (ch === '-' && next === '-') {
+        inLineComment = true
+        i++
+        continue
+      }
+      if (ch === '#') {
+        inLineComment = true
+        continue
+      }
+      if (ch === '/' && next === '*') {
+        inBlockComment = true
+        i++
+        continue
+      }
+      if (ch === '\'') {
+        inSingleQuote = true
+        continue
+      }
+      if (ch === '"') {
+        inDoubleQuote = true
+        continue
+      }
+      if (ch === '`') {
+        inBacktick = true
+        continue
+      }
+
+      if (ch === ':' && prev !== ':' && next && /[A-Za-z_]/.test(next)) {
+        let end = i + 2
+        while (end < sql.length && /\w/.test(sql[end]!)) {
+          end++
+        }
+        visitor(sql.slice(i + 1, end), i, end)
+        i = end - 1
+      }
+    }
+  }
+
   function detectParams(sql: string): string[] {
     const found = new Set<string>()
-    let match: RegExpExecArray | null
-    const re = new RegExp(PARAM_REGEX.source, PARAM_REGEX.flags)
-    while ((match = re.exec(sql)) !== null) {
-      found.add(match[1]!)
-    }
+    scanSqlParams(sql, name => found.add(name))
     return [...found]
   }
 
   function substituteParams(sql: string, params: Record<string, string>): string {
-    return sql.replace(new RegExp(PARAM_REGEX.source, PARAM_REGEX.flags), (full, name: string) => {
+    let output = ''
+    let lastIndex = 0
+
+    scanSqlParams(sql, (name, start, end) => {
+      output += sql.slice(lastIndex, start)
       const val = params[name]
-      if (val === undefined || val === '') return full
-      // 数字直接替换，否则用单引号包裹并转义
-      if (/^-?\d+(\.\d+)?$/.test(val)) return val
-      return `'${val.replace(/'/g, "''")}'`
+      if (val === undefined || val === '') {
+        output += sql.slice(start, end)
+      } else if (/^-?\d+(\.\d+)?$/.test(val)) {
+        output += val
+      } else {
+        output += `'${val.replace(/'/g, "''")}'`
+      }
+      lastIndex = end
     })
+
+    output += sql.slice(lastIndex)
+    return output
   }
 
   function executeWithParams(params: Record<string, string>) {
@@ -175,8 +273,63 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   }
 
   // ===== 主入口：执行 SQL =====
+  async function restoreSessionConnection() {
+    try {
+      await dbApi.dbAcquireSession(connectionId.value, tabId.value)
+      return true
+    } catch (e: unknown) {
+      console.warn('[useQueryExecution] restore session failed', e)
+      return false
+    }
+  }
+
+  async function ensureExecutionConnection() {
+    if (isConnected.value) return true
+    if (!ensureConnected) return false
+
+    const connected = await ensureConnected()
+    if (!connected) return false
+
+    return restoreSessionConnection()
+  }
+
+  async function tryAutoReconnect(errorMessage: string) {
+    if (!connectionId.value || !connectionStore.isDisconnectError(errorMessage)) return false
+
+    const reconnectResult = await connectionStore.attemptAutoReconnect(connectionId.value)
+    if (!reconnectResult?.success) return false
+
+    return restoreSessionConnection()
+  }
+
+  function normalizeResultError(result: QueryResult) {
+    if (result.error === null || result.error === undefined) return null
+    const errorMessage = ensureErrorString(result.error)
+    result.error = errorMessage
+    return errorMessage
+  }
+
+  function getRetryableMultiDisconnectError(results: SubStatementResult[]) {
+    let hasSuccessfulStatement = false
+
+    for (const statement of results) {
+      if (!statement.result.isError) {
+        hasSuccessfulStatement = true
+        continue
+      }
+
+      const errorMessage = normalizeResultError(statement.result)
+      if (!errorMessage) continue
+      if (hasSuccessfulStatement) return null
+
+      return connectionStore.isDisconnectError(errorMessage) ? errorMessage : null
+    }
+
+    return null
+  }
+
   async function handleExecute(sql: string): Promise<{ success: boolean }> {
-    if (!sql.trim() || !isConnected.value || isExecuting.value) return { success: false }
+    if (!sql.trim() || isExecuting.value) return { success: false }
 
     // 参数化查询检测
     const params = detectParams(sql)
@@ -202,23 +355,25 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       return { success: false }
     }
 
-    await doExecute(sql)
-    return { success: true }
+    const started = await doExecute(sql)
+    return { success: started }
   }
 
   /** 确认危险操作后继续执行 */
   function handleDangerConfirm() {
     const sql = dangerConfirm.confirmAndGetSql()
-    if (sql) doExecute(sql)
+    if (sql) void doExecute(sql)
   }
 
   /** 核心执行逻辑（绕过危险检查） */
   async function doExecute(sql: string) {
-    if (!sql.trim() || !isConnected.value || isExecuting.value) return
+    if (!sql.trim() || isExecuting.value) return false
+    if (!(await ensureExecutionConnection())) return false
 
     // 递增执行版本号，使正在进行的旧流式查询的 onChunk 失效
     const currentExecVersion = ++executeVersion
 
+    explainAnalysis.showExplain.value = false
     startExecutionTimer()
 
     // USE 语句特殊处理
@@ -236,7 +391,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       })
       dbApi.dbSwitchDatabase(connectionId.value, tabId.value, dbName).catch((e: unknown) => console.warn('[useQueryExecution]', e))
       notification.success(t('database.databaseSwitched', { name: dbName }) || `已切换到数据库 ${dbName}`)
-      return dbName
+      return true
     }
 
     // 清除旧状态
@@ -248,7 +403,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
 
     if (isMultiStatement(sql)) {
       await handleMultiExecute(sql, startTime, currentExecVersion)
-      return
+      return true
     }
 
     const firstWord = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? ''
@@ -259,14 +414,17 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     } else {
       await handleNonStreamExecute(sql, startTime, currentExecVersion)
     }
+
+    return true
   }
 
   // ===== 流式执行 =====
-  async function handleStreamExecute(sql: string, startTime: number, execVersion: number) {
+  async function handleStreamExecute(sql: string, startTime: number, execVersion: number, hasRetried = false) {
     let allColumns: QueryResult['columns'] = []
     let allRows: unknown[][] = []
     let lastError: string | null = null
     let totalTimeMs = 0
+    let receivedChunk = false
 
     try {
       const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
@@ -281,8 +439,9 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       const onChunk = (chunk: QueryChunk) => {
         // 版本号不匹配说明已有新的执行/browseTable，丢弃此 chunk
         if (execVersion !== executeVersion) return
+        receivedChunk = true
         if (chunk.columns && chunk.columns.length > 0) allColumns = chunk.columns
-        if (chunk.rows && chunk.rows.length > 0) allRows = [...allRows, ...chunk.rows]
+        if (chunk.rows && chunk.rows.length > 0) allRows.push(...chunk.rows)
         if (chunk.error) lastError = ensureErrorString(chunk.error)
         if (chunk.totalTimeMs !== null && chunk.totalTimeMs !== undefined) totalTimeMs = chunk.totalTimeMs
 
@@ -302,16 +461,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         connectionId.value, tabId.value, sql, onChunk, currentDb, timeoutSecs,
       ).catch(e => { rejectStream!(e) })
 
-      // 流式响应初始化超时：取用户查询超时的一半，至少 10 秒
-      const streamInitTimeoutMs = Math.max(10_000, (queryTimeout.value * 1000) / 2)
-      const waitTimeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('流式查询响应超时')), streamInitTimeoutMs),
-      )
-
-      await Promise.race([
-        Promise.all([invokePromise, streamFinishedPromise]),
-        waitTimeoutPromise,
-      ])
+      await Promise.all([invokePromise, streamFinishedPromise])
 
       const finalResult: QueryResult = {
         columns: allColumns, rows: allRows, affectedRows: 0,
@@ -321,9 +471,9 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         tableName: extractTableName(sql) || undefined,
       }
 
-      stopExecutionTimer()
       // 版本号不匹配说明已有新操作，丢弃此结果
       if (execVersion !== executeVersion) return
+      stopExecutionTimer()
       store.updateTabContext(connectionId.value, tabId.value, { result: finalResult, isExecuting: false })
 
       const executionTime = Date.now() - startTime
@@ -338,34 +488,64 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         notification.error(t('database.queryFailed'), lastError, true)
       }
       saveHistory(sql, finalResult)
-    } catch (_e) {
-      console.warn('流式查询无法完成，降级到传统 API:', _e)
-      await handleNonStreamExecute(sql, startTime, execVersion)
+    } catch (e: unknown) {
+      if (execVersion !== executeVersion) return
+
+      const errorMessage = lastError ?? parseBackendError(e).message
+      if (!receivedChunk && !hasRetried && await tryAutoReconnect(errorMessage)) {
+        return handleStreamExecute(sql, startTime, execVersion, true)
+      }
+      const shouldFallback = !receivedChunk
+        && /not implemented|unsupported|stream/i.test(errorMessage)
+
+      if (shouldFallback) {
+        console.warn('stream query unavailable, falling back to non-stream execution:', e)
+        await handleNonStreamExecute(sql, startTime, execVersion)
+        return
+      }
+
+      const errorResult: QueryResult = {
+        columns: allColumns,
+        rows: allRows,
+        affectedRows: 0,
+        executionTimeMs: totalTimeMs || (Date.now() - startTime),
+        isError: true,
+        error: errorMessage,
+        totalCount: allRows.length > 0 ? allRows.length : null,
+        truncated: false,
+        tableName: extractTableName(sql) || undefined,
+      }
+      stopExecutionTimer()
+      store.updateTabContext(connectionId.value, tabId.value, { result: errorResult, isExecuting: false })
+      notification.error(t('database.queryFailed'), errorMessage, true)
+      saveHistory(sql, errorResult)
     }
   }
 
   // ===== 非流式执行 =====
-  async function handleNonStreamExecute(sql: string, startTime: number, execVersion: number) {
+  async function handleNonStreamExecute(sql: string, startTime: number, execVersion: number, hasRetried = false) {
     try {
       const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
       const currentDb = tabContext.value?.currentDatabase
       const result = await dbApi.dbExecuteQueryOnSession(
         connectionId.value, tabId.value, sql, currentDb, timeoutSecs,
       )
+      if (execVersion !== executeVersion) return
       if (!result.isError) result.tableName = extractTableName(sql) || undefined
+      const errorMessage = normalizeResultError(result)
+      if (result.isError && errorMessage && !hasRetried && await tryAutoReconnect(errorMessage)) {
+        return handleNonStreamExecute(sql, startTime, execVersion, true)
+      }
 
       stopExecutionTimer()
       // 版本号不匹配说明已有新操作，丢弃此结果
       if (execVersion !== executeVersion) return
       // 防御性处理：后端可能返回对象类型的 error，需确保为字符串
-      if (result.error !== null && result.error !== undefined) {
-        result.error = ensureErrorString(result.error)
-      }
       store.updateTabContext(connectionId.value, tabId.value, { result, isExecuting: false })
 
       const executionTime = Date.now() - startTime
       if (result.isError) {
-        notification.error(t('database.queryFailed'), ensureErrorString(result.error), true)
+        notification.error(t('database.queryFailed'), errorMessage ?? undefined, true)
       } else {
         addResultTab(sql, result)
         const rowCount = result.totalCount ?? result.rows.length
@@ -377,14 +557,17 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       }
       saveHistory(sql, result)
     } catch (e: unknown) {
+      if (execVersion !== executeVersion) return
       const errorStr = parseBackendError(e).message
+      if (!hasRetried && await tryAutoReconnect(errorStr)) {
+        return handleNonStreamExecute(sql, startTime, execVersion, true)
+      }
       const errorResult: QueryResult = {
         columns: [], rows: [], affectedRows: 0,
         executionTimeMs: Date.now() - startTime,
         isError: true, error: errorStr, totalCount: null, truncated: false,
       }
       stopExecutionTimer()
-      if (execVersion !== executeVersion) return
       store.updateTabContext(connectionId.value, tabId.value, { result: errorResult, isExecuting: false })
       notification.error(t('database.queryFailed'), errorStr, true)
       saveHistory(sql, errorResult)
@@ -392,14 +575,16 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   }
 
   // ===== 多语句执行 =====
-  async function handleMultiExecute(sql: string, startTime: number, execVersion: number) {
+  async function handleMultiExecute(sql: string, startTime: number, execVersion: number, hasRetried = false) {
     try {
       const currentDb = tabContext.value?.currentDatabase
       const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
 
-      const results = await dbApi.dbExecuteMultiV2(
-        connectionId.value, sql, currentDb, errorStrategy.value, timeoutSecs,
+      const results = await dbApi.dbExecuteMultiV2OnSession(
+        connectionId.value, tabId.value, sql, currentDb, errorStrategy.value, timeoutSecs,
       )
+
+      if (execVersion !== executeVersion) return
 
       const totalTime = Date.now() - startTime
       const successCount = results.filter(r => !r.result.isError).length
@@ -408,6 +593,10 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       const subResults: SubStatementResult[] = results.map(stmt => ({
         index: stmt.index, sql: stmt.sql, statementType: stmt.statementType, result: stmt.result,
       }))
+      const disconnectError = getRetryableMultiDisconnectError(subResults)
+      if (disconnectError && !hasRetried && await tryAutoReconnect(disconnectError)) {
+        return handleMultiExecute(sql, startTime, execVersion, true)
+      }
 
       const selectResult = results.find(r => !r.result.isError && r.result.columns.length > 0)
       const lastResult = selectResult?.result ?? (results.length > 0 ? results[results.length - 1]!.result : null)
@@ -428,18 +617,23 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         if (unpinnedIdx === -1) break
         tabs.splice(unpinnedIdx, 1)
       }
-      const newTab: ResultTab = {
+      const newTab = {
         id: crypto.randomUUID(),
         title: `批量执行 (${successCount}/${results.length})`,
-        result: summaryResult, sql: sql.trim(),
-        isPinned: false, createdAt: Date.now(), subResults,
+        result: summaryResult,
+        sql: sql.trim(),
+        isPinned: false,
+        createdAt: Date.now(),
+        subResults,
       }
       tabs.push(newTab)
 
       stopExecutionTimer()
-      if (execVersion !== executeVersion) return
       store.updateTabContext(connectionId.value, tabId.value, {
-        result: summaryResult, isExecuting: false,
+        result: summaryResult,
+        resultTabs: tabs,
+        activeResultTabId: newTab.id,
+        isExecuting: false,
       })
 
       const summaryMsg = t('database.multiStatement.executionSummary', {
@@ -456,6 +650,9 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       if (lastResult) saveHistory(sql, lastResult)
     } catch (e: unknown) {
       const errorStr = parseBackendError(e).message
+      if (!hasRetried && await tryAutoReconnect(errorStr)) {
+        return handleMultiExecute(sql, startTime, execVersion, true)
+      }
       const errorResult: QueryResult = {
         columns: [], rows: [], affectedRows: 0,
         executionTimeMs: Date.now() - startTime,
@@ -489,7 +686,8 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   // ===== 取消查询 =====
   async function handleCancel() {
     try {
-      await dbApi.dbCancelQuery(connectionId.value)
+      ++executeVersion
+      await dbApi.dbCancelQueryOnSession(connectionId.value, tabId.value)
     } catch (_e) {
       // 静默处理
     } finally {

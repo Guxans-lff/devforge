@@ -876,6 +876,46 @@ describe('AiChatView interaction', () => {
     })
   })
 
+  it('clears repository task focus when the focused spawned task disappears', async () => {
+    mocks.state.workspaceStore.updateTabMeta.mockImplementation((tabId: string, meta: Record<string, unknown>) => {
+      const tab = mocks.state.workspaceStore.tabs.find((item: any) => item.id === tabId)
+      if (tab) {
+        tab.meta = { ...tab.meta, ...meta }
+      }
+    })
+    mocks.state.workspaceStore.tabs[0].meta = {
+      ...mocks.state.workspaceStore.tabs[0].meta,
+      focusedTaskId: 'task-1',
+      focusedTaskPaths: ['D:/Project/devforge/src/views/AiChatView.vue'],
+      focusedTaskLabel: 'tighten src/views/AiChatView.vue task rail',
+    }
+    mocks.state.chat.workDir.value = 'D:/Project/devforge'
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: 'tighten src/views/AiChatView.vue task rail',
+      status: 'done',
+      executionMode: 'headless',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+
+    mountView()
+    await flushPromises()
+
+    mocks.state.chat.spawnedTasks.value = []
+    await nextTick()
+    await flushPromises()
+
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenCalledWith('ai-tab-1', {
+      focusedTaskId: null,
+      focusedTaskPaths: [],
+      focusedTaskLabel: null,
+    })
+    expect(mocks.state.workspaceStore.tabs[0].meta.focusedTaskId).toBeNull()
+    expect(mocks.state.workspaceStore.tabs[0].meta.focusedTaskPaths).toEqual([])
+    expect(mocks.state.workspaceStore.tabs[0].meta.focusedTaskLabel).toBeNull()
+  })
+
   it('opens the first task context file directly from the right rail', async () => {
     mocks.state.workspaceStore.updateTabMeta.mockImplementation((tabId: string, meta: Record<string, unknown>) => {
       const tab = mocks.state.workspaceStore.tabs.find((item: any) => item.id === tabId)

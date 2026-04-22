@@ -339,7 +339,7 @@ onBeforeUnmount(async () => {
   }
 })
 
-async function connectAndLoad() {
+async function connectAndLoad(): Promise<boolean> {
   isConnecting.value = true
   try {
     const result = await dbApi.dbConnect(props.connectionId)
@@ -360,6 +360,7 @@ async function connectAndLoad() {
     // 使用预加载的数据库列表（由后端在连接时一并获取，减少一次 IPC 往返）
     const preloaded = result.databases.length > 0 ? result.databases : undefined
     await objectTreeRef.value?.loadDatabases(preloaded)
+    return true
   } catch (e) {
     isConnected.value = false
     connectionStore.updateConnectionStatus(props.connectionId, 'error', ensureErrorString(e))
@@ -380,6 +381,7 @@ async function connectAndLoad() {
         },
       })
     }
+    return false
   } finally {
     isConnecting.value = false
   }
@@ -902,6 +904,7 @@ function handleEditDatabaseSuccess() {
                 :connection-id="connectionId"
                 :tab-id="activeTab.id"
                 :is-connected="isConnected"
+                :ensure-connected="connectAndLoad"
                 :schema-cache="schemaCache"
                 :is-loading-schema="isLoadingSchema"
                 :driver="driver"

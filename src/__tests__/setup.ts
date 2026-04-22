@@ -7,6 +7,10 @@ import { vi } from 'vitest'
 // ===== Mock Tauri Core API =====
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn(),
+  convertFileSrc: vi.fn((path: string) => `asset://localhost/${String(path).replace(/\\/g, '/')}`),
+  Channel: class<T> {
+    onmessage?: (message: T) => void
+  },
 }))
 
 // ===== Mock Tauri Dialog Plugin =====

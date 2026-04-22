@@ -117,6 +117,12 @@ export function classifyDispatchStatus(task: SpawnedTask, allTasks: SpawnedTask[
   const missingDependency = dependsOn.some(dependencyId => !allTasks.some(candidate => candidate.id === dependencyId))
   if (missingDependency) return 'blocked'
 
+  const terminalDependency = dependsOn.some((dependencyId) => {
+    const dependency = allTasks.find(candidate => candidate.id === dependencyId)
+    return dependency?.status === 'error' || dependency?.status === 'cancelled'
+  })
+  if (terminalDependency) return 'blocked'
+
   const unresolvedDependency = dependsOn.some((dependencyId) => {
     const dependency = allTasks.find(candidate => candidate.id === dependencyId)
     return dependency?.status !== 'done'
@@ -293,7 +299,8 @@ export function createChatTaskDispatcher(options: ChatTaskDispatcherOptions) {
       const result = await executor.run(started)
       runningTasks.delete(taskId)
 
-      if (cancelledTasks.has(taskId) || result.status === 'cancelled') {
+      const wasExplicitlyCancelled = cancelledTasks.has(taskId)
+      if (wasExplicitlyCancelled || result.status === 'cancelled') {
         updateTask(taskId, current => markSpawnedTaskCancelled({
           ...current,
           lastSummary: result.summary ?? current.lastSummary,
@@ -303,12 +310,14 @@ export function createChatTaskDispatcher(options: ChatTaskDispatcherOptions) {
           taskTabId: result.taskTabId ?? current.taskTabId,
           taskSessionId: result.sessionId ?? current.taskSessionId,
         }, result.error ?? currentTaskCancelReason(current)))
-        emit({
-          type: 'cancelled',
-          taskId,
-          message: `Task "${started.description}" was cancelled.`,
-        })
-        await drain()
+        if (!wasExplicitlyCancelled) {
+          emit({
+            type: 'cancelled',
+            taskId,
+            message: `Task "${started.description}" was cancelled.`,
+          })
+          await drain()
+        }
         return
       }
 

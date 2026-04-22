@@ -49,6 +49,17 @@ const DISCONNECT_ERROR_KEYWORDS = [
   'network is unreachable',
   'no route to host',
   'connection closed',
+  'closed an existing connection',
+  'forcibly closed',
+  'communications link failure',
+  'server closed the connection',
+  'connection lost',
+  'error communicating with database',
+  'os error 10054',
+  '10054',
+  '10053',
+  '远程主机强迫关闭',
+  '现有的连接',
   'eof',
 ]
 

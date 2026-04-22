@@ -201,6 +201,20 @@ function normalizePath(path?: string | null): string {
   return (path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
 }
 
+function isSamePath(a?: string | null, b?: string | null): boolean {
+  const left = normalizePath(a)
+  const right = normalizePath(b)
+  return Boolean(left) && left === right
+}
+
+function isDescendantPath(parentPath: string, childPath?: string | null): boolean {
+  const normalizedParent = normalizePath(parentPath)
+  const normalizedChild = normalizePath(childPath)
+  return Boolean(normalizedParent && normalizedChild)
+    && normalizedChild !== normalizedParent
+    && normalizedChild.startsWith(`${normalizedParent}/`)
+}
+
 function parentPathOf(path: string): string {
   const normalized = normalizePath(path)
   const sep = normalized.lastIndexOf('/')
@@ -244,15 +258,19 @@ async function revealPathInTree(path: string): Promise<void> {
 }
 
 function isAiRoot(rootPath: string): boolean {
-  const workDir = aiStore.currentWorkDir
-  if (!workDir) return false
-  return workDir === rootPath || workDir.startsWith(`${rootPath}/`)
+  return isSamePath(aiStore.currentWorkDir, rootPath)
+}
+
+function isAiRootPath(rootPath: string): boolean {
+  return isDescendantPath(rootPath, aiStore.currentWorkDir)
 }
 
 function isEditorRoot(rootPath: string): boolean {
-  const editorPath = store.activeEditor?.path
-  if (!editorPath) return false
-  return editorPath === rootPath || editorPath.startsWith(`${rootPath}/`) || editorPath.startsWith(`${rootPath}\\`)
+  return isSamePath(store.activeEditor?.path, rootPath)
+}
+
+function isEditorRootPath(rootPath: string): boolean {
+  return isDescendantPath(rootPath, store.activeEditor?.path)
 }
 
 const currentAiTabMeta = computed<Record<string, unknown>>(() => {
@@ -267,12 +285,12 @@ function readMetaPaths(key: 'aiReferencedPaths' | 'taskReferencedPaths' | 'focus
   return value.filter((item): item is string => typeof item === 'string')
 }
 
-const aiReferencedPaths = computed(() => new Set(readMetaPaths('aiReferencedPaths')))
-const taskReferencedPaths = computed(() => new Set(readMetaPaths('taskReferencedPaths')))
-const focusedTaskPaths = computed(() => new Set(readMetaPaths('focusedTaskPaths')))
-const focusedTaskPathList = computed(() => readMetaPaths('focusedTaskPaths'))
-const focusedFilePaths = computed(() => new Set(readMetaPaths('focusedFilePaths')))
-const focusedFilePathList = computed(() => readMetaPaths('focusedFilePaths'))
+const aiReferencedPaths = computed(() => new Set(readMetaPaths('aiReferencedPaths').map(normalizePath)))
+const taskReferencedPaths = computed(() => new Set(readMetaPaths('taskReferencedPaths').map(normalizePath)))
+const focusedTaskPaths = computed(() => new Set(readMetaPaths('focusedTaskPaths').map(normalizePath)))
+const focusedTaskPathList = computed(() => readMetaPaths('focusedTaskPaths').map(normalizePath))
+const focusedFilePaths = computed(() => new Set(readMetaPaths('focusedFilePaths').map(normalizePath)))
+const focusedFilePathList = computed(() => readMetaPaths('focusedFilePaths').map(normalizePath))
 const focusedTaskLabel = computed(() => {
   const value = currentAiTabMeta.value.focusedTaskLabel
   return typeof value === 'string' ? value : ''
@@ -341,9 +359,21 @@ const aiContextSecondaryLabel = computed(() => {
   return ''
 })
 
-function isReferencedBySet(rootPath: string, paths: Set<string>): boolean {
+function hasExactPath(paths: Set<string>, targetPath: string): boolean {
+  const normalizedTarget = normalizePath(targetPath)
   for (const path of paths) {
-    if (path === rootPath || path.startsWith(`${rootPath}/`) || path.startsWith(`${rootPath}\\`)) {
+    if (normalizePath(path) === normalizedTarget) {
+      return true
+    }
+  }
+  return false
+}
+
+function hasDescendantPath(paths: Set<string>, targetPath: string): boolean {
+  const normalizedTarget = normalizePath(targetPath)
+  for (const path of paths) {
+    const normalizedPath = normalizePath(path)
+    if (normalizedPath !== normalizedTarget && normalizedPath.startsWith(`${normalizedTarget}/`)) {
       return true
     }
   }
@@ -351,16 +381,26 @@ function isReferencedBySet(rootPath: string, paths: Set<string>): boolean {
 }
 
 function isAiReferencedRoot(rootPath: string): boolean {
-  return isReferencedBySet(rootPath, aiReferencedPaths.value)
+  return hasExactPath(aiReferencedPaths.value, rootPath)
+}
+
+function isAiReferencedRootPath(rootPath: string): boolean {
+  return hasDescendantPath(aiReferencedPaths.value, rootPath)
 }
 
 function isTaskReferencedRoot(rootPath: string): boolean {
-  return isReferencedBySet(rootPath, taskReferencedPaths.value)
+  return hasExactPath(taskReferencedPaths.value, rootPath)
+}
+
+function isTaskReferencedRootPath(rootPath: string): boolean {
+  return hasDescendantPath(taskReferencedPaths.value, rootPath)
 }
 
 function isParentReferencedBySet(nodePath: string, paths: Set<string>): boolean {
+  const normalizedNodePath = normalizePath(nodePath)
   for (const path of paths) {
-    if (path.startsWith(`${nodePath}/`) || path.startsWith(`${nodePath}\\`)) {
+    const normalizedPath = normalizePath(path)
+    if (normalizedPath.startsWith(`${normalizedNodePath}/`)) {
       return true
     }
   }
@@ -368,7 +408,19 @@ function isParentReferencedBySet(nodePath: string, paths: Set<string>): boolean 
 }
 
 function isFocusedTaskRoot(rootPath: string): boolean {
-  return isReferencedBySet(rootPath, focusedTaskPaths.value) || isReferencedBySet(rootPath, focusedFilePaths.value)
+  return hasExactPath(focusedTaskPaths.value, rootPath) || hasExactPath(focusedFilePaths.value, rootPath)
+}
+
+function isFocusedTaskRootPath(rootPath: string): boolean {
+  return hasDescendantPath(focusedTaskPaths.value, rootPath) || hasDescendantPath(focusedFilePaths.value, rootPath)
+}
+
+function isContextPathRoot(rootPath: string): boolean {
+  return isAiRootPath(rootPath)
+    || isEditorRootPath(rootPath)
+    || isAiReferencedRootPath(rootPath)
+    || isTaskReferencedRootPath(rootPath)
+    || isFocusedTaskRootPath(rootPath)
 }
 
 watch(
@@ -509,6 +561,7 @@ watch(
             :ai-referenced-active="isAiReferencedRoot(store.roots.find(r => r.id === store.flatNodes[item.index]?.rootId)!.path)"
             :task-referenced-active="isTaskReferencedRoot(store.roots.find(r => r.id === store.flatNodes[item.index]?.rootId)!.path)"
             :focused-active="isFocusedTaskRoot(store.roots.find(r => r.id === store.flatNodes[item.index]?.rootId)!.path)"
+            :path-active="isContextPathRoot(store.roots.find(r => r.id === store.flatNodes[item.index]?.rootId)!.path)"
             @contextmenu="(ev: MouseEvent) => handleRootContextMenu(ev, store.roots.find(r => r.id === store.flatNodes[item.index]?.rootId)!)"
           />
           <!-- 文件行 -->
@@ -519,11 +572,11 @@ watch(
             :selected="selectedNodeId === store.flatNodes[item.index]?.id"
             :drag-over="dragOverNodeId === store.flatNodes[item.index]?.id"
             :multi-selected="store.selectedNodes.size > 0 ? store.selectedNodes.has(store.flatNodes[item.index]?.id ?? '') : undefined"
-            :ai-referenced="aiReferencedPaths.has(store.flatNodes[item.index]!.absolutePath)"
-            :task-referenced="taskReferencedPaths.has(store.flatNodes[item.index]!.absolutePath)"
+            :ai-referenced="hasExactPath(aiReferencedPaths, store.flatNodes[item.index]!.absolutePath)"
+            :task-referenced="hasExactPath(taskReferencedPaths, store.flatNodes[item.index]!.absolutePath)"
             :ai-referenced-parent="isParentReferencedBySet(store.flatNodes[item.index]!.absolutePath, aiReferencedPaths)"
             :task-referenced-parent="isParentReferencedBySet(store.flatNodes[item.index]!.absolutePath, taskReferencedPaths)"
-            :focused-task="focusedTaskPaths.has(store.flatNodes[item.index]!.absolutePath) || focusedFilePaths.has(store.flatNodes[item.index]!.absolutePath)"
+            :focused-task="hasExactPath(focusedTaskPaths, store.flatNodes[item.index]!.absolutePath) || hasExactPath(focusedFilePaths, store.flatNodes[item.index]!.absolutePath)"
             :focused-task-parent="isParentReferencedBySet(store.flatNodes[item.index]!.absolutePath, focusedTaskPaths) || isParentReferencedBySet(store.flatNodes[item.index]!.absolutePath, focusedFilePaths)"
             @click="(ev: MouseEvent, node: FileNode) => handleRowClick(ev, node)"
             @dblclick="handleRowDblClick(store.flatNodes[item.index]!)"
