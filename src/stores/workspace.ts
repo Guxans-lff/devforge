@@ -5,6 +5,7 @@ import type { Tab, PanelState, SidePanelId, WorkspaceSnapshot } from '@/types/wo
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useConnectionStore } from '@/stores/connections'
 import { useTransferStore } from '@/stores/transfer'
+import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 
 /** localStorage 遗留 key（仅用于一次性迁移） */
 const LEGACY_SNAPSHOT_KEY = 'devforge-workspace-snapshot'
@@ -56,20 +57,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   function closeTab(tabId: string) {
     const tab = tabs.value.find((t) => t.id === tabId)
     if (!tab || !tab.closable) return
+    const absPath = tab.type === 'file-editor' ? (tab.meta?.absolutePath as string | undefined) : undefined
 
     // 本地文件编辑器：未保存时弹确认
     if (tab.type === 'file-editor' && tab.dirty) {
       const confirmed = window.confirm(`文件 "${tab.title}" 有未保存的修改，确定要关闭吗？`)
       if (!confirmed) return
-      const absPath = tab.meta?.absolutePath as string | undefined
       if (absPath) {
+        useWorkspaceFilesStore().clearActiveEditor(absPath)
         import('@/stores/local-file-editor').then(({ useLocalFileEditorStore }) => {
           useLocalFileEditorStore().close(absPath)
         })
       }
     } else if (tab.type === 'file-editor') {
-      const absPath = tab.meta?.absolutePath as string | undefined
       if (absPath) {
+        useWorkspaceFilesStore().clearActiveEditor(absPath)
         import('@/stores/local-file-editor').then(({ useLocalFileEditorStore }) => {
           useLocalFileEditorStore().close(absPath)
         })

@@ -1,12 +1,12 @@
 use sqlx::mysql::MySqlPool;
 use sqlx::postgres::PgPool;
-use sqlx::{Column, Row};
+use sqlx::{Column, Row, TypeInfo};
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncWriteExt, BufWriter};
 use futures::StreamExt;
 
 use std::sync::Arc;
-use crate::services::db_drivers::{escape_mysql_ident, DriverPool};
+use crate::services::db_drivers::{escape_mysql_ident, mysql, DriverPool};
 use crate::services::db_engine::DbEngine;
 use crate::services::sql_splitter;
 use crate::utils::error::AppError;
@@ -35,6 +35,26 @@ pub struct RestoreProgress {
 
 const BATCH_SIZE: usize = 5000;
 
+fn is_base_table(table_type: &str) -> bool {
+    let normalized = table_type.trim().to_ascii_uppercase();
+    normalized == "BASE TABLE" || normalized == "TABLE"
+}
+
+fn is_binary_mysql_type(type_name: &str) -> bool {
+    let normalized = type_name
+        .trim()
+        .split_once('(')
+        .map(|(name, _)| name)
+        .unwrap_or(type_name)
+        .trim()
+        .to_ascii_uppercase();
+
+    matches!(
+        normalized.as_str(),
+        "BINARY" | "VARBINARY" | "BLOB" | "TINYBLOB" | "MEDIUMBLOB" | "LONGBLOB"
+    )
+}
+
 fn emit_backup_progress(app: &AppHandle, progress: &BackupProgress) {
     let _ = app.emit("backup://progress", progress);
 }
@@ -57,11 +77,23 @@ pub async fn backup_database(
     let pool = engine.clone().get_pool(connection_id.to_string()).await?;
 
     // 获取表列表
+    let table_infos = engine.clone().get_tables(connection_id.to_string(), database.to_string()).await?;
+    let base_table_names = table_infos
+        .iter()
+        .filter(|table| is_base_table(&table.table_type))
+        .map(|table| table.name.clone())
+        .collect::<std::collections::HashSet<_>>();
     let table_list = if tables.is_empty() {
-        let table_infos = engine.clone().get_tables(connection_id.to_string(), database.to_string()).await?;
-        table_infos.into_iter().map(|t| t.name).collect::<Vec<_>>()
+        table_infos
+            .into_iter()
+            .filter(|table| is_base_table(&table.table_type))
+            .map(|t| t.name)
+            .collect::<Vec<_>>()
     } else {
         tables
+            .into_iter()
+            .filter(|table| base_table_names.contains(table))
+            .collect::<Vec<_>>()
     };
 
     let total_tables = table_list.len() as u32;
@@ -348,7 +380,11 @@ async fn write_mysql_insert_batch<W: AsyncWriteExt + Unpin>(
             if col_idx > 0 {
                 buf.push_str(", ");
             }
-            escape_mysql_value_into(&mut buf, row, col_idx);
+            let type_name = row.columns()
+                .get(col_idx)
+                .map(|column| column.type_info().name())
+                .unwrap_or_default();
+            escape_mysql_value_into(&mut buf, row, col_idx, type_name);
         }
         buf.push(')');
 
@@ -380,7 +416,39 @@ fn push_mysql_escaped_str(buf: &mut String, val: &str) {
 }
 
 /// 将 MySQL 值直接写入 buffer，支持字符串、数值、布尔、日期类型，避免 hex 误序列化
-fn escape_mysql_value_into(buf: &mut String, row: &sqlx::mysql::MySqlRow, col_idx: usize) {
+fn escape_mysql_value_into(buf: &mut String, row: &sqlx::mysql::MySqlRow, col_idx: usize, type_name: &str) {
+    if is_binary_mysql_type(type_name) {
+        match row.try_get::<Option<Vec<u8>>, _>(col_idx) {
+            Ok(Some(bytes)) => {
+                buf.push_str("X'");
+                buf.push_str(&hex::encode(&bytes));
+                buf.push('\'');
+            }
+            Ok(None) => buf.push_str("NULL"),
+            Err(_) => buf.push_str("NULL"),
+        }
+        return;
+    }
+
+    let value = mysql::mysql_value_to_json(row, col_idx, type_name);
+    match value {
+        serde_json::Value::Null => buf.push_str("NULL"),
+        serde_json::Value::Bool(v) => buf.push_str(if v { "1" } else { "0" }),
+        serde_json::Value::Number(v) => buf.push_str(&v.to_string()),
+        serde_json::Value::String(v) => {
+            if is_binary_mysql_type(type_name) {
+                buf.push_str("X'");
+                buf.push_str(&hex::encode(v.as_bytes()));
+                buf.push('\'');
+            } else {
+                push_mysql_escaped_str(buf, &v);
+            }
+        }
+        serde_json::Value::Array(v) => push_mysql_escaped_str(buf, &serde_json::Value::Array(v).to_string()),
+        serde_json::Value::Object(v) => push_mysql_escaped_str(buf, &serde_json::Value::Object(v).to_string()),
+    }
+    /*
+
     // 1. 尝试字符串（最常见类型，包括 TEXT、VARCHAR、CHAR、ENUM、SET）
     match row.try_get::<Option<String>, _>(col_idx) {
         Ok(Some(val)) => { push_mysql_escaped_str(buf, &val); return; }
@@ -425,6 +493,7 @@ fn escape_mysql_value_into(buf: &mut String, row: &sqlx::mysql::MySqlRow, col_id
         }
         _ => buf.push_str("NULL"),
     }
+    */
 }
 
 // === PostgreSQL 备份辅助函数 ===

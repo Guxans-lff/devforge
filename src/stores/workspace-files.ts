@@ -30,14 +30,39 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     selectedText: string
   }
   const activeEditor = ref<ActiveEditorInfo | null>(null)
+  let _pendingActiveEditor: ActiveEditorInfo | null = null
   let _editorSetTimer: ReturnType<typeof setTimeout> | null = null
 
   /** 节流 300ms 更新 activeEditor（Monaco 光标频繁触发） */
   function setActiveEditor(info: ActiveEditorInfo | null): void {
     if (_editorSetTimer) clearTimeout(_editorSetTimer)
+    _pendingActiveEditor = info
     _editorSetTimer = setTimeout(() => {
       activeEditor.value = info
+      _pendingActiveEditor = null
+      _editorSetTimer = null
     }, 300)
+  }
+
+  function normalizeEditorPath(path: string | null | undefined): string {
+    return (path ?? '').replace(/\\/g, '/')
+  }
+
+  /** 立即清理指定路径的编辑器上下文，避免关闭 tab 后残留“编辑中”状态 */
+  function clearActiveEditor(path?: string | null): void {
+    const normalizedTarget = path ? normalizeEditorPath(path) : ''
+    const matchesCurrent = !path || normalizeEditorPath(activeEditor.value?.path) === normalizedTarget
+    const matchesPending = !path || normalizeEditorPath(_pendingActiveEditor?.path) === normalizedTarget
+
+    if (matchesPending && _editorSetTimer) {
+      clearTimeout(_editorSetTimer)
+      _editorSetTimer = null
+      _pendingActiveEditor = null
+    }
+
+    if (matchesCurrent) {
+      activeEditor.value = null
+    }
   }
 
   // ─── 持久化（仅 roots） ───
@@ -592,6 +617,7 @@ export const useWorkspaceFilesStore = defineStore('workspace-files', () => {
     selectedNodes,
     activeEditor,
     setActiveEditor,
+    clearActiveEditor,
     flatNodes,
     addRoot,
     removeRoot,

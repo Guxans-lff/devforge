@@ -5,11 +5,11 @@
  * 在 AI 模块内提供 Provider 的新增、编辑、删除功能。
  * 支持预设常用 Provider 和自定义配置，品牌卡片式设计。
  */
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { saveCredential } from '@/api/connection'
-import type { ProviderConfig, ModelConfig, ProviderType, ThinkingEffort } from '@/types/ai'
+import type { ProviderConfig, ModelConfig, ProviderType, ThinkingEffort, WorkspaceConfig } from '@/types/ai'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -57,6 +57,7 @@ const emit = defineEmits<{
 const store = useAiChatStore()
 const { t } = useI18n()
 const THINKING_EFFORTS: ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+const DISPATCHER_MODES: Array<'headless' | 'tab'> = ['headless', 'tab']
 
 // ─────────────────────── 预设 Provider 模板 ───────────────────────
 
@@ -297,6 +298,28 @@ const saveError = ref<string | null>(null)
 
 /** 删除确认 */
 const deleteConfirm = ref<string | null>(null)
+const workspaceSaving = ref(false)
+const workspaceSaveError = ref<string | null>(null)
+
+const workspaceDispatcher = reactive({
+  maxParallel: 3,
+  autoRetryCount: 1,
+  defaultMode: 'headless' as 'headless' | 'tab',
+})
+
+const currentWorkDir = computed(() => store.currentWorkDir)
+const hasCurrentWorkDir = computed(() => !!currentWorkDir.value)
+
+watch(
+  () => store.currentWorkspaceConfig,
+  (config) => {
+    workspaceDispatcher.maxParallel = Math.max(1, config?.dispatcherMaxParallel ?? 3)
+    workspaceDispatcher.autoRetryCount = Math.max(0, config?.dispatcherAutoRetryCount ?? 1)
+    workspaceDispatcher.defaultMode = config?.dispatcherDefaultMode ?? 'headless'
+    workspaceSaveError.value = null
+  },
+  { immediate: true, deep: true },
+)
 
 // ─────────────────────── 模型编辑 ───────────────────────
 
@@ -390,6 +413,27 @@ async function handleSave() {
 async function handleDelete(id: string) {
   await store.removeProvider(id)
   deleteConfirm.value = null
+}
+
+async function handleSaveWorkspaceDispatcher(): Promise<void> {
+  if (!currentWorkDir.value) return
+
+  workspaceSaving.value = true
+  workspaceSaveError.value = null
+
+  try {
+    const nextConfig: WorkspaceConfig = {
+      ...(store.currentWorkspaceConfig ?? {}),
+      dispatcherMaxParallel: Math.max(1, Math.trunc(workspaceDispatcher.maxParallel || 1)),
+      dispatcherAutoRetryCount: Math.max(0, Math.trunc(workspaceDispatcher.autoRetryCount || 0)),
+      dispatcherDefaultMode: workspaceDispatcher.defaultMode,
+    }
+    await store.saveWorkspaceConfig(currentWorkDir.value, nextConfig)
+  } catch (error) {
+    workspaceSaveError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    workspaceSaving.value = false
+  }
 }
 
 /** 设为默认 */
@@ -692,6 +736,88 @@ const canSave = computed(() =>
               </div>
             </button>
           </div>
+        </section>
+
+        <section class="space-y-4 rounded-xl border border-border/40 bg-card/40 p-5">
+          <div class="flex items-start justify-between gap-4">
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <div class="h-1 w-1 rounded-full bg-cyan-500" />
+                <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  {{ t('ai.providerConfig.workspaceDispatcher.title') }}
+                </h3>
+              </div>
+              <p class="text-xs text-muted-foreground">
+                {{ t('ai.providerConfig.workspaceDispatcher.description') }}
+              </p>
+              <p class="max-w-[560px] truncate text-[11px] text-muted-foreground/70">
+                {{ currentWorkDir || t('ai.providerConfig.workspaceDispatcher.emptyWorkdir') }}
+              </p>
+            </div>
+          </div>
+
+          <div class="grid gap-4 sm:grid-cols-3">
+            <div class="space-y-2">
+              <Label class="text-xs">{{ t('ai.providerConfig.workspaceDispatcher.fields.maxParallel') }}</Label>
+              <Input
+                v-model.number="workspaceDispatcher.maxParallel"
+                type="number"
+                min="1"
+                step="1"
+                class="h-10 text-sm"
+                :disabled="!hasCurrentWorkDir || workspaceSaving"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label class="text-xs">{{ t('ai.providerConfig.workspaceDispatcher.fields.autoRetryCount') }}</Label>
+              <Input
+                v-model.number="workspaceDispatcher.autoRetryCount"
+                type="number"
+                min="0"
+                step="1"
+                class="h-10 text-sm"
+                :disabled="!hasCurrentWorkDir || workspaceSaving"
+              />
+            </div>
+            <div class="space-y-2">
+              <Label class="text-xs">{{ t('ai.providerConfig.workspaceDispatcher.fields.defaultMode') }}</Label>
+              <Select
+                :model-value="workspaceDispatcher.defaultMode"
+                :disabled="!hasCurrentWorkDir || workspaceSaving"
+                @update:model-value="(v: unknown) => workspaceDispatcher.defaultMode = String(v) as 'headless' | 'tab'"
+              >
+                <SelectTrigger class="h-10 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem
+                    v-for="mode in DISPATCHER_MODES"
+                    :key="mode"
+                    :value="mode"
+                  >
+                    {{ t(`ai.providerConfig.workspaceDispatcher.modes.${mode}`) }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between gap-3">
+            <p class="text-[11px] text-muted-foreground">
+              {{ t('ai.providerConfig.workspaceDispatcher.hint') }}
+            </p>
+            <Button
+              size="sm"
+              class="h-9 min-w-[96px]"
+              :disabled="!hasCurrentWorkDir || workspaceSaving"
+              @click="handleSaveWorkspaceDispatcher"
+            >
+              {{ workspaceSaving ? t('ai.providerConfig.workspaceDispatcher.saving') : t('ai.providerConfig.workspaceDispatcher.save') }}
+            </Button>
+          </div>
+          <p v-if="workspaceSaveError" class="text-xs text-destructive">
+            {{ workspaceSaveError }}
+          </p>
         </section>
       </div>
     </ScrollArea>

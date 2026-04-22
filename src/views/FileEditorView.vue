@@ -4,7 +4,7 @@
  *
  * 一 Tab 一文件，Monaco 呈现，Ctrl+S 保存，脏态同步到 Tab。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch, nextTick } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch, nextTick } from 'vue'
 import * as monaco from 'monaco-editor'
 import { useLocalFileEditorStore } from '@/stores/local-file-editor'
 import { useWorkspaceStore } from '@/stores/workspace'
@@ -189,6 +189,14 @@ onMounted(async () => {
   }
 })
 
+onActivated(() => {
+  reportEditorContext()
+})
+
+onDeactivated(() => {
+  wsFiles.clearActiveEditor(props.absolutePath)
+})
+
 // 文件载入完成后创建编辑器
 watch(
   () => file.value?.isLoading,
@@ -240,7 +248,7 @@ watch(
 onBeforeUnmount(() => {
   editor?.dispose()
   editor = null
-  wsFiles.setActiveEditor(null)
+  wsFiles.clearActiveEditor(props.absolutePath)
 })
 </script>
 

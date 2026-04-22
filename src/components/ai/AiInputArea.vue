@@ -571,12 +571,12 @@ defineExpose({ focus, setDraft })
 </script>
 
 <template>
-  <div class="border-t border-border/50 bg-background">
+  <div class="border-t border-border/40 bg-background">
     <!-- 输入框区域 -->
-    <div class="px-4 pt-3 pb-2">
+    <div class="px-4 py-3">
       <div
-        class="relative rounded-xl border bg-muted/20 transition-colors focus-within:border-primary/40 focus-within:ring-1 focus-within:ring-primary/20"
-        :class="isDragOver ? 'border-primary/60 ring-2 ring-primary/30 bg-primary/5' : 'border-border/50'"
+        class="relative overflow-hidden rounded-2xl border bg-muted/15 shadow-[0_16px_40px_-32px_rgba(0,0,0,0.45)] transition-colors focus-within:border-primary/40 focus-within:bg-background focus-within:ring-1 focus-within:ring-primary/20"
+        :class="isDragOver ? 'border-primary/60 ring-2 ring-primary/30 bg-primary/5' : 'border-border/45'"
         @dragover="handleDragOver"
         @dragleave="handleDragLeave"
         @drop="handleDrop"
@@ -584,7 +584,7 @@ defineExpose({ focus, setDraft })
         <!-- 拖拽提示蒙层 -->
         <div
           v-if="isDragOver"
-          class="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-primary/5 pointer-events-none"
+          class="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-primary/5 pointer-events-none"
         >
           <span class="text-xs text-primary font-medium">{{ t('ai.input.dropFiles') }}</span>
         </div>
@@ -601,27 +601,27 @@ defineExpose({ focus, setDraft })
           :placeholder="inputPlaceholder"
           :disabled="disabled"
           rows="1"
-          class="w-full resize-none bg-transparent px-4 pt-3 pb-2 text-sm leading-relaxed placeholder:text-muted-foreground/60 focus:outline-none disabled:opacity-50"
+          class="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm leading-relaxed placeholder:text-muted-foreground/56 focus:outline-none disabled:opacity-50"
           style="max-height: 200px"
           @keydown="handleKeyDown"
           @input="adjustHeight(); detectAtMention(); detectSlashCommand(); pushToUndoStack(inputText)"
           @paste="handlePaste"
         />
 
-        <!-- 底部工具栏 -->
-        <div class="flex items-center justify-between px-3 pb-2">
-          <div class="flex items-center gap-1">
-            <!-- 模型选择器 -->
+        <!-- 状态与操作带 -->
+        <div class="flex flex-wrap items-center justify-between gap-2 px-3 pb-3 pt-1">
+          <div class="flex min-w-0 flex-wrap items-center gap-1.5">
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
                 <button
-                  class="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted/50 hover:text-foreground transition-colors"
+                  class="flex h-7 min-w-0 items-center gap-1.5 rounded-full border border-border/25 bg-background/60 px-2.5 text-[11px] text-muted-foreground transition-colors hover:border-border/45 hover:bg-muted/25 hover:text-foreground"
                   :disabled="disabled"
+                  :title="currentModel?.name || t('ai.input.selectModel')"
                 >
-                  <AtSign class="h-3 w-3" />
+                  <AtSign class="h-3 w-3 shrink-0" />
                   <span v-if="currentModel" class="max-w-[120px] truncate">{{ currentModel.name }}</span>
                   <span v-else>{{ t('ai.input.selectModel') }}</span>
-                  <ChevronDown class="h-3 w-3 opacity-50" />
+                  <ChevronDown class="h-3 w-3 shrink-0 opacity-50" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" class="w-[240px]">
@@ -643,9 +643,7 @@ defineExpose({ focus, setDraft })
                         <span v-if="model.capabilities.vision" class="text-[8px] px-1 rounded bg-blue-500/10 text-blue-500">{{ t('ai.input.capabilityVision') }}</span>
                       </div>
                     </div>
-                    <span v-if="selectedModelId === model.id && selectedProviderId === provider.id" class="text-[10px] text-primary">
-                      ✓
-                    </span>
+                    <span v-if="selectedModelId === model.id && selectedProviderId === provider.id" class="text-[10px] text-primary">✓</span>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                 </template>
@@ -656,16 +654,16 @@ defineExpose({ focus, setDraft })
               </DropdownMenuContent>
             </DropdownMenu>
 
-            <!-- 模式切换 -->
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
                 <button
-                  class="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition-colors hover:bg-muted/50"
+                  class="flex h-7 items-center gap-1.5 rounded-full border border-border/25 bg-background/60 px-2.5 text-[11px] transition-colors hover:border-border/45 hover:bg-muted/25"
                   :class="currentModeConfig.color"
+                  :title="currentModeConfig.label"
                 >
-                  <component :is="currentModeConfig.icon" class="h-3 w-3" />
+                  <component :is="currentModeConfig.icon" class="h-3 w-3 shrink-0" />
                   <span>{{ currentModeConfig.shortLabel }}</span>
-                  <ChevronDown class="h-3 w-3 opacity-50" />
+                  <ChevronDown class="h-3 w-3 shrink-0 opacity-50" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" class="w-[200px]">
@@ -688,75 +686,81 @@ defineExpose({ focus, setDraft })
             </DropdownMenu>
           </div>
 
-          <!-- 发送/中断按钮 -->
-          <div class="flex items-center gap-1">
-            <!-- 回形针按钮 -->
+          <div class="ml-auto flex items-center gap-1.5">
             <button
-              class="flex items-center justify-center h-7 w-7 rounded-lg text-muted-foreground/60 hover:text-foreground hover:bg-muted/50 transition-colors"
+              class="flex h-7 items-center gap-1.5 rounded-full border border-border/25 bg-background/60 px-2.5 text-[11px] text-muted-foreground transition-colors hover:border-border/45 hover:bg-muted/25 hover:text-foreground"
               :disabled="disabled"
               :title="t('ai.input.addFile')"
               @click="emit('selectFiles')"
             >
               <Paperclip class="h-3.5 w-3.5" />
+              <span>附件</span>
+              <span v-if="attachments.length > 0" class="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+                {{ attachments.length }}
+              </span>
             </button>
 
-            <!-- 上下文使用圆环指示器 -->
             <div
               v-if="contextUsagePercent > 0"
-              class="flex items-center justify-center h-7 w-7 shrink-0"
+              class="flex h-7 items-center gap-1.5 rounded-full border border-border/25 bg-background/60 px-2.5 text-[11px] text-muted-foreground/70"
               :title="t('ai.input.contextUsage', { percent: Math.round(contextUsagePercent) })"
             >
-              <svg width="18" height="18" viewBox="0 0 18 18" class="rotate-[-90deg]">
-                <circle cx="9" cy="9" r="7" fill="none" stroke-width="2"
-                  class="text-muted-foreground/15"
-                  stroke="currentColor"
-                />
-                <circle cx="9" cy="9" r="7" fill="none" stroke-width="2"
-                  :stroke="contextUsagePercent >= 90 ? '#ef4444' : contextUsagePercent >= 70 ? '#f59e0b' : '#10b981'"
-                  :stroke-dasharray="`${Math.min(contextUsagePercent, 100) * 0.4398} 43.98`"
-                  stroke-linecap="round"
-                />
-              </svg>
+              <span
+                class="h-1.5 w-1.5 rounded-full"
+                :class="contextUsagePercent >= 90 ? 'bg-red-500' : contextUsagePercent >= 70 ? 'bg-amber-500' : 'bg-emerald-500'"
+              />
+              <span>{{ t('ai.input.contextUsageCompact', { percent: Math.round(contextUsagePercent) }) }}</span>
             </div>
 
-            <!-- 提示词优化按钮（G14） -->
             <button
-              class="flex items-center justify-center h-7 w-7 rounded-lg transition-colors"
-              :class="inputText.trim() ? 'text-violet-500/70 hover:text-violet-500 hover:bg-violet-500/10' : 'text-muted-foreground/25 cursor-not-allowed'"
+              class="hidden h-7 items-center gap-1.5 rounded-full px-2.5 text-[11px] transition-colors sm:flex"
+              :class="inputText.trim() ? 'text-violet-500/80 hover:bg-violet-500/10 hover:text-violet-500' : 'text-muted-foreground/25 cursor-not-allowed'"
               :disabled="!inputText.trim() || disabled"
               :title="t('ai.input.enhancePrompt')"
               @click="openEnhancer"
             >
               <Sparkles class="h-3.5 w-3.5" />
+              <span>{{ t('ai.input.enhancePromptShort') }}</span>
+            </button>
+
+            <button
+              class="hidden h-7 items-center gap-1.5 rounded-full px-2 text-[10px] text-muted-foreground/45 transition-colors hover:bg-muted/25 hover:text-muted-foreground sm:flex"
+              :title="t('ai.input.toggleSendMode', {
+                mode: sendMode === 'enter' ? t('ai.input.sendModeEnter') : t('ai.input.sendModeCmd'),
+              })"
+              @click="toggleSendMode"
+            >
+              {{ sendMode === 'enter' ? t('ai.input.sendModeEnterShort') : t('ai.input.sendModeCmdShort') }}
             </button>
 
             <Button
               v-if="isStreaming"
               variant="destructive"
-              size="icon"
-              class="h-7 w-7 rounded-lg"
+              size="sm"
+              class="h-8 rounded-full px-3 text-xs"
               @click="handleAbort"
             >
-              <Square class="h-3 w-3" />
+              <Square class="mr-1.5 h-3 w-3" />
+              {{ t('ai.input.stopGenerating') }}
             </Button>
             <button
               v-else
               :disabled="!canSend"
-              class="h-7 w-7 rounded-lg flex items-center justify-center transition-colors"
+              class="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors"
               :class="canSend
-                ? 'text-primary hover:bg-primary/10'
+                ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90'
                 : 'text-muted-foreground/25 cursor-not-allowed'"
               @click="handleSend"
             >
               <Loader2 v-if="loading" class="h-3 w-3 animate-spin" />
               <Send v-else class="h-3 w-3" />
+              <span>{{ t('common.send') }}</span>
             </button>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- @ 文件引用浮层 -->
     <AtMentionPopover
       :query="atQuery"
       :anchor-pos="atAnchorPos"
@@ -765,7 +769,6 @@ defineExpose({ focus, setDraft })
       @close="closeAtPopover"
     />
 
-    <!-- 斜杠命令浮层 -->
     <SlashCommandPopover
       :query="slashQuery"
       :anchor-pos="slashAnchorPos"
@@ -774,29 +777,14 @@ defineExpose({ focus, setDraft })
       @close="closeSlashPopover"
     />
 
-    <!-- 底部提示 -->
-    <div class="flex items-center justify-between px-4 pb-2">
-      <p class="text-[10px] text-muted-foreground/40">
-        {{ sendHint }} · {{ t('ai.input.replyDisclaimer') }}
-      </p>
-      <button
-        class="text-[10px] text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors px-1.5 py-0.5 rounded hover:bg-muted/30"
-        :title="t('ai.input.toggleSendMode', {
-          mode: sendMode === 'enter' ? t('ai.input.sendModeEnter') : t('ai.input.sendModeCmd'),
-        })"
-        @click="toggleSendMode"
-      >
-        ⌨ {{ sendMode === 'enter' ? 'Enter' : '⌘↵' }}
-      </button>
-    </div>
-  </div>
+    <p class="sr-only">{{ sendHint }} · {{ t('ai.input.replyDisclaimer') }}</p>
 
-  <!-- 提示词优化对话框（G14） -->
-  <AiPromptEnhancer
-    v-model:open="showEnhancer"
-    :original-text="inputText"
-    :provider="currentProvider"
-    :model="currentModel"
-    @accept="handleEnhancerAccept"
-  />
+    <AiPromptEnhancer
+      v-model:open="showEnhancer"
+      :original-text="inputText"
+      :provider="currentProvider"
+      :model="currentModel"
+      @accept="handleEnhancerAccept"
+    />
+  </div>
 </template>

@@ -4,7 +4,7 @@ mod util;
 
 pub use connection::{connect, test_connect};
 pub use executor::*;
-pub use util::{get_string, get_opt_string};
+pub use util::{get_string, get_opt_string, mysql_value_to_json};
 
 use sqlx::mysql::MySqlRow;
 use sqlx::{MySqlPool, Row};

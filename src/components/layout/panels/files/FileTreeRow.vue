@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useAiChatStore } from '@/stores/ai-chat'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import type { FileNode, FileDecoration } from '@/types/workspace-files'
 import {
@@ -15,6 +16,12 @@ const props = defineProps<{
   selected: boolean
   dragOver: boolean
   multiSelected?: boolean
+  aiReferenced?: boolean
+  taskReferenced?: boolean
+  aiReferencedParent?: boolean
+  taskReferencedParent?: boolean
+  focusedTask?: boolean
+  focusedTaskParent?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -28,12 +35,21 @@ const emit = defineEmits<{
 }>()
 
 const store = useWorkspaceFilesStore()
+const aiStore = useAiChatStore()
 
 const decoration = computed<FileDecoration | undefined>(
   () => store.decorations.get(props.node.absolutePath)
 )
 
 const isRenaming = computed(() => store.renamingNodeId === props.node.id)
+
+function normalizePath(path?: string | null): string {
+  return (path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function isSameOrParentPath(parentPath: string, childPath: string): boolean {
+  return childPath === parentPath || childPath.startsWith(`${parentPath}/`)
+}
 
 /** 文件扩展名到类型色的映射 */
 const FILE_TYPE_COLORS: Record<string, string> = {
@@ -75,6 +91,32 @@ const gitPillClass = computed(() => {
     default: return ''
   }
 })
+
+const normalizedNodePath = computed(() => normalizePath(props.node.absolutePath))
+const normalizedWorkDir = computed(() => normalizePath(aiStore.currentWorkDir))
+const normalizedEditorPath = computed(() => normalizePath(store.activeEditor?.path))
+
+const isAiWorkdirNode = computed(() =>
+  Boolean(normalizedWorkDir.value) && normalizedNodePath.value === normalizedWorkDir.value,
+)
+
+const isAiWorkdirParent = computed(() =>
+  props.node.isDirectory
+  && Boolean(normalizedWorkDir.value)
+  && !isAiWorkdirNode.value
+  && isSameOrParentPath(normalizedNodePath.value, normalizedWorkDir.value),
+)
+
+const isEditorNode = computed(() =>
+  Boolean(normalizedEditorPath.value) && normalizedNodePath.value === normalizedEditorPath.value,
+)
+
+const isEditorParent = computed(() =>
+  props.node.isDirectory
+  && Boolean(normalizedEditorPath.value)
+  && !isEditorNode.value
+  && isSameOrParentPath(normalizedNodePath.value, normalizedEditorPath.value),
+)
 </script>
 
 <template>
@@ -83,9 +125,36 @@ const gitPillClass = computed(() => {
     :class="[
       selected
         ? 'bg-primary/8 rounded-lg relative before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-[2px] before:h-4 before:bg-primary before:rounded-full'
-        : 'hover:bg-muted/40 rounded-lg',
+        : focusedTask
+          ? 'bg-orange-500/18 hover:bg-orange-500/22 rounded-lg relative before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:w-[2px] before:h-4 before:bg-orange-400 before:rounded-full'
+          : isEditorNode
+            ? 'bg-emerald-500/10 hover:bg-emerald-500/15 rounded-lg'
+          : focusedTaskParent
+            ? 'bg-orange-500/6 hover:bg-orange-500/10 rounded-lg'
+          : taskReferenced
+            ? 'bg-amber-500/9 hover:bg-amber-500/13 rounded-lg'
+          : taskReferencedParent
+            ? 'bg-amber-500/4 hover:bg-amber-500/8 rounded-lg'
+          : isAiWorkdirNode
+            ? 'bg-primary/8 hover:bg-primary/12 rounded-lg'
+            : aiReferenced
+              ? 'bg-sky-500/7 hover:bg-sky-500/11 rounded-lg'
+            : aiReferencedParent
+              ? 'bg-sky-500/3 hover:bg-sky-500/7 rounded-lg'
+            : isEditorParent || isAiWorkdirParent
+              ? 'bg-muted/25 hover:bg-muted/35 rounded-lg'
+              : 'hover:bg-muted/40 rounded-lg',
       focused && 'ring-1 ring-primary/20 rounded-lg',
       dragOver && 'bg-primary/15 ring-1 ring-primary/30 rounded-lg',
+      (isEditorNode || isAiWorkdirNode) && 'ring-1 ring-inset',
+      isEditorNode && 'ring-emerald-500/20',
+      isAiWorkdirNode && 'ring-primary/20',
+      focusedTask && 'ring-1 ring-inset ring-orange-500/35',
+      focusedTaskParent && !focusedTask && 'ring-1 ring-inset ring-orange-500/12',
+      taskReferenced && !focusedTask && 'ring-1 ring-inset ring-amber-500/18',
+      taskReferencedParent && !focusedTask && !taskReferenced && 'ring-1 ring-inset ring-amber-500/8',
+      aiReferenced && !focusedTask && !taskReferenced && 'ring-1 ring-inset ring-sky-500/16',
+      aiReferencedParent && !focusedTask && !focusedTaskParent && !aiReferenced && !taskReferenced && !taskReferencedParent && 'ring-1 ring-inset ring-sky-500/8',
     ]"
     :style="{ paddingLeft: `${node.depth * 16 + 8}px`, height: '32px' }"
     draggable="true"
@@ -166,6 +235,55 @@ const gitPillClass = computed(() => {
     </template>
 
     <!-- 目录子项数 badge -->
+    <span
+      v-if="focusedTask"
+      class="flex-shrink-0 rounded-full border border-orange-500/25 bg-orange-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-orange-300"
+    >
+      当前
+    </span>
+    <span
+      v-else-if="focusedTaskParent"
+      class="flex-shrink-0 rounded-full border border-orange-500/12 bg-orange-500/5 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-orange-300/75"
+    >
+      相关
+    </span>
+    <span
+      v-else-if="taskReferenced"
+      class="flex-shrink-0 rounded-full border border-amber-500/18 bg-amber-500/8 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-amber-400"
+    >
+      相关
+    </span>
+    <span
+      v-else-if="taskReferencedParent"
+      class="flex-shrink-0 rounded-full border border-amber-500/12 bg-amber-500/4 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-amber-300/70"
+    >
+      相关
+    </span>
+    <span
+      v-else-if="isAiWorkdirNode"
+      class="flex-shrink-0 rounded-full border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-primary"
+    >
+      当前
+    </span>
+    <span
+      v-else-if="isEditorNode"
+      class="flex-shrink-0 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-emerald-400"
+    >
+      当前
+    </span>
+    <span
+      v-else-if="aiReferenced"
+      class="flex-shrink-0 rounded-full border border-sky-500/16 bg-sky-500/7 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-sky-400/90"
+    >
+      相关
+    </span>
+    <span
+      v-else-if="aiReferencedParent"
+      class="flex-shrink-0 rounded-full border border-sky-500/10 bg-sky-500/3 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-sky-300/65"
+    >
+      相关
+    </span>
+
     <span
       v-if="node.isDirectory && !node.isExpanded && (node as any).childCount"
       class="flex-shrink-0 text-[10px] text-muted-foreground/40 bg-muted/30 px-1.5 rounded-full"

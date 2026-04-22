@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import { useTransferStore } from '@/stores/transfer'
 import { useSettingsStore } from '@/stores/settings'
 import ActivityBar from '@/components/layout/ActivityBar.vue'
@@ -31,6 +32,7 @@ const FileEditorView = defineAsyncComponent(() => import('@/views/FileEditorView
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
+const workspaceFiles = useWorkspaceFilesStore()
 const transferStore = useTransferStore()
 const settingsStore = useSettingsStore()
 
@@ -142,6 +144,9 @@ watch(() => workspace.activeTab?.type, (tabType, oldType) => {
   if (tabType !== 'ai-chat' && oldType === 'ai-chat') {
     workspace.exitImmersive()
     workspace.resetImmersiveFlag()
+  }
+  if (tabType !== 'file-editor') {
+    workspaceFiles.clearActiveEditor()
   }
 })
 

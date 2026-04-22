@@ -186,6 +186,13 @@ export function useFileTree(scrollContainerRef: Ref<HTMLElement | null>) {
     store.moveEntry(source.absolutePath, targetNode.absolutePath)
   }
 
+  function focusNodeAtIndex(index: number): void {
+    if (index < 0 || index >= store.flatNodes.length) return
+    focusedIndex.value = index
+    selectedNodeId.value = store.flatNodes[index]?.id ?? null
+    virtualizer.value.scrollToIndex(index, { align: 'center' })
+  }
+
   return {
     virtualizer,
     virtualItems,
@@ -194,6 +201,7 @@ export function useFileTree(scrollContainerRef: Ref<HTMLElement | null>) {
     focusedIndex,
     selectedNodeId,
     lastClickIndex,
+    focusNodeAtIndex,
     handleKeyDown,
     handleRowClick,
     dragOverNodeId,

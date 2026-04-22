@@ -1,0 +1,918 @@
+<!--
+  Assumptions
+  - This prototype targets the main DevForge workspace shell, not an isolated AI chat page.
+  - The repository tree must participate in the AI experience instead of sitting beside it as neutral chrome.
+  - The center view should feel like a working board for the current repository, not a generic "AI assistant welcome screen".
+
+  Reasoning
+  - The strongest product-specific asset in the current app is the repository shell: tabs, files, workdir, workspace path.
+  - The redesign therefore turns the active repository into the primary visual subject, with AI acting as a layer that selects, explains, and operates on repo context.
+  - The design bias is toward information architecture and editorial composition rather than dashboard overload.
+
+  Placeholders
+  - File names, task labels, and context summaries are representative placeholders.
+  - This is a direction prototype, not production UI.
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DevForge · Repository-Centric AI Direction</title>
+  <style>
+    :root {
+      --bg: #090c10;
+      --shell: #0d1218;
+      --panel: #111820;
+      --panel-2: #151d27;
+      --panel-3: #1a2430;
+      --ink: #f1f5fb;
+      --muted: #97a8bc;
+      --muted-2: #69798e;
+      --line: rgba(255, 255, 255, 0.06);
+      --line-strong: rgba(255, 255, 255, 0.14);
+      --accent: #f0b44d;
+      --cyan: #58d4db;
+      --green: #9ad372;
+      --blue: #7ca8ff;
+      --folder: #ff9b2d;
+      --shadow: 0 32px 100px rgba(0, 0, 0, 0.42);
+      --display: "Space Grotesk", "Segoe UI", sans-serif;
+      --sans: "IBM Plex Sans", "Segoe UI", sans-serif;
+      --mono: "IBM Plex Mono", "Cascadia Code", monospace;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at 0% 0%, rgba(88, 212, 219, 0.08), transparent 20%),
+        radial-gradient(circle at 100% 0%, rgba(240, 180, 77, 0.08), transparent 22%),
+        linear-gradient(180deg, #07090d, #090c10);
+      color: var(--ink);
+      font-family: var(--sans);
+    }
+
+    body { padding: 18px; }
+
+    .app {
+      min-height: calc(100vh - 36px);
+      display: grid;
+      grid-template-rows: 42px 1fr;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      overflow: hidden;
+      background: rgba(8, 12, 18, 0.94);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .titlebar {
+      display: grid;
+      grid-template-columns: 220px 1fr 140px;
+      align-items: center;
+      gap: 12px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(15, 20, 27, 0.96), rgba(15, 20, 27, 0.88));
+    }
+
+    .brand,
+    .title-actions,
+    .window-controls,
+    .tabbar,
+    .toolbar,
+    .toolbar-left,
+    .toolbar-right,
+    .signal-row,
+    .context-actions,
+    .composer-footer,
+    .task-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-mark {
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(135deg, var(--accent), var(--cyan));
+      color: #081018;
+      font: 800 11px/1 var(--display);
+      letter-spacing: 0.08em;
+    }
+
+    .brand strong { font-size: 14px; letter-spacing: -0.02em; }
+
+    .command-input {
+      justify-self: center;
+      width: min(720px, 100%);
+      height: 30px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.02);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .window-controls {
+      justify-self: end;
+      color: var(--muted-2);
+      font-size: 14px;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 48px 320px 1fr;
+      min-height: 0;
+    }
+
+    .activitybar {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      padding: 12px 0;
+      border-right: 1px solid var(--line);
+      background: linear-gradient(180deg, #0d1116, #0a0d12);
+    }
+
+    .activity-icon {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      border: 1px solid transparent;
+      font-size: 15px;
+      position: relative;
+    }
+
+    .activity-icon.active {
+      color: var(--ink);
+      background: rgba(255,255,255,0.04);
+      border-color: var(--line);
+    }
+
+    .activity-icon.active::before {
+      content: "";
+      position: absolute;
+      left: -9px;
+      top: 8px;
+      bottom: 8px;
+      width: 2px;
+      background: var(--ink);
+      border-radius: 999px;
+    }
+
+    .sidebar {
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      border-right: 1px solid var(--line);
+      background: linear-gradient(180deg, #10151c, #0d1117);
+      min-width: 0;
+    }
+
+    .sidebar-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .sidebar-header strong {
+      font-size: 13px;
+      letter-spacing: -0.02em;
+    }
+
+    .sidebar-tools {
+      display: flex;
+      gap: 6px;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .tool-btn,
+    .chip,
+    .mini-btn,
+    .context-chip,
+    .send-btn {
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.02);
+      color: var(--muted);
+      font-size: 11px;
+      padding: 7px 9px;
+    }
+
+    .tree {
+      overflow: auto;
+      padding: 10px 6px 10px 8px;
+    }
+
+    .tree-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 34px;
+      border-radius: 10px;
+      padding: 0 10px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .tree-item.root {
+      color: var(--ink);
+      background: rgba(255,255,255,0.03);
+      margin-bottom: 6px;
+    }
+
+    .tree-item.context {
+      color: var(--ink);
+      background: rgba(88, 212, 219, 0.08);
+      border: 1px solid rgba(88, 212, 219, 0.16);
+    }
+
+    .tree-item.active {
+      color: var(--ink);
+      background: rgba(255,255,255,0.05);
+    }
+
+    .indent-1 { padding-left: 24px; }
+    .indent-2 { padding-left: 42px; }
+    .indent-3 { padding-left: 60px; }
+
+    .folder-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+      background: linear-gradient(180deg, #ffb45d, var(--folder));
+      flex: none;
+    }
+
+    .file-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 3px;
+      background: rgba(124, 168, 255, 0.9);
+      flex: none;
+    }
+
+    .context-footer {
+      border-top: 1px solid var(--line);
+      padding: 12px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));
+    }
+
+    .context-footer small {
+      display: block;
+      color: var(--muted-2);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 10px;
+      margin-bottom: 10px;
+    }
+
+    .context-chips {
+      display: grid;
+      gap: 8px;
+    }
+
+    .context-chip {
+      color: var(--ink);
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      background: rgba(255,255,255,0.03);
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-rows: 50px 1fr;
+      min-width: 0;
+      min-height: 0;
+      background: linear-gradient(180deg, #0b1015, #0c1117);
+    }
+
+    .tabbar {
+      align-items: end;
+      gap: 6px;
+      padding: 8px 10px 0;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #11151b, #0f1318);
+    }
+
+    .tab {
+      height: 34px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px;
+      border-radius: 12px 12px 0 0;
+      color: var(--muted);
+      border: 1px solid transparent;
+      font-size: 12px;
+    }
+
+    .tab.active {
+      color: var(--ink);
+      background: #0c1117;
+      border-color: var(--line);
+      border-bottom-color: #0c1117;
+    }
+
+    .surface {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 0;
+    }
+
+    .toolbar {
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(13, 18, 24, 0.78);
+    }
+
+    .path-pill {
+      color: var(--ink);
+      max-width: 300px;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 280px;
+      min-width: 0;
+      min-height: 0;
+    }
+
+    .focus-board {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      border-right: 1px solid var(--line);
+      background:
+        linear-gradient(180deg, rgba(18, 24, 33, 0.84), rgba(11, 15, 21, 0.88)),
+        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: auto, 28px 28px, 28px 28px;
+    }
+
+    .focus-header {
+      padding: 24px 24px 16px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .focus-header small,
+    .right-rail small {
+      color: var(--muted-2);
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      font-size: 10px;
+    }
+
+    .focus-header h1 {
+      margin: 0;
+      font: 700 30px/1 var(--display);
+      letter-spacing: -0.05em;
+      max-width: 760px;
+    }
+
+    .focus-header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+      max-width: 760px;
+    }
+
+    .signal-row {
+      flex-wrap: wrap;
+    }
+
+    .signal {
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      padding: 8px 11px;
+      font-size: 11px;
+      color: var(--ink);
+      background: rgba(255,255,255,0.03);
+    }
+
+    .signal.primary {
+      color: #fff1cf;
+      background: rgba(240, 180, 77, 0.1);
+      border-color: rgba(240, 180, 77, 0.24);
+    }
+
+    .working-set {
+      padding: 0 24px 20px;
+    }
+
+    .working-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .focus-card {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+      padding: 15px 15px 16px;
+      min-height: 122px;
+      display: grid;
+      align-content: start;
+      gap: 8px;
+    }
+
+    .focus-card.active {
+      background: linear-gradient(180deg, rgba(88, 212, 219, 0.1), rgba(88, 212, 219, 0.03));
+      border-color: rgba(88, 212, 219, 0.16);
+    }
+
+    .focus-card strong {
+      font-size: 14px;
+      letter-spacing: -0.02em;
+    }
+
+    .focus-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .focus-card code {
+      font-family: var(--mono);
+      color: #d7e6f6;
+      font-size: 11px;
+    }
+
+    .board-body {
+      padding: 8px 24px 18px;
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+      gap: 18px;
+      align-content: start;
+    }
+
+    .editorial-panel {
+      border-radius: 22px;
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+      padding: 18px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .editorial-panel h2 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: -0.03em;
+    }
+
+    .editorial-panel p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .report-list {
+      display: grid;
+      gap: 14px;
+    }
+
+    .report-item {
+      display: grid;
+      gap: 6px;
+      padding-top: 14px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .report-item:first-child {
+      border-top: 0;
+      padding-top: 0;
+    }
+
+    .report-item strong {
+      font-size: 13px;
+      letter-spacing: -0.02em;
+    }
+
+    .structure-panel {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .structure-card {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+      padding: 14px;
+    }
+
+    .structure-card h3 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      letter-spacing: -0.02em;
+    }
+
+    .structure-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .composer {
+      border-top: 1px solid var(--line);
+      padding: 16px 24px 22px;
+      background: linear-gradient(180deg, rgba(9, 12, 16, 0.56), rgba(9, 12, 16, 0.92));
+    }
+
+    .composer-box {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.02);
+      padding: 14px 16px;
+      max-width: 1040px;
+    }
+
+    .composer-box textarea {
+      width: 100%;
+      min-height: 86px;
+      resize: none;
+      background: transparent;
+      border: 0;
+      color: var(--ink);
+      font: 14px/1.6 var(--sans);
+      outline: none;
+    }
+
+    .mini-btn {
+      border-radius: 999px;
+      padding: 7px 10px;
+    }
+
+    .send-btn {
+      border-radius: 999px;
+      color: #081018;
+      background: linear-gradient(135deg, var(--accent), #d68d27);
+      border-color: rgba(240, 180, 77, 0.42);
+      font-weight: 700;
+      padding-inline: 16px;
+    }
+
+    .right-rail {
+      background: linear-gradient(180deg, #10161d, #0f151c);
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      min-height: 0;
+    }
+
+    .rail-section {
+      border-bottom: 1px solid var(--line);
+      padding: 16px;
+    }
+
+    .rail-section h2 {
+      margin: 6px 0 8px;
+      font-size: 15px;
+      letter-spacing: -0.02em;
+    }
+
+    .rail-section p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .task-list {
+      margin: 0;
+      padding: 12px;
+      list-style: none;
+      display: grid;
+      gap: 10px;
+      overflow: auto;
+    }
+
+    .task-card {
+      border-radius: 16px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.03);
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .task-card.done { border-color: rgba(154, 211, 114, 0.2); }
+    .task-card.running { border-color: rgba(240, 180, 77, 0.24); }
+    .task-card.blocked { border-style: dashed; border-color: rgba(255,255,255,0.14); }
+
+    .task-top {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .task-top strong {
+      font-size: 13px;
+      letter-spacing: -0.02em;
+    }
+
+    .task-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .status {
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      padding: 5px 8px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .status.done { color: #dcf1ce; background: rgba(154, 211, 114, 0.1); }
+    .status.running { color: #fff0d0; background: rgba(240, 180, 77, 0.1); }
+    .status.blocked { color: var(--muted); background: rgba(255,255,255,0.04); }
+    .status.mode { color: #dbe8f8; background: rgba(124, 168, 255, 0.08); }
+
+    @media (max-width: 1440px) {
+      .working-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 1240px) {
+      .shell { grid-template-columns: 48px 290px 1fr; }
+      .main-grid { grid-template-columns: 1fr 260px; }
+      .board-body { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 1080px) {
+      .shell { grid-template-columns: 48px 250px 1fr; }
+      .main-grid { grid-template-columns: 1fr; }
+      .focus-board { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="titlebar">
+      <div class="brand">
+        <div class="brand-mark">DF</div>
+        <strong>DevForge</strong>
+      </div>
+      <div class="command-input">⌕　命令面板</div>
+      <div class="window-controls">─ ◻ ✕</div>
+    </header>
+
+    <div class="shell">
+      <aside class="activitybar">
+        <div class="activity-icon">🗄</div>
+        <div class="activity-icon active">📁</div>
+        <div class="activity-icon">⌕</div>
+        <div class="activity-icon">🧩</div>
+        <div style="flex:1"></div>
+        <div class="activity-icon">⚙</div>
+        <div class="activity-icon">☾</div>
+      </aside>
+
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <strong>资源管理器</strong>
+          <span style="color:var(--muted-2)">✕</span>
+        </div>
+
+        <div class="sidebar-tools">
+          <button class="tool-btn">＋</button>
+          <button class="tool-btn">📄</button>
+          <button class="tool-btn">⌕</button>
+          <button class="tool-btn">⇵</button>
+        </div>
+
+        <div class="tree">
+          <div class="tree-item root"><span class="folder-dot"></span>devforge</div>
+          <div class="tree-item indent-1"><span class="folder-dot"></span>.claude</div>
+          <div class="tree-item indent-1"><span class="folder-dot"></span>docs</div>
+          <div class="tree-item indent-1"><span class="folder-dot"></span>scripts</div>
+          <div class="tree-item indent-1 context"><span class="folder-dot"></span>src</div>
+          <div class="tree-item indent-2 context"><span class="folder-dot"></span>views</div>
+          <div class="tree-item indent-3 context"><span class="file-dot"></span>AiChatView.vue</div>
+          <div class="tree-item indent-2 context"><span class="folder-dot"></span>components</div>
+          <div class="tree-item indent-3 context"><span class="folder-dot"></span>ai</div>
+          <div class="tree-item indent-3 context"><span class="file-dot"></span>AiChatShell.vue</div>
+          <div class="tree-item indent-1 context"><span class="folder-dot"></span>src-tauri</div>
+          <div class="tree-item indent-1 active"><span class="file-dot"></span>README.md</div>
+          <div class="tree-item indent-1"><span class="file-dot"></span>package.json</div>
+          <div class="tree-item indent-1"><span class="file-dot"></span>pnpm-lock.yaml</div>
+        </div>
+
+        <div class="context-footer">
+          <small>Working Set</small>
+          <div class="context-chips">
+            <div class="context-chip"><span>AI 主视图</span><span>AiChatView.vue</span></div>
+            <div class="context-chip"><span>壳层布局</span><span>AiChatShell.vue</span></div>
+            <div class="context-chip"><span>主框架</span><span>MainLayout.vue</span></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <div class="tabbar">
+          <div class="tab">⌂　首页</div>
+          <div class="tab active">🤖　分析 D:/Projec</div>
+        </div>
+
+        <div class="surface">
+          <div class="toolbar">
+            <div class="toolbar-left">
+              <button class="tool-btn">＋</button>
+              <button class="tool-btn">⌘</button>
+              <button class="tool-btn">↺</button>
+              <button class="tool-btn">⚙</button>
+              <button class="tool-btn">🧠</button>
+              <div class="chip path-pill">📁　…/Project/devforge</div>
+            </div>
+            <div class="toolbar-right">
+              <div class="chip">上下文 4</div>
+              <div class="chip">≈ ¥0.0000</div>
+            </div>
+          </div>
+
+          <div class="main-grid">
+            <section class="focus-board">
+              <div class="focus-header">
+                <small>Repository-Centric AI</small>
+                <h1>这不是“AI 首页”，而是当前仓库的工作焦点板。</h1>
+                <p>目录树决定上下文，中心画布只回答三个问题：AI 正围绕哪些文件工作、它已经推进到了哪一步、下一条输入会改变什么。</p>
+                <div class="signal-row">
+                  <div class="signal primary">当前焦点：AI 主页面改造</div>
+                  <div class="signal">工作目录：D:\Project\devforge</div>
+                  <div class="signal">运行中任务：3</div>
+                </div>
+              </div>
+
+              <div class="working-set">
+                <div class="working-grid">
+                  <div class="focus-card active">
+                    <small>View Layer</small>
+                    <strong>AiChatView.vue</strong>
+                    <p>当前 AI 主视图。需要从“欢迎页”改成“仓库焦点板”。</p>
+                    <code>src/views/AiChatView.vue</code>
+                  </div>
+                  <div class="focus-card active">
+                    <small>Shell Layer</small>
+                    <strong>AiChatShell.vue</strong>
+                    <p>要重新定义主画布、右侧任务轨和输入区域的层次关系。</p>
+                    <code>src/components/ai/AiChatShell.vue</code>
+                  </div>
+                  <div class="focus-card">
+                    <small>Main Layout</small>
+                    <strong>MainLayout.vue</strong>
+                    <p>决定资源管理器、TabBar 和 AI 视图的整体空间边界。</p>
+                    <code>src/views/MainLayout.vue</code>
+                  </div>
+                  <div class="focus-card">
+                    <small>Files Context</small>
+                    <strong>FilesPanel.vue</strong>
+                    <p>文件树需要能表现 AI 工作集，而不是只做中性浏览器。</p>
+                    <code>src/components/layout/panels/FilesPanel.vue</code>
+                  </div>
+                </div>
+              </div>
+
+              <div class="board-body">
+                <div class="editorial-panel">
+                  <div>
+                    <small>Current Brief</small>
+                    <h2>主页面要把目录、上下文和 AI 执行态连成一条链，而不是拼贴三个孤立区域。</h2>
+                  </div>
+
+                  <div class="report-list">
+                    <div class="report-item">
+                      <strong>1. 目录树不再只是背景</strong>
+                      <p>被 AI 纳入上下文的目录和文件，在资源管理器里出现状态层。用户不需要猜 AI 正在看哪里。</p>
+                    </div>
+                    <div class="report-item">
+                      <strong>2. 中央画布不再是欢迎页</strong>
+                      <p>机器人图标、三张模式卡、空洞标题都退场。中心区域改成“本次工作焦点板”，直接围绕当前仓库和正在改的文件说话。</p>
+                    </div>
+                    <div class="report-item">
+                      <strong>3. 执行态被收敛到右侧</strong>
+                      <p>spawned task、headless、tab、synthesis 都进入一条窄侧栏。它是“AI runtime”，不是主页面的第二个主角。</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="structure-panel">
+                  <div class="structure-card">
+                    <h3>这次改造应该保留什么</h3>
+                    <p>保留你现在熟悉的主框架：资源管理器、标签栏、顶部路径、底部输入区域。别把产品做成另一种 ChatGPT。</p>
+                  </div>
+                  <div class="structure-card">
+                    <h3>这次改造应该去掉什么</h3>
+                    <p>去掉空态式的自我介绍、平均化模式卡、重复解释文案，以及任何一眼看去像通用 AI 产品的结构。</p>
+                  </div>
+                  <div class="structure-card">
+                    <h3>视觉关键词</h3>
+                    <p>仓库导向、编辑性、工作板、少即是准、信息建筑，而不是科技炫技或全屏控制台。</p>
+                  </div>
+                </div>
+              </div>
+
+              <div class="composer">
+                <div class="composer-box">
+                  <textarea>围绕当前 working set 继续：先调整主页面结构，再把右侧任务轨做成默认收敛、按需展开。</textarea>
+                  <div class="composer-footer">
+                    <div class="context-actions">
+                      <button class="mini-btn">@ DeepSeek V3</button>
+                      <button class="mini-btn">普通</button>
+                      <button class="mini-btn">综合 working set</button>
+                    </div>
+                    <button class="send-btn">发送</button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <aside class="right-rail">
+              <div class="rail-section">
+                <small>AI Runtime</small>
+                <h2>任务轨</h2>
+                <p>缩成一条窄轨，只展示当前执行链。它是“副视线”，不是首页中心舞台。</p>
+              </div>
+
+              <div class="rail-section">
+                <small>Session Summary</small>
+                <h2>Parent Chat</h2>
+                <p>当前父会话在做主页面 AI 改造，依赖 3 个子任务返回结果后给出下一步实现建议。</p>
+              </div>
+
+              <ul class="task-list">
+                <li class="task-card done">
+                  <div class="task-top">
+                    <strong>inspect current shell</strong>
+                    <span class="status done">done</span>
+                  </div>
+                  <p>确认 MainLayout、FilesPanel、AiChatView 的真实层级关系。</p>
+                  <div class="task-meta">
+                    <span class="status mode">headless</span>
+                    <span class="status">summary ready</span>
+                  </div>
+                </li>
+
+                <li class="task-card running">
+                  <div class="task-top">
+                    <strong>draft repository-centric direction</strong>
+                    <span class="status running">running</span>
+                  </div>
+                  <p>把目录树、working set、主画布和 runtime rail 收敛成新的主页面构图。</p>
+                  <div class="task-meta">
+                    <span class="status mode">tab</span>
+                    <span class="status">live trace</span>
+                  </div>
+                </li>
+
+                <li class="task-card blocked">
+                  <div class="task-top">
+                    <strong>map to Vue implementation</strong>
+                    <span class="status blocked">blocked</span>
+                  </div>
+                  <p>等待方向确认后再拆成 `MainLayout / FilesPanel / AiChatShell / AiChatView` 的真实改造计划。</p>
+                  <div class="task-meta">
+                    <span class="status">depends on design sign-off</span>
+                  </div>
+                </li>
+              </ul>
+            </aside>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

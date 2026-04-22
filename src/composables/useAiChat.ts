@@ -1,5 +1,5 @@
 import { computed, nextTick, onUnmounted, reactive, ref, toRef, watch, type MaybeRef, type Ref } from 'vue'
-import { aiAbortStream, type ChatMessage } from '@/api/ai'
+import { aiAbortStream } from '@/api/ai'
 import { useAutoCompact } from '@/composables/useAutoCompact'
 import { abortChat } from '@/composables/ai/chatAbort'
 import {
@@ -10,9 +10,7 @@ import {
   loadChatHistoryWindow,
   preloadChatHistoryWindow,
 } from '@/composables/ai/chatHistoryLoad'
-import { finalizeSend } from '@/composables/ai/chatSendFinalize'
-import { prepareSendContext } from '@/composables/ai/chatSendPreparation'
-import { handleSendFailure } from '@/composables/ai/chatSendRecovery'
+import { runAiChatSessionTurn } from '@/composables/ai/chatSessionRunner'
 import { useAiChatObservability } from '@/composables/ai/useAiChatObservability'
 import {
   parseAndWriteJournalSections as writeJournalSectionsFromText,
@@ -25,7 +23,6 @@ import {
   type AiChatStreamState,
 } from '@/composables/ai/chatStreamEvents'
 import { executeToolCalls as runToolCalls } from '@/composables/ai/chatToolExecution'
-import { streamWithToolLoop as runStreamWithToolLoop } from '@/composables/ai/chatToolLoop'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiMemoryStore } from '@/stores/ai-memory'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
@@ -336,7 +333,7 @@ export function useAiChat(options: UseAiChatOptions) {
     }
   }
 
-  async function executeToolCalls(toolCalls: ToolCallInfo[], sessionId: string) {
+  async function executeToolCalls(toolCalls: ToolCallInfo[], sessionId: string, signal?: AbortSignal) {
     observability.updatePendingToolQueueLength(toolCalls.length)
     const results = await runToolCalls({
       sessionId,
@@ -350,6 +347,7 @@ export function useAiChat(options: UseAiChatOptions) {
       },
       updateStreamingMessage,
       refreshWorkspaceDirectoryForToolPath,
+      signal,
     })
     observability.recordToolRun(toolCalls, results)
     observability.updatePendingToolQueueLength(0)
@@ -372,40 +370,6 @@ export function useAiChat(options: UseAiChatOptions) {
     const tasks = collectSpawnedTasks(text, { sourceMessageId })
     if (tasks.length === 0) return
     spawnedTasks.value = [...spawnedTasks.value, ...tasks]
-  }
-
-  async function streamWithToolLoop(
-    sid: string,
-    chatMessages: ChatMessage[],
-    provider: ProviderConfig,
-    model: ModelConfig,
-    apiKey: string,
-    systemPrompt: string | undefined,
-    enableTools: boolean,
-  ): Promise<void> {
-    await runStreamWithToolLoop({
-      sid,
-      chatMessages,
-      provider,
-      model,
-      apiKey,
-      systemPrompt,
-      enableTools,
-      log,
-      messages,
-      isStreaming,
-      workDir,
-      streamState,
-      maxToolLoops: MAX_TOOL_LOOPS,
-      resetWatchdog,
-      clearWatchdog,
-      flushPendingDelta,
-      updateStreamingMessage,
-      onStreamEvent: handleIncomingStreamEvent,
-      executeToolCalls,
-      parseAndWriteJournalSections,
-      parseSpawnedTasks,
-    })
   }
 
   async function loadHistory(overrideSessionId?: string, options?: { windowSize?: number }): Promise<void> {
@@ -504,85 +468,41 @@ export function useAiChat(options: UseAiChatOptions) {
     error.value = null
     invalidateChatHistoryCache(sid)
     observability.markSendStart()
+    userScrolled.value = false
 
-    const {
-      chatMessages,
-      enableTools,
-      enrichedSystemPrompt,
-      hasVisionCapability,
-    } = await prepareSendContext({
+    await runAiChatSessionTurn({
+      sessionId: sid,
       content,
       provider,
       model,
+      apiKey,
       systemPrompt,
       attachments,
-      sessionId: sid,
-      messages,
-      workDir: workDir.value,
-      planGateEnabled: planGateEnabled.value,
-      planApproved: planApproved.value,
+      workDir,
       aiStore,
       memoryStore,
+      messages,
+      isStreaming,
+      streamState,
+      error,
+      planGateEnabled,
+      planApproved,
       log,
+      maxToolLoops: MAX_TOOL_LOOPS,
+      totalTokens: () => totalTokens.value,
+      forceCompact: autoCompact.forceCompact,
+      checkAndCompact: autoCompact.checkAndCompact,
+      clearWatchdog,
+      resetWatchdog,
+      flushPendingDelta,
+      updateStreamingMessage,
+      executeToolCalls: (toolCalls, sessionId, signal) => executeToolCalls(toolCalls, sessionId, signal),
+      parseAndWriteJournalSections,
+      parseSpawnedTasks,
+      onStreamEvent: handleIncomingStreamEvent,
+      onResponseComplete: () => observability.markResponseComplete(),
+      onCompactTriggered: () => observability.markCompactTriggered(),
     })
-
-    isStreaming.value = true
-    userScrolled.value = false
-
-    try {
-      await streamWithToolLoop(
-        sid,
-        chatMessages,
-        provider,
-        model,
-        apiKey,
-        enrichedSystemPrompt,
-        enableTools,
-      )
-    } catch (err) {
-      await handleSendFailure({
-        error: err,
-        sessionId: sid,
-        provider,
-        model,
-        apiKey,
-        enrichedSystemPrompt,
-        enableTools,
-        hasVisionCapability,
-        messages,
-        errorRef: error,
-        streamState,
-        log,
-        updateStreamingMessage,
-        forceCompact: autoCompact.forceCompact,
-        streamWithToolLoop,
-      })
-    } finally {
-      observability.markResponseComplete()
-      finalizeSend({
-        sessionId: sid,
-        provider,
-        model,
-        systemPrompt,
-        apiKey,
-        messages,
-        isStreaming,
-        streamState,
-        workDir: workDir.value,
-        totalTokens: totalTokens.value,
-        clearWatchdog,
-        updateStreamingMessage,
-        aiStore,
-        autoCompact: {
-          checkAndCompact: async (...args) => {
-            const compacted = await autoCompact.checkAndCompact(...args)
-            if (compacted) observability.markCompactTriggered()
-            return compacted
-          },
-        },
-        log,
-      })
-    }
   }
 
   async function abort(): Promise<void> {

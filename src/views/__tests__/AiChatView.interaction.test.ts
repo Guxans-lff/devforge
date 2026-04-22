@@ -1,6 +1,6 @@
-import { mount, flushPromises } from '@vue/test-utils'
+import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, reactive, ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AiMessage, ModelConfig, ProviderConfig } from '@/types/ai'
 import AiChatView from '@/views/AiChatView.vue'
 
@@ -16,6 +16,9 @@ const mocks = vi.hoisted(() => ({
     shellDraft: '',
   },
   getCredentialMock: vi.fn(),
+  runAiChatSessionTurnMock: vi.fn(),
+  createChatTaskDispatcherMock: vi.fn(),
+  dispatcher: null as any,
   setApprovalModeMock: vi.fn(),
   setActiveSessionIdMock: vi.fn(),
 }))
@@ -51,6 +54,14 @@ vi.mock('@/composables/useFileAttachment', () => ({
 
 vi.mock('@/api/connection', () => ({
   getCredential: mocks.getCredentialMock,
+}))
+
+vi.mock('@/composables/ai/chatSessionRunner', () => ({
+  runAiChatSessionTurn: (...args: unknown[]) => mocks.runAiChatSessionTurnMock(...args),
+}))
+
+vi.mock('@/composables/ai/chatTaskDispatcher', () => ({
+  createChatTaskDispatcher: (...args: unknown[]) => mocks.createChatTaskDispatcherMock(...args),
 }))
 
 vi.mock('@/composables/useToolApproval', () => ({
@@ -135,6 +146,12 @@ const AiSpawnedTasksPanelStub = defineComponent({
 
 const AiChatShellStub = defineComponent({
   name: 'AiChatShell',
+  props: {
+    showSideRailToggle: Boolean,
+    sideRailOpen: Boolean,
+    sideRailCount: Number,
+    sideRailLabel: String,
+  },
   emits: [
     'update:showSessionDrawer',
     'update:showMemoryDrawer',
@@ -165,8 +182,11 @@ const AiChatShellStub = defineComponent({
     'preloadSession',
     'filePickerConfirm',
     'exitImmersive',
+    'toggleSideRail',
   ],
-  setup(_props, { emit, expose, slots }) {
+  setup(props, { emit, expose, slots }) {
+    const localSideRailOpen = ref(Boolean(props.sideRailOpen))
+
     expose({
       scrollContainer: document.createElement('div'),
       setInputDraft: (value: string) => {
@@ -174,19 +194,28 @@ const AiChatShellStub = defineComponent({
       },
       focusInput: vi.fn(),
     })
-    return () => h('div', { class: 'ai-chat-shell-stub' }, [
-      h('button', { class: 'select-session', onClick: () => emit('selectSession', 'session-2') }, 'select-session'),
-      h('button', { class: 'preload-session', onMouseenter: () => emit('preloadSession', 'session-2') }, 'preload-session'),
-      h('button', { class: 'create-session', onClick: () => emit('createSession') }, 'create-session'),
+      return () => h('div', { class: 'ai-chat-shell-stub' }, [
+        h('button', { class: 'select-session', onClick: () => emit('selectSession', 'session-2') }, 'select-session'),
+        h('button', { class: 'preload-session', onMouseenter: () => emit('preloadSession', 'session-2') }, 'preload-session'),
+        h('button', { class: 'create-session', onClick: () => emit('createSession') }, 'create-session'),
       h('button', { class: 'send-first', onClick: () => emit('send', 'first request') }, 'send-first'),
       h('button', { class: 'send-second', onClick: () => emit('send', 'second request') }, 'send-second'),
-      h('button', { class: 'emit-continue', onClick: () => emit('continue') }, 'continue'),
-      h('button', { class: 'emit-bump', onClick: () => emit('bumpMaxOutput', 4096) }, 'bump'),
-      h('button', { class: 'emit-history', onClick: () => emit('loadMoreHistory') }, 'history'),
-      slots['empty-state-extra']?.(),
-      slots['after-compact']?.(),
-      slots['before-input']?.(),
-    ])
+      h('button', {
+        class: 'toggle-task-rail',
+        onClick: () => {
+          localSideRailOpen.value = !localSideRailOpen.value
+          emit('toggleSideRail')
+        },
+      }, 'toggle-task-rail'),
+        h('button', { class: 'emit-continue', onClick: () => emit('continue') }, 'continue'),
+        h('button', { class: 'emit-bump', onClick: () => emit('bumpMaxOutput', 4096) }, 'bump'),
+        h('button', { class: 'emit-history', onClick: () => emit('loadMoreHistory') }, 'history'),
+        slots['empty-state']?.(),
+        slots['empty-state-extra']?.(),
+        slots['after-compact']?.(),
+        (props.sideRailOpen || localSideRailOpen.value) ? slots['side-rail']?.() : null,
+        slots['before-input']?.(),
+      ])
   },
 })
 
@@ -308,7 +337,7 @@ function createChatMock(messages: AiMessage[] = []) {
 }
 
 function mountView() {
-  return mount(AiChatView, {
+  const wrapper = mount(AiChatView, {
     global: {
       stubs: {
         AiChatShell: AiChatShellStub,
@@ -354,7 +383,11 @@ function mountView() {
       },
     },
   })
+  mountedWrappers.push(wrapper)
+  return wrapper
 }
+
+const mountedWrappers: VueWrapper[] = []
 
 describe('AiChatView interaction', () => {
   beforeEach(() => {
@@ -392,7 +425,11 @@ describe('AiChatView interaction', () => {
       setActiveTab: vi.fn(),
     })
     mocks.state.workspaceFilesStore = {
-      roots: [],
+      roots: [
+        { id: 'root-1', name: 'devforge', path: 'D:/Project/devforge' },
+        { id: 'root-2', name: 'other', path: 'D:/Project/other' },
+      ],
+      flatNodes: [],
       activeEditor: null,
     }
     mocks.state.memoryStore = {
@@ -411,8 +448,123 @@ describe('AiChatView interaction', () => {
       removeAttachment: vi.fn(),
     }
     mocks.getCredentialMock.mockResolvedValue('test-api-key')
+    mocks.runAiChatSessionTurnMock.mockReset()
+    const projectTask = (task: any, allTasks: any[]) => ({
+      ...task,
+      executionMode: task.executionMode ?? 'headless',
+      dispatchStatus: task.dispatchStatus ?? (() => {
+        if (task.status === 'running' || task.status === 'done' || task.status === 'error' || task.status === 'cancelled') {
+          return task.status
+        }
+        const dependsOn = task.dependsOn ?? []
+        if (dependsOn.length === 0) return 'ready'
+        const unresolved = dependsOn.some((dependencyId: string) => {
+          const dependency = allTasks.find((candidate: any) => candidate.id === dependencyId)
+          return dependency?.status !== 'done'
+        })
+        return unresolved ? 'queued' : 'ready'
+      })(),
+    })
+
+    mocks.dispatcher = {
+      enqueue: vi.fn((tasks: any[]) => tasks),
+      syncTasks: vi.fn((tasks: any[]) => tasks),
+      runTask: vi.fn().mockResolvedValue(undefined),
+      runReadyTasks: vi.fn().mockResolvedValue(undefined),
+      cancelTask: vi.fn().mockResolvedValue(undefined),
+      drain: vi.fn().mockResolvedValue(undefined),
+      snapshot: vi.fn(() => mocks.state.chat.spawnedTasks.value.map((task: any) => projectTask(task, mocks.state.chat.spawnedTasks.value))),
+      getStats: vi.fn(() => ({
+        running: 0,
+        ready: 0,
+        queued: 0,
+        blocked: 0,
+        done: 0,
+        error: 0,
+        cancelled: 0,
+        runnable: 0,
+      })),
+    }
+    mocks.createChatTaskDispatcherMock.mockReset()
+    mocks.createChatTaskDispatcherMock.mockImplementation((options: any) => {
+      const classifyStatus = (task: any, allTasks: any[]) => projectTask(task, allTasks).dispatchStatus
+
+      mocks.dispatcher.enqueue.mockImplementation((tasks: any[]) => {
+        options.setTasks(tasks)
+        return tasks
+      })
+      mocks.dispatcher.syncTasks.mockImplementation((tasks: any[]) => {
+        options.setTasks(tasks)
+        return tasks
+      })
+      mocks.dispatcher.runTask.mockImplementation(async (taskId: string, runOptions?: { startedByDispatcher?: boolean }) => {
+        const allTasks = mocks.state.chat.spawnedTasks.value
+        const task = allTasks.find((item: any) => item.id === taskId)
+        if (!task) return
+        if (classifyStatus(task, allTasks) !== 'ready') return
+        const executionMode = task.executionMode ?? 'headless'
+        const executor = options.executors[executionMode]
+        const prepared = executor.prepare?.(task) ?? {}
+        const runningTask = {
+          ...task,
+          ...prepared,
+          status: 'running',
+          executionMode,
+          startedByDispatcher: runOptions?.startedByDispatcher ?? true,
+        }
+        mocks.state.chat.spawnedTasks.value = mocks.state.chat.spawnedTasks.value.map((item: any) =>
+          item.id === taskId ? runningTask : item,
+        )
+        const result = await executor.run(runningTask)
+        mocks.state.chat.spawnedTasks.value = mocks.state.chat.spawnedTasks.value.map((item: any) =>
+          item.id !== taskId
+            ? item
+            : {
+                ...item,
+                status: result.status === 'done' ? 'done' : result.status,
+                lastError: result.error,
+                lastSummary: result.summary,
+                resultSummary: result.summary,
+                resultSessionId: result.sessionId,
+                taskSessionId: result.sessionId ?? item.taskSessionId,
+                finishedAt: result.finishedAt,
+              },
+        )
+      })
+      mocks.dispatcher.runReadyTasks.mockImplementation(async (taskIds?: string[]) => {
+        const ids = (taskIds ?? mocks.state.chat.spawnedTasks.value.map((task: any) => task.id))
+          .filter((taskId: string) => {
+            const task = mocks.state.chat.spawnedTasks.value.find((item: any) => item.id === taskId)
+            return task && classifyStatus(task, mocks.state.chat.spawnedTasks.value) === 'ready'
+          })
+        await Promise.all(ids.map((taskId: string) =>
+          mocks.dispatcher.runTask(taskId, { startedByDispatcher: true }),
+        ))
+      })
+      mocks.dispatcher.drain.mockImplementation(async () => {
+        await mocks.dispatcher.runReadyTasks()
+      })
+      mocks.dispatcher.cancelTask.mockImplementation(async (taskId: string, reason: string) => {
+        const task = mocks.state.chat.spawnedTasks.value.find((item: any) => item.id === taskId)
+        if (!task) return null
+        const executionMode = task.executionMode ?? 'headless'
+        const executor = options.executors[executionMode]
+        await executor.cancel?.(task, reason)
+        mocks.state.chat.spawnedTasks.value = mocks.state.chat.spawnedTasks.value.map((item: any) =>
+          item.id === taskId ? { ...item, status: 'cancelled', lastError: reason } : item,
+        )
+        return mocks.state.chat.spawnedTasks.value.find((item: any) => item.id === taskId) ?? null
+      })
+      return mocks.dispatcher
+    })
     mocks.setApprovalModeMock.mockReset()
     mocks.setActiveSessionIdMock.mockReset()
+  })
+
+  afterEach(() => {
+    while (mountedWrappers.length > 0) {
+      mountedWrappers.pop()?.unmount()
+    }
   })
 
   it('queues a second send while streaming and dispatches it after the first finishes', async () => {
@@ -507,6 +659,7 @@ describe('AiChatView interaction', () => {
       id: 'task-1',
       description: 'inspect scheduler',
       status: 'pending',
+      executionMode: 'tab',
       createdAt: 1000,
       retryCount: 0,
     }]
@@ -514,6 +667,7 @@ describe('AiChatView interaction', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    await wrapper.find('.toggle-task-rail').trigger('click')
     await wrapper.find('.run-task').trigger('click')
 
     expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledWith(expect.objectContaining({
@@ -540,12 +694,354 @@ describe('AiChatView interaction', () => {
     expect(mocks.state.chat.spawnedTasks.value[0].durationMs).toBeGreaterThanOrEqual(0)
   })
 
+  it('auto-starts a task tab from its initial message metadata on mount', async () => {
+    mocks.state.workspaceStore.activeTabId = 'ai-task-task-1'
+    mocks.state.workspaceStore.tabs = [{
+      id: 'ai-task-task-1',
+      type: 'ai-chat',
+      title: '[Task] inspect scheduler',
+      closable: true,
+      meta: {
+        sessionId: 'session-task-task-1',
+        sourceTaskId: 'task-1',
+        initialMessage: 'inspect scheduler',
+        taskAutoStarted: true,
+        taskExecutionMode: 'tab',
+      },
+    }]
+
+    mountView()
+    await flushPromises()
+
+    expect(mocks.state.chat.send).toHaveBeenCalledWith(
+      'inspect scheduler',
+      expect.objectContaining({ id: 'provider-1' }),
+      expect.objectContaining({ id: 'model-1' }),
+      'test-api-key',
+      undefined,
+      [],
+    )
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenCalledWith('ai-task-task-1', {
+      initialMessage: undefined,
+      taskAutoStarted: false,
+      taskStatus: 'running',
+      taskError: undefined,
+      taskSummary: undefined,
+    })
+  })
+
+  it('runs headless spawned tasks in the background and writes back result session metadata', async () => {
+    mocks.state.chat.send.mockImplementation(async () => {
+      mocks.state.chat.spawnedTasks.value = [{
+        id: 'task-1',
+        description: 'inspect scheduler',
+        status: 'pending',
+        executionMode: 'headless',
+        createdAt: 1000,
+        retryCount: 0,
+      }]
+    })
+    mocks.runAiChatSessionTurnMock.mockResolvedValue({
+      status: 'done',
+      summary: 'Headless child completed successfully with enough detail to summarize.',
+      sessionId: 'session-headless-task-1-123',
+      startedAt: 1000,
+      finishedAt: 1200,
+      retryable: false,
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.send-first').trigger('click')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+
+    expect(mocks.state.workspaceStore.addTab).not.toHaveBeenCalled()
+
+    expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({
+      status: 'done',
+      executionMode: 'headless',
+      resultSessionId: expect.stringContaining('session-headless-task-1-'),
+      taskSessionId: expect.stringContaining('session-headless-task-1-'),
+    })
+    expect(mocks.state.chat.spawnedTasks.value[0].resultSummary).toContain('Headless child completed successfully')
+  })
+
+  it('returns from parent send without waiting for background dispatcher completion', async () => {
+    let releaseHeadless!: () => void
+    const headlessGate = new Promise<void>((resolve) => {
+      releaseHeadless = resolve
+    })
+
+    mocks.state.chat.send.mockImplementation(async (content: string) => {
+      if (content === 'first request') {
+        mocks.state.chat.spawnedTasks.value = [{
+          id: 'task-1',
+          description: 'inspect scheduler',
+          status: 'pending',
+          executionMode: 'headless',
+          createdAt: 1000,
+          retryCount: 0,
+        }]
+        return
+      }
+    })
+    mocks.runAiChatSessionTurnMock.mockImplementation(async () => {
+      await headlessGate
+      return {
+        status: 'done',
+        summary: 'Background dispatcher result.',
+        sessionId: 'session-headless-task-1-456',
+        startedAt: 1000,
+        finishedAt: 1400,
+        retryable: false,
+      }
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const sendPromise = wrapper.find('.send-first').trigger('click')
+    await flushPromises()
+
+    expect(mocks.state.chat.send).toHaveBeenCalledWith(
+      'first request',
+      expect.objectContaining({ id: 'provider-1' }),
+      expect.objectContaining({ id: 'model-1' }),
+      'test-api-key',
+      undefined,
+      [],
+    )
+
+    await sendPromise
+    await nextTick()
+    await flushPromises()
+    expect(mocks.state.chat.spawnedTasks.value[0]?.status).toBe('running')
+
+    releaseHeadless()
+    await flushPromises()
+
+    expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({
+      status: 'done',
+      resultSummary: expect.stringContaining('Background dispatcher result.'),
+    })
+  })
+
+  it('toggles repository focus from right-rail spawned task cards', async () => {
+    mocks.state.workspaceStore.updateTabMeta.mockImplementation((tabId: string, meta: Record<string, unknown>) => {
+      const tab = mocks.state.workspaceStore.tabs.find((item: any) => item.id === tabId)
+      if (tab) {
+        tab.meta = { ...tab.meta, ...meta }
+      }
+    })
+    mocks.state.chat.workDir.value = 'D:/Project/devforge'
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: 'tighten src/views/AiChatView.vue task rail',
+      status: 'done',
+      executionMode: 'headless',
+      resultSummary: 'Updated src/components/layout/panels/FilesPanel.vue.',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.toggle-task-rail').trigger('click')
+
+    const taskCard = wrapper.findAll('article').find(card => card.text().includes('AiChatView.vue'))
+    expect(taskCard).toBeTruthy()
+
+    await taskCard!.trigger('click')
+
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenCalledWith('ai-tab-1', {
+      focusedTaskId: 'task-1',
+      focusedTaskPaths: [
+        'D:/Project/devforge/src/views/AiChatView.vue',
+        'D:/Project/devforge/src/components/layout/panels/FilesPanel.vue',
+      ],
+      focusedTaskLabel: 'tighten src/views/AiChatView.vue task rail',
+    })
+    expect(mocks.state.workspaceStore.tabs[0].meta.focusedTaskId).toBe('task-1')
+
+    await taskCard!.trigger('click')
+
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenLastCalledWith('ai-tab-1', {
+      focusedTaskId: null,
+      focusedTaskPaths: [],
+      focusedTaskLabel: null,
+    })
+  })
+
+  it('opens the first task context file directly from the right rail', async () => {
+    mocks.state.workspaceStore.updateTabMeta.mockImplementation((tabId: string, meta: Record<string, unknown>) => {
+      const tab = mocks.state.workspaceStore.tabs.find((item: any) => item.id === tabId)
+      if (tab) {
+        tab.meta = { ...tab.meta, ...meta }
+      }
+    })
+    mocks.state.chat.workDir.value = 'D:/Project/devforge'
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: 'tighten src/views/AiChatView.vue task rail',
+      status: 'done',
+      executionMode: 'headless',
+      resultSummary: 'Updated src/components/layout/panels/FilesPanel.vue.',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.toggle-task-rail').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '展开')!.trigger('click')
+
+    const pathButton = wrapper.findAll('.task-context-open').find(button => button.text().includes('src/views/AiChatView.vue'))
+    expect(pathButton).toBeTruthy()
+
+    await pathButton!.trigger('click')
+
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenCalledWith('ai-tab-1', {
+      focusedTaskId: 'task-1',
+      focusedTaskPaths: [
+        'D:/Project/devforge/src/views/AiChatView.vue',
+        'D:/Project/devforge/src/components/layout/panels/FilesPanel.vue',
+      ],
+      focusedTaskLabel: 'tighten src/views/AiChatView.vue task rail',
+    })
+    expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledWith({
+      id: 'file-editor:D:/Project/devforge/src/views/AiChatView.vue',
+      type: 'file-editor',
+      title: 'AiChatView.vue',
+      closable: true,
+      meta: { absolutePath: 'D:/Project/devforge/src/views/AiChatView.vue' },
+    })
+  })
+
+  it('opens working set files directly from the main workspace list', async () => {
+    mocks.state.workspaceStore.updateTabMeta.mockImplementation((tabId: string, meta: Record<string, unknown>) => {
+      const tab = mocks.state.workspaceStore.tabs.find((item: any) => item.id === tabId)
+      if (tab) {
+        tab.meta = { ...tab.meta, ...meta }
+      }
+    })
+    mocks.state.chat.workDir.value = 'D:/Project/devforge'
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const workingFileButton = wrapper.findAll('.working-file-open')
+      .find(button => button.text().includes('MainLayout.vue'))
+    expect(workingFileButton).toBeTruthy()
+
+    await workingFileButton!.trigger('click')
+
+    expect(mocks.state.workspaceStore.updateTabMeta).toHaveBeenCalledWith('ai-tab-1', {
+      focusedFilePaths: ['D:/Project/devforge/src/views/MainLayout.vue'],
+      focusedFileLabel: 'MainLayout.vue',
+    })
+    expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledWith({
+      id: 'file-editor:D:/Project/devforge/src/views/MainLayout.vue',
+      type: 'file-editor',
+      title: 'MainLayout.vue',
+      closable: true,
+      meta: { absolutePath: 'D:/Project/devforge/src/views/MainLayout.vue' },
+    })
+  })
+
+  it('keeps the repository-centric empty-state layout structure stable', async () => {
+    mocks.state.chat.workDir.value = 'D:/Project/devforge'
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: 'inspect scheduler',
+      status: 'running',
+      executionMode: 'headless',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-ui="ai-empty-state"]').exists()).toBe(true)
+    expect(wrapper.find('[data-ui="workspace-bar"]').exists()).toBe(true)
+    expect(wrapper.find('[data-ui="workspace-summary"]').exists()).toBe(true)
+    expect(wrapper.find('[data-ui="roots-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-ui="working-files-panel"]').exists()).toBe(true)
+    expect(wrapper.findAll('.working-file-open').length).toBeGreaterThan(0)
+    expect(wrapper.find('[data-ui="task-rail"]').exists()).toBe(true)
+  })
+
+  it('keeps finished task rail collapsed until explicitly opened', async () => {
+    mocks.state.chat.workDir.value = 'D:/Project/devforge'
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: 'inspect scheduler',
+      status: 'done',
+      executionMode: 'headless',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('[data-ui="task-rail"]').exists()).toBe(false)
+
+    await wrapper.find('.toggle-task-rail').trigger('click')
+
+    expect(wrapper.find('[data-ui="task-rail"]').exists()).toBe(true)
+  })
+
+  it('prefers the active workspace root when resolving relative file paths', async () => {
+    mocks.state.workspaceStore.updateTabMeta.mockImplementation((tabId: string, meta: Record<string, unknown>) => {
+      const tab = mocks.state.workspaceStore.tabs.find((item: any) => item.id === tabId)
+      if (tab) {
+        tab.meta = { ...tab.meta, ...meta }
+      }
+    })
+    mocks.state.chat.workDir.value = 'D:/Project/devforge/packages/agent'
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: 'patch views/MainLayout.vue and src/views/AiChatView.vue',
+      status: 'done',
+      executionMode: 'headless',
+      resultSummary: 'Adjusted components/layout/panels/FilesPanel.vue.',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.toggle-task-rail').trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === '展开')!.trigger('click')
+
+    const pathButton = wrapper.findAll('.task-context-open').find(button => button.text().includes('views/MainLayout.vue'))
+    expect(pathButton).toBeTruthy()
+
+    await pathButton!.trigger('click')
+
+    expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledWith({
+      id: 'file-editor:D:/Project/devforge/packages/agent/views/MainLayout.vue',
+      type: 'file-editor',
+      title: 'MainLayout.vue',
+      closable: true,
+      meta: { absolutePath: 'D:/Project/devforge/packages/agent/views/MainLayout.vue' },
+    })
+  })
+
   it('runs spawned tasks in batch from the dispatcher panel', async () => {
     mocks.state.chat.spawnedTasks.value = [
       {
         id: 'task-1',
         description: 'inspect scheduler',
         status: 'pending',
+        executionMode: 'tab',
         createdAt: 1000,
         retryCount: 0,
       },
@@ -553,6 +1049,7 @@ describe('AiChatView interaction', () => {
         id: 'task-2',
         description: 'collect logs',
         status: 'pending',
+        executionMode: 'tab',
         createdAt: 1001,
         retryCount: 0,
       },
@@ -561,11 +1058,61 @@ describe('AiChatView interaction', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    await wrapper.find('.toggle-task-rail').trigger('click')
     await wrapper.find('.run-task-batch').trigger('click')
 
     expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledTimes(2)
     expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({ status: 'running' })
     expect(mocks.state.chat.spawnedTasks.value[1]).toMatchObject({ status: 'running' })
+  })
+
+  it('auto-dispatches tab tasks by opening task tabs without blocking the parent send', async () => {
+    let releaseTabTask!: () => void
+    const tabTaskGate = new Promise<void>((resolve) => {
+      releaseTabTask = resolve
+    })
+
+    mocks.state.chat.send.mockImplementation(async (content: string) => {
+      if (content === 'first request') {
+        mocks.state.chat.spawnedTasks.value = [{
+          id: 'task-1',
+          description: 'inspect scheduler',
+          status: 'pending',
+          executionMode: 'tab',
+          createdAt: 1000,
+          retryCount: 0,
+        }]
+        return
+      }
+      if (content === 'inspect scheduler') {
+        await tabTaskGate
+      }
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const sendPromise = wrapper.find('.send-first').trigger('click')
+    await flushPromises()
+    await sendPromise
+    await nextTick()
+    await flushPromises()
+
+    expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'ai-chat',
+      title: '[Task] inspect scheduler',
+      meta: expect.objectContaining({
+        initialMessage: 'inspect scheduler',
+        taskAutoStarted: true,
+      }),
+    }))
+    expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({
+      status: 'running',
+      executionMode: 'tab',
+      taskTabId: expect.stringContaining('ai-task-task-1-'),
+    })
+
+    releaseTabTask()
   })
 
   it('synthesizes spawned task results into the parent input draft', async () => {
@@ -595,14 +1142,15 @@ describe('AiChatView interaction', () => {
     const wrapper = mountView()
     await flushPromises()
 
+    await wrapper.find('.toggle-task-rail').trigger('click')
     await wrapper.find('.synthesize-tasks').trigger('click')
 
-    expect(mocks.state.shellDraft).toContain('Please synthesize the spawned task results')
-    expect(mocks.state.shellDraft).toContain('Source Group #1')
+    expect(mocks.state.shellDraft).toContain('ai.tasks.dispatcher.synthesis.intro')
+    expect(mocks.state.shellDraft).toContain('ai.tasks.dispatcher.synthesis.sourceGroupTitle')
     expect(mocks.state.shellDraft).toContain('inspect scheduler')
-    expect(mocks.state.shellDraft).toContain('Scheduler queue is healthy after retry.')
-    expect(mocks.state.shellDraft).toContain('Depends on: inspect scheduler')
-    expect(mocks.state.shellDraft).toContain('cancelled by user')
+    expect(mocks.state.shellDraft).toContain('ai.tasks.dispatcher.synthesis.summary')
+    expect(mocks.state.shellDraft).toContain('ai.tasks.dispatcher.synthesis.dependsOn')
+    expect(mocks.state.shellDraft).toContain('ai.tasks.dispatcher.synthesis.cancelledReason')
   })
 
   it('does not run a task whose explicit dependency is unresolved', async () => {
@@ -611,6 +1159,7 @@ describe('AiChatView interaction', () => {
         id: 'task-1',
         description: 'inspect scheduler',
         status: 'running',
+        executionMode: 'tab',
         createdAt: 1000,
         retryCount: 0,
         sourceMessageId: 'assistant-1',
@@ -619,6 +1168,7 @@ describe('AiChatView interaction', () => {
         id: 'task-2',
         description: 'collect logs',
         status: 'pending',
+        executionMode: 'tab',
         createdAt: 1001,
         retryCount: 0,
         sourceMessageId: 'assistant-1',
@@ -631,7 +1181,7 @@ describe('AiChatView interaction', () => {
 
     await wrapper.find('.run-task-batch').trigger('click')
 
-    expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledTimes(1)
+    expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledTimes(0)
     expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({ status: 'running' })
     expect(mocks.state.chat.spawnedTasks.value[1]).toMatchObject({ status: 'pending' })
   })
@@ -641,6 +1191,7 @@ describe('AiChatView interaction', () => {
       id: 'task-1',
       description: 'inspect scheduler',
       status: 'running',
+      executionMode: 'tab',
       createdAt: 1000,
       startedAt: 1200,
       taskTabId: 'ai-task-task-1',
@@ -679,6 +1230,7 @@ describe('AiChatView interaction', () => {
         id: 'task-1',
         description: 'inspect scheduler',
         status: 'running',
+        executionMode: 'tab',
         createdAt: 1000,
         startedAt: 1200,
         taskTabId: 'ai-task-task-1',
@@ -690,6 +1242,7 @@ describe('AiChatView interaction', () => {
         id: 'task-2',
         description: 'collect logs',
         status: 'running',
+        executionMode: 'tab',
         createdAt: 1001,
         startedAt: 1250,
         taskTabId: 'ai-task-task-2',
@@ -771,6 +1324,7 @@ describe('AiChatView interaction', () => {
       id: 'task-1',
       description: 'inspect scheduler',
       status: 'running',
+      executionMode: 'tab',
       createdAt: 1000,
       startedAt: 1200,
       taskTabId: 'ai-task-task-1',
