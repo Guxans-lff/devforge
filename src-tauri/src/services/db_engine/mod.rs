@@ -179,19 +179,22 @@ impl DbEngine {
         match pool {
             Some(DriverPool::MySql(p)) => {
                 let query_key = format!("{}:pool", connection_id);
+                let conn_mutex = Arc::new(tokio::sync::Mutex::new(
+                    p.acquire().await.map_err(AppError::Database)?,
+                ));
+                self.register_mysql_session_query(&conn_mutex, &query_key, &connection_id).await;
                 let fut = async {
                     let start = std::time::Instant::now();
-                    // 注册活跃查询（从 pool 获取临时连接取 CONNECTION_ID）
-                    self.register_mysql_query(&p, &query_key, &connection_id).await;
                     let result = if is_select_query(&sql) {
-                        mysql::execute_select(&p, &sql, start).await
+                        mysql::execute_select_on_conn(conn_mutex.clone(), sql, start).await
                     } else {
-                        mysql::execute_non_select(&p, &sql, start).await
+                        mysql::execute_non_select_on_conn(conn_mutex.clone(), sql, start).await
                     };
-                    self.running_queries.write().await.remove(&query_key);
                     result
                 };
-                Self::with_timeout(fut, timeout_secs).await
+                let result = Self::with_timeout(fut, timeout_secs).await;
+                self.running_queries.write().await.remove(&query_key);
+                result
             }
             Some(DriverPool::Postgres(p)) => {
                 let start = std::time::Instant::now();
@@ -206,19 +209,30 @@ impl DbEngine {
         match pool.as_ref() {
             DriverPool::MySql(p) => {
                 let query_key = format!("{}:pool", connection_id);
-                let p = p.clone();
+                let conn_mutex = Arc::new(tokio::sync::Mutex::new(
+                    p.acquire().await.map_err(AppError::Database)?,
+                ));
+                {
+                    let mut conn = conn_mutex.lock().await;
+                    use sqlx::Executor as _;
+                    let use_sql = format!("USE `{}`", database.replace('`', "``"));
+                    (&mut **conn).execute(sqlx::raw_sql(&use_sql)).await.map_err(|e| {
+                        AppError::Other(format!("鍒囨崲鏁版嵁搴撳け璐? {}", e))
+                    })?;
+                }
+                self.register_mysql_session_query(&conn_mutex, &query_key, &connection_id).await;
                 let fut = async {
                     let start = std::time::Instant::now();
-                    self.register_mysql_query(&p, &query_key, &connection_id).await;
                     let result = if is_select_query(&sql) {
-                        mysql::execute_select_in_database(p.clone(), database, sql, start).await
+                        mysql::execute_select_on_conn(conn_mutex.clone(), sql, start).await
                     } else {
-                        mysql::execute_non_select_in_database(p.clone(), database, sql, start).await
+                        mysql::execute_non_select_on_conn(conn_mutex.clone(), sql, start).await
                     };
-                    self.running_queries.write().await.remove(&query_key);
                     result
                 };
-                Self::with_timeout(fut, timeout_secs).await
+                let result = Self::with_timeout(fut, timeout_secs).await;
+                self.running_queries.write().await.remove(&query_key);
+                result
             }
             DriverPool::Postgres(p) => {
                 let start = std::time::Instant::now();
@@ -238,14 +252,17 @@ impl DbEngine {
         };
         if let Some(pool) = pool {
             let query_key = format!("{}:stream", connection_id);
+            let conn_mutex = Arc::new(tokio::sync::Mutex::new(
+                pool.acquire().await.map_err(AppError::Database)?,
+            ));
+            self.register_mysql_session_query(&conn_mutex, &query_key, &connection_id).await;
             let cb = on_chunk.clone();
             let fut = async {
-                self.register_mysql_query(&pool, &query_key, &connection_id).await;
-                let result = mysql::execute_select_stream(&pool, &sql, std::time::Instant::now(), move |c| cb(c)).await;
-                self.running_queries.write().await.remove(&query_key);
-                result
+                mysql::execute_select_stream_on_conn(conn_mutex, sql, std::time::Instant::now(), Arc::new(move |c| cb(c))).await
             };
-            return Self::with_timeout(fut, timeout_secs).await;
+            let result = Self::with_timeout(fut, timeout_secs).await;
+            self.running_queries.write().await.remove(&query_key);
+            return result;
         }
         let pg_pool = {
             let pg_pools = self.pg_pools.read().await;
@@ -260,15 +277,24 @@ impl DbEngine {
         match pool.as_ref() {
             DriverPool::MySql(p) => {
                 let query_key = format!("{}:stream_db", connection_id);
-                let p = p.clone();
+                let conn_mutex = Arc::new(tokio::sync::Mutex::new(
+                    p.acquire().await.map_err(AppError::Database)?,
+                ));
+                {
+                    let mut conn = conn_mutex.lock().await;
+                    use sqlx::Executor as _;
+                    let use_sql = format!("USE `{}`", database.replace('`', "``"));
+                    (&mut **conn).execute(sqlx::raw_sql(&use_sql)).await.map_err(|e| {
+                        AppError::Other(format!("鍒囨崲鏁版嵁搴撳け璐? {}", e))
+                    })?;
+                }
+                self.register_mysql_session_query(&conn_mutex, &query_key, &connection_id).await;
                 let fut = async {
-                    let start = std::time::Instant::now();
-                    self.register_mysql_query(&p, &query_key, &connection_id).await;
-                    let result = mysql::execute_select_stream_in_database(p, database, sql, start, on_chunk).await;
-                    self.running_queries.write().await.remove(&query_key);
-                    result
+                    mysql::execute_select_stream_on_conn(conn_mutex, sql, std::time::Instant::now(), on_chunk).await
                 };
-                Self::with_timeout(fut, timeout_secs).await
+                let result = Self::with_timeout(fut, timeout_secs).await;
+                self.running_queries.write().await.remove(&query_key);
+                result
             }
             DriverPool::Postgres(_) => Err(AppError::Other("Postgres 流式查询暂未实现".to_string())),
         }
@@ -501,21 +527,7 @@ impl DbEngine {
         Ok(())
     }
 
-    /// 注册 pool 模式的活跃查询（从池中临时获取连接取 CONNECTION_ID）
-    async fn register_mysql_query(&self, pool: &sqlx::MySqlPool, query_key: &str, connection_id: &str) {
-        // 尝试获取当前执行连接的 MySQL connection_id，失败时静默跳过
-        match sqlx::query_scalar::<_, u64>("SELECT CONNECTION_ID()").fetch_one(pool).await {
-            Ok(id) => {
-                self.running_queries.write().await.insert(
-                    query_key.to_string(),
-                    RunningQuery { mysql_conn_id: id, connection_id: connection_id.to_string() },
-                );
-            }
-            Err(e) => log::debug!("获取 CONNECTION_ID 失败（不影响查询）: {}", e),
-        }
-    }
-
-    /// 注册 session 模式的活跃查询（在 session 连接上取 CONNECTION_ID）
+    /// Register a running MySQL query using the same physical connection that will execute it.
     async fn register_mysql_session_query(
         &self,
         conn_mutex: &Arc<tokio::sync::Mutex<sqlx::pool::PoolConnection<sqlx::MySql>>>,

@@ -4,7 +4,7 @@ use tauri::{command, AppHandle, Manager};
 
 use crate::models::query::{
     ColumnInfo, DatabaseInfo, ForeignKeyRelation, QueryResult,
-    RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo,
+    RoutineInfo, RoutineParameter, SchemaBundle, TableInfo, TriggerInfo, ViewInfo,
 };
 use crate::utils::error::AppError;
 use super::DbEngineState;
@@ -49,9 +49,11 @@ pub async fn db_get_table_data(
     page_size: u32,
     where_clause: Option<String>,
     order_by: Option<String>,
+    seek_column: Option<String>,
+    seek_value: Option<i64>,
 ) -> Result<QueryResult, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
-    engine.clone().get_table_data(connection_id, database, table, page, page_size, where_clause, order_by).await
+    engine.clone().get_table_data(connection_id, database, table, page, page_size, where_clause, order_by, seek_column, seek_value).await
 }
 
 #[command]
@@ -153,4 +155,14 @@ pub async fn db_get_all_columns(
     engine
         .get_all_columns(connection_id, database)
         .await
+}
+
+#[command]
+pub async fn db_get_schema_bundle(
+    app: AppHandle,
+    connection_id: String,
+    database: String,
+) -> Result<SchemaBundle, AppError> {
+    let engine = app.state::<DbEngineState>().inner().clone();
+    engine.get_schema_bundle(connection_id, database).await
 }

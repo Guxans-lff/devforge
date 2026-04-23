@@ -296,11 +296,11 @@ function onDragEnd() {
 /** 将非收藏连接按类型分组 */
 const groupedNonFavorites = computed(() => {
   const categories = [
-    { type: 'database', label: t('welcome.database'), icon: Database },
-    { type: 'ssh', label: t('welcome.terminal'), icon: Terminal },
-    { type: 'sftp', label: t('welcome.files'), icon: FolderOpen },
-    { type: 'redis', label: 'Redis', icon: Container },
-    { type: 'git', label: t('connection.typeGit'), icon: GitBranch },
+    { type: 'database', label: t('welcome.database').toUpperCase(), icon: Database },
+    { type: 'ssh', label: 'SSH 终端', icon: Terminal },
+    { type: 'sftp', label: 'SFTP 文件', icon: FolderOpen },
+    { type: 'redis', label: 'REDIS', icon: Container },
+    { type: 'git', label: 'GIT 仓库', icon: GitBranch },
   ]
 
   return categories.map(cat => ({
@@ -377,12 +377,12 @@ const groupedNonFavorites = computed(() => {
         <!-- 收藏栏 -->
         <div v-if="connectionStore.filteredFavorites.length > 0" class="group/section relative mb-2">
           <Collapsible v-model:open="openGroups['favorites']">
-            <div class="sticky top-0 z-10 backdrop-blur-md bg-background/70 dark:bg-background/80 py-1.5 mb-1 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.05),inset_0_-1px_0_0_rgba(150,150,150,0.05)] pointer-events-none">
-              <CollapsibleTrigger class="flex w-full items-center gap-2 px-4 text-foreground/50 hover:text-foreground/90 transition-colors pointer-events-auto">
-                <ChevronRight class="h-[14px] w-[14px] shrink-0 transition-transform duration-200" :class="{ 'rotate-90': openGroups['favorites'] }" />
-                <Star class="h-[14px] w-[14px] text-df-warning/70" />
-                <span class="text-[11px] font-bold tracking-widest flex-1 text-left truncate">{{ t('sidebar.favorites') }}</span>
-                <span class="text-[9px] font-mono tracking-widest opacity-0 group-hover/section:opacity-100 transition-opacity pr-1">{{ connectionStore.filteredFavorites.length }}</span>
+            <div class="sticky top-0 z-10 bg-background/80 py-1.5 mb-1 backdrop-blur-md pointer-events-none">
+              <CollapsibleTrigger class="flex w-full items-center gap-2 px-4 text-muted-foreground/70 hover:text-foreground transition-colors pointer-events-auto">
+                <ChevronRight class="h-3 w-3 shrink-0 transition-transform duration-200" :class="{ 'rotate-90': openGroups['favorites'] }" />
+                <Star class="h-3 w-3 text-df-warning/80" />
+                <span class="flex-1 truncate text-left font-mono text-[10px] font-semibold uppercase tracking-[0.14em]">{{ t('sidebar.favorites') }}</span>
+                <span class="pr-1 font-mono text-[10px] font-medium tracking-wide text-muted-foreground/80">{{ connectionStore.filteredFavorites.length }}</span>
               </CollapsibleTrigger>
             </div>
 
@@ -422,16 +422,15 @@ const groupedNonFavorites = computed(() => {
             :tabindex="0"
             :aria-expanded="!group.isCollapsed"
             :aria-label="group.label"
-            class="sticky top-0 z-10 backdrop-blur-md bg-background/70 dark:bg-background/80 py-1.5 my-1 shadow-[0_4px_6px_-4px_rgba(0,0,0,0.05),inset_0_-1px_0_0_rgba(150,150,150,0.05)] cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm"
+            class="sticky top-0 z-10 my-1 cursor-pointer rounded-sm bg-background/80 py-1.5 backdrop-blur-md outline-none focus-visible:ring-1 focus-visible:ring-ring"
             @click="toggleGroup(group.type)"
             @keydown.enter.prevent="toggleGroup(group.type)"
             @keydown.space.prevent="toggleGroup(group.type)"
           >
-            <div class="flex w-full items-center gap-2 px-4 text-foreground/50 hover:text-foreground/90 transition-colors pointer-events-auto">
-              <ChevronRight class="h-[14px] w-[14px] shrink-0 transition-transform duration-200" :class="{ 'rotate-90': !group.isCollapsed }" />
-              <component :is="group.icon" class="h-[14px] w-[14px]" />
-              <span class="text-[11px] font-bold tracking-widest flex-1 text-left truncate">{{ group.label }}</span>
-              <span class="text-[9px] font-mono tracking-widest opacity-0 group-hover/section:opacity-100 transition-opacity pr-1">{{ group.items.length }}</span>
+            <div class="flex w-full items-center gap-2 px-4 text-muted-foreground/70 hover:text-foreground transition-colors pointer-events-auto">
+              <ChevronRight class="h-3 w-3 shrink-0 transition-transform duration-200" :class="{ 'rotate-90': !group.isCollapsed }" />
+              <span class="flex-1 truncate text-left font-mono text-[10px] font-semibold uppercase tracking-[0.14em]">{{ group.label }}</span>
+              <span class="pr-1 font-mono text-[10px] font-medium tracking-wide text-muted-foreground/80">{{ group.items.length }}</span>
             </div>
           </div>
 

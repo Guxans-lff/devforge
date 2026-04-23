@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::models::query::{
     ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo,
     ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, ScriptOptions,
-    ForeignKeyRelation
+    ForeignKeyRelation, SchemaBundle
 };
 use crate::services::db_drivers::{mysql, postgres, DriverPool};
 use crate::utils::error::AppError;
@@ -48,30 +48,72 @@ impl DbEngine {
         }
     }
 
-    pub async fn get_table_data(self: Arc<Self>, connection_id: String, database: String, table: String, page: u32, page_size: u32, where_clause: Option<String>, order_by: Option<String>) -> Result<QueryResult, AppError> {
+    pub async fn get_schema_bundle(self: Arc<Self>, connection_id: String, database: String) -> Result<SchemaBundle, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
+        let (tables, foreign_keys, all_columns) = match pool.as_ref() {
+            DriverPool::MySql(p) => {
+                let (tables, foreign_keys, all_columns) = tokio::try_join!(
+                    mysql::get_tables(p, &database),
+                    mysql::get_foreign_keys(p, &database),
+                    mysql::get_all_columns(p, &database),
+                )?;
+                (tables, foreign_keys, all_columns)
+            }
+            DriverPool::Postgres(p) => {
+                let (tables, foreign_keys, all_columns) = tokio::try_join!(
+                    postgres::get_tables(p, &database),
+                    postgres::get_foreign_keys(p, &database),
+                    postgres::get_all_columns(p, &database),
+                )?;
+                (tables, foreign_keys, all_columns)
+            }
+        };
+        Ok(SchemaBundle { tables, foreign_keys, all_columns })
+    }
+
+    pub async fn get_table_data(self: Arc<Self>, connection_id: String, database: String, table: String, page: u32, page_size: u32, where_clause: Option<String>, order_by: Option<String>, seek_column: Option<String>, seek_value: Option<i64>) -> Result<QueryResult, AppError> {
         let pool = self.clone().get_pool(connection_id.clone()).await?;
         let offset = page.saturating_sub(1) * page_size;
-        let (data_sql, count_sql) = match pool.as_ref() {
-            DriverPool::MySql(_) => (
-                mysql::build_table_data_sql(&database, &table, page_size, offset, where_clause.as_deref(), order_by.as_deref()).map_err(AppError::Other)?,
-                mysql::build_table_count_sql(&database, &table, where_clause.as_deref()).map_err(AppError::Other)?,
-            ),
-            DriverPool::Postgres(_) => (
-                postgres::build_table_data_sql(&database, &table, page_size, offset, where_clause.as_deref(), order_by.as_deref()).map_err(AppError::Other)?,
-                postgres::build_table_count_sql(&database, &table, where_clause.as_deref()).map_err(AppError::Other)?,
-            ),
+        let has_seek_column = seek_column
+            .as_deref()
+            .map(|col| !col.trim().is_empty())
+            .unwrap_or(false);
+        let order_by_trimmed = order_by.as_deref().map(str::trim);
+        let order_by_is_seek_order = match (order_by_trimmed, seek_column.as_deref()) {
+            (Some(order_by), Some(column)) => order_by.eq_ignore_ascii_case(&format!("{} ASC", column))
+                || order_by.eq_ignore_ascii_case(&format!("`{}` ASC", column.replace('`', "``")))
+                || order_by.eq_ignore_ascii_case(&format!("\"{}\" ASC", column.replace('"', "\"\""))),
+            _ => false,
+        };
+        let has_order_by = order_by
+            .as_deref()
+            .map(|o| !o.trim().is_empty())
+            .unwrap_or(false);
+        let use_seek = has_seek_column && seek_value.is_some() && (!has_order_by || order_by_is_seek_order);
+        let loaded_before = if use_seek { page.saturating_sub(1) * page_size } else { offset };
+        let data_sql = match pool.as_ref() {
+            DriverPool::MySql(_) => {
+                if use_seek {
+                    mysql::build_table_data_seek_sql(&database, &table, page_size + 1, where_clause.as_deref(), seek_column.as_deref().unwrap_or_default(), seek_value.unwrap_or_default()).map_err(AppError::Other)?
+                } else {
+                    mysql::build_table_data_sql(&database, &table, page_size + 1, offset, where_clause.as_deref(), order_by.as_deref()).map_err(AppError::Other)?
+                }
+            },
+            DriverPool::Postgres(_) => {
+                if use_seek {
+                    postgres::build_table_data_seek_sql(&database, &table, page_size + 1, where_clause.as_deref(), seek_column.as_deref().unwrap_or_default(), seek_value.unwrap_or_default()).map_err(AppError::Other)?
+                } else {
+                    postgres::build_table_data_sql(&database, &table, page_size + 1, offset, where_clause.as_deref(), order_by.as_deref()).map_err(AppError::Other)?
+                }
+            },
         };
 
-        let db_clone = connection_id.clone();
-        let (result, count_res) = tokio::join!(
-            self.clone().execute_query(connection_id, None, data_sql, None),
-            self.execute_query(db_clone, None, count_sql, None)
-        );
-        let mut result = result?;
-        if let Ok(count_res) = count_res {
-            if let Some(row) = count_res.rows.first() {
-                if let Some(val) = row.first() { result.total_count = val.as_i64(); }
-            }
+        let mut result = self.execute_query(connection_id, None, data_sql, None).await?;
+        if result.rows.len() as u32 > page_size {
+            result.rows.truncate(page_size as usize);
+            result.total_count = Some((loaded_before + page_size + 1) as i64);
+        } else {
+            result.total_count = Some((loaded_before + result.rows.len() as u32) as i64);
         }
         Ok(result)
     }
@@ -338,23 +380,37 @@ impl DbEngine {
         // 2. 并发获取所有表 DDL（限制并发度）+ 批量获取视图、存储过程、函数定义
         use futures::StreamExt;
         // collect 成 owned Vec<String> 避免闭包捕获 &String 引起生命周期问题
-        let owned_table_names: Vec<String> = table_names.iter().cloned().collect();
-        let ddl_results: Vec<_> = futures::stream::iter(owned_table_names.into_iter().map(|table_name| {
+        let table_ddl_task = {
+            let owned_table_names: Vec<String> = table_names.iter().cloned().collect();
             let engine = self.clone();
             let cid = connection_id.clone();
             let database = db.clone();
             async move {
-                engine.get_create_table(cid, database, table_name).await
+                futures::stream::iter(owned_table_names.into_iter().map(|table_name| {
+                    let engine = engine.clone();
+                    let cid = cid.clone();
+                    let database = database.clone();
+                    async move {
+                        engine.get_create_table(cid, database, table_name).await
+                    }
+                }))
+                .buffered(4)
+                .collect::<Vec<_>>()
+                .await
             }
-        }))
-        .buffered(4)
-        .collect()
-        .await;
+        };
 
-        let (view_defs, proc_defs, func_defs) = tokio::join!(
-            self.clone().get_view_definitions(connection_id.clone(), db.clone()),
-            self.clone().get_routine_definitions(connection_id.clone(), db.clone(), "PROCEDURE".to_string()),
-            self.clone().get_routine_definitions(connection_id.clone(), db.clone(), "FUNCTION".to_string())
+        let definitions_task = async {
+            tokio::join!(
+                self.clone().get_view_definitions(connection_id.clone(), db.clone()),
+                self.clone().get_routine_definitions(connection_id.clone(), db.clone(), "PROCEDURE".to_string()),
+                self.clone().get_routine_definitions(connection_id.clone(), db.clone(), "FUNCTION".to_string())
+            )
+        };
+
+        let (ddl_results, (view_defs, proc_defs, func_defs)) = tokio::join!(
+            table_ddl_task,
+            definitions_task
         );
 
         // 3. 组装表 DDL

@@ -1,7 +1,8 @@
 import { ref, computed } from 'vue'
 import type { Node, Edge } from '@vue-flow/core'
 import dagre from 'dagre'
-import { dbGetTables, dbGetColumns, dbGetForeignKeys } from '@/api/database'
+import { dbGetSchemaBundle } from '@/api/database'
+import { buildAllColumnsCacheKey, buildForeignKeysCacheKey, buildTablesCacheKey, fetchWithCache, setCache, warmColumnMetadataCache } from '@/composables/useMetadataCache'
 import type { ErTableNodeData, ErEdgeData, ErLayoutOptions } from '@/types/er-diagram'
 import type { ColumnInfo } from '@/types/database'
 
@@ -37,22 +38,20 @@ export function useErDiagram(connectionId: string, database: string) {
     error.value = null
     try {
       // 并行获取表和外键
-      const [tables, foreignKeys] = await Promise.all([
-        dbGetTables(connectionId, database),
-        dbGetForeignKeys(connectionId, database),
-      ])
+      const { data: bundle } = await fetchWithCache(
+        `${connectionId}:${database}:schemaBundle`,
+        () => dbGetSchemaBundle(connectionId, database),
+      )
+      const tables = bundle.tables
+      const foreignKeys = bundle.foreignKeys
+      const allColumns = bundle.allColumns
+      setCache(buildTablesCacheKey(connectionId, database), tables)
+      setCache(buildForeignKeysCacheKey(connectionId, database), foreignKeys)
+      setCache(buildAllColumnsCacheKey(connectionId, database), allColumns)
+      warmColumnMetadataCache(connectionId, database, allColumns)
 
       // 获取每个表的列信息
-      const columnsMap = new Map<string, ColumnInfo[]>()
-      const columnPromises = tables.map(async (table) => {
-        try {
-          const cols = await dbGetColumns(connectionId, database, table.name)
-          columnsMap.set(table.name, cols)
-        } catch {
-          columnsMap.set(table.name, [])
-        }
-      })
-      await Promise.all(columnPromises)
+      const columnsMap = new Map<string, ColumnInfo[]>(Object.entries(allColumns))
 
       // 构建节点
       const newNodes: Node<ErTableNodeData>[] = tables.map((table) => ({

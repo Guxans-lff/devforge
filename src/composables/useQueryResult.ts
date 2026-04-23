@@ -16,6 +16,7 @@ import { useToast } from '@/composables/useToast'
 import { useAdaptiveOverscan } from '@/composables/useAdaptiveOverscan'
 import { computeColumnStatsAsync, type ColumnStatsResult } from '@/utils/columnStatistics'
 import { fetchPrimaryKeys } from '@/composables/usePrimaryKey'
+import { extractNumericCursorValue, isIntegerResultColumn } from '@/composables/useTableSeek'
 import type { QueryResult as QueryResultType } from '@/types/database'
 import { parseBackendError } from '@/types/error'
 
@@ -761,13 +762,31 @@ export function useQueryResult(options: UseQueryResultOptions) {
         const whereClause = buildServerWhereClause()
         const orderBy = serverSortCol.value && serverSortDir.value
           ? `${serverSortCol.value} ${serverSortDir.value}` : null
+        const seekColumn = !orderBy && primaryKeys.value.length === 1 && isIntegerResultColumn(primaryKeys.value[0], result.value)
+          ? primaryKeys.value[0]
+          : undefined
+        const seekOrderBy = seekColumn ? `${seekColumn} ASC` : orderBy
         const allRows: unknown[][] = []
         let page = 1
+        let seekValue: number | undefined
         while (true) {
-          const more = await dbGetTableData(connectionId.value, database.value, tbl, page, batchSize, whereClause || null, orderBy)
+          const more = await dbGetTableData(
+            connectionId.value,
+            database.value,
+            tbl,
+            page,
+            batchSize,
+            whereClause || null,
+            seekOrderBy,
+            seekColumn,
+            seekValue,
+          )
           allRows.push(...more.rows)
           if (more.rows.length < batchSize) break
-          if (more.totalCount !== null && allRows.length >= more.totalCount) break
+          const nextSeekValue = extractNumericCursorValue(more.rows, more.columns, seekColumn)
+          if (seekColumn && nextSeekValue === undefined) break
+          seekValue = nextSeekValue
+          if (!seekColumn && more.totalCount !== null && allRows.length >= more.totalCount) break
           page++
         }
         exportResult = { ...result.value, rows: allRows }

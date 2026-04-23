@@ -7,7 +7,7 @@ import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import * as dbApi from '@/api/database'
-import { fetchWithCache, invalidateByPrefix } from '@/composables/useMetadataCache'
+import { fetchWithCache, invalidate, invalidateByPrefix } from '@/composables/useMetadataCache'
 import { useObjectSearch } from '@/composables/useObjectSearch'
 import { useAdaptiveOverscan } from '@/composables/useAdaptiveOverscan'
 import type { DatabaseTreeNode, DatabaseInfo } from '@/types/database'
@@ -457,6 +457,35 @@ export function useObjectTree(options: UseObjectTreeOptions) {
     await loadDatabases()
   }
 
+  function refreshDatabasesInPlace(freshDatabases: DatabaseInfo[]) {
+    const existingMap = new Map(treeNodes.value.map(node => [node.meta?.database, node]))
+    treeNodes.value = freshDatabases.map((db) => {
+      const existing = existingMap.get(db.name)
+      return {
+        id: `db-${db.name}`,
+        label: db.name,
+        type: 'database' as const,
+        children: existing?.children ?? [],
+        isExpanded: existing?.isExpanded ?? false,
+        isLoading: false,
+        meta: markRaw({ database: db.name }),
+      }
+    })
+    onSchemaUpdated()
+  }
+
+  function refreshExpandedNodeCache(node: DatabaseTreeNode) {
+    const database = node.meta?.database
+    if (!database) return
+    if (node.type === 'folder' && node.folderType) {
+      invalidate(`${connectionId.value}:${database}:${node.folderType}`)
+      return
+    }
+    if ((node.type === 'table' || node.type === 'view') && node.meta?.table) {
+      invalidate(`${connectionId.value}:${database}:${node.meta.table}:columns`)
+    }
+  }
+
   async function silentRefresh() {
     const expandedKeys = new Set<string>()
     const collectExpanded = (nodes: DatabaseTreeNode[]) => {
@@ -465,28 +494,44 @@ export function useObjectTree(options: UseObjectTreeOptions) {
         if (node.children) collectExpanded(node.children)
       }
     }
+    const restoreExpandedState = (nodes: DatabaseTreeNode[]) => {
+      for (const node of nodes) {
+        if (expandedKeys.has(node.id)) node.isExpanded = true
+      }
+    }
+
     collectExpanded(treeNodes.value)
-    invalidateByPrefix(connectionId.value)
-    await loadDatabases()
-    const restoreExpanded = async (nodes: DatabaseTreeNode[]) => {
-      await Promise.all(nodes.map(async (node) => {
-        if (expandedKeys.has(node.id)) {
-          node.isExpanded = true
-          if (node.type === 'database') {
-            await loadDatabaseFolders(node)
-            await restoreExpanded(node.children || [])
-          } else if (node.type === 'folder') {
-            await loadFolderChildren(node)
-            await restoreExpanded(node.children || [])
-          } else if (node.type === 'table' || node.type === 'view') {
-            await loadColumns(node)
-          }
+    invalidate(`${connectionId.value}:databases`)
+    const { data: databases } = await fetchWithCache(
+      `${connectionId.value}:databases`,
+      () => dbApi.dbGetDatabases(connectionId.value),
+      { ttl: 0, onRefresh: refreshDatabasesInPlace },
+    )
+    refreshDatabasesInPlace(databases)
+
+    const refreshExpanded = async (nodes: DatabaseTreeNode[]) => {
+      for (const node of nodes) {
+        if (!node.isExpanded) continue
+        refreshExpandedNodeCache(node)
+        if (node.type === 'database') {
+          await loadDatabaseFolders(node)
+          restoreExpandedState(node.children || [])
+          await refreshExpanded(node.children || [])
+          continue
         }
-      }))
+        if (node.type === 'folder') {
+          await loadFolderChildren(node)
+          restoreExpandedState(node.children || [])
+          await refreshExpanded(node.children || [])
+          continue
+        }
+        if (node.type === 'table' || node.type === 'view') {
+          await loadColumns(node)
+        }
+      }
     }
-    if (expandedKeys.size > 0) {
-      await restoreExpanded(treeNodes.value)
-    }
+
+    await refreshExpanded(treeNodes.value)
   }
 
   // ===== 节点元数据提取辅助函数 =====

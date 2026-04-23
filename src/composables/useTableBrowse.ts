@@ -9,6 +9,7 @@ import * as dbApi from '@/api/database'
 import type { QueryTabContext } from '@/types/database-workspace'
 import { TablePageCache } from './useQueryResultCache'
 import { parseBackendError } from '@/types/error'
+import { extractNumericCursorValue, resolveInitialTableSeek, resolveTableSeekAfterFirstPage } from '@/composables/useTableSeek'
 
 export interface UseTableBrowseOptions {
   connectionId: Ref<string>
@@ -41,7 +42,10 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
       activeResultTabId: undefined,
     })
     try {
-      const result = await dbApi.dbGetTableData(connectionId.value, database, table, 1, 200, whereClause, orderBy)
+      const initialSeek = await resolveInitialTableSeek(connectionId.value, database, table, orderBy)
+      const effectiveOrderBy = initialSeek.effectiveOrderBy
+      const result = await dbApi.dbGetTableData(connectionId.value, database, table, 1, 200, whereClause, effectiveOrderBy)
+      const seek = resolveTableSeekAfterFirstPage(result, initialSeek.seekColumn)
       // 版本不匹配说明已有更新的请求，丢弃此结果
       if (currentVersion !== browseVersion) {
         console.log(`[browseTable] 版本过期 v${currentVersion} != v${browseVersion}，丢弃 ${database}.${table} 的结果`)
@@ -49,11 +53,11 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
       }
       console.log(`[browseTable] 完成 v${currentVersion}: ${database}.${table}，列数=${result.columns.length}，行数=${result.rows.length}`)
       // 缓存第一页
-      pageCache.set(database, table, 1, 200, result, whereClause, orderBy)
+      pageCache.set(database, table, 1, 200, result, whereClause, effectiveOrderBy)
       store.updateTabContext(connectionId.value, tabId.value, {
         result,
         isExecuting: false,
-        tableBrowse: { database, table, currentPage: 1, pageSize: 200, whereClause, orderBy },
+        tableBrowse: { database, table, currentPage: 1, pageSize: 200, whereClause, orderBy, ...seek },
         resultTabs: [],
         activeResultTabId: undefined,
       })
@@ -81,12 +85,14 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
     const ctx = tabContext.value
     if (!ctx?.tableBrowse || !ctx.result || isLoadingMore.value) return
 
-    const { database, table, currentPage, pageSize, whereClause, orderBy } = ctx.tableBrowse
+    const { database, table, currentPage, pageSize, whereClause, orderBy, seekOrderBy, seekColumn, seekValue } = ctx.tableBrowse
     const nextPage = currentPage + 1
+    const effectiveOrderBy = orderBy?.trim() ? orderBy : seekOrderBy
 
     // 优先查缓存
-    const cached = pageCache.get(database, table, nextPage, pageSize, whereClause, orderBy)
+    const cached = pageCache.get(database, table, nextPage, pageSize, whereClause, effectiveOrderBy)
     if (cached && cached.rows.length > 0) {
+      const nextSeekValue = extractNumericCursorValue(cached.rows, cached.columns, ctx.tableBrowse.seekColumn)
       const merged: typeof ctx.result = {
         ...ctx.result,
         rows: [...ctx.result.rows, ...cached.rows],
@@ -94,29 +100,48 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
       }
       store.updateTabContext(connectionId.value, tabId.value, {
         result: merged,
-        tableBrowse: { ...ctx.tableBrowse, currentPage: nextPage },
+        tableBrowse: {
+          ...ctx.tableBrowse,
+          currentPage: nextPage,
+          seekValue: nextSeekValue ?? ctx.tableBrowse.seekValue,
+        },
       })
       return
     }
 
     isLoadingMore.value = true
     try {
-      const moreResult = await dbApi.dbGetTableData(connectionId.value, database, table, nextPage, pageSize, whereClause, orderBy)
+      const moreResult = await dbApi.dbGetTableData(
+        connectionId.value,
+        database,
+        table,
+        nextPage,
+        pageSize,
+        whereClause,
+        effectiveOrderBy,
+        seekColumn,
+        typeof seekValue === 'number' ? seekValue : undefined,
+      )
       // 请求完成后检查当前表是否已切换，防止旧数据污染新表
       const currentCtx = tabContext.value
       if (!currentCtx?.tableBrowse || currentCtx.tableBrowse.database !== database || currentCtx.tableBrowse.table !== table) return
       if (!currentCtx.result) return
       if (moreResult.rows.length > 0) {
         // 写入缓存
-        pageCache.set(database, table, nextPage, pageSize, moreResult, whereClause, orderBy)
+        pageCache.set(database, table, nextPage, pageSize, moreResult, whereClause, effectiveOrderBy)
         const merged: typeof currentCtx.result = {
           ...currentCtx.result,
           rows: [...currentCtx.result.rows, ...moreResult.rows],
           totalCount: moreResult.totalCount,
         }
+        const nextSeekValue = extractNumericCursorValue(moreResult.rows, moreResult.columns, currentCtx.tableBrowse.seekColumn)
         store.updateTabContext(connectionId.value, tabId.value, {
           result: merged,
-          tableBrowse: { ...currentCtx.tableBrowse, currentPage: nextPage },
+          tableBrowse: {
+            ...currentCtx.tableBrowse,
+            currentPage: nextPage,
+            seekValue: nextSeekValue ?? currentCtx.tableBrowse.seekValue,
+          },
         })
       }
     } catch (_e) {

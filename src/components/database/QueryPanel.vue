@@ -144,12 +144,12 @@ async function handleExecuteWithEmit(sql: string) {
   const result = await execution.handleExecute(sql)
   if (result.success) {
     emit('executeSuccess', sql)
+    const useMatch = sql.trim().match(/^USE\s+`?(\w+)`?\s*;?\s*$/i)
+    if (useMatch) {
+      emit('databaseChanged', useMatch[1]!)
+    }
   }
   // USE 语句切换数据库通知
-  const useMatch = sql.trim().match(/^USE\s+`?(\w+)`?\s*;?\s*$/i)
-  if (useMatch) {
-    emit('databaseChanged', useMatch[1]!)
-  }
 }
 
 function handleExecuteAll(sql: string) {

@@ -384,6 +384,7 @@ pub fn run() {
             db::db_export_database_ddl,
             db::db_get_foreign_keys,
             db::db_get_all_columns,
+            db::db_get_schema_bundle,
             db::write_text_file,
             db::read_text_file,
             // Session 连接管理（企业级模式）

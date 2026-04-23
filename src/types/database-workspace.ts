@@ -56,6 +56,9 @@ export interface QueryTabContext {
     pageSize: number
     whereClause?: string
     orderBy?: string
+    seekOrderBy?: string
+    seekColumn?: string
+    seekValue?: number
   }
 }
 
@@ -78,6 +81,11 @@ export interface TableDataTabContext {
   table: string
   page: number
   pageSize: number
+  whereClause?: string
+  orderBy?: string
+  seekOrderBy?: string
+  seekColumn?: string
+  seekValue?: number
 }
 
 export interface SchemaCompareTabContext {

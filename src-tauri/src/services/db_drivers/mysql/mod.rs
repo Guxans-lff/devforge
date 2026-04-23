@@ -411,15 +411,21 @@ pub fn build_table_data_sql(database: &str, table: &str, page_size: u32, offset:
     Ok(sql)
 }
 
-pub fn build_table_count_sql(database: &str, table: &str, where_clause: Option<&str>) -> Result<String, String> {
-    let mut sql = format!("SELECT COUNT(*) AS cnt FROM `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(table));
+pub fn build_table_data_seek_sql(database: &str, table: &str, page_size: u32, where_clause: Option<&str>, seek_column: &str, seek_value: i64) -> Result<String, String> {
+    let mut sql = format!("SELECT * FROM `{}`.`{}`", escape_mysql_ident(database), escape_mysql_ident(table));
+    let seek_predicate = format!("`{}` > {}", escape_mysql_ident(seek_column), seek_value);
     if let Some(w) = where_clause {
         let w = w.trim();
         if !w.is_empty() {
             super::validate_sql_clause(w)?;
-            sql.push_str(&format!(" WHERE {}", w));
+            sql.push_str(&format!(" WHERE ({}) AND {}", w, seek_predicate));
+        } else {
+            sql.push_str(&format!(" WHERE {}", seek_predicate));
         }
+    } else {
+        sql.push_str(&format!(" WHERE {}", seek_predicate));
     }
+    sql.push_str(&format!(" ORDER BY `{}` ASC LIMIT {}", escape_mysql_ident(seek_column), page_size));
     Ok(sql)
 }
 

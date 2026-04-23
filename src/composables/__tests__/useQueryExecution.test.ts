@@ -236,4 +236,63 @@ describe('useQueryExecution', () => {
 
     pending.catch(() => undefined)
   })
+
+  it('keeps the current database unchanged when switching the session database fails', async () => {
+    const { execution, workspaceStore, tabId } = setupQueryExecution()
+    const emit = vi.fn()
+
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === 'db_switch_database') {
+        throw new Error('switch failed')
+      }
+      throw new Error(`unmocked command: ${command}`)
+    })
+
+    await execution.handleDatabaseSelect('analytics', emit)
+
+    const ctx = workspaceStore.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+    expect(ctx.currentDatabase).toBe('demo')
+    expect(emit).not.toHaveBeenCalled()
+  })
+
+  it('reports USE failures instead of updating the selected database optimistically', async () => {
+    const { execution, workspaceStore, tabId } = setupQueryExecution()
+
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === 'db_switch_database') {
+        throw new Error('unknown database')
+      }
+      throw new Error(`unmocked command: ${command}`)
+    })
+
+    const result = await execution.handleExecute('USE analytics;')
+    const ctx = workspaceStore.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+
+    expect(result.success).toBe(false)
+    expect(ctx.currentDatabase).toBe('demo')
+    expect(ctx.result).toMatchObject({
+      isError: true,
+      error: 'unknown database',
+    })
+  })
+
+  it('begins transactions on the active tab session', async () => {
+    const { execution, workspaceStore, tabId } = setupQueryExecution()
+
+    vi.mocked(invoke).mockImplementation(async (command: string, args?: any) => {
+      if (command === 'db_begin_transaction') {
+        expect(args).toMatchObject({
+          connectionId: 'conn-1',
+          tabId,
+        })
+        return true
+      }
+      throw new Error(`unmocked command: ${command}`)
+    })
+
+    await execution.handleBeginTransaction()
+
+    const ctx = workspaceStore.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+    expect(ctx.isInTransaction).toBe(true)
+  })
 })

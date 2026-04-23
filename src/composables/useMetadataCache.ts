@@ -20,6 +20,25 @@ const DEFAULT_TTL = 60_000
 const cache = new Map<string, CacheEntry<unknown>>()
 const inflightRefreshes = new Map<string, Promise<unknown>>()
 
+export function buildAllColumnsCacheKey(connectionId: string, database: string): string {
+  return `${connectionId}:${database}:allColumns`
+}
+
+export function buildTablesCacheKey(connectionId: string, database: string): string {
+  return `${connectionId}:${database}:tables`
+}
+
+export function buildForeignKeysCacheKey(connectionId: string, database: string): string {
+  return `${connectionId}:${database}:foreignKeys`
+}
+
+export function warmColumnMetadataCache<T>(connectionId: string, database: string, allColumns: Record<string, T[]>): void {
+  setCache(buildAllColumnsCacheKey(connectionId, database), allColumns)
+  for (const [tableName, columns] of Object.entries(allColumns)) {
+    setCache(`${connectionId}:${database}:${tableName}:columns`, columns)
+  }
+}
+
 export function getCached<T>(key: string): T | null {
   const entry = cache.get(key) as CacheEntry<T> | undefined
   return entry?.data ?? null
@@ -54,29 +73,44 @@ export function clearAllCache(): void {
   inflightRefreshes.clear()
 }
 
+function startFetch<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  onRefresh?: (freshData: T) => void,
+): Promise<T> {
+  const existing = inflightRefreshes.get(key) as Promise<T> | undefined
+  if (existing) {
+    if (onRefresh) existing.then(onRefresh).catch(() => {})
+    return existing
+  }
+
+  let refresh: Promise<T>
+  refresh = fetcher()
+    .then((freshData) => {
+      // If the key was invalidated while this request was in flight, do not
+      // re-populate the cache with stale data from the old request.
+      if (inflightRefreshes.get(key) === refresh) {
+        setCache(key, freshData)
+        onRefresh?.(freshData)
+      }
+      return freshData
+    })
+    .finally(() => {
+      if (inflightRefreshes.get(key) === refresh) {
+        inflightRefreshes.delete(key)
+      }
+    })
+
+  inflightRefreshes.set(key, refresh)
+  return refresh
+}
+
 function refreshInBackground<T>(
   key: string,
   fetcher: () => Promise<T>,
   onRefresh?: (freshData: T) => void,
 ): void {
-  const existing = inflightRefreshes.get(key) as Promise<T> | undefined
-  if (existing) {
-    existing.then(onRefresh).catch(() => {})
-    return
-  }
-
-  const refresh = fetcher()
-    .then((freshData) => {
-      setCache(key, freshData)
-      onRefresh?.(freshData)
-      return freshData
-    })
-    .finally(() => {
-      inflightRefreshes.delete(key)
-    })
-
-  inflightRefreshes.set(key, refresh)
-  refresh.catch(() => {
+  startFetch(key, fetcher, onRefresh).catch(() => {
     // Keep stale data when background refresh fails.
   })
 }
@@ -98,7 +132,6 @@ export async function fetchWithCache<T>(
     return { data: cached, fromCache: true }
   }
 
-  const data = await fetcher()
-  setCache(key, data)
+  const data = await startFetch(key, fetcher)
   return { data, fromCache: false }
 }

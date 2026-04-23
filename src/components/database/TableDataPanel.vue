@@ -9,6 +9,11 @@ import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import * as dbApi from '@/api/database'
 import type { QueryResult } from '@/types/database'
 import type { TableDataTabContext } from '@/types/database-workspace'
+import {
+  extractNumericCursorValue,
+  resolveInitialTableSeek,
+  resolveTableSeekAfterFirstPage,
+} from '@/composables/useTableSeek'
 
 const props = defineProps<{
   connectionId: string
@@ -33,13 +38,43 @@ const loadingMore = ref(false)
 const PAGE_SIZES = ['50', '100', '200', '500'] as const
 const pageSize = ref(String(tabContext.value?.pageSize ?? 100))
 const currentPage = ref(tabContext.value?.page ?? 1)
-const whereClause = ref('')
-const orderBy = ref('')
+const whereClause = ref(tabContext.value?.whereClause ?? '')
+const orderBy = ref(tabContext.value?.orderBy ?? '')
+const seekOrderBy = ref(tabContext.value?.seekOrderBy)
+const seekColumn = ref(tabContext.value?.seekColumn)
+const seekValue = ref(tabContext.value?.seekValue)
 
 const hasMoreServerRows = computed(() => {
   if (!result.value || result.value.totalCount === null) return false
   return result.value.rows.length < result.value.totalCount
 })
+
+async function resolveSeekState(ctx: TableDataTabContext): Promise<{ effectiveOrderBy?: string; nextSeekColumn?: string }> {
+  seekOrderBy.value = undefined
+  seekColumn.value = undefined
+  seekValue.value = undefined
+
+  const initialSeek = await resolveInitialTableSeek(props.connectionId, ctx.database, ctx.table, orderBy.value)
+  seekOrderBy.value = initialSeek.seekOrderBy
+  seekColumn.value = initialSeek.seekColumn
+  return {
+    effectiveOrderBy: initialSeek.effectiveOrderBy,
+    nextSeekColumn: initialSeek.seekColumn,
+  }
+}
+
+function syncTabContext(extra: Partial<TableDataTabContext> = {}) {
+  store.updateTabContext(props.connectionId, props.tabId, {
+    page: currentPage.value,
+    pageSize: Number(pageSize.value),
+    whereClause: whereClause.value,
+    orderBy: orderBy.value,
+    seekOrderBy: seekOrderBy.value,
+    seekColumn: seekColumn.value,
+    seekValue: seekValue.value,
+    ...extra,
+  })
+}
 
 async function loadData() {
   const ctx = tabContext.value
@@ -48,14 +83,24 @@ async function loadData() {
   loading.value = true
   currentPage.value = 1
   try {
-    result.value = await dbApi.dbGetTableData(
-      props.connectionId, ctx.database, ctx.table, 1, Number(pageSize.value),
-      whereClause.value || null, orderBy.value || null
+    const { effectiveOrderBy, nextSeekColumn } = await resolveSeekState(ctx)
+    const firstPage = await dbApi.dbGetTableData(
+      props.connectionId,
+      ctx.database,
+      ctx.table,
+      1,
+      Number(pageSize.value),
+      whereClause.value || null,
+      effectiveOrderBy,
     )
-    store.updateTabContext(props.connectionId, props.tabId, {
-      page: 1,
-      pageSize: Number(pageSize.value),
-    })
+
+    const resolvedSeek = resolveTableSeekAfterFirstPage(firstPage, nextSeekColumn)
+    seekOrderBy.value = resolvedSeek.seekOrderBy
+    seekColumn.value = resolvedSeek.seekColumn
+    seekValue.value = resolvedSeek.seekValue
+
+    result.value = firstPage
+    syncTabContext({ page: 1 })
   } catch (e) {
     result.value = {
       columns: [],
@@ -77,11 +122,20 @@ async function loadMoreRows() {
   if (!ctx || !props.isConnected || !result.value || loadingMore.value) return
 
   const nextPage = currentPage.value + 1
+  const userOrderBy = orderBy.value.trim()
+  const effectiveOrderBy = userOrderBy || seekOrderBy.value || null
   loadingMore.value = true
   try {
     const more = await dbApi.dbGetTableData(
-      props.connectionId, ctx.database, ctx.table, nextPage, Number(pageSize.value),
-      whereClause.value || null, orderBy.value || null
+      props.connectionId,
+      ctx.database,
+      ctx.table,
+      nextPage,
+      Number(pageSize.value),
+      whereClause.value || null,
+      effectiveOrderBy,
+      seekColumn.value,
+      typeof seekValue.value === 'number' ? seekValue.value : undefined,
     )
     if (more.rows.length > 0) {
       result.value = {
@@ -90,9 +144,11 @@ async function loadMoreRows() {
         totalCount: more.totalCount,
       }
       currentPage.value = nextPage
+      seekValue.value = extractNumericCursorValue(more.rows, more.columns, seekColumn.value) ?? seekValue.value
+      syncTabContext()
     }
   } catch (_e) {
-    // 静默失败
+    // Silent failure keeps the existing page usable when incremental loading fails.
   } finally {
     loadingMore.value = false
   }
@@ -113,7 +169,6 @@ function handleServerSort(ob: string) {
   loadData()
 }
 
-// 初始加载
 watch(() => props.isConnected, (connected) => {
   if (connected && !result.value) loadData()
 }, { immediate: true })
@@ -123,7 +178,6 @@ defineExpose({ refresh: loadData })
 
 <template>
   <div class="flex h-full flex-col">
-    <!-- 顶部工具栏 -->
     <div class="flex items-center gap-2 border-b border-border px-3 py-1.5 shrink-0">
       <span class="text-xs font-medium">{{ tabContext?.table }}</span>
       <span class="text-[10px] text-muted-foreground">{{ tabContext?.database }}</span>
@@ -144,7 +198,6 @@ defineExpose({ refresh: loadData })
       </Button>
     </div>
 
-    <!-- 数据表格 -->
     <div class="flex-1 min-h-0">
       <QueryResultComponent
         :result="result"

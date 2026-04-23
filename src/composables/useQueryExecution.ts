@@ -39,6 +39,7 @@ export interface UseQueryExecutionOptions {
 
 /** 最大结果标签页数量 */
 const MAX_RESULT_TABS = 10
+const STREAM_RESULT_UPDATE_INTERVAL_MS = 32
 
 /**
  * 查询执行 composable
@@ -223,6 +224,25 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     doExecute(sql)
   }
 
+  function buildEmptyResult(overrides: Partial<QueryResult> = {}): QueryResult {
+    return {
+      columns: [],
+      rows: [],
+      affectedRows: 0,
+      executionTimeMs: 0,
+      isError: false,
+      error: null,
+      totalCount: null,
+      truncated: false,
+      ...overrides,
+    }
+  }
+
+  function updateStreamResult(result: QueryResult, execVersion: number) {
+    if (execVersion !== executeVersion) return
+    store.updateTabContext(connectionId.value, tabId.value, { result })
+  }
+
   // ===== 长耗时通知 =====
   let longRunningDelayTimer: ReturnType<typeof setTimeout> | null = null
   let longRunningUpdateTimer: ReturnType<typeof setInterval> | null = null
@@ -380,18 +400,31 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     const useMatch = sql.trim().match(/^USE\s+`?(\w+)`?\s*;?\s*$/i)
     if (useMatch) {
       const dbName = useMatch[1]!
-      stopExecutionTimer()
-      store.updateTabContext(connectionId.value, tabId.value, {
-        currentDatabase: dbName,
-        result: {
-          columns: [], rows: [], affectedRows: 0, executionTimeMs: 0,
-          isError: false, error: null, totalCount: null, truncated: false,
-        },
-        isExecuting: false,
-      })
-      dbApi.dbSwitchDatabase(connectionId.value, tabId.value, dbName).catch((e: unknown) => console.warn('[useQueryExecution]', e))
-      notification.success(t('database.databaseSwitched', { name: dbName }) || `已切换到数据库 ${dbName}`)
-      return true
+      try {
+        await dbApi.dbSwitchDatabase(connectionId.value, tabId.value, dbName)
+        stopExecutionTimer()
+        store.updateTabContext(connectionId.value, tabId.value, {
+          currentDatabase: dbName,
+          result: buildEmptyResult(),
+          isExecuting: false,
+        })
+        notification.success(t('database.databaseSwitched', { name: dbName }) || `已切换到数据库 ${dbName}`)
+        return true
+      } catch (e: unknown) {
+        const errorResult = buildEmptyResult({
+          isError: true,
+          error: parseBackendError(e).message,
+        })
+        stopExecutionTimer()
+        if (currentExecVersion !== executeVersion) return false
+        store.updateTabContext(connectionId.value, tabId.value, {
+          result: errorResult,
+          isExecuting: false,
+        })
+        notification.error(t('database.queryFailed'), errorResult.error ?? undefined, true)
+        saveHistory(sql, errorResult)
+        return false
+      }
     }
 
     // 清除旧状态
@@ -425,6 +458,35 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     let lastError: string | null = null
     let totalTimeMs = 0
     let receivedChunk = false
+    let pendingResultTimer: ReturnType<typeof setTimeout> | null = null
+
+    const clearPendingResultFlush = () => {
+      if (pendingResultTimer) {
+        clearTimeout(pendingResultTimer)
+        pendingResultTimer = null
+      }
+    }
+
+    const flushPartialResult = (isFinal: boolean) => {
+      updateStreamResult({
+        columns: allColumns,
+        rows: allRows,
+        affectedRows: 0,
+        executionTimeMs: totalTimeMs || (Date.now() - startTime),
+        isError: !!lastError,
+        error: lastError,
+        totalCount: isFinal ? allRows.length : null,
+        truncated: false,
+      }, execVersion)
+    }
+
+    const schedulePartialResultFlush = () => {
+      if (pendingResultTimer) return
+      pendingResultTimer = setTimeout(() => {
+        pendingResultTimer = null
+        flushPartialResult(false)
+      }, STREAM_RESULT_UPDATE_INTERVAL_MS)
+    }
 
     try {
       const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
@@ -445,15 +507,14 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         if (chunk.error) lastError = ensureErrorString(chunk.error)
         if (chunk.totalTimeMs !== null && chunk.totalTimeMs !== undefined) totalTimeMs = chunk.totalTimeMs
 
-        store.updateTabContext(connectionId.value, tabId.value, {
-          result: {
-            columns: allColumns, rows: allRows, affectedRows: 0,
-            executionTimeMs: totalTimeMs || (Date.now() - startTime),
-            isError: !!lastError, error: lastError,
-            totalCount: chunk.isLast ? allRows.length : null, truncated: false,
-          },
-        })
-        if (chunk.isLast) resolveStream()
+        if (chunk.isLast) {
+          clearPendingResultFlush()
+          flushPartialResult(true)
+          resolveStream()
+          return
+        }
+
+        schedulePartialResultFlush()
       }
 
       const currentDb = tabContext.value?.currentDatabase
@@ -489,6 +550,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       }
       saveHistory(sql, finalResult)
     } catch (e: unknown) {
+      clearPendingResultFlush()
       if (execVersion !== executeVersion) return
 
       const errorMessage = lastError ?? parseBackendError(e).message
@@ -715,13 +777,15 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   // ===== 数据库切换 =====
   async function handleDatabaseSelect(database: string, emit: (event: 'databaseChanged', database: string) => void) {
     if (!database || !isConnected.value) return
-    store.updateTabContext(connectionId.value, tabId.value, { currentDatabase: database })
+    if (database === tabContext.value?.currentDatabase) return
     try {
       await dbApi.dbSwitchDatabase(connectionId.value, tabId.value, database)
+      store.updateTabContext(connectionId.value, tabId.value, { currentDatabase: database })
+      emit('databaseChanged', database)
     } catch (e) {
+      notification.error(t('database.queryFailed'), parseBackendError(e).message, true)
       console.warn('[Session] 切换数据库失败:', e)
     }
-    emit('databaseChanged', database)
   }
 
   return {

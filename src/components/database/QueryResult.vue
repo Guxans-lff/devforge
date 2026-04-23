@@ -104,6 +104,15 @@ const qr = useQueryResult({
 })
 
 /** 控制图表侧边配置面板开关 */
+const displayedRowCountText = computed(() => {
+  const visible = Math.min(qr.visibleCount.value, qr.totalRows.value)
+  const totalCount = props.result?.totalCount
+  if (props.isTableBrowse && props.hasMoreServerRows && totalCount !== null && totalCount !== undefined) {
+    return `${visible} / ${totalCount}+`
+  }
+  return `${visible} / ${totalCount ?? qr.totalRows.value}`
+})
+
 const chartConfigOpen = ref(false)
 
 /** 数字类型关键字集合 */
@@ -550,7 +559,7 @@ function isDateTimeColumn(colId: string): boolean {
       class="flex h-[26px] items-center justify-between border-t border-border bg-muted/30 px-3 text-[10px] text-muted-foreground shrink-0"
     >
       <span>
-        {{ t('database.showing') }} {{ Math.min(qr.visibleCount.value, qr.totalRows.value) }} / {{ result.totalCount ?? qr.totalRows.value }} {{ t('database.rows') }}
+        {{ t('database.showing') }} {{ displayedRowCountText }} {{ t('database.rows') }}
         <template v-if="loadingMore"> ({{ t('database.loadingMore') }}...)</template>
       </span>
       <!-- 主键 / 编辑状态展示 -->

@@ -2,7 +2,7 @@ import { Channel } from '@tauri-apps/api/core'
 import { invokeCommand } from '@/api/base'
 import { useLogStore } from '@/stores/log'
 import { t } from '@/utils/i18n-helper'
-import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy, ForeignKeyRelation, IndexAnalysisResult, IndexSuggestion, SlowQueryDigest, InnoDbStatus, AuditLogEntry, AuditStats } from '@/types/database'
+import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy, ForeignKeyRelation, IndexAnalysisResult, IndexSuggestion, SlowQueryDigest, InnoDbStatus, AuditLogEntry, AuditStats, SchemaBundle } from '@/types/database'
 import type { PoolStatus, ReconnectParams, ReconnectResult } from '@/types/connection'
 import type { ExportFormat } from '@/types/export'
 
@@ -111,6 +111,13 @@ export function dbGetAllColumns(
   return invokeCommand('db_get_all_columns', { connectionId, database })
 }
 
+export function dbGetSchemaBundle(
+  connectionId: string,
+  database: string,
+): Promise<SchemaBundle> {
+  return invokeCommand('db_get_schema_bundle', { connectionId, database })
+}
+
 export function dbGetTableData(
   connectionId: string,
   database: string,
@@ -119,11 +126,15 @@ export function dbGetTableData(
   pageSize: number,
   whereClause?: string | null,
   orderBy?: string | null,
+  seekColumn?: string | null,
+  seekValue?: number | null,
 ): Promise<QueryResult> {
   return invokeCommand('db_get_table_data', {
     connectionId, database, table, page, pageSize,
     whereClause: whereClause ?? null,
     orderBy: orderBy ?? null,
+    seekColumn: seekColumn ?? null,
+    seekValue: seekValue ?? null,
   })
 }
 
@@ -197,18 +208,27 @@ export function dbCheckAndReconnect(connectionId: string, reconnectParams: Recon
 }
 
 /** 开始事务 */
-export function dbBeginTransaction(connectionId: string): Promise<boolean> {
-  return invokeCommand('db_begin_transaction', { connectionId })
+export function dbBeginTransaction(connectionId: string, tabId?: string): Promise<boolean> {
+  return invokeCommand('db_begin_transaction', {
+    connectionId,
+    tabId: tabId ?? null,
+  })
 }
 
 /** 提交事务 */
-export function dbCommit(connectionId: string): Promise<boolean> {
-  return invokeCommand('db_commit', { connectionId })
+export function dbCommit(connectionId: string, tabId?: string): Promise<boolean> {
+  return invokeCommand('db_commit', {
+    connectionId,
+    tabId: tabId ?? null,
+  })
 }
 
 /** 回滚事务 */
-export function dbRollback(connectionId: string): Promise<boolean> {
-  return invokeCommand('db_rollback', { connectionId })
+export function dbRollback(connectionId: string, tabId?: string): Promise<boolean> {
+  return invokeCommand('db_rollback', {
+    connectionId,
+    tabId: tabId ?? null,
+  })
 }
 
 /** 获取 SQL 执行计划（支持 table 和 json 两种格式） */

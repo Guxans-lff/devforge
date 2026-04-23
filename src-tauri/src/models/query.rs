@@ -116,6 +116,14 @@ pub struct ColumnInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SchemaBundle {
+    pub tables: Vec<TableInfo>,
+    pub foreign_keys: Vec<ForeignKeyRelation>,
+    pub all_columns: std::collections::HashMap<String, Vec<ColumnInfo>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DatabaseInfo {
     pub name: String,
     pub character_set: Option<String>,

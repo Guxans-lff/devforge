@@ -7,6 +7,7 @@
  * - 提供连接级别的缓存失效机制
  */
 import { dbGetColumns } from '@/api/database'
+import { fetchWithCache } from '@/composables/useMetadataCache'
 
 /** 主键缓存：key = `${connectionId}/${database}/${table}` */
 const pkCache = new Map<string, string[]>()
@@ -27,7 +28,10 @@ export async function fetchPrimaryKeys(
   if (pkCache.has(cacheKey)) return pkCache.get(cacheKey)!
 
   try {
-    const columns = await dbGetColumns(connectionId, database, table)
+    const { data: columns } = await fetchWithCache(
+      `${connectionId}:${database}:${table}:columns`,
+      () => dbGetColumns(connectionId, database, table),
+    )
     const pks = columns.filter(c => c.isPrimaryKey).map(c => c.name)
     pkCache.set(cacheKey, pks)
     return pks

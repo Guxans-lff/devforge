@@ -8,8 +8,8 @@
 import { ref, computed } from 'vue'
 import type { Node, Edge } from '@vue-flow/core'
 import dagre from 'dagre'
-import { writeTextFile, readTextFile } from '@/api/database'
-import { dbGetTables, dbGetColumns, dbGetForeignKeys } from '@/api/database'
+import { writeTextFile, readTextFile, dbGetSchemaBundle } from '@/api/database'
+import { buildAllColumnsCacheKey, buildForeignKeysCacheKey, buildTablesCacheKey, fetchWithCache, setCache, warmColumnMetadataCache } from '@/composables/useMetadataCache'
 import type {
   ModelProject,
   ModelTable,
@@ -247,23 +247,20 @@ export function useErModeling() {
 
   /** 从数据库导入（逆向工程） */
   async function importFromDatabase(connectionId: string, database: string) {
-    const [tables, foreignKeys] = await Promise.all([
-      dbGetTables(connectionId, database),
-      dbGetForeignKeys(connectionId, database),
-    ])
+    const { data: bundle } = await fetchWithCache(
+      `${connectionId}:${database}:schemaBundle`,
+      () => dbGetSchemaBundle(connectionId, database),
+    )
+    const tables = bundle.tables
+    const foreignKeys = bundle.foreignKeys
+    const allColumns = bundle.allColumns
+    setCache(buildTablesCacheKey(connectionId, database), tables)
+    setCache(buildForeignKeysCacheKey(connectionId, database), foreignKeys)
+    setCache(buildAllColumnsCacheKey(connectionId, database), allColumns)
+    warmColumnMetadataCache(connectionId, database, allColumns)
 
     // 获取每个表的列信息
-    const columnsMap = new Map<string, Awaited<ReturnType<typeof dbGetColumns>>>()
-    await Promise.all(
-      tables.map(async (t) => {
-        try {
-          const cols = await dbGetColumns(connectionId, database, t.name)
-          columnsMap.set(t.name, cols)
-        } catch {
-          columnsMap.set(t.name, [])
-        }
-      }),
-    )
+    const columnsMap = new Map<string, typeof allColumns[string]>(Object.entries(allColumns))
 
     // 表名 → 生成的表 ID 映射
     const tableIdMap = new Map<string, string>()

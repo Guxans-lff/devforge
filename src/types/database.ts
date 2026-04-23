@@ -38,6 +38,12 @@ export interface ColumnInfo {
   comment: string | null
 }
 
+export interface SchemaBundle {
+  tables: TableInfo[]
+  foreignKeys: ForeignKeyRelation[]
+  allColumns: Record<string, ColumnInfo[]>
+}
+
 export interface DatabaseInfo {
   name: string
   characterSet: string | null

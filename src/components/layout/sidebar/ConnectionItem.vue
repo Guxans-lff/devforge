@@ -5,7 +5,6 @@
  * 同时承载 P0 键盘可操作性、P1 design tokens、P1-3 语义化、P2-3 精确过渡
  */
 import {
-  Database, Terminal, FolderOpen, Container, GitBranch,
   Plug, FlaskConical, Pencil, Copy, Trash2, Star, StarOff,
 } from 'lucide-vue-next'
 import {
@@ -42,30 +41,42 @@ const emit = defineEmits<{
   dragEnd: []
 }>()
 
-// 类型图标映射
-const typeIcons: Record<string, typeof Database> = {
-  database: Database,
-  ssh: Terminal,
-  sftp: FolderOpen,
-  redis: Container,
-  git: GitBranch,
+// 类型颜色 — 对齐 Welcome demo 的 6 类连接色
+const typeDotClassMap: Record<string, string> = {
+  database: 'df-conn-dot df-conn-dot-database',
+  ssh: 'df-conn-dot df-conn-dot-ssh',
+  sftp: 'df-conn-dot df-conn-dot-sftp',
+  redis: 'df-conn-dot df-conn-dot-redis',
+  git: 'df-conn-dot df-conn-dot-git',
 }
 
-// 类型颜色 — 使用 design tokens
-const typeBadgeColors: Record<string, string> = {
-  database: 'text-blue-500',
-  ssh: 'text-df-success',
-  sftp: 'text-df-warning',
-  redis: 'text-destructive',
-  git: 'text-df-info',
+const activeTypeDotClassMap: Record<string, string> = {
+  database: 'df-conn-dot-active-database',
+  ssh: 'df-conn-dot-active-ssh',
+  sftp: 'df-conn-dot-active-sftp',
+  redis: 'df-conn-dot-active-redis',
+  git: 'df-conn-dot-active-git',
 }
 
-// 状态颜色 — connected 使用 df-success token
-const statusColors: Record<string, string> = {
-  connected: 'bg-df-success shadow-[0_0_6px_var(--df-success)]',
-  disconnected: 'bg-muted-foreground/30',
-  connecting: 'bg-df-warning animate-[pulse_1.5s_ease-in-out_infinite]',
-  error: 'bg-destructive shadow-[0_0_6px_rgba(239,68,68,0.5)]',
+// 右侧元信息：优先端口，Git 展示 main/dev 等 host 片段，空则不显示
+function getConnectionMeta(record: ConnectionRecord): string {
+  if (record.type === 'git') {
+    const segments = record.host.split(/[\\/]/).filter(Boolean)
+    const lastSegment = segments.length > 0 ? segments[segments.length - 1] : ''
+    return lastSegment || record.port?.toString() || ''
+  }
+  return record.port?.toString() || ''
+}
+
+const statusClassMap = {
+  connected: 'df-conn-status-connected',
+  connecting: 'df-conn-status-connecting',
+  error: 'df-conn-status-error',
+  disconnected: 'df-conn-status-disconnected',
+} as const
+
+function getStatusDotClass(status: string): string {
+  return statusClassMap[status as keyof typeof statusClassMap] ?? statusClassMap.disconnected
 }
 
 /** 环境类型缩写 */
@@ -75,13 +86,6 @@ const ENV_SHORT_LABELS: Record<EnvironmentType, string> = {
   development: 'DEV',
   testing: 'TEST',
   local: 'LOCAL',
-}
-
-/** 图标动画 class */
-function iconAnimClass(status: string): string {
-  if (status === 'connecting') return 'animate-spin'
-  if (status === 'error') return 'text-destructive'
-  return ''
 }
 
 /** 获取环境类型 */
@@ -97,6 +101,14 @@ function onKeydown(e: KeyboardEvent) {
     emit('open', props.conn)
   }
 }
+
+function dotClass(type: string): string {
+  return typeDotClassMap[type] ?? 'df-conn-dot df-conn-dot-default'
+}
+
+function activeDotClass(type: string): string {
+  return activeTypeDotClassMap[type] ?? 'df-conn-dot-active-default'
+}
 </script>
 
 <template>
@@ -108,9 +120,9 @@ function onKeydown(e: KeyboardEvent) {
         :tabindex="0"
         :aria-selected="isActive"
         :aria-label="conn.record.name"
-        class="group relative flex cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2 mx-1.5 mb-[3px] transform-gpu will-change-transform transition-[background-color,box-shadow,opacity,scale] duration-300 hover:bg-accent active:scale-[0.98] outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        class="group relative flex min-h-8 cursor-pointer items-center gap-3 rounded-md px-3 py-1.5 mx-2 mb-0.5 outline-none transition-[background-color,color,opacity] duration-150 hover:bg-accent/70 focus-visible:ring-1 focus-visible:ring-ring"
         :class="[
-          isActive ? 'bg-accent shadow-[inset_0_0_0_1px_rgba(var(--primary-rgb),0.2)]' : '',
+          isActive ? 'bg-accent text-foreground' : '',
           isDragging ? 'opacity-40 grayscale' : '',
           isDragOver ? 'bg-accent' : '',
         ]"
@@ -125,7 +137,7 @@ function onKeydown(e: KeyboardEvent) {
       >
         <!-- 左侧激活指示条 -->
         <div
-          class="absolute left-[-2px] top-2 bottom-2 w-[3px] rounded-full bg-primary transition-[scale,opacity] duration-500 transform-gpu origin-center"
+          class="absolute left-[-8px] top-2 bottom-2 w-[2px] rounded-r-full bg-primary transition-[scale,opacity] duration-300 origin-center"
           :class="isActive ? 'scale-y-100 opacity-100' : 'scale-y-0 opacity-0'"
         />
 
@@ -136,38 +148,35 @@ function onKeydown(e: KeyboardEvent) {
           :style="{ backgroundColor: conn.record.color }"
         />
 
-        <!-- 类型图标 + 状态 LED -->
+        <!-- 类型彩点 + 状态变体 -->
         <div
-          class="relative flex h-[32px] w-[32px] shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-b from-white to-zinc-100/80 dark:from-zinc-700/50 dark:to-zinc-800/50 shadow-[0_2px_5px_rgba(0,0,0,0.04),inset_0_0_0_1px_rgba(255,255,255,0.7),inset_0_-1px_0_rgba(0,0,0,0.06)] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08),0_2px_8px_rgba(0,0,0,0.3)] transition-[scale,box-shadow] duration-300 group-hover:scale-[1.02] group-hover:shadow-[0_4px_8px_rgba(0,0,0,0.08),inset_0_0_0_1px_rgba(255,255,255,1),inset_0_-1px_0_rgba(0,0,0,0.05)] dark:group-hover:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12),0_4px_12px_rgba(0,0,0,0.5)]"
-          :class="[typeBadgeColors[conn.record.type] ?? 'text-muted-foreground']"
+          class="relative flex h-4 w-4 shrink-0 items-center justify-center"
+          :class="getStatusDotClass(conn.status)"
         >
-          <component :is="typeIcons[conn.record.type] ?? Database" class="h-[15px] w-[15px]" :class="iconAnimClass(conn.status)" />
-          <!-- 镶嵌式 LED 状态灯 -->
-          <div class="absolute -bottom-1 -right-1 flex h-[14px] w-[14px] items-center justify-center rounded-full border-[1.5px] border-background bg-background/50 backdrop-blur-sm shadow-[0_1px_2px_rgba(0,0,0,0.1)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.4)]">
-            <div class="relative h-[8px] w-[8px] rounded-full overflow-hidden" :class="statusColors[conn.status] ?? statusColors.disconnected">
-              <div v-if="conn.status === 'connected'" class="absolute inset-0 rounded-full bg-df-success/70 animate-[ping_2s_cubic-bezier(0,0,0.2,1)_infinite] opacity-75" />
-            </div>
-          </div>
+          <span class="h-2 w-2 rounded-full transition-[box-shadow,background-color,border-color,opacity] duration-200" :class="[dotClass(conn.record.type), isActive ? activeDotClass(conn.record.type) : '']" />
         </div>
 
         <!-- 信息 -->
-        <div class="min-w-0 flex-1 flex flex-col justify-center h-8 relative top-[-0.5px]">
-          <div class="flex items-center gap-1.5 mb-[2px]">
-            <p class="truncate text-[13px] font-semibold tracking-tight text-foreground/90 group-hover:text-primary transition-colors leading-none">{{ conn.record.name }}</p>
+        <div class="min-w-0 flex-1">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <p class="truncate text-[13px] font-medium tracking-tight text-foreground/90 transition-colors group-hover:text-foreground">{{ conn.record.name }}</p>
             <!-- 收藏星标 -->
             <Star v-if="isFavorite" class="h-[10px] w-[10px] shrink-0 text-df-warning fill-df-warning" />
             <!-- 环境标记 -->
             <span
               v-if="getRecordEnvironment(conn.record)"
-              class="shrink-0 rounded-full px-1.5 h-3.5 text-[8px] font-extrabold uppercase tracking-widest inline-flex items-center justify-center ring-1 ring-inset ring-current/20 backdrop-blur-sm leading-none -translate-y-px"
+              class="shrink-0 rounded px-1 h-3.5 text-[8px] font-bold uppercase tracking-wider inline-flex items-center justify-center ring-1 ring-inset ring-current/20 leading-none"
               :style="{
                 color: ENV_PRESETS[getRecordEnvironment(conn.record)!].color,
                 backgroundColor: ENV_PRESETS[getRecordEnvironment(conn.record)!].color + '18',
               }"
             >{{ ENV_SHORT_LABELS[getRecordEnvironment(conn.record)!] }}</span>
           </div>
-          <p class="truncate text-[10px] font-medium text-muted-foreground font-mono tracking-[0.02em] leading-none">{{ conn.record.host }}</p>
         </div>
+
+        <span class="shrink-0 font-mono text-[10.5px] leading-none text-muted-foreground/55 tabular-nums tracking-wide group-hover:text-muted-foreground">
+          {{ getConnectionMeta(conn.record) }}
+        </span>
       </div>
     </ContextMenuTrigger>
 
@@ -206,3 +215,48 @@ function onKeydown(e: KeyboardEvent) {
     </ContextMenuContent>
   </ContextMenu>
 </template>
+
+<style scoped>
+.df-conn-dot {
+  display: block;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+}
+
+.df-conn-dot-database { background: #ffb347; box-shadow: 0 0 0 2px rgba(255, 179, 71, 0.14); }
+.df-conn-dot-ssh { background: #67d4f5; box-shadow: 0 0 0 2px rgba(103, 212, 245, 0.16); }
+.df-conn-dot-sftp { background: #a899f2; box-shadow: 0 0 0 2px rgba(168, 153, 242, 0.14); }
+.df-conn-dot-redis { background: #ff7a6b; box-shadow: 0 0 0 2px rgba(255, 122, 107, 0.16); }
+.df-conn-dot-git { background: #f5a663; box-shadow: 0 0 0 2px rgba(245, 166, 99, 0.14); }
+.df-conn-dot-default { background: rgb(var(--muted-foreground)); opacity: 0.6; }
+
+.df-conn-dot-active-database { box-shadow: 0 0 0 3px rgba(255, 179, 71, 0.18); }
+.df-conn-dot-active-ssh { box-shadow: 0 0 0 3px rgba(103, 212, 245, 0.18); }
+.df-conn-dot-active-sftp { box-shadow: 0 0 0 3px rgba(168, 153, 242, 0.18); }
+.df-conn-dot-active-redis { box-shadow: 0 0 0 3px rgba(255, 122, 107, 0.2); }
+.df-conn-dot-active-git { box-shadow: 0 0 0 3px rgba(245, 166, 99, 0.18); }
+.df-conn-dot-active-default { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.08); }
+
+.df-conn-status-connected .df-conn-dot {
+  box-shadow: inherit, 0 0 8px currentColor;
+}
+
+.df-conn-status-connecting .df-conn-dot {
+  animation: df-conn-pulse 1.5s ease-in-out infinite;
+}
+
+.df-conn-status-error .df-conn-dot {
+  border-color: rgba(248, 113, 113, 0.8);
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.2);
+}
+
+.df-conn-status-disconnected .df-conn-dot {
+  opacity: 0.45;
+  box-shadow: none;
+}
+
+@keyframes df-conn-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.18); opacity: 0.7; }
+}
+</style>

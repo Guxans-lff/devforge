@@ -22,7 +22,7 @@ export function useTransactionControl(options: UseTransactionControlOptions) {
   async function handleBeginTransaction() {
     if (!isConnected.value) return
     try {
-      await dbApi.dbBeginTransaction(connectionId.value)
+      await dbApi.dbBeginTransaction(connectionId.value, tabId.value)
       store.updateTabContext(connectionId.value, tabId.value, {
         isInTransaction: true,
       })
@@ -34,7 +34,7 @@ export function useTransactionControl(options: UseTransactionControlOptions) {
   async function handleCommit() {
     if (!isConnected.value) return
     try {
-      await dbApi.dbCommit(connectionId.value)
+      await dbApi.dbCommit(connectionId.value, tabId.value)
       store.updateTabContext(connectionId.value, tabId.value, {
         isInTransaction: false,
       })
@@ -46,7 +46,7 @@ export function useTransactionControl(options: UseTransactionControlOptions) {
   async function handleRollback() {
     if (!isConnected.value) return
     try {
-      await dbApi.dbRollback(connectionId.value)
+      await dbApi.dbRollback(connectionId.value, tabId.value)
       store.updateTabContext(connectionId.value, tabId.value, {
         isInTransaction: false,
       })

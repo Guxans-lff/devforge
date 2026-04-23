@@ -295,11 +295,13 @@ pub async fn db_explain(
 pub async fn db_begin_transaction(
     app: AppHandle,
     connection_id: String,
+    tab_id: Option<String>,
 ) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
-    engine.clone()
-        .begin_transaction(connection_id)
-        .await
+    match tab_id {
+        Some(tab_id) => engine.clone().begin_transaction_on_session(connection_id, tab_id).await,
+        None => engine.clone().begin_transaction(connection_id).await,
+    }
 }
 
 /// 提交事务
@@ -307,11 +309,13 @@ pub async fn db_begin_transaction(
 pub async fn db_commit(
     app: AppHandle,
     connection_id: String,
+    tab_id: Option<String>,
 ) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
-    engine.clone()
-        .commit_transaction(connection_id)
-        .await
+    match tab_id {
+        Some(tab_id) => engine.clone().commit_transaction_on_session(connection_id, tab_id).await,
+        None => engine.clone().commit_transaction(connection_id).await,
+    }
 }
 
 /// 回滚事务
@@ -319,11 +323,13 @@ pub async fn db_commit(
 pub async fn db_rollback(
     app: AppHandle,
     connection_id: String,
+    tab_id: Option<String>,
 ) -> Result<bool, AppError> {
     let engine = app.state::<DbEngineState>().inner().clone();
-    engine.clone()
-        .rollback_transaction(connection_id)
-        .await
+    match tab_id {
+        Some(tab_id) => engine.clone().rollback_transaction_on_session(connection_id, tab_id).await,
+        None => engine.clone().rollback_transaction(connection_id).await,
+    }
 }
 
 /// 在 Session 连接上执行查询

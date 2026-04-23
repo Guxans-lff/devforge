@@ -10,9 +10,10 @@ import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
 import '@vue-flow/core/dist/style.css'
 import '@vue-flow/core/dist/theme-default.css'
-import { dbGetTables, dbGetColumns, dbGetForeignKeys } from '@/api/database'
+import { dbGetColumns, dbGetSchemaBundle } from '@/api/database'
 import { useSqlBuilder } from '@/composables/useSqlBuilder'
 import { useToast } from '@/composables/useToast'
+import { buildAllColumnsCacheKey, buildForeignKeysCacheKey, buildTablesCacheKey, fetchWithCache, getCached, setCache, warmColumnMetadataCache } from '@/composables/useMetadataCache'
 import type { TableInfo, ColumnInfo, ForeignKeyRelation } from '@/types/database'
 import type { JoinType, SqlOperator } from '@/types/sql-builder'
 import type { Node, Edge, Connection } from '@vue-flow/core'
@@ -88,15 +89,41 @@ const filteredTables = computed(() => {
     : tableList.value
 })
 
+async function warmAllColumns() {
+  try {
+    const { data: bundle } = await fetchWithCache(
+      `${props.connectionId}:${props.database}:schemaBundle`,
+      () => dbGetSchemaBundle(props.connectionId, props.database),
+    )
+    const allColumns = bundle.allColumns
+    setCache(buildTablesCacheKey(props.connectionId, props.database), bundle.tables)
+    setCache(buildForeignKeysCacheKey(props.connectionId, props.database), bundle.foreignKeys)
+    setCache(buildAllColumnsCacheKey(props.connectionId, props.database), allColumns)
+    warmColumnMetadataCache(props.connectionId, props.database, allColumns)
+    for (const [tableName, columns] of Object.entries(allColumns)) {
+      columnsCache.set(tableName, columns)
+    }
+  } catch {
+    // Keep lazy per-table loading as a fallback when batch warmup fails.
+  }
+}
+
 async function loadTableList() {
   loadingTables.value = true
   try {
-    const [tables, fks] = await Promise.all([
-      dbGetTables(props.connectionId, props.database),
-      dbGetForeignKeys(props.connectionId, props.database),
-    ])
-    tableList.value = tables
-    foreignKeys.value = fks
+    const { data: bundle } = await fetchWithCache(
+      `${props.connectionId}:${props.database}:schemaBundle`,
+      () => dbGetSchemaBundle(props.connectionId, props.database),
+    )
+    tableList.value = bundle.tables
+    foreignKeys.value = bundle.foreignKeys
+    setCache(buildTablesCacheKey(props.connectionId, props.database), bundle.tables)
+    setCache(buildForeignKeysCacheKey(props.connectionId, props.database), bundle.foreignKeys)
+    setCache(buildAllColumnsCacheKey(props.connectionId, props.database), bundle.allColumns)
+    warmColumnMetadataCache(props.connectionId, props.database, bundle.allColumns)
+    for (const [tableName, columns] of Object.entries(bundle.allColumns)) {
+      columnsCache.set(tableName, columns)
+    }
   } catch (e) {
     tableList.value = []
     toast.error(t('sqlBuilder.loadingTables'), String(e))
@@ -108,9 +135,18 @@ async function loadTableList() {
 /** 获取列信息（带缓存） */
 async function getColumns(tableName: string): Promise<ColumnInfo[]> {
   if (columnsCache.has(tableName)) return columnsCache.get(tableName)!
-  const cols = await dbGetColumns(props.connectionId, props.database, tableName)
-  columnsCache.set(tableName, cols)
-  return cols
+  const cachedColumns = getCached<ColumnInfo[]>(`${props.connectionId}:${props.database}:${tableName}:columns`)
+  if (cachedColumns) {
+    columnsCache.set(tableName, cachedColumns)
+    return cachedColumns
+  }
+
+  const { data: columns } = await fetchWithCache(
+    `${props.connectionId}:${props.database}:${tableName}:columns`,
+    () => dbGetColumns(props.connectionId, props.database, tableName),
+  )
+  columnsCache.set(tableName, columns)
+  return columns
 }
 
 /** 双击表名添加到画布 */
