@@ -13,6 +13,15 @@ vi.mock('@tauri-apps/api/core', () => ({
   },
 }))
 
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: vi.fn(() => ({
+    label: 'main',
+    isFullscreen: vi.fn().mockResolvedValue(false),
+    setFullscreen: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+  })),
+}))
+
 // ===== Mock Tauri Dialog Plugin =====
 vi.mock('@tauri-apps/plugin-dialog', () => ({
   save: vi.fn(),

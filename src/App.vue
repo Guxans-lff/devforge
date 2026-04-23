@@ -9,12 +9,16 @@ import { startPerformanceMonitoring } from '@/composables/usePerformance'
 import { useUpdater } from '@/composables/useUpdater'
 import { useGlobalScreenshot, cleanupGlobalScreenshot } from '@/composables/useGlobalScreenshot'
 import { cleanupGlobalErrorHandler } from '@/composables/useGlobalErrorHandler'
+import { createLogger } from '@/utils/logger'
 import UpdateNotification from '@/components/layout/UpdateNotification.vue'
 
 /** 当前窗口标签（main / pin-xxx / region-select） */
 const currentWindowLabel = getCurrentWindow().label
 const isMainWindow = currentWindowLabel === 'main'
-if (import.meta.env.DEV) console.log('[App.vue] 窗口标签:', currentWindowLabel, '是否主窗口:', isMainWindow)
+const log = createLogger('app.startup')
+if (import.meta.env.DEV) {
+  log.debug('window_label', { label: currentWindowLabel, isMainWindow })
+}
 
 // 以下初始化仅在主窗口执行
 const { initScheduler } = useTheme()
@@ -34,14 +38,14 @@ function applyUiFontSize(size: number) {
 async function showMainWindow() {
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    console.info('[Startup] 准备显示主窗口')
+    log.info('show_main_window_prepare')
     setTimeout(() => {
       void invoke('show_main_window').catch((e) => {
-        console.error('[Startup] 显示主窗口失败:', e)
+        log.error('show_main_window_failed', undefined, e)
       })
     }, 100)
   } catch (e) {
-    console.error('[Startup] 显示主窗口失败:', e)
+    log.error('show_main_window_failed', undefined, e)
   }
 }
 
@@ -50,39 +54,39 @@ async function restoreStartupState() {
   const connectionStore = useConnectionStore()
 
   try {
-    console.info('[Startup] 开始恢复设置')
+    log.info('restore_settings_start')
     await settingsStore.restoreState()
     settingsStore.enableAutoSave()
     applyUiFontSize(settingsStore.settings.uiFontSize)
     initScheduler()
-    console.info('[Startup] 设置恢复完成')
+    log.info('restore_settings_done')
   } catch (e) {
-    console.error('[Startup] 恢复设置失败:', e)
+    log.error('restore_settings_failed', undefined, e)
   }
 
   try {
-    console.info('[Startup] 开始初始化数据路径')
+    log.info('initialize_data_path_start')
     await settingsStore.initializeDataPath()
-    console.info('[Startup] 数据路径初始化完成')
+    log.info('initialize_data_path_done')
   } catch (e) {
-    console.error('[Startup] 初始化数据路径失败:', e)
+    log.error('initialize_data_path_failed', undefined, e)
   }
 
   try {
-    console.info('[Startup] 开始加载连接列表')
+    log.info('load_connections_start')
     await connectionStore.loadConnections()
-    console.info('[Startup] 连接列表加载完成')
+    log.info('load_connections_done')
   } catch (e) {
-    console.error('[Startup] 加载连接列表失败:', e)
+    log.error('load_connections_failed', undefined, e)
   }
 
   try {
-    console.info('[Startup] 开始恢复工作区')
+    log.info('restore_workspace_start')
     await workspaceStore.restoreState()
     workspaceStore.enableAutoSave()
-    console.info('[Startup] 工作区恢复完成')
+    log.info('restore_workspace_done')
   } catch (e) {
-    console.error('[Startup] 恢复工作区失败:', e)
+    log.error('restore_workspace_failed', undefined, e)
   }
 }
 
@@ -103,7 +107,7 @@ if (import.meta.env.DEV) {
 // 仅主窗口执行启动恢复和初始化
 onMounted(() => {
   if (isMainWindow) {
-    console.info('[Startup] App mounted')
+    log.info('app_mounted')
     void showMainWindow()
     void restoreStartupState()
     initUpdater()

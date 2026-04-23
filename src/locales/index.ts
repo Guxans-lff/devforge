@@ -2,6 +2,7 @@ import { createI18n } from 'vue-i18n'
 import zhCN from './zh-CN'
 
 export type Locale = 'zh-CN' | 'en'
+type LocaleMessages = typeof zhCN
 
 const savedLocale = localStorage.getItem('devforge-locale') as Locale | null
 const defaultLocale = savedLocale ?? 'zh-CN'
@@ -26,8 +27,7 @@ export async function loadLocale(locale: Locale) {
     const mod = locale === 'en'
       ? await import('./en')
       : await import('./zh-CN')
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    i18n.global.setLocaleMessage(locale, mod.default as any)
+    i18n.global.setLocaleMessage(locale, mod.default as LocaleMessages)
     loadedLocales.add(locale)
   }
   ;(i18n.global.locale as unknown as { value: string }).value = locale

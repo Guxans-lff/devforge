@@ -155,7 +155,7 @@ describe('AiMessageListVirtual', () => {
     expect(wrapper.text()).toContain('ai.history.loadMoreFailed')
   })
 
-  it('renders a sticky compact bubble for the latest user item', () => {
+  it('does not render the sticky compact bubble while the latest user item is still visible', () => {
     const wrapper = mount(AiMessageListVirtual, {
       props: {
         items: [
@@ -165,8 +165,27 @@ describe('AiMessageListVirtual', () => {
       },
     })
 
-    expect(wrapper.findAll('.bubble-stub')).toHaveLength(3)
+    expect(wrapper.findAll('.bubble-stub')).toHaveLength(2)
     expect(wrapper.findAll('.message-id').map(node => node.text())).toContain('user-1')
+  })
+
+  it('renders the sticky compact bubble after scrolling past the latest user item', async () => {
+    const wrapper = mount(AiMessageListVirtual, {
+      attachTo: document.body,
+      props: {
+        items: [
+          { key: 'user-1', message: makeMessage('user-1', 'user'), stickyCompact: true },
+          { key: 'assistant-1', message: makeMessage('assistant-1', 'assistant') },
+        ],
+      },
+    })
+
+    const container = wrapper.find('.min-h-0.flex-1.overflow-y-auto').element as HTMLDivElement
+    container.scrollTop = 120
+    await wrapper.find('.min-h-0.flex-1.overflow-y-auto').trigger('scroll')
+    await nextTick()
+
+    expect(wrapper.findAll('.bubble-stub')).toHaveLength(3)
   })
 
   it('exposes scrollToBottom and scrollContainer', async () => {

@@ -46,7 +46,25 @@ const isMaxTokensTruncated = computed(() => {
 
 const copied = ref(false)
 
-const hasThinking = computed(() => !!props.message.thinking?.trim())
+function stripProtocolArtifacts(text: string | undefined): string {
+  if (!text) return ''
+  const normalized = text.replace(/\r\n/g, '\n')
+
+  // Drop leaked internal DSML tool-call protocol blocks from reasoning display.
+  const withoutDsmlBlocks = normalized.replace(
+    /<\|DSML\|tool_calls\>[\s\S]*?<\|DSML\|tool_calls\>/g,
+    '',
+  )
+  const withoutInvokeLines = withoutDsmlBlocks
+    .split('\n')
+    .filter(line => !line.includes('<|DSML|'))
+    .join('\n')
+
+  return withoutInvokeLines.trim()
+}
+
+const sanitizedThinking = computed(() => stripProtocolArtifacts(props.message.thinking))
+const hasThinking = computed(() => !!sanitizedThinking.value)
 const isUser = computed(() => props.message.role === 'user')
 const isError = computed(() => props.message.role === 'error')
 const hasToolCalls = computed(() => (props.message.toolCalls?.length ?? 0) > 0)
@@ -398,7 +416,7 @@ function renderBlock(text: string): string {
           <span>思考过程</span>
         </summary>
         <div class="mt-1 pl-3 border-l border-muted-foreground/10 text-[11px] text-muted-foreground/30 italic leading-relaxed whitespace-pre-wrap max-h-[180px] overflow-y-auto">
-          {{ message.thinking }}
+          {{ sanitizedThinking }}
         </div>
       </details>
 

@@ -36,7 +36,7 @@ vi.mock('@/stores/ai-memory', () => ({
 
 vi.mock('@/stores/workspace-files', () => ({
   useWorkspaceFilesStore: () => ({
-    roots: [],
+    roots: [{ id: 'root-1', path: 'D:/Project/DevForge/devforge', name: 'devforge' }],
     activeEditor: null,
   }),
 }))
@@ -264,12 +264,24 @@ describe('useAiChat interaction behavior', () => {
     sessionId.value = 'session-2'
     await chat.loadHistory('session-2')
 
-    expect(chat.workDir.value).toBe('')
+    expect(chat.workDir.value).toBe('D:/Project/DevForge/devforge')
     expect(chat.planApproved.value).toBe(false)
     expect(chat.pendingPlan.value).toBe('')
     expect(chat.awaitingPlanApproval.value).toBe(false)
     expect(chat.spawnedTasks.value).toEqual([])
     expect(chat.messages.value).toHaveLength(1)
+  })
+
+  it('falls back to the current workspace root when restored session has no saved work directory', async () => {
+    aiGetSessionMock.mockResolvedValueOnce(
+      makeSessionDetail(1, 1, 300, { sessionId: 'session-empty-workdir', workDir: undefined }),
+    )
+
+    const chat = useAiChat({ sessionId: ref('session-empty-workdir') })
+
+    await chat.loadHistory()
+
+    expect(chat.workDir.value).toBe('D:/Project/DevForge/devforge')
   })
 
   it('scrollToBottom uses the shared scroll container ref', async () => {

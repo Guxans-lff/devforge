@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildChatMessages, sanitizeLoadedMessages } from '@/composables/ai/chatMessageBuilder'
+import { buildChatMessages, buildChatMessagesWithOptions, sanitizeLoadedMessages } from '@/composables/ai/chatMessageBuilder'
 import type { AiMessage } from '@/types/ai'
 
 function makeAssistantMessage(extra: Partial<AiMessage> = {}): AiMessage {
@@ -132,6 +132,49 @@ describe('chatMessageBuilder', () => {
         content: 'file content',
         toolCallId: 'tool-1',
         name: 'read_file',
+      },
+    ])
+  })
+
+  it('omits tool call replay when the current model has tools disabled', () => {
+    const messages = buildChatMessagesWithOptions([
+      {
+        id: 'user-1',
+        role: 'user',
+        content: 'Inspect the file.',
+        timestamp: 1,
+      },
+      makeAssistantMessage({
+        content: 'I checked the file.',
+        thinking: 'Need to inspect the workspace first.',
+        toolCalls: [
+          {
+            id: 'tool-1',
+            name: 'read_file',
+            arguments: '{"path":"src/main.ts"}',
+            status: 'success',
+            result: 'file content',
+          },
+        ],
+        toolResults: [
+          {
+            toolCallId: 'tool-1',
+            toolName: 'read_file',
+            success: true,
+            content: 'file content',
+          },
+        ],
+      }),
+    ], { replayToolContext: false })
+
+    expect(messages).toEqual([
+      {
+        role: 'user',
+        content: 'Inspect the file.',
+      },
+      {
+        role: 'assistant',
+        content: 'I checked the file.',
       },
     ])
   })

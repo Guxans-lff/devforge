@@ -65,6 +65,15 @@ const totalSize = computed(() => virtualizer.value.getTotalSize())
 const stickyItem = computed(() =>
   [...props.items].reverse().find(item => item.message.role === 'user' && item.stickyCompact) ?? null,
 )
+const stickyItemIndex = computed(() =>
+  stickyItem.value ? props.items.findIndex(item => item.key === stickyItem.value?.key) : -1,
+)
+const showStickyItem = computed(() => {
+  const index = stickyItemIndex.value
+  if (index < 0) return false
+  const item = virtualItems.value.find(row => row.index === index)
+  return Boolean(item && item.start < (scrollContainer.value?.scrollTop ?? 0))
+})
 
 function measureAllVisible(): void {
   nextTick(() => {
@@ -119,7 +128,7 @@ defineExpose({
 <template>
   <div ref="scrollContainer" class="min-h-0 flex-1 overflow-y-auto" @scroll="emit('scroll', $event)">
     <div
-      v-if="stickyItem"
+      v-if="showStickyItem && stickyItem"
       class="sticky top-0 z-20 border-b border-border/20 bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
     >
       <AiMessageBubble

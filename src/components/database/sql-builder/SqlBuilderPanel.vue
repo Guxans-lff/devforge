@@ -89,25 +89,6 @@ const filteredTables = computed(() => {
     : tableList.value
 })
 
-async function warmAllColumns() {
-  try {
-    const { data: bundle } = await fetchWithCache(
-      `${props.connectionId}:${props.database}:schemaBundle`,
-      () => dbGetSchemaBundle(props.connectionId, props.database),
-    )
-    const allColumns = bundle.allColumns
-    setCache(buildTablesCacheKey(props.connectionId, props.database), bundle.tables)
-    setCache(buildForeignKeysCacheKey(props.connectionId, props.database), bundle.foreignKeys)
-    setCache(buildAllColumnsCacheKey(props.connectionId, props.database), allColumns)
-    warmColumnMetadataCache(props.connectionId, props.database, allColumns)
-    for (const [tableName, columns] of Object.entries(allColumns)) {
-      columnsCache.set(tableName, columns)
-    }
-  } catch {
-    // Keep lazy per-table loading as a fallback when batch warmup fails.
-  }
-}
-
 async function loadTableList() {
   loadingTables.value = true
   try {

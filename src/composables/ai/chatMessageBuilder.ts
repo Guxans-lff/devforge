@@ -81,6 +81,25 @@ function getReplayableToolEntries(msg: AiMessage): Array<{
 }
 
 export function buildChatMessages(msgs: AiMessage[], hasVision = false): ChatMessage[] {
+  return buildChatMessagesWithOptions(msgs, {
+    hasVision,
+    replayToolContext: true,
+  })
+}
+
+export interface BuildChatMessagesOptions {
+  hasVision?: boolean
+  replayToolContext?: boolean
+}
+
+export function buildChatMessagesWithOptions(
+  msgs: AiMessage[],
+  options: BuildChatMessagesOptions = {},
+): ChatMessage[] {
+  const {
+    hasVision = false,
+    replayToolContext = true,
+  } = options
   const result: ChatMessage[] = []
 
   for (const msg of msgs) {
@@ -104,7 +123,7 @@ export function buildChatMessages(msgs: AiMessage[], hasVision = false): ChatMes
     if (msg.role !== 'assistant') continue
 
     const hasContent = !!(msg.content && msg.content.trim())
-    const replayableToolEntries = getReplayableToolEntries(msg)
+    const replayableToolEntries = replayToolContext ? getReplayableToolEntries(msg) : []
     const hasToolCalls = replayableToolEntries.length > 0
     if (!hasContent && !hasToolCalls) continue
 

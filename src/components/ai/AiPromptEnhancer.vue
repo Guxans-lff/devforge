@@ -1,14 +1,10 @@
 <script setup lang="ts">
-/**
- * AI 提示词优化器
- *
- * 接收原始提示词，调用 AI 生成优化版本，左右对比展示，支持接受/拒绝。
- */
-import { ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ProviderConfig, ModelConfig } from '@/types/ai'
-import { aiChatStream } from '@/api/ai'
 import { getCredential } from '@/api/connection'
+import { iteratePrompt, optimizePrompt } from '@/composables/ai/promptOptimizer'
+import type { PromptOptimizerTemplate } from '@/composables/ai/promptOptimizerTemplates'
 import { diffWords } from 'diff'
 import { Sparkles, Loader2, Check, X, RefreshCw } from 'lucide-vue-next'
 import {
@@ -32,11 +28,22 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const templateOptions = computed<Array<{ value: Exclude<PromptOptimizerTemplate['id'], 'iterate-optimize'>; label: string }>>(() => [
+  { value: 'general-optimize', label: t('ai.promptEnhancer.templateGeneral') },
+  { value: 'code-optimize', label: t('ai.promptEnhancer.templateCode') },
+  { value: 'structured-optimize', label: t('ai.promptEnhancer.templateStructured') },
+  { value: 'polish-optimize', label: t('ai.promptEnhancer.templatePolish') },
+])
+const selectedTemplateId = ref<Exclude<PromptOptimizerTemplate['id'], 'iterate-optimize'>>('general-optimize')
 const enhancedText = ref('')
+const feedback = ref('')
 const isLoading = ref(false)
 const error = ref('')
+let activeRequestId = 0
+let activeController: AbortController | null = null
 
-/** 词级 diff 渲染：新增词绿色高亮，删除词红色删除线 */
+const canIterate = computed(() => !!enhancedText.value && !isLoading.value)
+
 function renderDiff(original: string, enhanced: string): string {
   const parts = diffWords(original, enhanced)
   return parts.map(part => {
@@ -51,15 +58,6 @@ function renderDiff(original: string, enhanced: string): string {
   }).join('')
 }
 
-const ENHANCE_PROMPT = `你是提示词优化引擎。将用户输入的提示词改写为更清晰、具体、有效的版本。
-
-规则（必须严格遵守）：
-1. 只输出改写后的提示词本身，禁止输出任何其他内容
-2. 禁止以"以下是"、"优化后"、"作为"、"我将"等任何前缀开头
-3. 禁止在末尾加任何总结、说明或注释
-4. 保留原始核心意图，补充必要上下文和约束
-5. 语言与原文保持一致（中文输入→中文输出）`
-
 async function runEnhance() {
   if (!props.provider || !props.model) {
     error.value = t('ai.promptEnhancer.selectModelFirst')
@@ -69,50 +67,141 @@ async function runEnhance() {
     error.value = t('ai.promptEnhancer.emptyInput')
     return
   }
+
+  cancelActiveRequest()
+  const controller = new AbortController()
+  activeController = controller
+  const requestId = ++activeRequestId
   isLoading.value = true
   error.value = ''
   enhancedText.value = ''
 
   try {
     const apiKey = await getCredential(`ai-provider-${props.provider.id}`) ?? ''
+    if (requestId !== activeRequestId) return
     if (!apiKey) {
       error.value = t('ai.promptEnhancer.apiKeyMissing')
       return
     }
-    await aiChatStream(
+
+    const result = await optimizePrompt(
       {
-        sessionId: `enhance-${Date.now()}`,
-        messages: [{ role: 'user', content: props.originalText }],
+        prompt: props.originalText,
         providerType: props.provider.providerType,
         model: props.model.id,
         apiKey,
         endpoint: props.provider.endpoint ?? '',
-        systemPrompt: ENHANCE_PROMPT,
-        enableTools: false,
+        templateId: selectedTemplateId.value,
+        sessionId: `prompt-enhance-${Date.now()}-${requestId}`,
+        signal: controller.signal,
       },
-      (event) => {
-        if (event.type === 'TextDelta') {
-          enhancedText.value += event.delta
-        }
+      {
+        onDelta(delta) {
+          if (requestId !== activeRequestId || controller.signal.aborted) return
+          enhancedText.value += delta
+        },
       },
     )
+
+    if (requestId !== activeRequestId || controller.signal.aborted) return
+    enhancedText.value = result.text
   } catch (e: unknown) {
-    if (e instanceof Error) {
-      error.value = e.message
-    } else if (typeof e === 'object' && e !== null && 'message' in e) {
-      error.value = String((e as { message: unknown }).message)
-    } else {
-      error.value = JSON.stringify(e)
-    }
+    if (requestId !== activeRequestId || controller.signal.aborted || isAbortError(e)) return
+    error.value = getErrorMessage(e)
   } finally {
-    isLoading.value = false
+    if (requestId === activeRequestId && activeController === controller) {
+      isLoading.value = false
+      activeController = null
+    }
   }
+}
+
+async function runIterate() {
+  if (!props.provider || !props.model || !enhancedText.value) return
+
+  cancelActiveRequest()
+  const controller = new AbortController()
+  activeController = controller
+  const requestId = ++activeRequestId
+  const currentOptimizedText = enhancedText.value
+  let nextEnhancedText = ''
+  isLoading.value = true
+  error.value = ''
+  enhancedText.value = ''
+
+  try {
+    const apiKey = await getCredential(`ai-provider-${props.provider.id}`) ?? ''
+    if (requestId !== activeRequestId) return
+    if (!apiKey) {
+      error.value = t('ai.promptEnhancer.apiKeyMissing')
+      return
+    }
+
+    const result = await iteratePrompt(
+      {
+        originalPrompt: props.originalText,
+        optimizedPrompt: currentOptimizedText,
+        feedback: feedback.value.trim(),
+        providerType: props.provider.providerType,
+        model: props.model.id,
+        apiKey,
+        endpoint: props.provider.endpoint ?? '',
+        sessionId: `prompt-iterate-${Date.now()}-${requestId}`,
+        signal: controller.signal,
+      },
+      {
+        onDelta(delta) {
+          if (requestId !== activeRequestId || controller.signal.aborted) return
+          nextEnhancedText += delta
+          enhancedText.value = nextEnhancedText
+        },
+      },
+    )
+
+    if (requestId !== activeRequestId || controller.signal.aborted) return
+    enhancedText.value = result.text
+  } catch (e: unknown) {
+    if (requestId !== activeRequestId || controller.signal.aborted || isAbortError(e)) return
+    enhancedText.value = currentOptimizedText
+    error.value = getErrorMessage(e)
+  } finally {
+    if (requestId === activeRequestId && activeController === controller) {
+      isLoading.value = false
+      activeController = null
+    }
+  }
+}
+
+function cancelActiveRequest() {
+  activeController?.abort()
+  activeController = null
+}
+
+function getErrorMessage(errorLike: unknown): string {
+  if (errorLike instanceof Error) {
+    return errorLike.message
+  }
+  if (typeof errorLike === 'object' && errorLike !== null && 'message' in errorLike) {
+    return String((errorLike as { message: unknown }).message)
+  }
+  return JSON.stringify(errorLike)
+}
+
+function isAbortError(errorLike: unknown): boolean {
+  return errorLike instanceof DOMException
+    ? errorLike.name === 'AbortError'
+    : errorLike instanceof Error && errorLike.name === 'AbortError'
 }
 
 watch(() => props.open, (v) => {
   if (v) runEnhance()
   else {
+    cancelActiveRequest()
+    activeRequestId++
+    isLoading.value = false
     enhancedText.value = ''
+    feedback.value = ''
+    selectedTemplateId.value = 'general-optimize'
     error.value = ''
   }
 })
@@ -124,33 +213,36 @@ function handleAccept() {
 }
 
 function handleClose() {
+  cancelActiveRequest()
+  activeRequestId++
   emit('update:open', false)
 }
+
+onBeforeUnmount(() => {
+  cancelActiveRequest()
+  activeRequestId++
+})
 </script>
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
     <DialogContent class="w-[780px] max-w-[90vw] p-0 gap-0 overflow-hidden">
-      <!-- 头部 -->
       <DialogHeader class="flex-row items-center gap-2 px-5 py-4 border-b border-border/40 space-y-0">
         <Sparkles class="h-4 w-4 text-violet-500 shrink-0" />
         <DialogTitle class="text-sm font-semibold leading-none">{{ t('ai.promptEnhancer.title') }}</DialogTitle>
         <span class="text-xs text-muted-foreground/50">{{ t('ai.promptEnhancer.subtitle') }}</span>
       </DialogHeader>
 
-      <!-- 对比区 -->
       <div class="grid grid-cols-2 divide-x divide-border/40 min-h-[240px]">
-        <!-- 原始 -->
-          <div class="flex flex-col">
-            <div class="px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/50 border-b border-border/30 bg-muted/10">
-              {{ t('ai.promptEnhancer.original') }}
-            </div>
+        <div class="flex flex-col">
+          <div class="px-4 py-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/50 border-b border-border/30 bg-muted/10">
+            {{ t('ai.promptEnhancer.original') }}
+          </div>
           <div class="flex-1 p-4 text-xs leading-relaxed whitespace-pre-wrap break-words text-muted-foreground overflow-y-auto max-h-[320px]">
             {{ originalText }}
           </div>
         </div>
 
-        <!-- 优化后 -->
         <div class="flex flex-col">
           <div class="flex items-center justify-between px-4 py-2 border-b border-border/30 bg-muted/10">
             <div class="text-[10px] font-medium uppercase tracking-wider text-violet-500/70">{{ t('ai.promptEnhancer.enhanced') }}</div>
@@ -164,19 +256,19 @@ function handleClose() {
             </button>
           </div>
           <div class="flex-1 p-4 text-xs leading-relaxed break-words overflow-y-auto max-h-[320px]">
-            <!-- 错误 -->
-            <div v-if="error" class="flex items-start gap-1.5 text-destructive/80">
-              <span class="shrink-0">⚠</span>
-              <span>{{ error }}</span>
+            <div v-if="error" class="space-y-3">
+              <div v-if="enhancedText" class="whitespace-pre-wrap" v-html="renderDiff(originalText, enhancedText)" />
+              <div class="flex items-start gap-1.5 text-destructive/80">
+                <span class="shrink-0">⚠</span>
+                <span>{{ error }}</span>
+              </div>
             </div>
-            <!-- 流式输出中（纯文本，不 diff） -->
             <div v-else-if="isLoading" class="whitespace-pre-wrap text-foreground/80">
               <span v-if="!enhancedText" class="flex items-center gap-2 text-muted-foreground/50">
                 <Loader2 class="h-3.5 w-3.5 animate-spin" />{{ t('ai.promptEnhancer.loading') }}
               </span>
               <template v-else>{{ enhancedText }}</template>
             </div>
-            <!-- 完成后：词级 diff -->
             <div
               v-else-if="enhancedText"
               class="whitespace-pre-wrap"
@@ -186,11 +278,41 @@ function handleClose() {
         </div>
       </div>
 
-      <!-- 底部操作 -->
+      <div class="border-t border-border/40 bg-muted/5 px-5 py-3 space-y-2">
+        <div class="space-y-2">
+          <div class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+            {{ t('ai.promptEnhancer.templateMode') }}
+          </div>
+          <select
+            v-model="selectedTemplateId"
+            :disabled="isLoading"
+            class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            @change="runEnhance"
+          >
+            <option v-for="option in templateOptions" :key="option.value" :value="option.value">
+              {{ option.label }}
+            </option>
+          </select>
+        </div>
+        <div class="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+          {{ t('ai.promptEnhancer.iterateLabel') }}
+        </div>
+        <textarea
+          v-model="feedback"
+          :disabled="isLoading"
+          class="min-h-20 w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          :placeholder="t('ai.promptEnhancer.iteratePlaceholder')"
+        />
+      </div>
+
       <div class="flex items-center justify-end gap-2 px-5 py-3 border-t border-border/40 bg-muted/10">
         <Button variant="ghost" size="sm" @click="handleClose">
           <X class="mr-1 h-3.5 w-3.5" />
           {{ t('common.cancel') }}
+        </Button>
+        <Button size="sm" variant="outline" :disabled="!canIterate" @click="runIterate">
+          <RefreshCw class="mr-1 h-3.5 w-3.5" />
+          {{ t('ai.promptEnhancer.iterate') }}
         </Button>
         <Button
           size="sm"

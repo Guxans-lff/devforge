@@ -1,7 +1,7 @@
 import type { AiMessage, ModelConfig, ProviderConfig } from '@/types/ai'
 import type { Logger } from '@/utils/logger'
 import { ensureErrorString } from '@/types/error'
-import { buildChatMessages } from './chatMessageBuilder'
+import { buildChatMessagesWithOptions } from './chatMessageBuilder'
 import { normalizeAiErrorMessage } from './chatHelpers'
 import type { AiChatStreamState } from './chatStreamEvents'
 
@@ -90,7 +90,10 @@ export async function handleSendFailure(params: HandleSendFailureParams): Promis
 
   messages.value = compacted
   try {
-    const retryMessages = buildChatMessages(messages.value, hasVisionCapability)
+    const retryMessages = buildChatMessagesWithOptions(messages.value, {
+      hasVision: hasVisionCapability,
+      replayToolContext: enableTools,
+    })
     await streamWithToolLoop(
       sessionId,
       retryMessages,

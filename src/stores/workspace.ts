@@ -325,6 +325,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     panelState: PanelState
   }
 
+  interface LegacyPanelState extends Partial<PanelState> {
+    sidebarCollapsed?: boolean
+    sidebarWidth?: number
+  }
+
   const persistence = usePersistence<PersistedWorkspace>({
     key: 'workspace',
     version: 2,
@@ -333,7 +338,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       // v1 → v2：PanelState 字段替换（sidebarCollapsed/Width → activeSidePanel/sidePanelWidth/showStatusBar）
       2: (oldData) => {
         const data = oldData as PersistedWorkspace
-        const ps = data.panelState as any
+        const ps = data.panelState as LegacyPanelState
         if (ps) {
           ps.activeSidePanel = ps.sidebarCollapsed ? null : 'connections'
           ps.sidePanelWidth = ps.sidebarWidth ?? 260

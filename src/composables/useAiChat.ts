@@ -148,8 +148,8 @@ export function useAiChat(options: UseAiChatOptions) {
   watch(
     () => filesStore.roots,
     roots => {
-      if (!workDir.value && roots.length > 0) {
-        workDir.value = roots[0]?.path ?? ''
+      if (!workDir.value && (aiStore.currentWorkDir || roots.length > 0)) {
+        workDir.value = aiStore.currentWorkDir || roots[0]?.path || ''
       }
     },
     { immediate: true },
@@ -420,7 +420,7 @@ export function useAiChat(options: UseAiChatOptions) {
       historyTotalRecords.value = result.window.totalRecords
       if (!options?.windowSize) {
         resetSessionEphemeralState()
-        workDir.value = result.session?.workDir ?? ''
+        workDir.value = result.session?.workDir || aiStore.currentWorkDir || filesStore.roots[0]?.path || ''
       }
 
       const currentIds = messages.value.map(message => message.id).join('|')

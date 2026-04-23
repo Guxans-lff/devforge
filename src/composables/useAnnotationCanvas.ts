@@ -4,6 +4,7 @@
  * 支持 9 个工具 + 撤销/重做操作栈
  */
 import { ref, shallowRef, watch, type Ref, nextTick } from 'vue'
+import { createLogger } from '@/utils/logger'
 import type {
   Annotation,
   AnnotationTool,
@@ -13,11 +14,9 @@ import type {
 
 /** StackBlur 简化版（用于模糊工具，半径受限避免性能问题） */
 // 数组索引访问全部在循环边界内，不会越界
-/* eslint-disable @typescript-eslint/no-explicit-any */
 function stackBlur(imageData: ImageData, radius: number) {
   const { width, height } = imageData
-  // 使用 any 绕过 noUncheckedIndexedAccess — 所有索引均在算法边界内
-  const data = imageData.data as any
+  const data = imageData.data
   if (radius < 1) return
   radius = Math.min(radius, 20) // 限制最大半径
 
@@ -36,9 +35,9 @@ function stackBlur(imageData: ImageData, radius: number) {
     rSum = gSum = bSum = 0
     for (let i = -radius; i <= radius; i++) {
       p = (yw + Math.min(wm, Math.max(0, i))) * 4
-      rSum += data[p]
-      gSum += data[p + 1]
-      bSum += data[p + 2]
+      rSum += data[p]!
+      gSum += data[p + 1]!
+      bSum += data[p + 2]!
     }
     for (let x = 0; x < width; x++) {
       r[yw + x] = (rSum / div) | 0
@@ -47,9 +46,9 @@ function stackBlur(imageData: ImageData, radius: number) {
 
       p1 = (yw + Math.min(wm, x + radius + 1)) * 4
       p2 = (yw + Math.max(0, x - radius)) * 4
-      rSum += data[p1] - data[p2]
-      gSum += data[p1 + 1] - data[p2 + 1]
-      bSum += data[p1 + 2] - data[p2 + 2]
+      rSum += data[p1]! - data[p2]!
+      gSum += data[p1 + 1]! - data[p2 + 1]!
+      bSum += data[p1 + 2]! - data[p2 + 2]!
     }
   }
 
@@ -93,6 +92,7 @@ export interface UseAnnotationCanvasOptions {
 }
 
 export function useAnnotationCanvas(options: UseAnnotationCanvasOptions) {
+  const log = createLogger('screenshot.annotation')
   const {
     baseCanvas,
     annotCanvas,
@@ -136,11 +136,18 @@ export function useAnnotationCanvas(options: UseAnnotationCanvasOptions) {
 
   function loadImage() {
     if (!imageSrc.value) return
-    if (import.meta.env.DEV) console.log('[AnnotCanvas] loadImage:', imageSrc.value)
+    if (import.meta.env.DEV) {
+      log.debug('load_image_start', { src: imageSrc.value })
+    }
     const img = new Image()
-    img.onerror = (e) => console.error('[AnnotCanvas] 图片加载失败:', imageSrc.value, e)
+    img.onerror = (e) => log.error('load_image_failed', { src: imageSrc.value }, e)
     img.onload = () => {
-      if (import.meta.env.DEV) console.log('[AnnotCanvas] 图片加载成功:', img.naturalWidth, 'x', img.naturalHeight)
+      if (import.meta.env.DEV) {
+        log.debug('load_image_done', {
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+        })
+      }
       baseImage.value = img
       renderBase()
       renderAnnotations()
@@ -477,7 +484,9 @@ export function useAnnotationCanvas(options: UseAnnotationCanvasOptions) {
   function onMouseDown(e: MouseEvent) {
     if (!tool.value) return
     const point = getCanvasPoint(e)
-    if (import.meta.env.DEV) console.log('[AnnotCanvas] onMouseDown, tool:', tool.value, 'point:', point)
+    if (import.meta.env.DEV) {
+      log.debug('pointer_down', { tool: tool.value, point })
+    }
 
     // 文字工具：点击创建输入框
     if (tool.value === 'text') {
@@ -681,7 +690,14 @@ export function useAnnotationCanvas(options: UseAnnotationCanvasOptions) {
   function exportBase64(): string | null {
     const base = baseCanvas.value
     const annot = annotCanvas.value
-    if (import.meta.env.DEV) console.log('[AnnotCanvas] exportBase64: base=', base?.width, 'x', base?.height, 'annot=', annot?.width, 'x', annot?.height)
+    if (import.meta.env.DEV) {
+      log.debug('export_base64_start', {
+        baseWidth: base?.width ?? null,
+        baseHeight: base?.height ?? null,
+        annotWidth: annot?.width ?? null,
+        annotHeight: annot?.height ?? null,
+      })
+    }
     if (!base || !annot) return null
 
     const exportCanvas = document.createElement('canvas')

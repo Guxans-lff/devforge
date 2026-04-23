@@ -1,20 +1,9 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { getBezierPath, BaseEdge, EdgeLabelRenderer } from '@vue-flow/core'
+import { getBezierPath, BaseEdge, EdgeLabelRenderer, Position, type EdgeProps } from '@vue-flow/core'
 import type { ErEdgeData } from '@/types/er-diagram'
 
-const props = defineProps<{
-  id: string
-  sourceX: number
-  sourceY: number
-  targetX: number
-  targetY: number
-  sourcePosition: string
-  targetPosition: string
-  data: ErEdgeData
-  selected?: boolean
-  animated?: boolean
-}>()
+const props = defineProps<EdgeProps<ErEdgeData>>()
 
 const path = computed(() => {
   const [d, labelX, labelY] = getBezierPath({
@@ -22,8 +11,8 @@ const path = computed(() => {
     sourceY: props.sourceY,
     targetX: props.targetX,
     targetY: props.targetY,
-    sourcePosition: props.sourcePosition as any,
-    targetPosition: props.targetPosition as any,
+    sourcePosition: props.sourcePosition as Position,
+    targetPosition: props.targetPosition as Position,
   })
   return { d, labelX, labelY }
 })

@@ -285,7 +285,11 @@ defineExpose({
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" class="w-48">
-              <DropdownMenuItem class="text-[12px]" @select="emit('update:showSessionDrawer', true)">
+              <DropdownMenuItem
+                v-if="!showSessionDrawer"
+                class="text-[12px]"
+                @select="emit('update:showSessionDrawer', true)"
+              >
                 <History class="mr-2 h-3.5 w-3.5" />
                 {{ t('ai.messages.history') }}
               </DropdownMenuItem>

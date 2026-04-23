@@ -4,7 +4,7 @@ use sqlx::postgres::{PgColumn, PgConnectOptions, PgPool, PgPoolOptions, PgRow, P
 use sqlx::pool::PoolConnection;
 use sqlx::{Column, Executor, Row, TypeInfo};
 
-use crate::models::query::{ColumnDef, ColumnInfo, DatabaseInfo, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo};
+use crate::models::query::{ColumnDef, ColumnInfo, DatabaseInfo, ForeignKeyRelation, QueryResult, RoutineInfo, TableInfo, TriggerInfo, ViewInfo};
 use crate::utils::error::AppError;
 use super::{escape_pg_ident, validate_sql_clause};
 
@@ -569,6 +569,39 @@ pub async fn get_all_columns(
         map.entry(table_name).or_default().push(col);
     }
     Ok(map)
+}
+
+pub async fn get_foreign_keys(
+    pool: &PgPool,
+    schema: &str,
+) -> Result<Vec<ForeignKeyRelation>, AppError> {
+    let rows: Vec<PgRow> = sqlx::query(
+        "SELECT kcu.table_name AS tbl,
+                kcu.column_name AS col,
+                ccu.table_name AS ref_tbl,
+                ccu.column_name AS ref_col
+         FROM information_schema.table_constraints tc
+         JOIN information_schema.key_column_usage kcu
+           ON tc.constraint_name = kcu.constraint_name
+          AND tc.table_schema = kcu.table_schema
+         JOIN information_schema.constraint_column_usage ccu
+           ON tc.constraint_name = ccu.constraint_name
+          AND tc.table_schema = ccu.table_schema
+         WHERE tc.constraint_type = 'FOREIGN KEY'
+           AND tc.table_schema = $1
+         ORDER BY kcu.table_name, kcu.ordinal_position",
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to load foreign keys: {}", e)))?;
+
+    Ok(rows.iter().map(|row| ForeignKeyRelation {
+        table_name: row.try_get::<String, _>("tbl").unwrap_or_default(),
+        column_name: row.try_get::<String, _>("col").unwrap_or_default(),
+        referenced_table_name: row.try_get::<String, _>("ref_tbl").unwrap_or_default(),
+        referenced_column_name: row.try_get::<String, _>("ref_col").unwrap_or_default(),
+    }).collect())
 }
 
 /// Reconstructs a CREATE TABLE DDL from information_schema.

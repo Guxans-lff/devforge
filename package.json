@@ -11,6 +11,10 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:typecheck": "vue-tsc -b",
+    "test:db-workspace": "vitest run src/components/database/__tests__/TableDataPanel.test.ts src/components/database/sql-builder/__tests__/SqlBuilderPanel.test.ts src/composables/__tests__/useErDiagram.test.ts src/composables/__tests__/useErModeling.test.ts src/composables/__tests__/useMetadataCache.test.ts src/composables/__tests__/useObjectTree.test.ts src/composables/__tests__/usePrimaryKey.test.ts src/composables/__tests__/useQueryExecution.test.ts src/composables/__tests__/useQueryResult.test.ts src/composables/__tests__/useSchemaCache.test.ts src/composables/__tests__/useTableBrowse.test.ts src/composables/__tests__/useTableSeek.test.ts",
+    "check:rust": "cargo check --manifest-path src-tauri/Cargo.toml",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },

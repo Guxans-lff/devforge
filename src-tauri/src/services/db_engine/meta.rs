@@ -485,7 +485,7 @@ impl DbEngine {
         let pool = self.get_pool(connection_id).await?;
         match pool.as_ref() {
             DriverPool::MySql(p) => mysql::get_foreign_keys(p, &database).await,
-            DriverPool::Postgres(_) => Ok(vec![]),
+            DriverPool::Postgres(p) => postgres::get_foreign_keys(p, &database).await,
         }
     }
 }

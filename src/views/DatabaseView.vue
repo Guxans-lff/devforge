@@ -34,11 +34,12 @@ import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useSchemaRegistryStore } from '@/stores/schema-registry'
 import * as dbApi from '@/api/database'
 import type { ScriptOptions } from '@/api/database'
-import type { PoolStatus } from '@/types/connection'
 import type { TableEditorTabContext, ImportTabContext, ErDiagramTabContext, SqlBuilderTabContext, QueryTabContext } from '@/types/database-workspace'
 import type { ObjectTreeExposed } from '@/types/component-exposed'
 import { useToast } from '@/composables/useToast'
 import { useSchemaCache } from '@/composables/useSchemaCache'
+import { usePoolStatusPolling } from '@/composables/usePoolStatusPolling'
+import { useDatabaseConnectionLifecycle } from '@/composables/useDatabaseConnectionLifecycle'
 import { useNotification } from '@/composables/useNotification'
 import { getConfirmDanger, getEnvironment, getReadOnly } from '@/api/connection'
 import { parseBackendError, ensureErrorString } from '@/types/error'
@@ -57,16 +58,8 @@ const schemaRegistry = useSchemaRegistryStore()
 const connectionState = computed(() => connectionStore.connections.get(props.connectionId))
 const isReconnecting = computed(() => (connectionState.value?.status as string) === 'reconnecting')
 
-// 缓存 configJson 解析结果，避免 driver computed 每次求值都重复 JSON.parse
-const parsedConfig = computed(() => {
-  const state = connectionStore.connections.get(props.connectionId)
-  if (!state) return null
-  try {
-    return JSON.parse(state.record.configJson) as Record<string, unknown>
-  } catch {
-    return null
-  }
-})
+// 复用 store 中已解析好的连接配置，避免在视图层重复 JSON.parse
+const parsedConfig = computed(() => connectionState.value?.parsedConfig ?? null)
 
 const driver = computed(() => {
   return (parsedConfig.value?.driver as string) ?? 'mysql'
@@ -105,9 +98,6 @@ const objectTreeRef = ref<InstanceType<typeof ObjectTree>>()
 function getObjectTree(): ObjectTreeExposed | undefined {
   return objectTreeRef.value as unknown as ObjectTreeExposed | undefined
 }
-
-const isConnected = ref(false)
-const isConnecting = ref(false)
 
 // 使用 useSchemaCache composable 管理 Schema 缓存和加载状态
 const {
@@ -152,44 +142,6 @@ onErrorCaptured((err) => {
   panelError.value = ensureErrorString(err)
   return false
 })
-
-// 连接池状态
-const poolStatus = ref<PoolStatus | null>(null)
-let poolStatusTimer: ReturnType<typeof setInterval> | null = null
-
-function handleVisibilityChange() {
-  if (document.hidden) {
-    stopPoolStatusPolling()
-  } else if (isConnected.value) {
-    startPoolStatusPolling()
-  }
-}
-
-/** 获取连接池状态 */
-async function fetchPoolStatus() {
-  if (!isConnected.value) return
-  try {
-    poolStatus.value = await dbApi.dbGetPoolStatus(props.connectionId)
-  } catch {
-    // 静默处理，不影响主流程
-  }
-}
-
-/** 启动连接池状态轮询 */
-function startPoolStatusPolling() {
-  stopPoolStatusPolling()
-  fetchPoolStatus()
-  if (document.hidden) return
-  poolStatusTimer = setInterval(fetchPoolStatus, 10000) // 每 10 秒刷新
-}
-
-/** 停止连接池状态轮询 */
-function stopPoolStatusPolling() {
-  if (poolStatusTimer) {
-    clearInterval(poolStatusTimer)
-    poolStatusTimer = null
-  }
-}
 
 // 当前活动的内部 Tab（使用 getOrCreate 确保 workspace 始终存在，避免 computed 在 onMounted 前求值时返回 undefined）
 const workspace = computed(() => {
@@ -275,117 +227,78 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
-onMounted(async () => {
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-  // 从 SQLite 恢复上次的标签页状态（首次调用，幂等）
-  await dbWorkspaceStore.restoreState().catch((e: unknown) => console.warn('[DatabaseView]', e))
-  // 确保该连接的 workspace 已初始化（副作用仅在此处执行一次）
-  dbWorkspaceStore.getOrCreate(props.connectionId)
-  // 启用自动保存（标签页变更 → debounce 1s → 写入 SQLite）
-  dbWorkspaceStore.enableAutoSave()
-  await connectAndLoad()
-})
-
-// KeepAlive 重新激活时：检查连接状态，断开则重连并刷新
-// 注意：closeTab 通过 store 更新状态为 disconnected，但本地 isConnected ref 不会被重置
-// 因此必须同时检查 store 中的实际连接状态
-onActivated(async () => {
-  // 重新激活时恢复全局快捷键监听
-  window.addEventListener('keydown', handleGlobalKeydown)
-
-  const storeState = connectionStore.connections.get(props.connectionId)
-  const storeDisconnected = !storeState || storeState.status !== 'connected'
-
-  if (storeDisconnected) {
-    // 同步本地状态，并立即清除旧缓存数据，避免用户看到上次的内容
-    isConnected.value = false
-    clearSchemaCache()
-    poolStatus.value = null
-    stopPoolStatusPolling()
+const connectionLifecycle = useDatabaseConnectionLifecycle({
+  connectionId: () => props.connectionId,
+  getWorkspace: () => workspace.value,
+  getConnectionStoreState: () => connectionStore.connections.get(props.connectionId),
+  restoreWorkspaceState: () => dbWorkspaceStore.restoreState(),
+  ensureWorkspaceInitialized: () => {
+    dbWorkspaceStore.getOrCreate(props.connectionId)
+  },
+  enableWorkspaceAutoSave: () => {
+    dbWorkspaceStore.enableAutoSave()
+  },
+  updateConnectionStatus: (status, error) => {
+    connectionStore.updateConnectionStatus(props.connectionId, status, error)
+  },
+  updateQueryTabContext: (tabId, context) => {
+    dbWorkspaceStore.updateTabContext(props.connectionId, tabId, context)
+  },
+  clearSchemaCache,
+  disposeSchemaCache,
+  unregisterSchema: () => {
+    schemaRegistry.unregisterSchema(props.connectionId)
+  },
+  clearObjectTree: () => {
     objectTreeRef.value?.clearTree()
-
-    // 清除所有 query tab 的旧结果
-    const ws = workspace.value
-    for (const tab of ws.tabs) {
-      if (tab.type === 'query') {
-        dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, {
-          result: null,
-          tableBrowse: undefined,
-        })
-      }
-    }
-  }
-
-  if (!isConnected.value) {
-    await connectAndLoad()
-  }
+  },
+  loadObjectTreeDatabases: async (preloaded) => {
+    await objectTreeRef.value?.loadDatabases(preloaded)
+  },
+  onConnected: () => {
+    poolStatusPolling.activate()
+  },
+  onDeactivate: () => {
+    poolStatusPolling.deactivate()
+  },
+  onResetDisconnected: () => {
+    poolStatusPolling.reset()
+  },
 })
 
-// KeepAlive 停用时暂停连接池状态轮询并移除快捷键监听
+const { isConnected, isConnecting } = connectionLifecycle
+
+const poolStatusPolling = usePoolStatusPolling({
+  connectionId: () => props.connectionId,
+  isConnected,
+})
+
+const { poolStatus } = poolStatusPolling
+
+async function connectAndLoad(): Promise<boolean> {
+  return connectionLifecycle.ensureConnected()
+}
+
+onMounted(async () => {
+  window.addEventListener('keydown', handleGlobalKeydown)
+  await connectionLifecycle.mount()
+})
+
+onActivated(async () => {
+  window.addEventListener('keydown', handleGlobalKeydown)
+  await connectionLifecycle.activate()
+})
+
 onDeactivated(() => {
-  stopPoolStatusPolling()
+  connectionLifecycle.deactivate()
   window.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 onBeforeUnmount(async () => {
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-  disposeSchemaCache()
-  schemaRegistry.unregisterSchema(props.connectionId)
-  stopPoolStatusPolling()
   window.removeEventListener('keydown', handleGlobalKeydown)
-  if (isConnected.value) {
-    await dbApi.dbDisconnect(props.connectionId).catch((e: unknown) => console.warn('[DatabaseView]', e))
-    connectionStore.updateConnectionStatus(props.connectionId, 'disconnected')
-  }
+  await connectionLifecycle.unmount()
+  poolStatusPolling.dispose()
 })
-
-async function connectAndLoad(): Promise<boolean> {
-  isConnecting.value = true
-  try {
-    const result = await dbApi.dbConnect(props.connectionId)
-    isConnected.value = true
-    connectionStore.updateConnectionStatus(props.connectionId, 'connected')
-
-    // 连接成功后启动连接池状态轮询
-    startPoolStatusPolling()
-
-    // 连接成功后，如果当前活跃 tab 是报错状态，则清除错误结果
-    const ws = workspace.value
-    const activeQueryTab = ws.tabs.find((t) => t.id === ws.activeTabId)
-    if (activeQueryTab?.type === 'query' && (activeQueryTab.context as { result?: { isError?: boolean } }).result?.isError) {
-      dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, {
-        result: null,
-      })
-    }
-    // 使用预加载的数据库列表（由后端在连接时一并获取，减少一次 IPC 往返）
-    const preloaded = result.databases.length > 0 ? result.databases : undefined
-    await objectTreeRef.value?.loadDatabases(preloaded)
-    return true
-  } catch (e) {
-    isConnected.value = false
-    connectionStore.updateConnectionStatus(props.connectionId, 'error', ensureErrorString(e))
-    // 将错误显示在当前活动的 query tab 中
-    const ws = workspace.value
-    const activeQueryTab = ws.tabs.find((t) => t.id === ws.activeTabId)
-    if (activeQueryTab?.type === 'query') {
-      dbWorkspaceStore.updateTabContext(props.connectionId, activeQueryTab.id, {
-        result: {
-          columns: [],
-          rows: [],
-          affectedRows: 0,
-          executionTimeMs: 0,
-          isError: true,
-          error: ensureErrorString(e),
-          totalCount: null,
-          truncated: false,
-        },
-      })
-    }
-    return false
-  } finally {
-    isConnecting.value = false
-  }
-}
 
 function quoteIdentifier(name: string): string {
   return driver.value === 'postgresql' ? `"${name}"` : `\`${name}\``

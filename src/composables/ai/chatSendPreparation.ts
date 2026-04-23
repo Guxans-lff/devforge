@@ -4,7 +4,7 @@ import type { useAiMemoryStore } from '@/stores/ai-memory'
 import type { AiMessage, AiMessageRecord, FileAttachment, ModelConfig, ProviderConfig } from '@/types/ai'
 import type { Logger } from '@/utils/logger'
 import { buildFileMarkedContent } from '@/utils/file-markers'
-import { buildChatMessages } from './chatMessageBuilder'
+import { buildChatMessagesWithOptions } from './chatMessageBuilder'
 import { genId } from './chatHelpers'
 import { saveNewSessionShellIfMissing } from './chatSessionPersistence'
 
@@ -178,7 +178,10 @@ export async function prepareSendContext(params: PrepareSendContextParams): Prom
 
   const hasVisionCapability = model.capabilities.vision
   return {
-    chatMessages: buildChatMessages(messages.value, hasVisionCapability),
+    chatMessages: buildChatMessagesWithOptions(messages.value, {
+      hasVision: hasVisionCapability,
+      replayToolContext: enableTools,
+    }),
     enableTools,
     enrichedSystemPrompt,
     hasVisionCapability,

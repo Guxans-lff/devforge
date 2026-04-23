@@ -11,6 +11,7 @@ vi.mock('@/api/database', () => ({
 
 vi.mock('@/composables/useMetadataCache', () => ({
   setCache: vi.fn(),
+  warmColumnMetadataCache: vi.fn(),
 }))
 
 import { dbGetAllColumns, dbGetForeignKeys } from '@/api/database'
@@ -120,6 +121,8 @@ describe('useSchemaCache', () => {
     schema.handleDatabaseSwitch('analytics')
     schema.refreshSchemaCache()
     await vi.advanceTimersByTimeAsync(350)
+    await Promise.resolve()
+    await nextTick()
 
     expect(dbGetForeignKeys).toHaveBeenCalledTimes(1)
     expect(dbGetAllColumns).toHaveBeenCalledTimes(1)

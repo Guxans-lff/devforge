@@ -1,8 +1,12 @@
 import { setupMonacoLocale } from '@/utils/monacoLocale'
 import { setupMonacoEnvironment } from '@/utils/monacoSetup'
+import { createLogger } from '@/utils/logger'
 
-// 调试：输出当前窗口 URL
-if (import.meta.env.DEV) console.log('[main.ts] window.location:', window.location.href)
+const log = createLogger('app.bootstrap')
+
+if (import.meta.env.DEV) {
+  log.debug('window_location', { href: window.location.href })
+}
 
 // 必须在 Monaco Editor 加载之前初始化中文语言包
 setupMonacoLocale()

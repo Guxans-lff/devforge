@@ -38,6 +38,9 @@ pub async fn ai_chat_stream(
     engine: State<'_, AiEngineState>,
     storage: State<'_, Arc<Storage>>,
 ) -> Result<ChatResult, AppError> {
+    let tools_enabled = enable_tools.unwrap_or(false);
+    let messages = sanitize_messages_for_request(messages, tools_enabled);
+
     log::info!(
         target: "ai.stream",
         "stream_start session={} model={} provider={} msg_count={} tools={}",
@@ -45,10 +48,10 @@ pub async fn ai_chat_stream(
         model,
         provider_type,
         messages.len(),
-        enable_tools.unwrap_or(false)
+        tools_enabled
     );
     // 工具定义
-    let (tools, tool_choice) = if enable_tools.unwrap_or(false) {
+    let (tools, tool_choice) = if tools_enabled {
         (Some(ai_tools::get_tool_definitions()), Some("auto".to_string()))
     } else {
         (None, None)
@@ -113,6 +116,119 @@ pub async fn ai_chat_stream(
     }
 
     result
+}
+
+fn sanitize_messages_for_request(messages: Vec<ChatMessage>, tools_enabled: bool) -> Vec<ChatMessage> {
+    if tools_enabled {
+        return messages;
+    }
+
+    messages
+        .into_iter()
+        .filter_map(|mut message| {
+            if message.role == MessageRole::Tool {
+                return None;
+            }
+
+            if message.role == MessageRole::Assistant {
+                message.tool_calls = None;
+            }
+
+            Some(message)
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_messages_for_request;
+    use crate::services::ai::models::{ChatMessage, MessageRole, ToolCallFunction, ToolCallRecord};
+
+    #[test]
+    fn strips_tool_context_when_tools_are_disabled() {
+        let messages = vec![
+            ChatMessage {
+                role: MessageRole::User,
+                content: Some("hello".to_string()),
+                content_blocks: None,
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+                reasoning_content: None,
+            },
+            ChatMessage {
+                role: MessageRole::Assistant,
+                content: Some("I checked the file.".to_string()),
+                content_blocks: None,
+                name: None,
+                tool_calls: Some(vec![ToolCallRecord {
+                    id: "tool-1".to_string(),
+                    call_type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "read_file".to_string(),
+                        arguments: "{\"path\":\"src/main.ts\"}".to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                reasoning_content: Some("thinking".to_string()),
+            },
+            ChatMessage {
+                role: MessageRole::Tool,
+                content: Some("file content".to_string()),
+                content_blocks: None,
+                name: Some("read_file".to_string()),
+                tool_calls: None,
+                tool_call_id: Some("tool-1".to_string()),
+                reasoning_content: None,
+            },
+        ];
+
+        let sanitized = sanitize_messages_for_request(messages, false);
+
+        assert_eq!(sanitized.len(), 2);
+        assert_eq!(sanitized[0].role, MessageRole::User);
+        assert_eq!(sanitized[1].role, MessageRole::Assistant);
+        assert!(sanitized[1].tool_calls.is_none());
+        assert_eq!(sanitized[1].content.as_deref(), Some("I checked the file."));
+        assert_eq!(sanitized[1].reasoning_content.as_deref(), Some("thinking"));
+    }
+
+    #[test]
+    fn keeps_tool_context_when_tools_are_enabled() {
+        let messages = vec![
+            ChatMessage {
+                role: MessageRole::Assistant,
+                content: None,
+                content_blocks: None,
+                name: None,
+                tool_calls: Some(vec![ToolCallRecord {
+                    id: "tool-1".to_string(),
+                    call_type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "read_file".to_string(),
+                        arguments: "{\"path\":\"src/main.ts\"}".to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                reasoning_content: None,
+            },
+            ChatMessage {
+                role: MessageRole::Tool,
+                content: Some("file content".to_string()),
+                content_blocks: None,
+                name: Some("read_file".to_string()),
+                tool_calls: None,
+                tool_call_id: Some("tool-1".to_string()),
+                reasoning_content: None,
+            },
+        ];
+
+        let sanitized = sanitize_messages_for_request(messages, true);
+
+        assert_eq!(sanitized.len(), 2);
+        assert!(sanitized[0].tool_calls.is_some());
+        assert_eq!(sanitized[1].role, MessageRole::Tool);
+    }
 }
 
 /// 中断流式生成

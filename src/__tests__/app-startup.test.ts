@@ -48,6 +48,15 @@ vi.mock('@/composables/usePerformance', () => ({
   startPerformanceMonitoring: startPerformanceMonitoringMock,
 }))
 
+vi.mock('@/composables/useGlobalScreenshot', () => ({
+  useGlobalScreenshot: vi.fn(),
+  cleanupGlobalScreenshot: vi.fn(),
+}))
+
+vi.mock('@/composables/useGlobalErrorHandler', () => ({
+  cleanupGlobalErrorHandler: vi.fn(),
+}))
+
 vi.mock('@/stores/settings', () => ({
   useSettingsStore: () => settingsStoreMock,
 }))
@@ -127,7 +136,7 @@ describe('App 启动流程', () => {
     await vi.runAllTimersAsync()
 
     expect(invoke).toHaveBeenCalledWith('show_main_window')
-    expect(console.error).toHaveBeenCalledWith('[Startup] 显示主窗口失败:', showWindowError)
+    expect(console.error).toHaveBeenCalledWith('[app.startup] show_main_window_failed', showWindowError)
   })
 })
 

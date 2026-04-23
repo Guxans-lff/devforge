@@ -7,6 +7,12 @@ use crate::services::db_drivers::DriverPool;
 use crate::services::db_engine::DbEngine;
 use crate::utils::error::AppError;
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SyncReadStrategy {
+    Offset,
+    Seek { column: String },
+}
+
 /// 数据同步引擎
 /// 支持同类型数据库之间的全量同步和 UPSERT 同步
 
@@ -110,6 +116,7 @@ pub async fn sync_tables(
             &config.source_connection_id,
             &config.source_database,
             table,
+            &db_type,
         )
         .await?;
 
@@ -210,6 +217,8 @@ async fn sync_table_full(
     on_progress: &impl Fn(SyncProgress),
 ) -> Result<u64, AppError> {
     let page_size = config.effective_page_size();
+    let primary_keys = primary_keys_of(columns);
+    let read_strategy = determine_read_strategy(columns);
 
     // 步骤 1：TRUNCATE 目标表
     on_progress(SyncProgress {
@@ -237,6 +246,7 @@ async fn sync_table_full(
     // 步骤 2：分页读取源表并批量 INSERT
     let mut offset: u64 = 0;
     let mut synced_rows: u64 = 0;
+    let mut last_seek_value: Option<String> = None;
 
     loop {
         on_progress(SyncProgress {
@@ -250,7 +260,19 @@ async fn sync_table_full(
             error: None,
         });
 
-        let select_sql = build_select_sql(table, db_type, page_size, offset);
+        let select_sql = match &read_strategy {
+            SyncReadStrategy::Seek { column } => build_seek_select_sql(
+                table,
+                columns,
+                db_type,
+                page_size,
+                column,
+                last_seek_value.as_deref(),
+            ),
+            SyncReadStrategy::Offset => {
+                build_select_sql(table, columns, &primary_keys, db_type, page_size, offset)
+            }
+        };
         let result = engine
             .clone()
             .execute_query_in_database(
@@ -280,10 +302,19 @@ async fn sync_table_full(
             .await?;
 
         synced_rows += row_count;
-        offset += page_size as u64;
 
-        if row_count < page_size as u64 {
+        let has_more_rows = row_count == page_size as u64;
+        if !has_more_rows {
             break;
+        }
+
+        match &read_strategy {
+            SyncReadStrategy::Seek { column } => {
+                last_seek_value = Some(extract_last_seek_value(&result.rows, columns, column)?)
+            }
+            SyncReadStrategy::Offset => {
+                offset += page_size as u64;
+            }
         }
     }
 
@@ -305,7 +336,6 @@ async fn sync_table_upsert(
 ) -> Result<u64, AppError> {
     let page_size = config.effective_page_size();
 
-    // 获取主键列
     let primary_keys: Vec<String> = columns
         .iter()
         .filter(|c| c.is_primary_key)
@@ -314,13 +344,15 @@ async fn sync_table_upsert(
 
     if primary_keys.is_empty() {
         return Err(AppError::Validation(format!(
-            "表 {} 没有主键，无法使用 UPSERT 模式",
+            "Table {} has no primary key; UPSERT mode is unavailable",
             table
         )));
     }
 
+    let read_strategy = determine_read_strategy(columns);
     let mut offset: u64 = 0;
     let mut synced_rows: u64 = 0;
+    let mut last_seek_value: Option<String> = None;
 
     loop {
         on_progress(SyncProgress {
@@ -329,12 +361,24 @@ async fn sync_table_upsert(
             table_count,
             synced_rows,
             total_rows,
-            stage: format!("UPSERT 数据 ({}/{})", synced_rows, total_rows),
+            stage: format!("UPSERT data ({}/{})", synced_rows, total_rows),
             finished: false,
             error: None,
         });
 
-        let select_sql = build_select_sql(table, db_type, page_size, offset);
+        let select_sql = match &read_strategy {
+            SyncReadStrategy::Seek { column } => build_seek_select_sql(
+                table,
+                columns,
+                db_type,
+                page_size,
+                column.as_str(),
+                last_seek_value.as_deref(),
+            ),
+            SyncReadStrategy::Offset => {
+                build_select_sql(table, columns, &primary_keys, db_type, page_size, offset)
+            }
+        };
         let result = engine
             .clone()
             .execute_query_in_database(
@@ -351,9 +395,7 @@ async fn sync_table_upsert(
 
         let row_count = result.rows.len() as u64;
 
-        // 构建 UPSERT SQL
-        let upsert_sql =
-            build_upsert_sql(table, columns, &result.rows, &primary_keys, db_type);
+        let upsert_sql = build_upsert_sql(table, columns, &result.rows, &primary_keys, db_type);
         engine
             .clone()
             .execute_query_in_database(
@@ -365,10 +407,23 @@ async fn sync_table_upsert(
             .await?;
 
         synced_rows += row_count;
-        offset += page_size as u64;
 
-        if row_count < page_size as u64 {
+        let has_more_rows = row_count == page_size as u64;
+        if !has_more_rows {
             break;
+        }
+
+        match &read_strategy {
+            SyncReadStrategy::Seek { column } => {
+                last_seek_value = Some(extract_last_seek_value(
+                    &result.rows,
+                    columns,
+                    column.as_str(),
+                )?)
+            }
+            SyncReadStrategy::Offset => {
+                offset += page_size as u64;
+            }
         }
     }
 
@@ -383,8 +438,9 @@ async fn count_table_rows(
     connection_id: &str,
     database: &str,
     table: &str,
+    db_type: &str,
 ) -> Result<u64, AppError> {
-    let sql = format!("SELECT COUNT(*) AS cnt FROM {}", quote_identifier(table, "mysql"));
+    let sql = build_count_rows_sql(table, db_type);
     let result = engine
         .execute_query_in_database(
             connection_id.to_string(),
@@ -416,13 +472,153 @@ fn build_truncate_sql(table: &str, db_type: &str) -> String {
     format!("TRUNCATE TABLE {}", quote_identifier(table, db_type))
 }
 
-/// 构建分页 SELECT 语句
-fn build_select_sql(table: &str, db_type: &str, page_size: usize, offset: u64) -> String {
+fn build_count_rows_sql(table: &str, db_type: &str) -> String {
     format!(
-        "SELECT * FROM {} LIMIT {} OFFSET {}",
+        "SELECT COUNT(*) AS cnt FROM {}",
+        quote_identifier(table, db_type)
+    )
+}
+
+fn primary_keys_of(columns: &[ColumnInfo]) -> Vec<String> {
+    columns
+        .iter()
+        .filter(|c| c.is_primary_key)
+        .map(|c| c.name.clone())
+        .collect()
+}
+
+fn determine_read_strategy(columns: &[ColumnInfo]) -> SyncReadStrategy {
+    let Some(primary_key) = columns.iter().find(|c| c.is_primary_key) else {
+        return SyncReadStrategy::Offset;
+    };
+
+    if columns.iter().filter(|c| c.is_primary_key).count() == 1
+        && is_seek_compatible_type(&primary_key.data_type)
+    {
+        SyncReadStrategy::Seek {
+            column: primary_key.name.clone(),
+        }
+    } else {
+        SyncReadStrategy::Offset
+    }
+}
+
+fn is_seek_compatible_type(data_type: &str) -> bool {
+    let normalized = data_type.trim().to_ascii_lowercase();
+    let base = normalized
+        .split(|c: char| c == '(' || c.is_whitespace())
+        .next()
+        .unwrap_or("");
+
+    matches!(
+        base,
+        "tinyint"
+            | "smallint"
+            | "mediumint"
+            | "int"
+            | "integer"
+            | "bigint"
+            | "serial"
+            | "smallserial"
+            | "bigserial"
+            | "int2"
+            | "int4"
+            | "int8"
+    )
+}
+
+fn build_select_column_list(columns: &[ColumnInfo], db_type: &str) -> String {
+    if columns.is_empty() {
+        "*".to_string()
+    } else {
+        columns
+            .iter()
+            .map(|c| quote_identifier(&c.name, db_type))
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+fn build_order_by_clause(primary_keys: &[String], db_type: &str) -> String {
+    if primary_keys.is_empty() {
+        String::new()
+    } else {
+        let keys = primary_keys
+            .iter()
+            .map(|key| format!("{} ASC", quote_identifier(key, db_type)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(" ORDER BY {}", keys)
+    }
+}
+
+fn extract_last_seek_value(
+    rows: &[Vec<serde_json::Value>],
+    columns: &[ColumnInfo],
+    seek_column: &str,
+) -> Result<String, AppError> {
+    let column_index = columns
+        .iter()
+        .position(|column| column.name == seek_column)
+        .ok_or_else(|| AppError::Validation(format!("Seek column not found: {}", seek_column)))?;
+
+    let row = rows.last().ok_or_else(|| {
+        AppError::Validation("No last row available for seek pagination".to_string())
+    })?;
+
+    let value = row.get(column_index).ok_or_else(|| {
+        AppError::Validation(format!("Seek column value missing: {}", seek_column))
+    })?;
+
+    match value {
+        serde_json::Value::Number(number) => Ok(number.to_string()),
+        _ => Err(AppError::Validation(format!(
+            "Seek column value must be numeric: {}",
+            seek_column
+        ))),
+    }
+}
+
+/// 构建分页 SELECT 语句
+fn build_select_sql(
+    table: &str,
+    columns: &[ColumnInfo],
+    primary_keys: &[String],
+    db_type: &str,
+    page_size: usize,
+    offset: u64,
+) -> String {
+    format!(
+        "SELECT {} FROM {}{} LIMIT {} OFFSET {}",
+        build_select_column_list(columns, db_type),
         quote_identifier(table, db_type),
+        build_order_by_clause(primary_keys, db_type),
         page_size,
         offset
+    )
+}
+
+fn build_seek_select_sql(
+    table: &str,
+    columns: &[ColumnInfo],
+    db_type: &str,
+    page_size: usize,
+    seek_column: &str,
+    last_seek_value: Option<&str>,
+) -> String {
+    let seek_identifier = quote_identifier(seek_column, db_type);
+    let where_clause = last_seek_value
+        .filter(|value| !value.is_empty())
+        .map(|value| format!(" WHERE {} > {}", seek_identifier, value))
+        .unwrap_or_default();
+
+    format!(
+        "SELECT {} FROM {}{} ORDER BY {} ASC LIMIT {}",
+        build_select_column_list(columns, db_type),
+        quote_identifier(table, db_type),
+        where_clause,
+        seek_identifier,
+        page_size
     )
 }
 
@@ -433,7 +629,10 @@ fn build_insert_sql(
     rows: &[Vec<serde_json::Value>],
     db_type: &str,
 ) -> String {
-    let col_names: Vec<String> = columns.iter().map(|c| quote_identifier(&c.name, db_type)).collect();
+    let col_names: Vec<String> = columns
+        .iter()
+        .map(|c| quote_identifier(&c.name, db_type))
+        .collect();
     let col_list = col_names.join(", ");
 
     let value_rows: Vec<String> = rows
@@ -462,7 +661,10 @@ fn build_upsert_sql(
     primary_keys: &[String],
     db_type: &str,
 ) -> String {
-    let col_names: Vec<String> = columns.iter().map(|c| quote_identifier(&c.name, db_type)).collect();
+    let col_names: Vec<String> = columns
+        .iter()
+        .map(|c| quote_identifier(&c.name, db_type))
+        .collect();
     let col_list = col_names.join(", ");
 
     let value_rows: Vec<String> = rows
@@ -539,7 +741,11 @@ fn escape_value(value: &serde_json::Value) -> String {
     match value {
         serde_json::Value::Null => "NULL".to_string(),
         serde_json::Value::Bool(b) => {
-            if *b { "1".to_string() } else { "0".to_string() }
+            if *b {
+                "1".to_string()
+            } else {
+                "0".to_string()
+            }
         }
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::String(s) => {
@@ -560,5 +766,100 @@ fn quote_identifier(name: &str, db_type: &str) -> String {
     match db_type {
         "postgres" => format!("\"{}\"", name.replace('"', "\"\"")),
         _ => format!("`{}`", name.replace('`', "``")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_column(name: &str, data_type: &str, is_primary_key: bool) -> ColumnInfo {
+        ColumnInfo {
+            name: name.to_string(),
+            data_type: data_type.to_string(),
+            nullable: false,
+            default_value: None,
+            is_primary_key,
+            comment: None,
+        }
+    }
+
+    #[test]
+    fn count_rows_sql_uses_actual_database_dialect() {
+        assert_eq!(
+            build_count_rows_sql("orders", "mysql"),
+            "SELECT COUNT(*) AS cnt FROM `orders`",
+        );
+        assert_eq!(
+            build_count_rows_sql("orders", "postgres"),
+            "SELECT COUNT(*) AS cnt FROM \"orders\"",
+        );
+    }
+
+    #[test]
+    fn offset_select_sql_uses_explicit_columns_and_primary_key_order() {
+        let columns = vec![
+            make_column("id", "bigint", true),
+            make_column("created_at", "timestamp", false),
+        ];
+        let primary_keys = primary_keys_of(&columns);
+
+        assert_eq!(
+            build_select_sql("orders", &columns, &primary_keys, "mysql", 500, 1000),
+            "SELECT `id`, `created_at` FROM `orders` ORDER BY `id` ASC LIMIT 500 OFFSET 1000",
+        );
+    }
+
+    #[test]
+    fn seek_select_sql_uses_explicit_columns_and_cursor_predicate() {
+        let columns = vec![
+            make_column("id", "int8", true),
+            make_column("name", "text", false),
+        ];
+
+        assert_eq!(
+            build_seek_select_sql("users", &columns, "postgres", 200, "id", Some("42")),
+            "SELECT \"id\", \"name\" FROM \"users\" WHERE \"id\" > 42 ORDER BY \"id\" ASC LIMIT 200",
+        );
+    }
+
+    #[test]
+    fn choose_seek_strategy_for_single_numeric_primary_key() {
+        let columns = vec![
+            make_column("id", "bigint", true),
+            make_column("name", "varchar(255)", false),
+        ];
+
+        assert_eq!(
+            determine_read_strategy(&columns),
+            SyncReadStrategy::Seek {
+                column: "id".to_string(),
+            },
+        );
+    }
+
+    #[test]
+    fn choose_offset_strategy_for_composite_primary_key() {
+        let columns = vec![
+            make_column("tenant_id", "int", true),
+            make_column("id", "int", true),
+            make_column("name", "varchar(255)", false),
+        ];
+
+        assert_eq!(determine_read_strategy(&columns), SyncReadStrategy::Offset);
+    }
+
+    #[test]
+    fn extract_seek_value_from_last_row_number() {
+        let columns = vec![
+            make_column("id", "bigint", true),
+            make_column("name", "varchar(255)", false),
+        ];
+        let rows = vec![
+            vec![serde_json::json!(1), serde_json::json!("a")],
+            vec![serde_json::json!(9), serde_json::json!("b")],
+        ];
+
+        assert_eq!(extract_last_seek_value(&rows, &columns, "id").unwrap(), "9");
     }
 }

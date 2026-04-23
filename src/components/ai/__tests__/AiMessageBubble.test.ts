@@ -109,4 +109,46 @@ describe('AiMessageBubble', () => {
 
     expect(wrapper.text()).toContain('error|denied|[user_rejected] User rejected edit_file.')
   })
+
+  it('hides leaked DSML tool protocol from the thinking panel', () => {
+    const wrapper = mount(AiMessageBubble, {
+      props: {
+        message: makeAssistantMessage({
+          content: '正常回复内容',
+          thinking: [
+            '需要先看文件。',
+            '<|DSML|tool_calls>',
+            '<|DSML|invoke name="read_file">',
+            '<|DSML|parameter name="path" string="true">src/main.ts</|DSML|parameter>',
+            '</|DSML|invoke>',
+            '<|DSML|tool_calls>',
+            '然后总结。',
+          ].join('\n'),
+        }),
+        sessionId: 'session-1',
+      },
+      global: {
+        stubs: {
+          AiCodeBlock: true,
+          AiFileCard: true,
+          AiFileOpsGroup: true,
+          AiContextPill: true,
+          AiToolCallBlock: ToolCallBlockStub,
+          Download: true,
+          Copy: true,
+          Check: true,
+          AlertCircle: true,
+          AlertTriangle: true,
+          Info: true,
+          RotateCw: true,
+          ChevronRight: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('需要先看文件。')
+    expect(wrapper.text()).toContain('然后总结。')
+    expect(wrapper.text()).not.toContain('DSML')
+    expect(wrapper.text()).not.toContain('read_file')
+  })
 })
