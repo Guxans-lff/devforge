@@ -14,6 +14,7 @@ export interface AiChatStreamState {
   pendingThinkingDelta: string
   pendingToolCalls: ToolCallInfo[]
   lastFinishReason: string
+  lastErrorRetryable?: boolean
   streamingMessageId: string
   inToolExec: boolean
 }
@@ -108,6 +109,7 @@ export function handleStreamEvent({
     case 'Error':
       flushPendingDelta()
       error.value = event.message
+      streamState.lastErrorRetryable = event.retryable
       if (!event.retryable) {
         updateStreamingMessage(msg => ({
           ...msg,

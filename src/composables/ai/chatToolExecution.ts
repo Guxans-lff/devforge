@@ -279,6 +279,7 @@ async function runToolAttempt(
         params.workDir,
         params.sessionId,
         toolCall.id,
+        execution.timeoutMs,
       ),
       execution.timeoutMs,
     )

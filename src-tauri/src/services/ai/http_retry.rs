@@ -7,11 +7,12 @@ use std::time::Duration;
 
 /// Generic retry delays before each attempt.
 const BACKOFF_MS: &[u64] = &[0, 2000, 5000];
-/// Extra delay used when the upstream returns HTTP 429.
-const RATE_LIMIT_BACKOFF_MS: &[u64] = &[2000, 5000];
-
 /// Maximum number of attempts including the first try.
 pub const MAX_ATTEMPTS: usize = 3;
+
+pub fn is_retryable_status(status: reqwest::StatusCode) -> bool {
+    status.as_u16() == 429 || status.is_server_error()
+}
 
 /// Whether a reqwest error is worth retrying.
 fn is_retryable_error(e: &reqwest::Error) -> bool {
@@ -21,16 +22,6 @@ fn is_retryable_error(e: &reqwest::Error) -> bool {
 /// Whether the connection pool may hold a stale socket and should rebuild the client.
 fn is_connection_rotten(e: &reqwest::Error) -> bool {
     e.is_connect() || e.is_request() || e.is_timeout()
-}
-
-fn rate_limit_delay(status: reqwest::StatusCode, attempt: usize) -> Option<Duration> {
-    if status.as_u16() != 429 {
-        return None;
-    }
-    RATE_LIMIT_BACKOFF_MS
-        .get(attempt)
-        .copied()
-        .map(Duration::from_millis)
 }
 
 /// Send a request with optional client rebuilds between retries.
@@ -73,14 +64,12 @@ where
         match req.send().await {
             Ok(resp) => {
                 let status = resp.status();
-                if let Some(delay) = rate_limit_delay(status, attempt) {
+                if status.as_u16() == 429 && attempt + 1 < MAX_ATTEMPTS {
                     log::warn!(
                         target: "ai.stream",
-                        "rate_limit_retry status=429 attempt={} after {}ms",
+                        "rate_limit_retry status=429 attempt={}",
                         attempt + 1,
-                        delay.as_millis()
                     );
-                    tokio::time::sleep(delay).await;
                     continue;
                 }
                 if status.is_server_error() && attempt + 1 < MAX_ATTEMPTS {
@@ -114,6 +103,7 @@ where
 }
 
 /// Send a cloneable request with retry/backoff.
+#[allow(dead_code)]
 pub async fn send_with_backoff(
     builder: RequestBuilder,
 ) -> Result<reqwest::Response, reqwest::Error> {
@@ -137,14 +127,12 @@ pub async fn send_with_backoff(
         match req.send().await {
             Ok(resp) => {
                 let status = resp.status();
-                if let Some(delay) = rate_limit_delay(status, attempt) {
+                if status.as_u16() == 429 && attempt + 1 < MAX_ATTEMPTS {
                     log::warn!(
                         target: "ai.stream",
-                        "rate_limit_retry status=429 attempt={} after {}ms",
+                        "rate_limit_retry status=429 attempt={}",
                         attempt + 1,
-                        delay.as_millis()
                     );
-                    tokio::time::sleep(delay).await;
                     continue;
                 }
                 if status.is_server_error() && attempt + 1 < MAX_ATTEMPTS {
@@ -175,4 +163,25 @@ pub async fn send_with_backoff(
     }
 
     Err(last_err.expect("retry loop exited without error"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_retryable_status;
+
+    #[test]
+    fn marks_429_and_5xx_as_retryable_statuses() {
+        assert!(is_retryable_status(reqwest::StatusCode::TOO_MANY_REQUESTS));
+        assert!(is_retryable_status(reqwest::StatusCode::BAD_GATEWAY));
+        assert!(is_retryable_status(reqwest::StatusCode::SERVICE_UNAVAILABLE));
+        assert!(is_retryable_status(reqwest::StatusCode::GATEWAY_TIMEOUT));
+    }
+
+    #[test]
+    fn does_not_mark_regular_4xx_as_retryable_statuses() {
+        assert!(!is_retryable_status(reqwest::StatusCode::BAD_REQUEST));
+        assert!(!is_retryable_status(reqwest::StatusCode::UNAUTHORIZED));
+        assert!(!is_retryable_status(reqwest::StatusCode::FORBIDDEN));
+        assert!(!is_retryable_status(reqwest::StatusCode::NOT_FOUND));
+    }
 }

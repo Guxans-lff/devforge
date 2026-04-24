@@ -4,6 +4,7 @@ import { useAiChatViewState } from '@/composables/useAiChatViewState'
 import { clearApprovalStateForTests } from '@/composables/useToolApproval'
 import type { FileAttachment, ModelConfig, ProviderConfig } from '@/types/ai'
 import type { ChatMode } from '@/components/ai/AiInputArea.vue'
+import { recordProviderTransientFailure, resetProviderRuntimeRoutingForTests } from '@/composables/ai/chatRuntimeRouting'
 
 const { getCredentialMock } = vi.hoisted(() => ({
   getCredentialMock: vi.fn(),
@@ -34,22 +35,42 @@ const model: ModelConfig = {
   id: 'model-1',
   name: 'Model 1',
   capabilities: {
-    contextWindow: 1000,
+    streaming: true,
     maxContext: 1000,
     maxOutput: 100,
     vision: false,
     toolUse: true,
-    reasoning: false,
+    thinking: false,
   },
 }
 
 const provider: ProviderConfig = {
   id: 'provider-1',
   name: 'Provider 1',
-  type: 'openai',
-  baseUrl: 'https://example.com',
+  providerType: 'openai_compat',
+  endpoint: 'https://example.com',
   models: [model],
-  enabled: true,
+  isDefault: true,
+  createdAt: 1,
+}
+
+const backupProvider: ProviderConfig = {
+  id: 'provider-2',
+  name: 'Provider 2',
+  providerType: 'openai_compat',
+  endpoint: 'https://example.com',
+  models: [{
+    ...model,
+    id: 'model-2',
+    name: 'Model 2',
+    capabilities: {
+      ...model.capabilities,
+      maxContext: 200000,
+      maxOutput: 4096,
+    },
+  }],
+  isDefault: false,
+  createdAt: 2,
 }
 
 function makeHarness(overrides: Partial<{
@@ -99,6 +120,7 @@ describe('useAiChatViewState', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     clearApprovalStateForTests()
+    resetProviderRuntimeRoutingForTests()
     getCredentialMock.mockResolvedValue('api-key')
   })
 
@@ -198,5 +220,32 @@ describe('useAiChatViewState', () => {
     expect(memoryStore.setWorkspace).toHaveBeenCalledWith('D:/workspace')
     expect(onPersistWorkDir).toHaveBeenCalledWith('D:/workspace')
     expect(state.workDirDisplay.value).toBe('D:/workspace')
+  })
+
+  it('reroutes sends away from a provider with an open runtime circuit', async () => {
+    const { state, chat } = makeHarness({
+      providers: [provider, backupProvider],
+      defaultProvider: provider,
+    })
+
+    state.syncDefaultProviderSelection()
+    const now = Date.now()
+    recordProviderTransientFailure('provider-1', now)
+    recordProviderTransientFailure('provider-1', now + 1)
+
+    const outcome = await state.sendMessageNow('hello', [])
+
+    expect(outcome?.route).toMatchObject({
+      rerouted: true,
+      provider: expect.objectContaining({ id: 'provider-2' }),
+    })
+    expect(chat.send).toHaveBeenCalledWith(
+      'hello',
+      expect.objectContaining({ id: 'provider-2' }),
+      expect.objectContaining({ id: 'model-2' }),
+      'api-key',
+      expect.anything(),
+      [],
+    )
   })
 })

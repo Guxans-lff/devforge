@@ -9,6 +9,7 @@ function makeState(): AiChatStreamState {
     pendingThinkingDelta: '',
     pendingToolCalls: [],
     lastFinishReason: '',
+    lastErrorRetryable: undefined,
     streamingMessageId: 'msg-1',
     inToolExec: false,
   }
@@ -66,5 +67,19 @@ describe('chatStreamEvents', () => {
     }, streamState))
 
     expect(streamState.pendingToolCalls[0]?.parsedArgs).toEqual({ path: 'src/a.ts' })
+  })
+
+  it('stores retryable hint from stream errors', () => {
+    const streamState = makeState()
+    const params = makeParams({
+      type: 'Error',
+      message: 'temporary upstream failure',
+      retryable: true,
+    }, streamState)
+
+    handleStreamEvent(params)
+
+    expect(params.error.value).toBe('temporary upstream failure')
+    expect(streamState.lastErrorRetryable).toBe(true)
   })
 })

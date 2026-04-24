@@ -97,6 +97,7 @@ export async function abortChat({
   streamState.pendingThinkingDelta = ''
   streamState.pendingToolCalls = []
   streamState.lastFinishReason = ''
+  streamState.lastErrorRetryable = undefined
   streamState.inToolExec = false
   isStreaming.value = false
 }

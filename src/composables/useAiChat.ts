@@ -10,7 +10,7 @@ import {
   loadChatHistoryWindow,
   preloadChatHistoryWindow,
 } from '@/composables/ai/chatHistoryLoad'
-import { runAiChatSessionTurn } from '@/composables/ai/chatSessionRunner'
+import { runAiChatSessionTurn, type AiChatSessionRunnerResult } from '@/composables/ai/chatSessionRunner'
 import { useAiChatObservability } from '@/composables/ai/useAiChatObservability'
 import {
   parseAndWriteJournalSections as writeJournalSectionsFromText,
@@ -23,6 +23,7 @@ import {
   type AiChatStreamState,
 } from '@/composables/ai/chatStreamEvents'
 import { executeToolCalls as runToolCalls } from '@/composables/ai/chatToolExecution'
+import { resolveStreamWatchdogConfig } from '@/composables/ai/chatHelpers'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiMemoryStore } from '@/stores/ai-memory'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
@@ -39,8 +40,6 @@ import { createLogger } from '@/utils/logger'
 const log = createLogger('ai.chat')
 
 const MAX_TOOL_LOOPS = 50
-const STREAM_WATCHDOG_MS = 90_000
-const STREAM_WATCHDOG_WARN_MS = 45_000
 
 export interface UseAiChatOptions {
   sessionId: MaybeRef<string>
@@ -88,6 +87,8 @@ export function useAiChat(options: UseAiChatOptions) {
   let scrollRafId: number | null = null
   let watchdogTimer: ReturnType<typeof setTimeout> | null = null
   let watchdogWarnTimer: ReturnType<typeof setTimeout> | null = null
+  let streamWatchdogMs = 90_000
+  let streamWatchdogWarnMs = 45_000
   let loadSeq = 0
   let lastLoadedHistoryKey = ''
   let streamingMessageIndex = -1
@@ -216,36 +217,39 @@ export function useAiChat(options: UseAiChatOptions) {
     }
   }
 
+  function configureStreamWatchdog(model?: ModelConfig): void {
+    const { warnMs, timeoutMs } = resolveStreamWatchdogConfig(model)
+    streamWatchdogWarnMs = warnMs
+    streamWatchdogMs = timeoutMs
+  }
+
   function resetWatchdog(): void {
     clearWatchdog()
 
     watchdogWarnTimer = setTimeout(() => {
       watchdogWarnTimer = null
       if (streamState.inToolExec || !isStreaming.value) return
-      log.warn('watchdog_warning', { sessionId: sessionIdRef.value, ms: STREAM_WATCHDOG_WARN_MS })
-    }, STREAM_WATCHDOG_WARN_MS)
+      log.warn('watchdog_warning', { sessionId: sessionIdRef.value, ms: streamWatchdogWarnMs })
+    }, streamWatchdogWarnMs)
 
     watchdogTimer = setTimeout(async () => {
       watchdogTimer = null
       if (streamState.inToolExec || !isStreaming.value) return
 
-      error.value = `娴佸紡鍝嶅簲瓒呮椂锛?{STREAM_WATCHDOG_MS / 1000}s 鏃犳暟鎹級`
-      log.warn('watchdog_timeout', { sessionId: sessionIdRef.value, ms: STREAM_WATCHDOG_MS })
+      error.value = `流式响应超时（${streamWatchdogMs / 1000}s），已自动中断。`
+      log.warn('watchdog_timeout', { sessionId: sessionIdRef.value, ms: streamWatchdogMs })
 
-      try {
-        await aiAbortStream(sessionIdRef.value)
-      } catch (err) {
-        log.warn('watchdog_abort_failed', { sessionId: sessionIdRef.value }, err)
-      }
-
-      flushPendingDelta()
-      updateStreamingMessage(message => ({
-        ...message,
-        content: `${message.content}\n\n[瓒呮椂涓柇]`,
-        isStreaming: false,
-      }))
-      isStreaming.value = false
-    }, STREAM_WATCHDOG_MS)
+      await abortChat({
+        sessionId: sessionIdRef.value,
+        messages,
+        isStreaming,
+        streamState,
+        log,
+        clearWatchdog,
+        flushPendingDelta,
+        updateStreamingMessage,
+      })
+    }, streamWatchdogMs)
   }
 
   function cancelFlushTimer(): void {
@@ -386,6 +390,7 @@ export function useAiChat(options: UseAiChatOptions) {
       streamState.pendingThinkingDelta = ''
       streamState.pendingToolCalls = []
       streamState.lastFinishReason = ''
+      streamState.lastErrorRetryable = undefined
       streamState.inToolExec = false
     }
 
@@ -456,7 +461,7 @@ export function useAiChat(options: UseAiChatOptions) {
     apiKey: string,
     systemPrompt?: string,
     attachments?: FileAttachment[],
-  ): Promise<void> {
+  ): Promise<AiChatSessionRunnerResult | undefined> {
     if (!canSend.value || !content.trim()) return
 
     const sid = sessionIdRef.value
@@ -470,39 +475,47 @@ export function useAiChat(options: UseAiChatOptions) {
     observability.markSendStart()
     userScrolled.value = false
 
-    await runAiChatSessionTurn({
-      sessionId: sid,
-      content,
-      provider,
-      model,
-      apiKey,
-      systemPrompt,
-      attachments,
-      workDir,
-      aiStore,
-      memoryStore,
-      messages,
-      isStreaming,
-      streamState,
-      error,
-      planGateEnabled,
-      planApproved,
-      log,
-      maxToolLoops: MAX_TOOL_LOOPS,
-      totalTokens: () => totalTokens.value,
-      forceCompact: autoCompact.forceCompact,
-      checkAndCompact: autoCompact.checkAndCompact,
-      clearWatchdog,
-      resetWatchdog,
-      flushPendingDelta,
-      updateStreamingMessage,
-      executeToolCalls: (toolCalls, sessionId, signal) => executeToolCalls(toolCalls, sessionId, signal),
-      parseAndWriteJournalSections,
-      parseSpawnedTasks,
-      onStreamEvent: handleIncomingStreamEvent,
-      onResponseComplete: () => observability.markResponseComplete(),
-      onCompactTriggered: () => observability.markCompactTriggered(),
-    })
+    configureStreamWatchdog(model)
+    try {
+      return await runAiChatSessionTurn({
+        sessionId: sid,
+        content,
+        provider,
+        model,
+        apiKey,
+        systemPrompt,
+        attachments,
+        workDir,
+        aiStore,
+        memoryStore,
+        messages,
+        isStreaming,
+        streamState,
+        error,
+        planGateEnabled,
+        planApproved,
+        log,
+        maxToolLoops: MAX_TOOL_LOOPS,
+        totalTokens: () => totalTokens.value,
+        forceCompact: autoCompact.forceCompact,
+        checkAndCompact: autoCompact.checkAndCompact,
+        clearWatchdog,
+        resetWatchdog,
+        flushPendingDelta,
+        updateStreamingMessage,
+        executeToolCalls: (toolCalls, sessionId, signal) => executeToolCalls(toolCalls, sessionId, signal),
+        parseAndWriteJournalSections,
+        parseSpawnedTasks,
+        onStreamEvent: handleIncomingStreamEvent,
+        onPrepareComplete: () => observability.markPrepareComplete(),
+        onRequestStart: () => observability.markRequestStart(),
+        onRecovery: () => observability.markRecovery(),
+        onResponseComplete: () => observability.markResponseComplete(),
+        onCompactTriggered: () => observability.markCompactTriggered(),
+      })
+    } finally {
+      configureStreamWatchdog()
+    }
   }
 
   async function abort(): Promise<void> {
@@ -523,7 +536,7 @@ export function useAiChat(options: UseAiChatOptions) {
     model: ModelConfig,
     apiKey: string,
     systemPrompt?: string,
-  ): Promise<void> {
+  ): Promise<AiChatSessionRunnerResult | undefined> {
     if (isStreaming.value) return
 
     const lastUserMessage = [...messages.value].reverse().find(message => message.role === 'user')
@@ -547,7 +560,7 @@ export function useAiChat(options: UseAiChatOptions) {
       messages.value = messages.value.filter((_, index) => index !== lastUserIndex)
     }
 
-    await send(lastUserMessage.content, provider, model, apiKey, systemPrompt)
+    return await send(lastUserMessage.content, provider, model, apiKey, systemPrompt)
   }
 
   function removeLastError(): void {
@@ -574,6 +587,7 @@ export function useAiChat(options: UseAiChatOptions) {
     streamState.pendingThinkingDelta = ''
     streamState.pendingToolCalls = []
     streamState.lastFinishReason = ''
+    streamState.lastErrorRetryable = undefined
     streamState.inToolExec = false
     cancelFlushTimer()
     clearWatchdog()
@@ -657,6 +671,7 @@ export function useAiChat(options: UseAiChatOptions) {
     historyTotalRecords,
     historyRemainingRecords,
     observability: observability.metrics,
+    recordRuntimeRouting: observability.recordRuntimeRouting,
     isCompacting: autoCompact.isCompacting,
     availableWorkDirs,
     isPathInWorkspace,

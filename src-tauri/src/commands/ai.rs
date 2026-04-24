@@ -340,7 +340,7 @@ pub async fn ai_get_session(
                 .iter()
                 .find(|m| m.role == "user")
                 .map(|m| m.content.chars().take(20).collect::<String>())
-                .unwrap_or_else(|| "Recovered Session".to_string());
+                .unwrap_or_else(|| "已恢复会话".to_string());
             let skeleton = AiSession {
                 id: id.clone(),
                 title,
@@ -435,6 +435,7 @@ pub async fn ai_execute_tool(
     work_dir: String,
     session_id: String,
     tool_call_id: String,
+    timeout_ms: Option<u64>,
     app: tauri::AppHandle,
 ) -> Result<ai_tools::ToolExecResult, AppError> {
     log::info!(
@@ -448,9 +449,10 @@ pub async fn ai_execute_tool(
 
     let app_data_dir = app.path().app_data_dir().ok();
 
-    // 超时 30 秒
+    // 超时 30 秒，前端可按工具类型覆盖。
+    let timeout_ms = timeout_ms.unwrap_or(30_000).max(1);
     let result = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
+        std::time::Duration::from_millis(timeout_ms),
         ai_tools::execute_tool(
             &name,
             &arguments,
@@ -468,7 +470,7 @@ pub async fn ai_execute_tool(
             log::warn!(target: "ai.tool", "timeout name={} session={} tool_call={}", name, session_id, tool_call_id);
             Ok(ai_tools::ToolExecResult {
                 success: false,
-                content: format!("工具执行超时（30秒限制）: {}", name),
+                content: format!("工具执行超时（{}ms）: {}", timeout_ms, name),
             })
         }
     }
@@ -491,7 +493,7 @@ pub async fn ai_enforce_tool_result_budget(
     tool_result_budget::enforce(&dir, &session_id, results).await
 }
 
-/// 读取完整落盘工具结果（供前端"查看完整"使用）
+/// 读取完整落盘工具结果（供前端“查看完整”使用）
 #[tauri::command]
 pub async fn ai_read_tool_result_file(
     session_id: String,

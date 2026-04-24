@@ -19,12 +19,28 @@ const thresholds = computed(() => settingsStore.settings.aiDiagnosticsThresholds
 
 const metricCards = computed(() => [
   {
+    key: 'prepare',
+    label: t('ai.diagnostics.prepare'),
+    value: formatMs(props.metrics.prepareDurationMs),
+    hint: props.metrics.prepareCompletedAt ? t('ai.diagnostics.prepared') : t('ai.diagnostics.preparing'),
+    icon: Clock3,
+    tone: toneForMs(props.metrics.prepareDurationMs, thresholds.value.firstTokenWarnMs, thresholds.value.firstTokenDangerMs),
+  },
+  {
     key: 'first-token',
     label: t('ai.diagnostics.firstToken'),
     value: formatMs(props.metrics.firstTokenLatencyMs),
     hint: props.metrics.firstTokenAt ? t('ai.diagnostics.streamStarted') : t('ai.diagnostics.waiting'),
     icon: Clock3,
     tone: toneForMs(props.metrics.firstTokenLatencyMs, thresholds.value.firstTokenWarnMs, thresholds.value.firstTokenDangerMs),
+  },
+  {
+    key: 'request-first-token',
+    label: t('ai.diagnostics.requestFirstToken'),
+    value: formatMs(props.metrics.requestFirstTokenLatencyMs),
+    hint: props.metrics.requestStartedAt ? t('ai.diagnostics.requestStarted') : t('ai.diagnostics.waiting'),
+    icon: Activity,
+    tone: toneForMs(props.metrics.requestFirstTokenLatencyMs, thresholds.value.firstTokenWarnMs, thresholds.value.firstTokenDangerMs),
   },
   {
     key: 'response',
@@ -68,6 +84,13 @@ const trendCards = computed(() => [
     tone: toneForMs(props.metrics.trend.firstTokenAverageMs, thresholds.value.firstTokenWarnMs, thresholds.value.firstTokenDangerMs),
   },
   {
+    key: 'trend-request-first-token',
+    label: t('ai.diagnostics.avgRequestFirstToken'),
+    value: formatMs(props.metrics.trend.requestFirstTokenAverageMs),
+    hint: formatDelta(props.metrics.trend.lastRequestFirstTokenDeltaMs),
+    tone: toneForMs(props.metrics.trend.requestFirstTokenAverageMs, thresholds.value.firstTokenWarnMs, thresholds.value.firstTokenDangerMs),
+  },
+  {
     key: 'trend-response',
     label: t('ai.diagnostics.avgResponse'),
     value: formatMs(props.metrics.trend.responseAverageMs),
@@ -84,6 +107,12 @@ const trendCards = computed(() => [
 ])
 
 const toolSummary = computed(() => [
+  { label: t('ai.diagnostics.requests'), value: props.metrics.requestCount },
+  { label: t('ai.diagnostics.recoveries'), value: props.metrics.recoveryCount },
+  { label: t('ai.diagnostics.providerReroutes'), value: props.metrics.providerRerouteCount },
+  { label: t('ai.diagnostics.autoDowngrades'), value: props.metrics.autoDowngradeCount },
+  { label: t('ai.diagnostics.autoProviderSwitches'), value: props.metrics.autoSwitchProviderCount },
+  { label: t('ai.diagnostics.lastRoutingReason'), value: formatRoutingReason(props.metrics.lastRoutingReason) },
   { label: t('ai.diagnostics.calls'), value: props.metrics.lastToolRun.totalCalls },
   { label: t('ai.diagnostics.success'), value: props.metrics.lastToolRun.successCount },
   { label: t('ai.diagnostics.errors'), value: props.metrics.lastToolRun.errorCount },
@@ -102,7 +131,7 @@ const sessionHistorySummary = computed(() =>
     .map((session, index) => ({
       key: `${session.startedAt ?? index}`,
       label: t('ai.diagnostics.recentSessionN', { index: index + 1 }),
-      value: `${formatMs(session.responseDurationMs)} / ${session.toolCallCount} ${t('ai.diagnostics.calls')}`,
+      value: `${formatMs(session.responseDurationMs)} / ${session.requestCount} ${t('ai.diagnostics.requests')}`,
       hint: session.success
         ? t('ai.diagnostics.healthy')
         : t('ai.diagnostics.errorsAndTimeouts', {
@@ -133,19 +162,31 @@ const overallTone = computed<Tone>(() => {
 })
 
 const summaryText = computed(() => [
+  `${t('ai.diagnostics.prepare')} ${formatMs(props.metrics.prepareDurationMs)}`,
   `${t('ai.diagnostics.firstToken')} ${formatMs(props.metrics.firstTokenLatencyMs)} / ${t('ai.diagnostics.avg')} ${formatMs(props.metrics.trend.firstTokenAverageMs)}`,
+  `${t('ai.diagnostics.requestFirstToken')} ${formatMs(props.metrics.requestFirstTokenLatencyMs)}`,
   `${t('ai.diagnostics.response')} ${formatMs(props.metrics.responseDurationMs)} / ${t('ai.diagnostics.avg')} ${formatMs(props.metrics.trend.responseAverageMs)}`,
-  `${t('ai.diagnostics.tools')} ${props.metrics.lastToolRun.totalCalls}`,
+  `${t('ai.diagnostics.requests')} ${props.metrics.requestCount} / ${t('ai.diagnostics.recoveries')} ${props.metrics.recoveryCount}`,
+  `${t('ai.diagnostics.providerReroutes')} ${props.metrics.providerRerouteCount} / ${t('ai.diagnostics.autoDowngrades')} ${props.metrics.autoDowngradeCount} / ${t('ai.diagnostics.autoProviderSwitches')} ${props.metrics.autoSwitchProviderCount}`,
 ].join(' | '))
 
 const exportPayload = computed(() => JSON.stringify({
   exportedAt: Date.now(),
   current: {
+    prepareDurationMs: props.metrics.prepareDurationMs,
+    requestStartedAt: props.metrics.requestStartedAt,
+    requestCount: props.metrics.requestCount,
+    recoveryCount: props.metrics.recoveryCount,
     firstTokenLatencyMs: props.metrics.firstTokenLatencyMs,
+    requestFirstTokenLatencyMs: props.metrics.requestFirstTokenLatencyMs,
     responseDurationMs: props.metrics.responseDurationMs,
     loadHistoryDurationMs: props.metrics.loadHistoryDurationMs,
     pendingToolQueueLength: props.metrics.pendingToolQueueLength,
     compactTriggeredCount: props.metrics.compactTriggeredCount,
+    providerRerouteCount: props.metrics.providerRerouteCount,
+    autoDowngradeCount: props.metrics.autoDowngradeCount,
+    autoSwitchProviderCount: props.metrics.autoSwitchProviderCount,
+    lastRoutingReason: props.metrics.lastRoutingReason,
     lastToolRun: props.metrics.lastToolRun,
   },
   trend: props.metrics.trend,
@@ -184,6 +225,13 @@ function toneLabel(tone: Tone): string {
   if (tone === 'danger') return t('ai.diagnostics.critical')
   if (tone === 'warn') return t('ai.diagnostics.watch')
   return t('ai.diagnostics.healthy')
+}
+
+function formatRoutingReason(reason: AiChatMetricsSnapshot['lastRoutingReason']): string {
+  if (reason === 'provider_circuit_open') return t('ai.diagnostics.routingReasonProviderCircuitOpen')
+  if (reason === 'downgrade_model') return t('ai.diagnostics.routingReasonDowngradeModel')
+  if (reason === 'switch_provider') return t('ai.diagnostics.routingReasonSwitchProvider')
+  return t('ai.diagnostics.none')
 }
 
 function formatMs(value: number | null): string {
@@ -244,7 +292,7 @@ function formatDelta(value: number | null): string {
         </button>
       </div>
 
-      <div class="grid gap-2 md:grid-cols-4">
+      <div class="grid gap-2 md:grid-cols-5">
         <div
           v-for="card in metricCards"
           :key="card.key"
@@ -265,7 +313,7 @@ function formatDelta(value: number | null): string {
           <TrendingUp class="h-3.5 w-3.5" />
           <span class="text-[10px] uppercase tracking-[0.16em]">{{ t('ai.diagnostics.trend') }}</span>
         </div>
-        <div class="grid gap-2 md:grid-cols-4">
+        <div class="grid gap-2 md:grid-cols-5">
           <div
             v-for="card in trendCards"
             :key="card.key"

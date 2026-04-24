@@ -22,6 +22,7 @@ impl Default for AiConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct AiMessage {
     pub role: String,
     pub content: String,
@@ -29,6 +30,7 @@ pub struct AiMessage {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct AiResult {
     pub content: String,
     pub model: String,
@@ -38,6 +40,7 @@ pub struct AiResult {
 
 /// OpenAI-compatible API response types
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct ChatCompletionResponse {
     pub choices: Vec<ChatChoice>,
     pub model: String,
@@ -55,6 +58,7 @@ pub struct ChatMessageResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct ChatUsage {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,

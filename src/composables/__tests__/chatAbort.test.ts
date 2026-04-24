@@ -27,6 +27,7 @@ function makeStreamState(): AiChatStreamState {
       },
     ],
     lastFinishReason: 'tool_calls',
+    lastErrorRetryable: true,
     streamingMessageId: 'assistant-1',
     inToolExec: true,
   }
@@ -85,6 +86,7 @@ describe('chatAbort', () => {
     expect(streamState.pendingThinkingDelta).toBe('')
     expect(streamState.pendingToolCalls).toEqual([])
     expect(streamState.lastFinishReason).toBe('')
+    expect(streamState.lastErrorRetryable).toBeUndefined()
     expect(streamState.inToolExec).toBe(false)
   })
 })

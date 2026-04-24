@@ -141,6 +141,7 @@ describe('chatTaskDispatcher', () => {
   })
 
   it('retries retryable failures once and then succeeds', async () => {
+    vi.useFakeTimers()
     const state = ref<SpawnedTask[]>([
       makeTask({ id: 'task-1', description: 'retry once', autoRetryBudget: 1 }),
     ])
@@ -178,7 +179,10 @@ describe('chatTaskDispatcher', () => {
     })
 
     dispatcher.syncTasks(state.value)
-    await dispatcher.runReadyTasks()
+    const runPromise = dispatcher.runReadyTasks()
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(250)
+    await runPromise
 
     expect(attempts).toBe(2)
     expect(state.value[0]).toMatchObject({
@@ -186,6 +190,130 @@ describe('chatTaskDispatcher', () => {
       retryCount: 1,
       lastSummary: 'done after retry',
     })
+    vi.useRealTimers()
+  })
+
+  it('does not block other ready tasks while a retryable task waits for retry backoff', async () => {
+    vi.useFakeTimers()
+    const state = ref<SpawnedTask[]>([
+      makeTask({ id: 'task-1', description: 'retry once', autoRetryBudget: 1, priority: 'high' }),
+      makeTask({ id: 'task-2', description: 'independent task', priority: 'normal' }),
+    ])
+    let task1Attempts = 0
+    const runOrder: string[] = []
+
+    const dispatcher = createChatTaskDispatcher({
+      getTasks: () => state.value,
+      setTasks: tasks => {
+        state.value = tasks
+      },
+      maxParallel: 1,
+      executors: {
+        headless: {
+          mode: 'headless',
+          run: vi.fn(async (task) => {
+            runOrder.push(task.id)
+            if (task.id === 'task-1') {
+              task1Attempts += 1
+              if (task1Attempts === 1) {
+                return {
+                  status: 'error',
+                  error: 'network timeout',
+                  retryable: true,
+                  startedAt: Date.now(),
+                  finishedAt: Date.now(),
+                }
+              }
+              return {
+                status: 'done',
+                summary: 'retried task done',
+                startedAt: Date.now(),
+                finishedAt: Date.now(),
+              }
+            }
+            return {
+              status: 'done',
+              summary: 'independent done',
+              startedAt: Date.now(),
+              finishedAt: Date.now(),
+            }
+          }),
+        },
+        tab: { mode: 'tab', run: vi.fn() },
+      },
+    })
+
+    dispatcher.syncTasks(state.value)
+    const runPromise = dispatcher.runReadyTasks()
+    await Promise.resolve()
+
+    expect(runOrder).toEqual(['task-1', 'task-2'])
+    expect(state.value.find(task => task.id === 'task-2')?.status).toBe('running')
+
+    await vi.advanceTimersByTimeAsync(250)
+    await runPromise
+
+    expect(task1Attempts).toBe(2)
+    expect(state.value.find(task => task.id === 'task-1')).toMatchObject({
+      status: 'done',
+      retryCount: 1,
+    })
+    expect(state.value.find(task => task.id === 'task-2')).toMatchObject({
+      status: 'done',
+    })
+    vi.useRealTimers()
+  })
+
+  it('retries explicit retryable failures even when the error text is not network-shaped', async () => {
+    vi.useFakeTimers()
+    const state = ref<SpawnedTask[]>([
+      makeTask({ id: 'task-1', description: 'structured retryable', autoRetryBudget: 1 }),
+    ])
+    let attempts = 0
+
+    const dispatcher = createChatTaskDispatcher({
+      getTasks: () => state.value,
+      setTasks: tasks => {
+        state.value = tasks
+      },
+      executors: {
+        headless: {
+          mode: 'headless',
+          run: vi.fn(async () => {
+            attempts += 1
+            if (attempts === 1) {
+              return {
+                status: 'error',
+                error: 'provider overloaded now',
+                retryable: true,
+                startedAt: Date.now(),
+                finishedAt: Date.now(),
+              }
+            }
+            return {
+              status: 'done',
+              summary: 'recovered after structured retryable failure',
+              startedAt: Date.now(),
+              finishedAt: Date.now(),
+            }
+          }),
+        },
+        tab: { mode: 'tab', run: vi.fn() },
+      },
+    })
+
+    dispatcher.syncTasks(state.value)
+    const runPromise = dispatcher.runReadyTasks()
+    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(250)
+    await runPromise
+
+    expect(attempts).toBe(2)
+    expect(state.value[0]).toMatchObject({
+      status: 'done',
+      retryCount: 1,
+    })
+    vi.useRealTimers()
   })
 
   it('cancels a running headless task without letting a late result mark it done', async () => {

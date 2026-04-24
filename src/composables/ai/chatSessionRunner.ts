@@ -2,7 +2,7 @@ import { aiAbortStream, type ChatMessage } from '@/api/ai'
 import type { useAiChatStore } from '@/stores/ai-chat'
 import type { useAiMemoryStore } from '@/stores/ai-memory'
 import type { AiMessage, AiStreamEvent, FileAttachment, ModelConfig, ProviderConfig, ToolCallInfo, ToolResultInfo } from '@/types/ai'
-import { ensureErrorString } from '@/types/error'
+import { ensureErrorString, readStructuredRetryable } from '@/types/error'
 import type { Logger } from '@/utils/logger'
 import { finalizeSend } from './chatSendFinalize'
 import { prepareSendContext } from './chatSendPreparation'
@@ -71,6 +71,9 @@ export interface AiChatSessionRunnerParams {
   onPendingToolQueueLength?: (length: number) => void
   onResponseComplete?: () => void
   onCompactTriggered?: () => void
+  onPrepareComplete?: () => void
+  onRequestStart?: () => void
+  onRecovery?: () => void
   signal?: AbortSignal
   summaryMode?: 'brief' | 'normal'
 }
@@ -104,6 +107,15 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
   const startedAt = Date.now()
   const sid = params.sessionId
   let abortListener: (() => void) | undefined
+  const onStreamEvent = (event: AiStreamEvent) => {
+    if (event.type === 'TextDelta' || event.type === 'ThinkingDelta') {
+      params.onFirstToken?.()
+    }
+    if (event.type === 'ToolCall') {
+      params.onPendingToolQueueLength?.(params.streamState.pendingToolCalls.length + 1)
+    }
+    params.onStreamEvent?.(event)
+  }
 
   if (params.signal?.aborted) {
     return {
@@ -142,6 +154,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
       memoryStore: params.memoryStore,
       log: params.log,
     })
+    params.onPrepareComplete?.()
 
     params.isStreaming.value = true
 
@@ -171,15 +184,8 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
       clearWatchdog: params.clearWatchdog,
       flushPendingDelta: params.flushPendingDelta,
       updateStreamingMessage: params.updateStreamingMessage,
-      onStreamEvent: (event) => {
-        if (event.type === 'TextDelta' || event.type === 'ThinkingDelta') {
-          params.onFirstToken?.()
-        }
-        if (event.type === 'ToolCall') {
-          params.onPendingToolQueueLength?.(params.streamState.pendingToolCalls.length + 1)
-        }
-        params.onStreamEvent?.(event)
-      },
+      onStreamEvent,
+      onRequestStart: params.onRequestStart,
       executeToolCalls: (toolCalls, toolSessionId) =>
         params.executeToolCalls(toolCalls, toolSessionId, params.signal),
       parseAndWriteJournalSections: params.parseAndWriteJournalSections,
@@ -196,6 +202,11 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
       prepared.enableTools,
     )
   } catch (error) {
+    const structuredRetryable = readStructuredRetryable(error)
+    if (structuredRetryable !== undefined) {
+      params.streamState.lastErrorRetryable = structuredRetryable
+    }
+
     if (params.signal?.aborted) {
       params.error.value = 'Task cancelled'
     } else if (prepared) {
@@ -213,6 +224,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
         streamState: params.streamState,
         log: params.log,
         updateStreamingMessage: params.updateStreamingMessage,
+        onRecovery: params.onRecovery,
         forceCompact: params.forceCompact,
         streamWithToolLoop: (
           retrySessionId,
@@ -240,7 +252,8 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
           clearWatchdog: params.clearWatchdog,
           flushPendingDelta: params.flushPendingDelta,
           updateStreamingMessage: params.updateStreamingMessage,
-          onStreamEvent: params.onStreamEvent,
+          onStreamEvent,
+          onRequestStart: params.onRequestStart,
           executeToolCalls: (toolCalls, toolSessionId) =>
             params.executeToolCalls(toolCalls, toolSessionId, params.signal),
           parseAndWriteJournalSections: params.parseAndWriteJournalSections,
@@ -254,7 +267,11 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
     if (params.signal && abortListener) {
       params.signal.removeEventListener('abort', abortListener)
     }
-    params.onResponseComplete?.()
+    const latestError = [...params.messages.value].reverse().find(message => message.role === 'error')
+    const completed = !params.signal?.aborted && !params.error.value && !latestError
+    if (completed) {
+      params.onResponseComplete?.()
+    }
     finalizeSend({
       sessionId: sid,
       provider: params.provider,
@@ -287,6 +304,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
     startedAt,
     finishedAt: Date.now(),
     cancelled: Boolean(params.signal?.aborted),
+    streamRetryable: params.streamState.lastErrorRetryable,
     summaryMode: params.summaryMode,
   })
 }
@@ -298,6 +316,7 @@ function buildRunnerResult(params: {
   startedAt: number
   finishedAt: number
   cancelled: boolean
+  streamRetryable?: boolean
   summaryMode?: 'brief' | 'normal'
 }): AiChatSessionRunnerResult {
   const summary = summarizeMessages(params.messages, params.summaryMode)
@@ -316,6 +335,9 @@ function buildRunnerResult(params: {
   const latestError = [...params.messages].reverse().find(message => message.role === 'error')
   const error = params.error ?? latestError?.content
   if (error) {
+    const retryable = params.streamRetryable
+      ?? readStructuredRetryable(error)
+      ?? isRetryableRunnerError(error)
     return {
       status: 'error',
       summary,
@@ -323,7 +345,7 @@ function buildRunnerResult(params: {
       sessionId: params.sessionId,
       startedAt: params.startedAt,
       finishedAt: params.finishedAt,
-      retryable: isRetryableRunnerError(error),
+      retryable,
     }
   }
 

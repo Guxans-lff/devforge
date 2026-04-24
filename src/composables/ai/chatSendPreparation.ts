@@ -61,6 +61,27 @@ export interface PrepareSendContextParams {
   log: Logger
 }
 
+interface ContextFileReadResult {
+  entry: NonNullable<AiChatStore['currentWorkspaceConfig']>['contextFiles'][number]
+  fileContent: string
+}
+
+async function readContextFiles(
+  contextFiles: NonNullable<AiChatStore['currentWorkspaceConfig']>['contextFiles'],
+  workDir: string,
+  log: Logger,
+): Promise<Array<ContextFileReadResult | null>> {
+  return await Promise.all(contextFiles.map(async (entry) => {
+    try {
+      const fileContent = await aiReadContextFile(workDir, entry.path, CONTEXT_FILE_MAX_LINES)
+      return { entry, fileContent }
+    } catch (error) {
+      log.warn('context_file_read_failed', { path: entry.path }, error)
+      return null
+    }
+  }))
+}
+
 export async function prepareSendContext(params: PrepareSendContextParams): Promise<PrepareSendResult> {
   const {
     content,
@@ -95,58 +116,6 @@ export async function prepareSendContext(params: PrepareSendContextParams): Prom
   const contentType = readyFiles.length > 0 ? 'text_with_files' : 'text'
   const enableTools = model.capabilities.toolUse && !!workDir
 
-  let enrichedSystemPrompt = systemPrompt
-
-  if (memoryStore.currentWorkspaceId !== '_global') {
-    const tokenBudget = Math.floor(model.capabilities.maxContext * 0.05)
-    const recalled = await memoryStore.recall(content, tokenBudget)
-    if (recalled) {
-      enrichedSystemPrompt = `${systemPrompt ?? ''}\n\n${recalled}`
-    }
-  }
-
-  const workspaceConfig = aiStore.currentWorkspaceConfig
-  if (workspaceConfig && workDir) {
-    if (workspaceConfig.systemPromptExtra) {
-      enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n${workspaceConfig.systemPromptExtra}`
-    }
-
-    if (workspaceConfig.contextFiles && workspaceConfig.contextFiles.length > 0) {
-      const contextParts: string[] = []
-      let totalContextChars = 0
-      for (const entry of workspaceConfig.contextFiles) {
-        if (totalContextChars >= CONTEXT_FILES_TOTAL_MAX_CHARS) break
-        try {
-          const fileContent = await aiReadContextFile(workDir, entry.path, CONTEXT_FILE_MAX_LINES)
-          const { content: truncatedContent, truncated } = truncateContextContent(fileContent)
-          const remainingBudget = CONTEXT_FILES_TOTAL_MAX_CHARS - totalContextChars
-          if (remainingBudget <= 0) break
-
-          const boundedContent = truncatedContent.length > remainingBudget
-            ? `${truncatedContent.slice(0, Math.max(remainingBudget - 16, 0))}\n...[truncated]`
-            : truncatedContent
-          const header = entry.reason ? `# ${entry.path} (${entry.reason})` : `# ${entry.path}`
-          const suffix = truncated || boundedContent.length < fileContent.length
-            ? '\n[context-file truncated due to budget]'
-            : ''
-          const section = `${header}\n\`\`\`\n${boundedContent}\n\`\`\`${suffix}`
-          totalContextChars += boundedContent.length
-          contextParts.push(section)
-        } catch (error) {
-          log.warn('context_file_read_failed', { path: entry.path }, error)
-        }
-      }
-
-      if (contextParts.length > 0) {
-        enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n<context-files>\n${contextParts.join('\n\n')}\n</context-files>`
-      }
-    }
-  }
-
-  if (planGateEnabled && !planApproved) {
-    enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n[PLAN GATE ACTIVE] 你必须先输出清晰的执行计划（步骤列表），不能调用任何工具，等待用户确认后才开始执行。计划中每个步骤请以 "- " 开头。`
-  }
-
   const userMessage: AiMessage = {
     id: genId(),
     role: 'user',
@@ -175,6 +144,65 @@ export async function prepareSendContext(params: PrepareSendContextParams): Prom
     model,
     log,
   })
+
+  let enrichedSystemPrompt = systemPrompt
+  const tokenBudget = Math.floor(model.capabilities.maxContext * 0.05)
+  const recallPromise = memoryStore.currentWorkspaceId !== '_global'
+    ? memoryStore.recall(content, tokenBudget).catch((error) => {
+      log.warn('memory_recall_failed', { sessionId }, error)
+      return ''
+    })
+    : Promise.resolve('')
+
+  const workspaceConfig = aiStore.currentWorkspaceConfig
+  const contextFileReadsPromise = workspaceConfig && workDir && workspaceConfig.contextFiles && workspaceConfig.contextFiles.length > 0
+    ? readContextFiles(workspaceConfig.contextFiles, workDir, log)
+    : Promise.resolve([])
+
+  const recalled = await recallPromise
+  if (recalled) {
+    enrichedSystemPrompt = `${systemPrompt ?? ''}\n\n${recalled}`
+  }
+
+  if (workspaceConfig && workDir) {
+    if (workspaceConfig.systemPromptExtra) {
+      enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n${workspaceConfig.systemPromptExtra}`
+    }
+
+    if (workspaceConfig.contextFiles && workspaceConfig.contextFiles.length > 0) {
+      const contextFileReads = await contextFileReadsPromise
+      const contextParts: string[] = []
+      let totalContextChars = 0
+      for (const fileResult of contextFileReads) {
+        if (totalContextChars >= CONTEXT_FILES_TOTAL_MAX_CHARS) break
+        if (!fileResult) continue
+
+        const { entry, fileContent } = fileResult
+        const { content: truncatedContent, truncated } = truncateContextContent(fileContent)
+        const remainingBudget = CONTEXT_FILES_TOTAL_MAX_CHARS - totalContextChars
+        if (remainingBudget <= 0) break
+
+        const boundedContent = truncatedContent.length > remainingBudget
+          ? `${truncatedContent.slice(0, Math.max(remainingBudget - 16, 0))}\n...[truncated]`
+          : truncatedContent
+        const header = entry.reason ? `# ${entry.path} (${entry.reason})` : `# ${entry.path}`
+        const suffix = truncated || boundedContent.length < fileContent.length
+          ? '\n[context-file truncated due to budget]'
+          : ''
+        const section = `${header}\n\`\`\`\n${boundedContent}\n\`\`\`${suffix}`
+        totalContextChars += boundedContent.length
+        contextParts.push(section)
+      }
+
+      if (contextParts.length > 0) {
+        enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n<context-files>\n${contextParts.join('\n\n')}\n</context-files>`
+      }
+    }
+  }
+
+  if (planGateEnabled && !planApproved) {
+    enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n[PLAN GATE ACTIVE] 你必须先输出清晰的执行计划（步骤列表），不能调用任何工具，等待用户确认后才开始执行。计划中每个步骤请以 "- " 开头。`
+  }
 
   const hasVisionCapability = model.capabilities.vision
   return {

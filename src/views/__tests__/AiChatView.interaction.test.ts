@@ -231,9 +231,25 @@ function makeModel(): ModelConfig {
     id: 'model-1',
     name: 'Model 1',
     capabilities: {
-      stream: true,
+      streaming: true,
       toolUse: false,
       vision: false,
+      thinking: true,
+      maxContext: 32000,
+      maxOutput: 4096,
+    },
+  }
+}
+
+function makeStableModel(): ModelConfig {
+  return {
+    id: 'model-stable',
+    name: 'Model Stable',
+    capabilities: {
+      streaming: true,
+      toolUse: false,
+      vision: false,
+      thinking: false,
       maxContext: 32000,
       maxOutput: 4096,
     },
@@ -244,9 +260,9 @@ function makeProvider(): ProviderConfig {
   return {
     id: 'provider-1',
     name: 'Provider 1',
-    providerType: 'openai',
+    providerType: 'openai_compat',
     endpoint: 'https://api.example.com',
-    models: [makeModel()],
+    models: [makeModel(), makeStableModel()],
     isDefault: true,
     createdAt: 1,
   }
@@ -1433,6 +1449,39 @@ describe('AiChatView interaction', () => {
     await flushPromises()
 
     expect(wrapper.find('.ai-diagnostics-panel-stub').exists()).toBe(true)
+  })
+
+  it('retries a transient failure with a more stable fallback model', async () => {
+    mocks.state.chat.send
+      .mockResolvedValueOnce({
+        status: 'error',
+        error: 'network timeout while streaming',
+        retryable: true,
+      })
+      .mockResolvedValueOnce({
+        status: 'done',
+        summary: 'done',
+        retryable: false,
+      })
+    mocks.state.chat.messages.value = [
+      { id: 'user-1', role: 'user', content: 'first request', timestamp: 1 },
+      { id: 'error-1', role: 'error', content: 'network timeout while streaming', timestamp: 2 },
+    ]
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.send-first').trigger('click')
+    await flushPromises()
+
+    expect(mocks.state.chat.send).toHaveBeenCalledTimes(1)
+    expect(mocks.state.chat.regenerate).toHaveBeenCalledTimes(1)
+    expect(mocks.state.chat.regenerate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'provider-1' }),
+      expect.objectContaining({ id: 'model-stable' }),
+      'test-api-key',
+      undefined,
+    )
   })
 
   it('hides the diagnostics panel outside developer mode', async () => {

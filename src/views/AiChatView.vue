@@ -34,6 +34,11 @@ import { executeToolCalls as runToolCalls } from '@/composables/ai/chatToolExecu
 import { handleStreamEvent as applyStreamEvent, type AiChatStreamState } from '@/composables/ai/chatStreamEvents'
 import { useAutoCompact } from '@/composables/useAutoCompact'
 import { useAiChatObservability } from '@/composables/ai/useAiChatObservability'
+import {
+  recordProviderSuccess,
+  recordProviderTransientFailure,
+  resolveRetryableFailureFallback,
+} from '@/composables/ai/chatRuntimeRouting'
 import { createLogger } from '@/utils/logger'
 import AiChatShell from '@/components/ai/AiChatShell.vue'
 import AiDiagnosticsPanel from '@/components/ai/AiDiagnosticsPanel.vue'
@@ -45,6 +50,7 @@ import {
   Sparkles,
   Zap,
 } from 'lucide-vue-next'
+import type { ProviderConfig, ModelConfig } from '@/types/ai'
 
 interface MessageGroup {
   isGroupStart: boolean
@@ -75,6 +81,8 @@ interface RepositoryRootFocus {
   selectedCount: number
   active?: boolean
 }
+
+type RetryFallbackReason = 'downgrade_model' | 'switch_provider'
 
 function normalizeWorkspacePath(path?: string | null): string {
   return (path ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
@@ -504,6 +512,52 @@ function formatTaskStatus(task: SpawnedTask): string {
     default:
       return '待处理'
   }
+}
+
+function appendRoutingDivider(text: string): void {
+  chat.messages.value.push({
+    id: `divider-route-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    role: 'system',
+    type: 'divider',
+    dividerText: text,
+    content: '',
+    timestamp: Date.now(),
+  })
+}
+
+function syncSelectedRoute(provider: ProviderConfig, model: ModelConfig): void {
+  selectedProviderId.value = provider.id
+  selectedModelId.value = model.id
+}
+
+function trackRunnerResult(provider: ProviderConfig, result: { status: string; retryable?: boolean }): void {
+  if (result.status === 'done') {
+    recordProviderSuccess(provider.id)
+    return
+  }
+  if (result.retryable) {
+    recordProviderTransientFailure(provider.id)
+  }
+}
+
+function appendFallbackDivider(
+  provider: ProviderConfig,
+  model: ModelConfig,
+  reason: RetryFallbackReason,
+): void {
+  appendRoutingDivider(t(
+    reason === 'downgrade_model'
+      ? 'ai.messages.autoDowngradedModel'
+      : 'ai.messages.autoSwitchedProvider',
+    {
+      providerLabel: provider.name,
+      modelLabel: model.name,
+    },
+  ))
+}
+
+function recordRoutingEvent(reason: RetryFallbackReason | 'provider_circuit_open'): void {
+  chat.recordRuntimeRouting?.(reason)
 }
 
 function toggleTaskRail(): void {
@@ -981,8 +1035,8 @@ async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
 }> {
   const startedAt = Date.now()
   const taskSessionId = task.taskSessionId ?? `session-headless-${task.id}-${startedAt}`
-  const provider = currentProvider.value
-  const model = currentModel.value
+  let provider = currentProvider.value
+  let model = currentModel.value
   if (!provider || !model) {
     return {
       status: 'error',
@@ -994,7 +1048,7 @@ async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
     }
   }
 
-  const apiKey = await getCredential(`ai-provider-${provider.id}`) ?? ''
+  let apiKey = await getCredential(`ai-provider-${provider.id}`) ?? ''
   if (!apiKey) {
     return {
       status: 'error',
@@ -1019,10 +1073,12 @@ async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
     pendingThinkingDelta: '',
     pendingToolCalls: [],
     lastFinishReason: '',
+    lastErrorRetryable: undefined,
     streamingMessageId: '',
     inToolExec: false,
   })
   const abortController = new AbortController()
+  headlessObservability.markSendStart()
   headlessTaskRuns.set(task.id, {
     sessionId: taskSessionId,
     abortController,
@@ -1037,6 +1093,12 @@ async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
     taskMessages.value[index] = updater(taskMessages.value[index]!)
   }
   const handleIncomingStreamEvent = (event: import('@/types/ai').AiStreamEvent) => {
+    if (event.type === 'TextDelta' || event.type === 'ThinkingDelta') {
+      headlessObservability.markFirstToken()
+    }
+    if (event.type === 'ToolCall') {
+      headlessObservability.updatePendingToolQueueLength(streamState.pendingToolCalls.length + 1)
+    }
     applyStreamEvent({
       event,
       sessionId: taskSessionId,
@@ -1057,7 +1119,7 @@ async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
   }
 
   try {
-    const result = await runAiChatSessionTurn({
+    const runTaskTurn = () => runAiChatSessionTurn({
       sessionId: taskSessionId,
       content: task.description,
       provider,
@@ -1114,9 +1176,29 @@ async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
       parseAndWriteJournalSections: () => {},
       parseSpawnedTasks: () => {},
       onStreamEvent: handleIncomingStreamEvent,
+      onPrepareComplete: () => headlessObservability.markPrepareComplete(),
+      onRequestStart: () => headlessObservability.markRequestStart(),
+      onRecovery: () => headlessObservability.markRecovery(),
+      onResponseComplete: () => headlessObservability.markResponseComplete(),
       signal: abortController.signal,
       summaryMode: task.summaryMode,
     })
+
+    let result = await runTaskTurn()
+    trackRunnerResult(provider, result)
+    if (result.status === 'error' && result.retryable) {
+      const fallback = resolveRetryableFailureFallback(store.providers, provider, model)
+      if (fallback.rerouted) {
+        headlessObservability.recordRuntimeRouting(fallback.reason!)
+        provider = fallback.provider
+        model = fallback.model
+        apiKey = await getCredential(`ai-provider-${provider.id}`) ?? ''
+        if (apiKey) {
+          result = await runTaskTurn()
+          trackRunnerResult(provider, result)
+        }
+      }
+    }
     return result
   } finally {
     headlessTaskRuns.delete(task.id)
@@ -1201,7 +1283,7 @@ async function doSend(
   attachments: ReturnType<typeof fileAttachment.getReadyAttachments>,
 ): Promise<void> {
   const beforeTaskIds = new Set(chat.spawnedTasks.value.map(task => task.id))
-  await sendMessageNow(content, attachments, (cleanContent) => {
+  const sendOutcome = await sendMessageNow(content, attachments, (cleanContent) => {
     const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
     if (!tab) return
     if (!isDefaultAiTabTitle(tab.title)) return
@@ -1211,6 +1293,50 @@ async function doSend(
     const shortTitle = meaningful.replace(/\s+/g, ' ').slice(0, 12)
     workspace.updateTabTitle(tab.id, shortTitle)
   })
+  if (!sendOutcome) return
+
+  if (sendOutcome.route.rerouted) {
+    recordRoutingEvent('provider_circuit_open')
+    syncSelectedRoute(sendOutcome.route.provider, sendOutcome.route.model)
+    appendRoutingDivider(t('ai.messages.providerRerouted', {
+      providerLabel: sendOutcome.route.provider.name,
+      modelLabel: sendOutcome.route.model.name,
+    }))
+  }
+
+  const primaryResult = sendOutcome.result
+  if (primaryResult) {
+    trackRunnerResult(sendOutcome.route.provider, primaryResult)
+  }
+
+  if (
+    primaryResult?.status === 'error'
+    && primaryResult.retryable
+  ) {
+    const fallback = resolveRetryableFailureFallback(
+      store.providers,
+      sendOutcome.route.provider,
+      sendOutcome.route.model,
+    )
+    if (fallback.rerouted) {
+      recordRoutingEvent(fallback.reason!)
+      syncSelectedRoute(fallback.provider, fallback.model)
+      appendFallbackDivider(fallback.provider, fallback.model, fallback.reason!)
+      const apiKey = await getCredential(`ai-provider-${fallback.provider.id}`) ?? ''
+      if (apiKey) {
+        const retryResult = await chat.regenerate(
+          fallback.provider,
+          fallback.model,
+          apiKey,
+          effectiveSystemPrompt.value,
+        )
+        if (retryResult) {
+          trackRunnerResult(fallback.provider, retryResult)
+        }
+      }
+    }
+  }
+
   const nextTasks = chat.spawnedTasks.value.map(task => normalizeSpawnedTask(task, {
     executionMode: getDispatcherDefaultMode(),
     autoRetryBudget: getDispatcherAutoRetryCount(),

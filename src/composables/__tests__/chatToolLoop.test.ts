@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+﻿import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { streamWithToolLoop } from '@/composables/ai/chatToolLoop'
 import type { AiChatStreamState } from '@/composables/ai/chatStreamEvents'
 import type { AiMessage, AiStreamEvent, ModelConfig, ProviderConfig, ToolCallInfo, ToolResultInfo } from '@/types/ai'
@@ -46,6 +46,7 @@ function makeStreamState(): AiChatStreamState {
     pendingThinkingDelta: '',
     pendingToolCalls: [],
     lastFinishReason: '',
+    lastErrorRetryable: undefined,
     streamingMessageId: '',
     inToolExec: false,
   }
@@ -159,6 +160,49 @@ describe('chatToolLoop', () => {
     expect(params.executeToolCalls).not.toHaveBeenCalled()
     expect(params.messages.value).toHaveLength(1)
     expect(params.messages.value[0]?.role).toBe('assistant')
+  })
+
+  it('caps request max tokens instead of sending the model hard limit upstream', async () => {
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      onEvent({ type: 'Done', finish_reason: 'stop' })
+    })
+
+    const params = makeParams({
+      model: {
+        ...makeModel(),
+        capabilities: {
+          ...makeModel().capabilities,
+          thinking: true,
+          maxOutput: 128000,
+        },
+      },
+    })
+
+    await streamWithToolLoop(params)
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(1)
+    expect(aiChatStreamMock.mock.calls[0]?.[0]).toMatchObject({
+      maxTokens: 8192,
+      enableTools: true,
+    })
+  })
+
+  it('emits request start for each upstream stream attempt', async () => {
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      onEvent({ type: 'ToolCall', id: `tool-${aiChatStreamMock.mock.calls.length}`, name: 'read_file', arguments: '{"path":"a.ts"}' })
+      onEvent({ type: 'Done', finish_reason: 'tool_calls' })
+    })
+
+    const onRequestStart = vi.fn()
+    const params = makeParams({
+      maxToolLoops: 1,
+      onRequestStart,
+    })
+
+    await streamWithToolLoop(params)
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(2)
+    expect(onRequestStart).toHaveBeenCalledTimes(2)
   })
 
   it('converts empty assistant responses into an error without parsing side effects', async () => {
@@ -303,4 +347,30 @@ describe('chatToolLoop', () => {
     expect(params.messages.value.at(-1)?.role).toBe('error')
     expect(params.messages.value.at(-1)?.content).toContain('工具循环疑似卡住')
   })
+
+  it('still detects repeated tool loops when tool results are very large', async () => {
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      onEvent({ type: 'ToolCall', id: `tool-${aiChatStreamMock.mock.calls.length}`, name: 'read_file', arguments: '{"path":"src/huge.ts"}' })
+      onEvent({ type: 'Done', finish_reason: 'tool_calls' })
+    })
+
+    const hugeResult = 'x'.repeat(50_000)
+    const params = makeParams({
+      maxToolLoops: 5,
+      executeToolCalls: vi.fn(async () => [{
+        toolCallId: 'tool-fixed',
+        toolName: 'read_file',
+        success: true,
+        content: hugeResult,
+      }]),
+    })
+
+    await streamWithToolLoop(params)
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(3)
+    expect(params.executeToolCalls).toHaveBeenCalledTimes(2)
+    expect(params.messages.value.at(-1)?.role).toBe('error')
+    expect(params.messages.value.at(-1)?.content).toContain('工具循环疑似卡住')
+  })
 })
+

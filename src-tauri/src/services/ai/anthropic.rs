@@ -18,10 +18,18 @@ use super::models::*;
 use super::provider::AiProvider;
 use crate::utils::error::AppError;
 
+fn is_retryable_stream_error_type(error_type: &str) -> bool {
+    matches!(error_type, "rate_limit_error" | "overloaded_error" | "api_error")
+}
+
+fn should_stop_after_event(event_type: &str) -> bool {
+    matches!(event_type, "message_stop")
+}
+
 fn build_http_client() -> Client {
     Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
-        .read_timeout(std::time::Duration::from_secs(120))
+        .read_timeout(std::time::Duration::from_secs(300))
         .build()
         .expect("创建 HTTP 客户端失败")
 }
@@ -456,7 +464,7 @@ impl AiProvider for AnthropicProvider {
             let msg = format!("{} ({})", readable_msg, status.as_u16());
             let _ = on_event.send(AiStreamEvent::Error {
                 message: msg.clone(),
-                retryable: status.is_server_error(),
+                retryable: super::http_retry::is_retryable_status(status),
             });
             return Err(AppError::Other(msg));
         }
@@ -476,6 +484,7 @@ impl AiProvider for AnthropicProvider {
         let mut current_tool_name = String::new();
         let mut current_tool_input = String::new();
         let mut in_tool_use = false;
+        let mut stream_done = false;
 
         loop {
             tokio::select! {
@@ -599,15 +608,22 @@ impl AiProvider for AnthropicProvider {
                                         let _ = on_event.send(AiStreamEvent::Done {
                                             finish_reason: finish_reason.clone(),
                                         });
+                                        stream_done = true;
                                     }
                                     "error" => {
-                                        let error_msg = serde_json::from_str::<serde_json::Value>(&data)
-                                            .ok()
+                                        let error_payload = serde_json::from_str::<serde_json::Value>(&data).ok();
+                                        let error_msg = error_payload
+                                            .as_ref()
                                             .and_then(|v| v.get("error").and_then(|e| e.get("message")).and_then(|m| m.as_str()).map(|s| s.to_string()))
                                             .unwrap_or_else(|| data.clone());
+                                        let retryable = error_payload
+                                            .as_ref()
+                                            .and_then(|v| v.get("error").and_then(|e| e.get("type")).and_then(|t| t.as_str()))
+                                            .map(is_retryable_stream_error_type)
+                                            .unwrap_or(false);
                                         let _ = on_event.send(AiStreamEvent::Error {
                                             message: error_msg.clone(),
-                                            retryable: false,
+                                            retryable,
                                         });
                                         let _ = on_event.send(AiStreamEvent::Done {
                                             finish_reason: "error".to_string(),
@@ -616,6 +632,13 @@ impl AiProvider for AnthropicProvider {
                                     }
                                     _ => {} // ping 等忽略
                                 }
+
+                                if should_stop_after_event(&event_type) {
+                                    break;
+                                }
+                            }
+                            if stream_done {
+                                break;
                             }
                         }
                         Some(Err(e)) => {
@@ -633,6 +656,9 @@ impl AiProvider for AnthropicProvider {
                     }
                 }
             }
+            if stream_done {
+                break;
+            }
         }
 
         Ok(ChatResult {
@@ -642,5 +668,26 @@ impl AiProvider for AnthropicProvider {
             completion_tokens,
             finish_reason,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_retryable_stream_error_type, should_stop_after_event};
+
+    #[test]
+    fn marks_retryable_anthropic_stream_error_types() {
+        assert!(is_retryable_stream_error_type("rate_limit_error"));
+        assert!(is_retryable_stream_error_type("overloaded_error"));
+        assert!(is_retryable_stream_error_type("api_error"));
+        assert!(!is_retryable_stream_error_type("invalid_request_error"));
+        assert!(!is_retryable_stream_error_type("authentication_error"));
+    }
+
+    #[test]
+    fn stops_only_after_message_stop_event() {
+        assert!(should_stop_after_event("message_stop"));
+        assert!(!should_stop_after_event("message_delta"));
+        assert!(!should_stop_after_event("content_block_delta"));
     }
 }

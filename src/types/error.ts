@@ -18,6 +18,32 @@ export interface BackendError {
 }
 
 /**
+ * 读取后端/调用链显式给出的 retryable 提示。
+ *
+ * 只在输入本身携带 retryable 布尔值时返回结果；
+ * 普通字符串、JS Error 或非结构化对象返回 undefined，
+ * 让上层继续走基于上下文的兜底判断。
+ */
+export function readStructuredRetryable(err: unknown): boolean | undefined {
+  if (typeof err === 'string') {
+    try {
+      const parsed = JSON.parse(err) as Record<string, unknown>
+      if (typeof parsed.retryable === 'boolean') return parsed.retryable
+    } catch {
+      // ignore plain-text errors
+    }
+    return undefined
+  }
+
+  if (err && typeof err === 'object') {
+    const value = (err as Record<string, unknown>).retryable
+    if (typeof value === 'boolean') return value
+  }
+
+  return undefined
+}
+
+/**
  * 解析后端返回的错误，兼容新旧两种格式
  *
  * - 新格式：Tauri 将 Err(AppError) 序列化为 JSON 字符串 `{ kind, message, retryable }`

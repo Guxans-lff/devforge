@@ -197,6 +197,7 @@ describe('chatToolExecution', () => {
     expect(results[0]?.metadata?.retryCount).toBe(1)
     expect(results[0]?.metadata?.timeoutMs).toBe(5)
     expect(toolCalls[0]?.execution?.timedOut).toBe(false)
+    expect(aiExecuteToolMock.mock.calls[0]?.[5]).toBe(5)
   })
 
   it('does not start queued tools after cancellation', async () => {

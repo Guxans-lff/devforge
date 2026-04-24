@@ -9,6 +9,8 @@ import { checkTokenLimit } from '@/utils/file-markers'
 import { buildToolGuide } from '@/utils/ai-prompts'
 import { setApprovalMode, type ApprovalMode } from '@/composables/useToolApproval'
 import { ensureErrorString } from '@/types/error'
+import { resolveRuntimeRoute } from '@/composables/ai/chatRuntimeRouting'
+import type { AiChatSessionRunnerResult } from '@/composables/ai/chatSessionRunner'
 
 type WorkDirOption = { label: string; value: string }
 type ModeConfig = {
@@ -33,14 +35,26 @@ interface ChatLike {
     apiKey: string,
     systemPrompt?: string,
     attachments?: FileAttachment[],
-  ) => Promise<void>
+  ) => Promise<AiChatSessionRunnerResult | undefined>
   regenerate: (
     provider: ProviderConfig,
     model: ModelConfig,
     apiKey: string,
     systemPrompt?: string,
-  ) => Promise<void>
+  ) => Promise<AiChatSessionRunnerResult | undefined>
   removeLastError: () => void
+}
+
+export interface ChatResolvedRoute {
+  provider: ProviderConfig
+  model: ModelConfig
+  rerouted: boolean
+  reason?: 'provider_circuit_open'
+}
+
+export interface SendMessageNowResult {
+  route: ChatResolvedRoute
+  result: AiChatSessionRunnerResult | undefined
 }
 
 interface MemoryStoreLike {
@@ -207,34 +221,41 @@ export function useAiChatViewState({
     content: string,
     attachments: FileAttachment[],
     onSent?: (cleanContent: string) => void | Promise<void>,
-  ): Promise<void> {
-    if (!currentProvider.value || !currentModel.value) return
+  ): Promise<SendMessageNowResult | null> {
+    if (!currentProvider.value || !currentModel.value) return null
+
+    const route = resolveRuntimeRoute(
+      store.providers,
+      currentProvider.value,
+      currentModel.value,
+    )
 
     const cleanContent = stripMentionMarkers(content)
-    const apiKey = await getCredential(`ai-provider-${currentProvider.value.id}`) ?? ''
+    const apiKey = await getCredential(`ai-provider-${route.provider.id}`) ?? ''
     if (!apiKey) {
       chat.error.value = t('ai.messages.apiKeyNotConfigured')
-      return
+      return null
     }
 
-    if (currentModel.value.capabilities.maxContext > 0) {
+    if (route.model.capabilities.maxContext > 0) {
       const totalText = cleanContent + attachments.map(file => file.content ?? '').join('')
-      const check = checkTokenLimit(totalText, chat.totalTokens.value, currentModel.value.capabilities.maxContext)
+      const check = checkTokenLimit(totalText, chat.totalTokens.value, route.model.capabilities.maxContext)
       if (check.warn) {
         console.warn(`[AI] Token near limit: estimated ${check.usage} / limit ${check.limit}`)
       }
     }
 
-    await chat.send(
+    const result = await chat.send(
       cleanContent,
-      currentProvider.value,
-      currentModel.value,
+      route.provider,
+      route.model,
       apiKey,
       effectiveSystemPrompt.value,
       attachments,
     )
 
     await onSent?.(cleanContent)
+    return { route, result }
   }
 
   async function handleContinue(): Promise<void> {

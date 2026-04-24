@@ -80,6 +80,7 @@ pub fn file_path(app_data_dir: &Path, session_id: &str, tool_call_id: &str) -> P
 
 /// 判断是否需要落盘
 #[inline]
+#[allow(dead_code)]
 pub fn should_persist(content: &str) -> bool {
     content.chars().count() > MAX_RESULT_SIZE_CHARS
 }

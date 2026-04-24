@@ -20,6 +20,16 @@ use super::provider::AiProvider;
 use super::stream_parser;
 use crate::utils::error::AppError;
 
+fn is_retryable_stream_error_code(code: &str) -> bool {
+    matches!(code, "rate_limit_exceeded" | "server_error" | "temporarily_unavailable")
+}
+
+fn contains_done_event(events: &[AiStreamEvent]) -> bool {
+    events
+        .iter()
+        .any(|event| matches!(event, AiStreamEvent::Done { .. }))
+}
+
 /// 检测模型是否需要走 OpenAI Responses API（GPT-5 / o3 / o4 系列）
 fn is_responses_api_model(model: &str) -> bool {
     let m = model.to_lowercase();
@@ -35,7 +45,7 @@ pub struct OpenAiCompatProvider {
 fn build_http_client() -> Client {
     Client::builder()
         .connect_timeout(std::time::Duration::from_secs(30))
-        .read_timeout(std::time::Duration::from_secs(120))
+        .read_timeout(std::time::Duration::from_secs(300))
         .build()
         .expect("创建 HTTP 客户端失败")
 }
@@ -320,7 +330,10 @@ impl OpenAiCompatProvider {
                 .and_then(|v| v.get("error")?.get("message")?.as_str().map(|s| s.to_string()))
                 .unwrap_or_else(|| error_body.chars().take(200).collect());
             let msg = format!("{} ({})", readable_msg, status.as_u16());
-            let _ = on_event.send(AiStreamEvent::Error { message: msg.clone(), retryable: status.is_server_error() });
+            let _ = on_event.send(AiStreamEvent::Error {
+                message: msg.clone(),
+                retryable: super::http_retry::is_retryable_status(status),
+            });
             return Err(AppError::Other(msg));
         }
 
@@ -331,6 +344,7 @@ impl OpenAiCompatProvider {
         let mut completion_tokens: u32 = 0;
         let mut finish_reason = String::from("stop");
         let mut t_first_delta: Option<std::time::Instant> = None;
+        let mut stream_done = false;
 
         loop {
             tokio::select! {
@@ -343,6 +357,7 @@ impl OpenAiCompatProvider {
                 maybe_events = event_stream.next() => {
                     match maybe_events {
                         Some(events) => {
+                            stream_done = contains_done_event(&events);
                             for event in events {
                                 match &event {
                                     AiStreamEvent::TextDelta { delta } => { if t_first_delta.is_none() { t_first_delta = Some(std::time::Instant::now()); } full_content.push_str(delta); }
@@ -353,10 +368,16 @@ impl OpenAiCompatProvider {
                                 }
                                 let _ = on_event.send(event);
                             }
+                            if stream_done {
+                                break;
+                            }
                         }
                         None => break,
                     }
                 }
+            }
+            if stream_done {
+                break;
             }
         }
 
@@ -385,7 +406,7 @@ impl OpenAiCompatProvider {
         let body_bytes = serde_json::to_string(&body).map(|s| s.len()).unwrap_or(0);
         log::info!("AI 请求(responses): {} model={} input_count={} body_bytes={}",
             url, config.model, messages.len(), body_bytes);
-        log::info!("AI Responses 请求体: {}", serde_json::to_string(&body).unwrap_or_default());
+        log::debug!("AI Responses 请求体: {}", serde_json::to_string(&body).unwrap_or_default());
 
         let t_request_start = std::time::Instant::now();
 
@@ -410,7 +431,10 @@ impl OpenAiCompatProvider {
                 .and_then(|v| v.get("error")?.get("message")?.as_str().map(|s| s.to_string()))
                 .unwrap_or_else(|| error_body.chars().take(200).collect());
             let msg = format!("{} ({})", readable_msg, status.as_u16());
-            let _ = on_event.send(AiStreamEvent::Error { message: msg.clone(), retryable: status.is_server_error() });
+            let _ = on_event.send(AiStreamEvent::Error {
+                message: msg.clone(),
+                retryable: super::http_retry::is_retryable_status(status),
+            });
             return Err(AppError::Other(msg));
         }
 
@@ -425,6 +449,7 @@ impl OpenAiCompatProvider {
         // item_id → call_id（Responses API delta 事件用 item_id，output_item.added 用 call_id）
         let mut item_id_to_call_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let mut tool_call_index: u32 = 0;
+        let mut stream_done = false;
 
         let mut byte_stream = response.bytes_stream();
         let mut buf = Vec::<u8>::new();
@@ -453,11 +478,14 @@ impl OpenAiCompatProvider {
                                 if line.is_empty() { continue; }
 
                                 let data = match line.strip_prefix("data: ") { Some(d) => d, None => continue };
-                                if data == "[DONE]" { break; }
+                                if data == "[DONE]" {
+                                    stream_done = true;
+                                    break;
+                                }
 
                                 let ev: serde_json::Value = match serde_json::from_str(data) { Ok(v) => v, Err(_) => continue };
                                 let ev_type = ev.get("type").and_then(|v| v.as_str()).unwrap_or("");
-                                log::info!("Responses SSE: type={} data={}", ev_type, data.chars().take(300).collect::<String>());
+                                log::debug!("Responses SSE: type={} data={}", ev_type, data.chars().take(300).collect::<String>());
 
                                 match ev_type {
                                     // 文本增量
@@ -544,15 +572,31 @@ impl OpenAiCompatProvider {
                                         }
                                         let _ = on_event.send(AiStreamEvent::Usage { prompt_tokens, completion_tokens, cache_read_tokens: 0 });
                                         let _ = on_event.send(AiStreamEvent::Done { finish_reason: finish_reason.clone() });
+                                        stream_done = true;
+                                        break;
                                     }
                                     // 错误
                                     "error" => {
-                                        let msg = ev.get("message").and_then(|v| v.as_str()).unwrap_or("Responses API 错误").to_string();
-                                        let _ = on_event.send(AiStreamEvent::Error { message: msg.clone(), retryable: false });
+                                        let msg = ev
+                                            .get("message")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("Responses API 错误")
+                                            .to_string();
+                                        let code = ev
+                                            .get("code")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or_default();
+                                        let _ = on_event.send(AiStreamEvent::Error {
+                                            message: msg.clone(),
+                                            retryable: is_retryable_stream_error_code(code),
+                                        });
                                         return Err(AppError::Other(msg));
                                     }
                                     _ => {}
                                 }
+                            }
+                            if stream_done {
+                                break;
                             }
                         }
                         Some(Err(e)) => {
@@ -564,6 +608,9 @@ impl OpenAiCompatProvider {
                     }
                 }
             }
+            if stream_done {
+                break;
+            }
         }
 
         let elapsed_ms = t_request_start.elapsed().as_millis();
@@ -571,6 +618,43 @@ impl OpenAiCompatProvider {
             config.model, finish_reason, prompt_tokens, completion_tokens, elapsed_ms);
 
         Ok(ChatResult { content: full_content, model: config.model.clone(), prompt_tokens, completion_tokens, finish_reason })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{contains_done_event, is_retryable_stream_error_code};
+    use crate::services::ai::models::AiStreamEvent;
+
+    #[test]
+    fn marks_retryable_stream_error_codes() {
+        assert!(is_retryable_stream_error_code("rate_limit_exceeded"));
+        assert!(is_retryable_stream_error_code("server_error"));
+        assert!(is_retryable_stream_error_code("temporarily_unavailable"));
+        assert!(!is_retryable_stream_error_code("invalid_request_error"));
+        assert!(!is_retryable_stream_error_code("authentication_error"));
+    }
+
+    #[test]
+    fn detects_done_event_in_stream_batch() {
+        assert!(contains_done_event(&[
+            AiStreamEvent::TextDelta {
+                delta: "hello".to_string(),
+            },
+            AiStreamEvent::Done {
+                finish_reason: "stop".to_string(),
+            },
+        ]));
+        assert!(!contains_done_event(&[
+            AiStreamEvent::TextDelta {
+                delta: "hello".to_string(),
+            },
+            AiStreamEvent::Usage {
+                prompt_tokens: 1,
+                completion_tokens: 2,
+                cache_read_tokens: 0,
+            },
+        ]));
     }
 }
 

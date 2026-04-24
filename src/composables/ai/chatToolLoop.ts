@@ -1,7 +1,7 @@
 import { aiChatStream, aiSaveMessage, type ChatMessage } from '@/api/ai'
 import type { AiMessage, AiMessageRecord, AiStreamEvent, ModelConfig, ProviderConfig, ToolCallInfo, ToolResultInfo } from '@/types/ai'
 import type { Logger } from '@/utils/logger'
-import { genId, thinkingEffortToBudget } from './chatHelpers'
+import { genId, hashArgs, resolveRequestMaxTokens, thinkingEffortToBudget } from './chatHelpers'
 import type { AiChatStreamState } from './chatStreamEvents'
 
 export interface StreamWithToolLoopParams {
@@ -23,6 +23,7 @@ export interface StreamWithToolLoopParams {
   flushPendingDelta: () => void
   updateStreamingMessage: (updater: (msg: AiMessage) => AiMessage) => void
   onStreamEvent: (event: AiStreamEvent) => void
+  onRequestStart?: () => void
   executeToolCalls: (toolCalls: ToolCallInfo[], sessionId: string) => Promise<ToolResultInfo[]>
   parseAndWriteJournalSections: (text: string, workDirPath: string) => void
   parseSpawnedTasks: (text: string) => void
@@ -47,6 +48,7 @@ export async function streamWithToolLoop({
   flushPendingDelta,
   updateStreamingMessage,
   onStreamEvent,
+  onRequestStart,
   executeToolCalls,
   parseAndWriteJournalSections,
   parseSpawnedTasks,
@@ -63,6 +65,7 @@ export async function streamWithToolLoop({
     streamState.streamingMessageId = genId()
     streamState.pendingToolCalls = []
     streamState.lastFinishReason = ''
+    streamState.lastErrorRetryable = undefined
     streamState.pendingTextDelta = ''
     streamState.pendingThinkingDelta = ''
 
@@ -78,6 +81,7 @@ export async function streamWithToolLoop({
     messages.value = [...messages.value, assistantMessage]
 
     resetWatchdog()
+    onRequestStart?.()
     await aiChatStream(
       {
         sessionId: sid,
@@ -86,7 +90,7 @@ export async function streamWithToolLoop({
         model: model.id,
         apiKey,
         endpoint: provider.endpoint,
-        maxTokens: model.capabilities.maxOutput > 0 ? model.capabilities.maxOutput : undefined,
+        maxTokens: resolveRequestMaxTokens(model, { enableTools }),
         systemPrompt,
         enableTools,
         thinkingBudget: model.capabilities.thinking && !disableAnthropicThinkingForToolLoop
@@ -133,7 +137,7 @@ export async function streamWithToolLoop({
         } else if (hasThinking) {
           errMsg = `[模型 thinking 后 stop 空回] finish_reason=${streamState.lastFinishReason}。MiMo / DeepSeek-R 系在 tool 循环第 2 轮常见此问题，尝试：1) 换模型测试 2) 在 Provider 里关闭该模型的 thinking 能力标志 3) 调大 max_tokens。`
         } else {
-          errMsg = `[模型未生成回复] finish_reason=${streamState.lastFinishReason}。可能因异常中断或服务端问题。`
+          errMsg = `[模型未生成回答] finish_reason=${streamState.lastFinishReason}。可能因异常中断或服务端问题。`
         }
 
         log.warn('empty_assistant_converted_to_error', {
@@ -324,12 +328,12 @@ export async function streamWithToolLoop({
 
 function buildToolCallSignature(toolCalls: ToolCallInfo[]): string {
   return toolCalls
-    .map(toolCall => `${toolCall.name}:${toolCall.arguments}`)
+    .map(toolCall => `${toolCall.name}:${toolCall.arguments.length}:${hashArgs(toolCall.arguments)}`)
     .join('|')
 }
 
 function buildToolResultSignature(toolResults: ToolResultInfo[]): string {
   return toolResults
-    .map(result => `${result.toolName}:${result.success ? 'ok' : 'err'}:${result.content}`)
+    .map(result => `${result.toolName}:${result.success ? 'ok' : 'err'}:${result.content.length}:${hashArgs(result.content)}`)
     .join('|')
 }

@@ -79,6 +79,11 @@ const RETRYABLE_ERROR_PATTERNS = [
   /429/,
 ]
 
+const RATE_LIMIT_ERROR_PATTERNS = [
+  /rate limit/i,
+  /429/,
+]
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -100,8 +105,15 @@ function isRetryableFailure(result: DispatchTaskExecutionResult): boolean {
   if (!result.retryable) return false
   if (result.status !== 'error') return false
   const errorMessage = result.error
-  if (!errorMessage) return false
-  return RETRYABLE_ERROR_PATTERNS.some(pattern => pattern.test(errorMessage))
+  if (!errorMessage) return true
+  return RETRYABLE_ERROR_PATTERNS.some(pattern => pattern.test(errorMessage)) || result.retryable
+}
+
+function resolveRetryDelayMs(errorMessage: string): number {
+  if (RATE_LIMIT_ERROR_PATTERNS.some(pattern => pattern.test(errorMessage))) {
+    return 1200
+  }
+  return 200
 }
 
 export function classifyDispatchStatus(task: SpawnedTask, allTasks: SpawnedTask[]): TaskDispatchStatus {
@@ -356,16 +368,15 @@ export function createChatTaskDispatcher(options: ChatTaskDispatcherOptions) {
       writeTasks(replaceTask(snapshot(), failedTask))
 
       if (isRetryableFailure(result) && (failedTask.retryCount < (failedTask.autoRetryBudget ?? resolveAutoRetryCount()))) {
+        const retryDelayMs = resolveRetryDelayMs(failedTask.lastError ?? '')
+        const expectedRetryCount = failedTask.retryCount
         emit({
           type: 'retried',
           taskId,
           message: `Task "${failedTask.description}" failed and will retry automatically.`,
         })
-        await sleep(1500)
-        const reset = updateTask(taskId, current => resetSpawnedTaskForRetry(current))
-        if (reset) {
-          await drain()
-        }
+        void scheduleRetry(taskId, expectedRetryCount, retryDelayMs)
+        await drain()
         return
       }
 
@@ -405,6 +416,23 @@ export function createChatTaskDispatcher(options: ChatTaskDispatcherOptions) {
 
   async function drain(): Promise<void> {
     await runReadyTasks()
+  }
+
+  async function scheduleRetry(taskId: string, expectedRetryCount: number, delayMs: number): Promise<void> {
+    await sleep(delayMs)
+    const current = snapshot().find(task => task.id === taskId)
+    if (!current) return
+    if (current.status !== 'error') return
+    if (current.retryCount !== expectedRetryCount) return
+
+    const reset = updateTask(taskId, task =>
+      task.status === 'error' && task.retryCount === expectedRetryCount
+        ? resetSpawnedTaskForRetry(task)
+        : task,
+    )
+    if (reset?.status === 'pending') {
+      await drain()
+    }
   }
 
   function syncTasks(tasks: SpawnedTask[]): SpawnedTask[] {

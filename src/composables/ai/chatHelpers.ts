@@ -18,9 +18,40 @@ export function thinkingEffortToBudget(effort?: ModelConfig['thinkingEffort']): 
   }
 }
 
+export function resolveRequestMaxTokens(model: ModelConfig, options?: { enableTools?: boolean }): number | undefined {
+  const modelMaxOutput = model.capabilities.maxOutput
+  if (!modelMaxOutput || modelMaxOutput <= 0) return undefined
+
+  const hardCap = model.capabilities.thinking
+    ? (options?.enableTools ? 8192 : 16384)
+    : (options?.enableTools ? 4096 : 8192)
+
+  return Math.min(modelMaxOutput, hardCap)
+}
+
+export function resolveStreamWatchdogConfig(model?: ModelConfig): { warnMs: number; timeoutMs: number } {
+  if (model?.capabilities.thinking) {
+    return {
+      warnMs: 90_000,
+      timeoutMs: 180_000,
+    }
+  }
+
+  return {
+    warnMs: 45_000,
+    timeoutMs: 90_000,
+  }
+}
+
 export function normalizeAiErrorMessage(errMsg: string): string {
   if (/\b429\b/.test(errMsg)) {
     return `上游模型服务限流了（429）。已自动进行短暂退避重试；如果仍失败，请稍等几秒再继续，或切换模型/降低连续工具调用频率。\n\n原始错误: ${errMsg}`
+  }
+  if (/timeout|timed out|deadline exceeded/i.test(errMsg)) {
+    return `上游模型响应超时了。系统会优先尝试自动恢复；如果仍反复出现，建议先切到非 thinking 模型，或减少单轮上下文/工具调用数量。\n\n原始错误: ${errMsg}`
+  }
+  if (/temporarily unavailable|server_error|overloaded|bad gateway|gateway timeout|\b502\b|\b503\b|\b504\b/i.test(errMsg)) {
+    return `上游模型服务当前不稳定，可能是暂时性过载或网关错误。系统会优先尝试自动恢复；如果仍失败，请稍后重试或切换模型/Provider。\n\n原始错误: ${errMsg}`
   }
   return errMsg
 }

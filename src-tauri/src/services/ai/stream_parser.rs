@@ -82,7 +82,11 @@ impl SseParser {
                     match serde_json::from_str::<ChatCompletionChunk>(data) {
                         Ok(chunk) => events.push(SseEvent::Chunk(chunk)),
                         Err(e) => {
-                            log::warn!("SSE JSON 解析失败: {e}, 原文长度: {}", data.len());
+                            if let Some(error_event) = parse_error_event(data) {
+                                events.push(SseEvent::AiError(error_event));
+                            } else {
+                                log::warn!("SSE JSON 解析失败: {e}, 原文长度: {}", data.len());
+                            }
                         }
                     }
                 }
@@ -98,6 +102,8 @@ impl SseParser {
 pub enum SseEvent {
     /// 数据块
     Chunk(ChatCompletionChunk),
+    /// 流内错误
+    AiError(AiStreamEvent),
     /// 流结束
     Done,
 }
@@ -144,9 +150,10 @@ impl ToolCallAccumulator {
 
     /// 完成拼接，返回完整的 ToolCallRecord 列表
     pub fn finish(&mut self) -> Vec<ToolCallRecord> {
-        let result: Vec<ToolCallRecord> = self
-            .calls
-            .drain()
+        let mut ordered_calls: Vec<(u32, (String, String, String))> = self.calls.drain().collect();
+        ordered_calls.sort_by_key(|(index, _)| *index);
+        ordered_calls
+            .into_iter()
             .map(|(_, (id, name, args))| ToolCallRecord {
                 id,
                 call_type: "function".to_string(),
@@ -155,8 +162,7 @@ impl ToolCallAccumulator {
                     arguments: args,
                 },
             })
-            .collect();
-        result
+            .collect()
     }
 }
 
@@ -272,6 +278,14 @@ pub async fn parse_sse_stream(
                             }
                             ai_events.extend(events);
                         }
+                        SseEvent::AiError(error_event) => {
+                            errored = true;
+                            done_sent = true;
+                            ai_events.push(error_event);
+                            ai_events.push(AiStreamEvent::Done {
+                                finish_reason: "error".to_string(),
+                            });
+                        }
                         SseEvent::Done => {
                             // 仅在整个流从未发送过 Done 时补发（跨批次检查）
                             if !done_sent && !ai_events.iter().any(|e| matches!(e, AiStreamEvent::Done { .. })) {
@@ -309,4 +323,100 @@ pub async fn parse_sse_stream(
 
         std::future::ready(events)
     })
+}
+
+fn parse_error_event(data: &str) -> Option<AiStreamEvent> {
+    let payload = serde_json::from_str::<serde_json::Value>(data).ok()?;
+    let error = payload.get("error")?;
+    let message = error
+        .get("message")
+        .and_then(|value| value.as_str())
+        .or_else(|| payload.get("message").and_then(|value| value.as_str()))?
+        .to_string();
+    let code = error
+        .get("code")
+        .and_then(|value| value.as_str())
+        .or_else(|| payload.get("code").and_then(|value| value.as_str()))
+        .unwrap_or_default();
+    let retryable = matches!(code, "rate_limit_exceeded" | "server_error" | "temporarily_unavailable");
+    Some(AiStreamEvent::Error { message, retryable })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_error_event, SseParser, SseEvent, ToolCallAccumulator, chunk_to_events};
+    use tokio_util::bytes::Bytes;
+    use crate::services::ai::models::{AiStreamEvent, ChatCompletionChunk};
+
+    #[test]
+    fn parses_error_payload_into_retryable_stream_error() {
+        let event = parse_error_event(r#"{"error":{"message":"rate limited","code":"rate_limit_exceeded"}}"#)
+            .expect("expected error event");
+
+        match event {
+            AiStreamEvent::Error { message, retryable } => {
+                assert_eq!(message, "rate limited");
+                assert!(retryable);
+            }
+            _ => panic!("unexpected event kind"),
+        }
+    }
+
+    #[test]
+    fn parser_surfaces_error_payload_as_ai_error_event() {
+        let mut parser = SseParser::new();
+        let events = parser.feed(&Bytes::from_static(
+            b"data: {\"error\":{\"message\":\"temporary outage\",\"code\":\"temporarily_unavailable\"}}\n\n",
+        ));
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            SseEvent::AiError(AiStreamEvent::Error { message, retryable }) => {
+                assert_eq!(message, "temporary outage");
+                assert!(*retryable);
+            }
+            _ => panic!("unexpected event kind"),
+        }
+    }
+
+    #[test]
+    fn tool_call_finish_preserves_original_index_order() {
+        let chunk: ChatCompletionChunk = serde_json::from_str(
+            r#"{
+              "id":"chunk-1",
+              "model":"test-model",
+              "choices":[
+                {
+                  "index":0,
+                  "delta":{
+                    "tool_calls":[
+                      {"index":1,"id":"tool-2","function":{"name":"second","arguments":"{\"b\":2}"}},
+                      {"index":0,"id":"tool-1","function":{"name":"first","arguments":"{\"a\":1}"}}
+                    ]
+                  },
+                  "finish_reason":"tool_calls"
+                }
+              ]
+            }"#,
+        ).expect("valid chunk");
+
+        let mut accumulator = ToolCallAccumulator::new();
+        let events = chunk_to_events(&chunk, &mut accumulator);
+
+        let tool_calls: Vec<(String, String)> = events
+            .into_iter()
+            .filter_map(|event| match event {
+                AiStreamEvent::ToolCall { id, name, .. } => Some((id, name)),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            tool_calls,
+            vec![
+                ("tool-1".to_string(), "first".to_string()),
+                ("tool-2".to_string(), "second".to_string()),
+            ],
+        );
+    }
 }

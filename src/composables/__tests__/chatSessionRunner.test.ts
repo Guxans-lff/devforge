@@ -52,6 +52,7 @@ function createHarness(options?: { signal?: AbortSignal; summaryMode?: 'brief' |
     pendingThinkingDelta: '',
     pendingToolCalls: [],
     lastFinishReason: '',
+    lastErrorRetryable: undefined,
     streamingMessageId: '',
     inToolExec: false,
   })
@@ -78,11 +79,26 @@ function createHarness(options?: { signal?: AbortSignal; summaryMode?: 'brief' |
     }))
   }
 
+  const onFirstToken = vi.fn()
+  const onPendingToolQueueLength = vi.fn()
+  const onResponseComplete = vi.fn()
+  const onPrepareComplete = vi.fn()
+  const onRequestStart = vi.fn()
+  const onRecovery = vi.fn()
+  const forceCompact = vi.fn().mockResolvedValue(null)
+
   return {
     messages,
     isStreaming,
     error,
     streamState,
+    onFirstToken,
+    onPendingToolQueueLength,
+    onResponseComplete,
+    onPrepareComplete,
+    onRequestStart,
+    onRecovery,
+    forceCompact,
     run: () => runAiChatSessionTurn({
       sessionId: 'session-runner-1',
       content: 'please inspect',
@@ -112,7 +128,7 @@ function createHarness(options?: { signal?: AbortSignal; summaryMode?: 'brief' |
       } as any,
       maxToolLoops: 3,
       totalTokens: () => 0,
-      forceCompact: vi.fn().mockResolvedValue(null),
+      forceCompact,
       checkAndCompact: vi.fn().mockResolvedValue(null),
       clearWatchdog: vi.fn(),
       resetWatchdog: vi.fn(),
@@ -142,6 +158,12 @@ function createHarness(options?: { signal?: AbortSignal; summaryMode?: 'brief' |
         scheduleFlush: flushPendingDelta,
         updateStreamingMessage,
       }),
+      onFirstToken,
+      onPendingToolQueueLength,
+      onResponseComplete,
+      onPrepareComplete,
+      onRequestStart,
+      onRecovery,
       signal: options?.signal,
       summaryMode: options?.summaryMode,
     }),
@@ -171,6 +193,9 @@ describe('runAiChatSessionTurn', () => {
       summary: 'Completed child task.',
       retryable: false,
     })
+    expect(harness.onPrepareComplete).toHaveBeenCalledTimes(1)
+    expect(harness.onRequestStart).toHaveBeenCalledTimes(1)
+    expect(harness.onRecovery).not.toHaveBeenCalled()
     expect(harness.messages.value.some(message => message.role === 'user')).toBe(true)
   })
 
@@ -216,5 +241,85 @@ describe('runAiChatSessionTurn', () => {
       retryable: false,
     })
     expect(result.error).toContain('user_rejected')
+  })
+
+  it('preserves retryable stream errors even when the message text is not pattern matched', async () => {
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      onEvent({ type: 'Error', message: 'provider overloaded now', retryable: true })
+      throw new Error('provider overloaded now')
+    })
+
+    const harness = createHarness()
+    const result = await harness.run()
+
+    expect(result).toMatchObject({
+      status: 'error',
+      retryable: true,
+    })
+  })
+
+  it('preserves structured backend retryable errors', async () => {
+    aiChatStreamMock.mockRejectedValue({
+      kind: 'CONNECTION',
+      message: 'temporary upstream failure',
+      retryable: true,
+    })
+
+    const harness = createHarness()
+    const result = await harness.run()
+
+    expect(result).toMatchObject({
+      status: 'error',
+      retryable: true,
+    })
+    expect(result.error).toContain('temporary upstream failure')
+  })
+
+  it('preserves observability callbacks when overflow recovery retries the stream', async () => {
+    aiChatStreamMock
+      .mockRejectedValueOnce(new Error('maximum context length exceeded'))
+      .mockImplementationOnce(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+        onEvent({ type: 'TextDelta', delta: 'Recovered answer.' })
+        onEvent({ type: 'Done', finish_reason: 'stop' })
+        return {}
+      })
+
+    const harness = createHarness()
+    harness.forceCompact.mockImplementation(async (messages: AiMessage[]) => messages)
+
+    const result = await harness.run()
+
+    expect(result.status).toBe('done')
+    expect(harness.onFirstToken).toHaveBeenCalledTimes(1)
+    expect(harness.onPrepareComplete).toHaveBeenCalledTimes(1)
+    expect(harness.onRequestStart).toHaveBeenCalledTimes(2)
+    expect(harness.onRecovery).toHaveBeenCalledTimes(1)
+    expect(harness.onResponseComplete).toHaveBeenCalledTimes(1)
+  })
+
+  it('emits pending tool queue callbacks during overflow recovery retries', async () => {
+    aiChatStreamMock
+      .mockRejectedValueOnce(new Error('maximum context length exceeded'))
+      .mockImplementationOnce(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+        onEvent({ type: 'ToolCall', id: 'tool-1', name: 'read_file', arguments: '{"path":"src/a.ts"}' })
+        onEvent({ type: 'Done', finish_reason: 'tool_calls' })
+        return {}
+      })
+
+    const harness = createHarness()
+    harness.forceCompact.mockImplementation(async (messages: AiMessage[]) => messages)
+    await harness.run()
+
+    expect(harness.onPendingToolQueueLength).toHaveBeenCalledWith(1)
+  })
+
+  it('does not mark response complete for failed turns', async () => {
+    aiChatStreamMock.mockRejectedValue(new Error('network timeout while streaming'))
+
+    const harness = createHarness()
+    const result = await harness.run()
+
+    expect(result.status).toBe('error')
+    expect(harness.onResponseComplete).not.toHaveBeenCalled()
   })
 })

@@ -19,6 +19,7 @@ export interface HandleSendFailureParams {
   streamState: AiChatStreamState
   log: Logger
   updateStreamingMessage: (updater: (msg: AiMessage) => AiMessage) => void
+  onRecovery?: () => void
   forceCompact: (
     messages: AiMessage[],
     sessionId: string,
@@ -52,6 +53,7 @@ export async function handleSendFailure(params: HandleSendFailureParams): Promis
     streamState,
     log,
     updateStreamingMessage,
+    onRecovery,
     forceCompact,
     streamWithToolLoop,
   } = params
@@ -74,6 +76,7 @@ export async function handleSendFailure(params: HandleSendFailureParams): Promis
   }
 
   log.info('overflow_detected', { sessionId, errMsg: errMsg.slice(0, 200) })
+  onRecovery?.()
 
   if (streamState.streamingMessageId) {
     const failedMessageId = streamState.streamingMessageId
@@ -84,7 +87,7 @@ export async function handleSendFailure(params: HandleSendFailureParams): Promis
   const compacted = await forceCompact(messages.value, sessionId, provider, model, apiKey)
   if (!compacted) {
     log.error('overflow_compact_failed', { sessionId })
-    errorRef.value = `${errMsg}\n自动压缩失败，请手动清空历史或切换更大上下文模型。`
+    errorRef.value = `${errMsg}\n已尝试自动压缩但失败，请手动清空历史或切换更大上下文模型。`
     return
   }
 

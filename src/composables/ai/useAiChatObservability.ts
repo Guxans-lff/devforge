@@ -6,6 +6,8 @@ const SESSION_HISTORY_LIMIT = 12
 
 type ErrorKind = NonNullable<ToolExecutionMetadata['errorKind']> | 'unknown'
 
+export type AiRuntimeRoutingReason = 'provider_circuit_open' | 'downgrade_model' | 'switch_provider'
+
 export interface AiToolMetricsSnapshot {
   totalCalls: number
   successCount: number
@@ -21,16 +23,22 @@ export interface AiToolMetricsSnapshot {
 export interface AiChatTrendSnapshot {
   sampleCount: number
   firstTokenAverageMs: number | null
+  requestFirstTokenAverageMs: number | null
   responseAverageMs: number | null
   toolRunAverageMs: number | null
   lastFirstTokenDeltaMs: number | null
+  lastRequestFirstTokenDeltaMs: number | null
   lastResponseDeltaMs: number | null
   lastToolRunDeltaMs: number | null
 }
 
 export interface AiChatSessionSummary {
   startedAt: number | null
+  prepareDurationMs: number | null
   firstTokenLatencyMs: number | null
+  requestCount: number
+  requestFirstTokenLatencyMs: number | null
+  recoveryCount: number
   responseDurationMs: number | null
   toolCallCount: number
   toolErrorCount: number
@@ -47,11 +55,21 @@ export interface AiChatDiagnosticsExport {
   exportedAt: number
   current: {
     sessionStartedAt: number | null
+    prepareCompletedAt: number | null
+    prepareDurationMs: number | null
+    requestStartedAt: number | null
+    requestCount: number
+    recoveryCount: number
     firstTokenLatencyMs: number | null
+    requestFirstTokenLatencyMs: number | null
     responseDurationMs: number | null
     loadHistoryDurationMs: number | null
     historyRestoreCount: number
     compactTriggeredCount: number
+    providerRerouteCount: number
+    autoDowngradeCount: number
+    autoSwitchProviderCount: number
+    lastRoutingReason: AiRuntimeRoutingReason | null
     pendingToolQueueLength: number
     lastToolRun: AiToolMetricsSnapshot
   }
@@ -62,14 +80,24 @@ export interface AiChatDiagnosticsExport {
 
 export interface AiChatMetricsSnapshot {
   sessionStartedAt: number | null
+  prepareCompletedAt: number | null
+  prepareDurationMs: number | null
+  requestStartedAt: number | null
+  requestCount: number
+  recoveryCount: number
   firstTokenAt: number | null
   firstTokenLatencyMs: number | null
+  requestFirstTokenLatencyMs: number | null
   responseCompletedAt: number | null
   responseDurationMs: number | null
   loadHistoryStartedAt: number | null
   loadHistoryDurationMs: number | null
   historyRestoreCount: number
   compactTriggeredCount: number
+  providerRerouteCount: number
+  autoDowngradeCount: number
+  autoSwitchProviderCount: number
+  lastRoutingReason: AiRuntimeRoutingReason | null
   pendingToolQueueLength: number
   lastToolRun: AiToolMetricsSnapshot
   trend: AiChatTrendSnapshot
@@ -119,23 +147,35 @@ function toErrorKind(value: ToolExecutionMetadata['errorKind'] | undefined): Err
 export function useAiChatObservability() {
   const state = reactive({
     sessionStartedAt: null as number | null,
+    prepareCompletedAt: null as number | null,
+    prepareDurationMs: null as number | null,
+    requestStartedAt: null as number | null,
+    requestCount: 0,
+    recoveryCount: 0,
     firstTokenAt: null as number | null,
     firstTokenLatencyMs: null as number | null,
+    requestFirstTokenLatencyMs: null as number | null,
     responseCompletedAt: null as number | null,
     responseDurationMs: null as number | null,
     loadHistoryStartedAt: null as number | null,
     loadHistoryDurationMs: null as number | null,
     historyRestoreCount: 0,
     compactTriggeredCount: 0,
+    providerRerouteCount: 0,
+    autoDowngradeCount: 0,
+    autoSwitchProviderCount: 0,
+    lastRoutingReason: null as AiRuntimeRoutingReason | null,
     pendingToolQueueLength: 0,
     lastToolRun: emptyToolSnapshot(),
   })
 
   const trendState = reactive({
     firstTokenSamples: [] as number[],
+    requestFirstTokenSamples: [] as number[],
     responseSamples: [] as number[],
     toolRunSamples: [] as number[],
     lastFirstTokenDeltaMs: null as number | null,
+    lastRequestFirstTokenDeltaMs: null as number | null,
     lastResponseDeltaMs: null as number | null,
     lastToolRunDeltaMs: null as number | null,
   })
@@ -148,13 +188,16 @@ export function useAiChatObservability() {
   const trend = computed<AiChatTrendSnapshot>(() => ({
     sampleCount: Math.max(
       trendState.firstTokenSamples.length,
+      trendState.requestFirstTokenSamples.length,
       trendState.responseSamples.length,
       trendState.toolRunSamples.length,
     ),
     firstTokenAverageMs: average(trendState.firstTokenSamples),
+    requestFirstTokenAverageMs: average(trendState.requestFirstTokenSamples),
     responseAverageMs: average(trendState.responseSamples),
     toolRunAverageMs: average(trendState.toolRunSamples),
     lastFirstTokenDeltaMs: trendState.lastFirstTokenDeltaMs,
+    lastRequestFirstTokenDeltaMs: trendState.lastRequestFirstTokenDeltaMs,
     lastResponseDeltaMs: trendState.lastResponseDeltaMs,
     lastToolRunDeltaMs: trendState.lastToolRunDeltaMs,
   }))
@@ -171,7 +214,11 @@ export function useAiChatObservability() {
 
     pushSessionSummary(sessionState.history, {
       startedAt: state.sessionStartedAt,
+      prepareDurationMs: state.prepareDurationMs,
       firstTokenLatencyMs: state.firstTokenLatencyMs,
+      requestCount: state.requestCount,
+      requestFirstTokenLatencyMs: state.requestFirstTokenLatencyMs,
+      recoveryCount: state.recoveryCount,
       responseDurationMs: state.responseDurationMs,
       toolCallCount: state.lastToolRun.totalCalls,
       toolErrorCount: state.lastToolRun.errorCount,
@@ -184,19 +231,56 @@ export function useAiChatObservability() {
     finalizeCurrentSession()
 
     state.sessionStartedAt = now
+    state.prepareCompletedAt = null
+    state.prepareDurationMs = null
+    state.requestStartedAt = null
+    state.requestCount = 0
+    state.recoveryCount = 0
     state.firstTokenAt = null
     state.firstTokenLatencyMs = null
+    state.requestFirstTokenLatencyMs = null
     state.responseCompletedAt = null
     state.responseDurationMs = null
+    state.providerRerouteCount = 0
+    state.autoDowngradeCount = 0
+    state.autoSwitchProviderCount = 0
+    state.lastRoutingReason = null
     state.lastToolRun = emptyToolSnapshot()
   }
 
+  function markPrepareComplete(now = Date.now()): void {
+    if (!state.sessionStartedAt) return
+    state.prepareCompletedAt = now
+    state.prepareDurationMs = now - state.sessionStartedAt
+  }
+
+  function markRequestStart(now = Date.now()): void {
+    if (!state.sessionStartedAt) return
+    state.requestStartedAt = now
+    state.requestCount += 1
+    state.requestFirstTokenLatencyMs = null
+  }
+
+  function markRecovery(): void {
+    if (!state.sessionStartedAt) return
+    state.recoveryCount += 1
+  }
+
   function markFirstToken(now = Date.now()): void {
-    if (!state.sessionStartedAt || state.firstTokenAt) return
-    state.firstTokenAt = now
-    state.firstTokenLatencyMs = now - state.sessionStartedAt
-    if (state.firstTokenLatencyMs !== null) {
-      trendState.lastFirstTokenDeltaMs = pushSample(trendState.firstTokenSamples, state.firstTokenLatencyMs)
+    if (!state.sessionStartedAt) return
+    if (!state.firstTokenAt) {
+      state.firstTokenAt = now
+      state.firstTokenLatencyMs = now - state.sessionStartedAt
+      if (state.firstTokenLatencyMs !== null) {
+        trendState.lastFirstTokenDeltaMs = pushSample(trendState.firstTokenSamples, state.firstTokenLatencyMs)
+      }
+    }
+    if (state.requestStartedAt && state.requestFirstTokenLatencyMs === null) {
+      state.requestFirstTokenLatencyMs = now - state.requestStartedAt
+      trendState.lastRequestFirstTokenDeltaMs = pushSample(
+        trendState.requestFirstTokenSamples,
+        state.requestFirstTokenLatencyMs,
+      )
     }
   }
 
@@ -222,6 +306,20 @@ export function useAiChatObservability() {
 
   function markCompactTriggered(): void {
     state.compactTriggeredCount += 1
+  }
+
+  function recordRuntimeRouting(reason: AiRuntimeRoutingReason): void {
+    if (!state.sessionStartedAt) return
+    state.lastRoutingReason = reason
+    if (reason === 'provider_circuit_open') {
+      state.providerRerouteCount += 1
+      return
+    }
+    if (reason === 'downgrade_model') {
+      state.autoDowngradeCount += 1
+      return
+    }
+    state.autoSwitchProviderCount += 1
   }
 
   function updatePendingToolQueueLength(length: number): void {
@@ -275,11 +373,21 @@ export function useAiChatObservability() {
       exportedAt: now,
       current: {
         sessionStartedAt: state.sessionStartedAt,
+        prepareCompletedAt: state.prepareCompletedAt,
+        prepareDurationMs: state.prepareDurationMs,
+        requestStartedAt: state.requestStartedAt,
+        requestCount: state.requestCount,
+        recoveryCount: state.recoveryCount,
         firstTokenLatencyMs: state.firstTokenLatencyMs,
+        requestFirstTokenLatencyMs: state.requestFirstTokenLatencyMs,
         responseDurationMs: state.responseDurationMs,
         loadHistoryDurationMs: state.loadHistoryDurationMs,
         historyRestoreCount: state.historyRestoreCount,
         compactTriggeredCount: state.compactTriggeredCount,
+        providerRerouteCount: state.providerRerouteCount,
+        autoDowngradeCount: state.autoDowngradeCount,
+        autoSwitchProviderCount: state.autoSwitchProviderCount,
+        lastRoutingReason: state.lastRoutingReason,
         pendingToolQueueLength: state.pendingToolQueueLength,
         lastToolRun: { ...state.lastToolRun },
       },
@@ -291,21 +399,33 @@ export function useAiChatObservability() {
 
   function reset(): void {
     state.sessionStartedAt = null
+    state.prepareCompletedAt = null
+    state.prepareDurationMs = null
+    state.requestStartedAt = null
+    state.requestCount = 0
+    state.recoveryCount = 0
     state.firstTokenAt = null
     state.firstTokenLatencyMs = null
+    state.requestFirstTokenLatencyMs = null
     state.responseCompletedAt = null
     state.responseDurationMs = null
     state.loadHistoryStartedAt = null
     state.loadHistoryDurationMs = null
     state.historyRestoreCount = 0
     state.compactTriggeredCount = 0
+    state.providerRerouteCount = 0
+    state.autoDowngradeCount = 0
+    state.autoSwitchProviderCount = 0
+    state.lastRoutingReason = null
     state.pendingToolQueueLength = 0
     state.lastToolRun = emptyToolSnapshot()
 
     trendState.firstTokenSamples = []
+    trendState.requestFirstTokenSamples = []
     trendState.responseSamples = []
     trendState.toolRunSamples = []
     trendState.lastFirstTokenDeltaMs = null
+    trendState.lastRequestFirstTokenDeltaMs = null
     trendState.lastResponseDeltaMs = null
     trendState.lastToolRunDeltaMs = null
 
@@ -321,11 +441,15 @@ export function useAiChatObservability() {
       errorBreakdown: errorBreakdown.value,
     })),
     markSendStart,
+    markPrepareComplete,
+    markRequestStart,
+    markRecovery,
     markFirstToken,
     markResponseComplete,
     markHistoryLoadStart,
     markHistoryLoadComplete,
     markCompactTriggered,
+    recordRuntimeRouting,
     updatePendingToolQueueLength,
     recordToolRun,
     exportSnapshot,

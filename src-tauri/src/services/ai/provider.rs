@@ -64,6 +64,7 @@ impl ProviderRegistry {
     }
 
     /// 获取所有已注册的 Provider ID
+    #[allow(dead_code)]
     pub fn list_ids(&self) -> Vec<&str> {
         self.providers.iter().map(|p| p.id()).collect()
     }

@@ -1144,17 +1144,16 @@ async fn exec_edit_file(arguments: &str, work_dir: &str) -> Result<String, AppEr
 
 // ──────────────── read_tool_result ────────────────
 
-/*
 async fn exec_edit_file_resilient(arguments: &str, work_dir: &str) -> Result<String, AppError> {
     match exec_edit_file(arguments, work_dir).await {
         Ok(result) => Ok(result),
         Err(AppError::Other(message)) if message.contains("old_string") => {
             let args: EditFileArgs = serde_json::from_str(arguments)
-                .map_err(|e| AppError::Other(format!("鍙傛暟瑙ｆ瀽澶辫触: {e}")))?;
+                .map_err(|e| AppError::Other(format!("解析 edit_file 参数失败: {e}")))?;
 
             let path = validate_path(&args.path, work_dir)?;
             let original = tokio::fs::read_to_string(&path).await
-                .map_err(|e| AppError::Other(format!("璇诲彇鏂囦欢澶辫触: {e}")))?;
+                .map_err(|e| AppError::Other(format!("读取文件失败: {e}")))?;
             let replace_all = args.replace_all.unwrap_or(false);
 
             if let Some((updated, occurrences)) = replace_with_normalized_newlines(
@@ -1165,85 +1164,31 @@ async fn exec_edit_file_resilient(arguments: &str, work_dir: &str) -> Result<Str
             ) {
                 if occurrences > 1 && !replace_all {
                     return Err(AppError::Other(format!(
-                        "old_string 鍦ㄦ枃浠朵腑鍖归厤鍒?{} 澶勶紙鎹㈣褰㈠紡宸紓鍚庯級锛岃鎻愪緵鏇村涓婁笅鏂囦娇鍏跺敮涓€锛屾垨璁剧疆 replace_all=true",
-                        occurrences
+                        "old_string 在换行标准化后匹配到 {occurrences} 处，请提供更多上下文使其唯一，或设置 replace_all=true。"
                     )));
                 }
 
                 if updated == original {
-                    return Ok(format!("鏂囦欢鏈彉鍖? {}锛坥ld_string 涓?new_string 鐩稿悓锛?, path.display()));
+                    return Ok(format!("文件未变化: {}（old_string 与 new_string 相同）", path.display()));
                 }
 
                 tokio::fs::write(&path, &updated).await
-                    .map_err(|e| AppError::Other(format!("鍐欏叆鏂囦欢澶辫触: {e}")))?;
+                    .map_err(|e| AppError::Other(format!("写入文件失败: {e}")))?;
 
                 let delta = updated.len() as i64 - original.len() as i64;
                 let sign = if delta >= 0 { "+" } else { "" };
-                return Ok(format!("宸茬紪杈?{} ({}{} 瀛楄妭)", path.display(), sign, delta));
+                return Ok(format!("已编辑 {} ({}{delta} 字节)", path.display(), sign));
             }
 
             if patch_already_applied(&original, &args.old_string, &args.new_string) {
                 return Ok(format!(
-                    "鏂囦欢鏈彉鍖? {}锛屽綋鍓嶅唴瀹瑰凡鍖呭惈 new_string锛屾湰娆?edit_file 鎸夊凡搴旂敤澶勭悊",
+                    "文件未变化: {}，当前内容已包含 new_string，本次 edit_file 按已应用处理",
                     path.display()
                 ));
             }
 
             Err(AppError::Other(
-                "old_string 鏈湪鏂囦欢涓壘鍒般€傚彲鑳芥槸鎹㈣/绌虹櫧涓嶄竴鑷达紝鎴栨枃浠跺凡琚笂涓€杞?edit_file 淇敼銆傝鍏堢敤 read_file 閲嶈鏈€鏂板唴瀹癸紝鍐嶅甫 3-5 琛屼笂涓嬫枃閲嶈瘯".to_string(),
-            ))
-        }
-        Err(other) => Err(other),
-    }
-}
-
-*/
-
-async fn exec_edit_file_resilient(arguments: &str, work_dir: &str) -> Result<String, AppError> {
-    match exec_edit_file(arguments, work_dir).await {
-        Ok(result) => Ok(result),
-        Err(AppError::Other(message)) if message.contains("old_string") => {
-            let args: EditFileArgs = serde_json::from_str(arguments)
-                .map_err(|e| AppError::Other(format!("failed to parse edit_file args: {e}")))?;
-
-            let path = validate_path(&args.path, work_dir)?;
-            let original = tokio::fs::read_to_string(&path).await
-                .map_err(|e| AppError::Other(format!("failed to read file: {e}")))?;
-            let replace_all = args.replace_all.unwrap_or(false);
-
-            if let Some((updated, occurrences)) = replace_with_normalized_newlines(
-                &original,
-                &args.old_string,
-                &args.new_string,
-                replace_all,
-            ) {
-                if occurrences > 1 && !replace_all {
-                    return Err(AppError::Other(format!(
-                        "old_string matched {occurrences} locations after newline normalization. Provide more context or set replace_all=true."
-                    )));
-                }
-
-                if updated == original {
-                    return Ok(format!("file unchanged: {} (old_string and new_string are identical)", path.display()));
-                }
-
-                tokio::fs::write(&path, &updated).await
-                    .map_err(|e| AppError::Other(format!("failed to write file: {e}")))?;
-
-                let delta = updated.len() as i64 - original.len() as i64;
-                let sign = if delta >= 0 { "+" } else { "" };
-                return Ok(format!("edited {} ({}{delta} bytes)", path.display(), sign));
-            }
-
-            if patch_already_applied(&original, &args.old_string, &args.new_string) {
-                return Ok(format!(
-                    "file unchanged: {} already contains new_string; edit_file treated as already applied",
-                    path.display()
-                ));
-            }
-
-            Err(AppError::Other(
-                "old_string was not found. The file may have changed, or whitespace/newlines differ. Re-read the file and retry with 3-5 lines of exact context.".to_string(),
+                "old_string 未在文件中找到。可能是文件已变化，或空白/换行不一致。请先用 read_file 重新读取最新内容，再带 3-5 行精确上下文重试。".to_string(),
             ))
         }
         Err(other) => Err(other),

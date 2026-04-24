@@ -55,6 +55,8 @@ describe('useAiChatObservability', () => {
     const obs = useAiChatObservability()
 
     obs.markSendStart(1000)
+    obs.markPrepareComplete(1030)
+    obs.markRequestStart(1060)
     obs.markFirstToken(1125)
     obs.markResponseComplete(1800)
     obs.recordToolRun(
@@ -63,11 +65,18 @@ describe('useAiChatObservability', () => {
     )
 
     obs.markSendStart(2000)
+    obs.markPrepareComplete(2045)
+    obs.markRequestStart(2100)
+    obs.markRecovery()
+    obs.markRequestStart(2140)
     obs.markFirstToken(2185)
     obs.markResponseComplete(2950)
     obs.markHistoryLoadStart(2000)
     obs.markHistoryLoadComplete(12, 2150)
     obs.markCompactTriggered()
+    obs.recordRuntimeRouting('provider_circuit_open')
+    obs.recordRuntimeRouting('downgrade_model')
+    obs.recordRuntimeRouting('switch_provider')
     obs.updatePendingToolQueueLength(3)
 
     const toolCalls = [
@@ -83,11 +92,19 @@ describe('useAiChatObservability', () => {
 
     obs.recordToolRun(toolCalls, toolResults)
 
+    expect(obs.metrics.value.prepareDurationMs).toBe(45)
     expect(obs.metrics.value.firstTokenLatencyMs).toBe(185)
+    expect(obs.metrics.value.requestFirstTokenLatencyMs).toBe(45)
+    expect(obs.metrics.value.requestCount).toBe(2)
+    expect(obs.metrics.value.recoveryCount).toBe(1)
     expect(obs.metrics.value.responseDurationMs).toBe(950)
     expect(obs.metrics.value.loadHistoryDurationMs).toBe(150)
     expect(obs.metrics.value.historyRestoreCount).toBe(12)
     expect(obs.metrics.value.compactTriggeredCount).toBe(1)
+    expect(obs.metrics.value.providerRerouteCount).toBe(1)
+    expect(obs.metrics.value.autoDowngradeCount).toBe(1)
+    expect(obs.metrics.value.autoSwitchProviderCount).toBe(1)
+    expect(obs.metrics.value.lastRoutingReason).toBe('switch_provider')
     expect(obs.metrics.value.pendingToolQueueLength).toBe(3)
     expect(obs.metrics.value.lastToolRun.totalCalls).toBe(3)
     expect(obs.metrics.value.lastToolRun.successCount).toBe(1)
@@ -99,9 +116,11 @@ describe('useAiChatObservability', () => {
     expect(obs.metrics.value.lastToolRun.maxDurationMs).toBe(70)
     expect(obs.metrics.value.trend.sampleCount).toBe(2)
     expect(obs.metrics.value.trend.firstTokenAverageMs).toBe(155)
+    expect(obs.metrics.value.trend.requestFirstTokenAverageMs).toBe(55)
     expect(obs.metrics.value.trend.responseAverageMs).toBe(875)
     expect(obs.metrics.value.trend.toolRunAverageMs).toBe(30)
     expect(obs.metrics.value.trend.lastFirstTokenDeltaMs).toBe(60)
+    expect(obs.metrics.value.trend.lastRequestFirstTokenDeltaMs).toBe(-20)
     expect(obs.metrics.value.trend.lastResponseDeltaMs).toBe(150)
     expect(obs.metrics.value.trend.lastToolRunDeltaMs).toBe(20)
     expect(obs.metrics.value.errorBreakdown).toEqual([
@@ -113,13 +132,21 @@ describe('useAiChatObservability', () => {
 
     expect(obs.metrics.value.sessionHistory).toHaveLength(2)
     expect(obs.metrics.value.sessionHistory[0]).toMatchObject({
+      prepareDurationMs: 30,
       firstTokenLatencyMs: 125,
+      requestCount: 1,
+      requestFirstTokenLatencyMs: 65,
+      recoveryCount: 0,
       responseDurationMs: 800,
       toolCallCount: 1,
       success: true,
     })
     expect(obs.metrics.value.sessionHistory[1]).toMatchObject({
+      prepareDurationMs: 45,
       firstTokenLatencyMs: 185,
+      requestCount: 2,
+      requestFirstTokenLatencyMs: 45,
+      recoveryCount: 1,
       responseDurationMs: 950,
       toolCallCount: 3,
       toolErrorCount: 2,
@@ -129,8 +156,16 @@ describe('useAiChatObservability', () => {
 
     const snapshot = obs.exportSnapshot(9000)
     expect(snapshot.exportedAt).toBe(9000)
+    expect(snapshot.current.prepareDurationMs).toBeNull()
+    expect(snapshot.current.requestCount).toBe(0)
+    expect(snapshot.current.recoveryCount).toBe(0)
     expect(snapshot.current.compactTriggeredCount).toBe(1)
+    expect(snapshot.current.providerRerouteCount).toBe(0)
+    expect(snapshot.current.autoDowngradeCount).toBe(0)
+    expect(snapshot.current.autoSwitchProviderCount).toBe(0)
+    expect(snapshot.current.lastRoutingReason).toBeNull()
     expect(snapshot.trend.sampleCount).toBe(2)
+    expect(snapshot.trend.requestFirstTokenAverageMs).toBe(55)
     expect(snapshot.sessionHistory).toHaveLength(2)
     expect(snapshot.errorBreakdown).toEqual([
       { kind: 'timeout', count: 1 },
