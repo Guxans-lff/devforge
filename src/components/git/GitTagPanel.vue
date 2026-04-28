@@ -9,6 +9,7 @@ import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-works
 import { useToast } from '@/composables/useToast'
 import { parseBackendError } from '@/types/error'
 import { formatTimestamp as formatTime } from '@/composables/useGitUtils'
+import { confirmGitRisk } from '@/composables/git/gitRisk'
 import { Tag, Plus, Check, Trash2 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -38,6 +39,7 @@ async function handleCreateTag() {
 }
 
 async function handleDeleteTag(name: string) {
+  if (!confirmGitRisk({ operation: 'delete_tag', tag: name })) return
   try {
     await store.deleteTag(props.repoPath, name)
     toast.success(t('git.tagDeleted', { name }))

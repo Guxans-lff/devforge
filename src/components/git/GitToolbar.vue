@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
 import { parseBackendError } from '@/types/error'
+import { confirmGitRisk } from '@/composables/git/gitRisk'
 import {
   RefreshCw, FolderOpen, Upload, Download, RotateCw,
   GitBranch as GitBranchIcon, ArrowUpCircle, ArrowDownCircle,
@@ -43,6 +44,11 @@ async function handleRefresh() {
 }
 
 async function handlePush(force = false) {
+  if (force && !confirmGitRisk({
+    operation: 'force_push',
+    remote: defaultRemote.value,
+    branch: currentBranch.value,
+  })) return
   try {
     const msg = await store.push(props.repoPath, defaultRemote.value, currentBranch.value, force)
     toast.success(t('git.pushSuccess'), msg)
@@ -52,6 +58,7 @@ async function handlePush(force = false) {
 }
 
 async function handlePull() {
+  if (!confirmGitRisk({ operation: 'pull', remote: defaultRemote.value, branch: currentBranch.value })) return
   try {
     const msg = await store.pull(props.repoPath, defaultRemote.value, currentBranch.value)
     toast.success(t('git.pullSuccess'), msg)

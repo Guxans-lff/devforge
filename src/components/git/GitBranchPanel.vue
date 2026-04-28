@@ -7,6 +7,7 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
 import { parseBackendError } from '@/types/error'
+import { confirmGitRisk } from '@/composables/git/gitRisk'
 import {
   Plus, Check, Trash2, Merge, GitFork,
   GitBranch as GitBranchIcon,
@@ -71,6 +72,7 @@ async function handleCheckout(name: string) {
 }
 
 async function handleDelete(name: string) {
+  if (!confirmGitRisk({ operation: 'delete_branch', branch: name })) return
   try {
     await store.deleteBranch(props.repoPath, name)
     toast.success(t('git.branchDeleted', { name }))
@@ -80,6 +82,7 @@ async function handleDelete(name: string) {
 }
 
 async function handleMerge(name: string) {
+  if (!confirmGitRisk({ operation: 'merge', branch: name })) return
   try {
     const result = await store.mergeBranch(props.repoPath, name)
     if (result.success) {
@@ -93,6 +96,7 @@ async function handleMerge(name: string) {
 }
 
 async function handleRebase(name: string) {
+  if (!confirmGitRisk({ operation: 'rebase', branch: name })) return
   try {
     await store.rebaseBranch(props.repoPath, name)
     toast.success(t('git.rebaseSuccess', { name }))

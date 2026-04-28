@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useGitWorkspaceStore, type GitWorkspaceState } from '@/stores/git-workspace'
 import { useToast } from '@/composables/useToast'
 import { parseBackendError } from '@/types/error'
+import { confirmGitRisk } from '@/composables/git/gitRisk'
 import { Archive, ArrowDownCircle, Trash2, ArrowUpFromDot } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -37,6 +38,7 @@ async function handleCreateStash() {
 }
 
 async function handleApplyStash(index: number) {
+  if (!confirmGitRisk({ operation: 'stash_apply', stashIndex: index })) return
   try {
     await store.applyStash(props.repoPath, index)
     toast.success(t('git.stashApplied'))
@@ -46,6 +48,7 @@ async function handleApplyStash(index: number) {
 }
 
 async function handlePopStash(index: number) {
+  if (!confirmGitRisk({ operation: 'stash_pop', stashIndex: index })) return
   try {
     await store.popStash(props.repoPath, index)
     toast.success(t('git.stashPopped'))
@@ -55,6 +58,7 @@ async function handlePopStash(index: number) {
 }
 
 async function handleDropStash(index: number) {
+  if (!confirmGitRisk({ operation: 'stash_drop', stashIndex: index })) return
   try {
     await store.dropStash(props.repoPath, index)
     toast.success(t('git.stashDropped'))
