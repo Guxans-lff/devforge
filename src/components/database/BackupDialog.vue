@@ -4,7 +4,7 @@ import { parseBackendError } from '@/types/error'
 import { useI18n } from 'vue-i18n'
 import { save } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
-import { HardDrive, Loader2, Check, X, Search } from 'lucide-vue-next'
+import { HardDrive, Loader2, Check, X, Search, FolderOpen, FileText, Clock } from 'lucide-vue-next'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -69,6 +69,7 @@ const someSelected = computed(() => {
 // 选项
 const includeStructure = ref(true)
 const includeData = ref(true)
+const outputPath = ref('')
 
 // 进度
 const backing = ref(false)
@@ -167,6 +168,68 @@ async function loadTables() {
 
 let progressUnlisten: (() => void) | null = null
 
+const selectedTableInfos = computed(() =>
+  tables.value.filter((table) => selectedTables.value.has(table.name)),
+)
+
+const totalSelectedRows = computed(() =>
+  selectedTableInfos.value.reduce((sum, table) => sum + (table.rowCount ?? 0), 0),
+)
+
+const estimatedSizeBytes = computed(() => {
+  const tableCount = selectedTables.value.size
+  let size = 0
+  if (includeStructure.value) size += tableCount * 2048
+  if (includeData.value) size += totalSelectedRows.value * 220
+  return size
+})
+
+function formatSize(bytes: number): string {
+  if (bytes <= 0) return '< 1 KB'
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+const estimatedSizeText = computed(() => {
+  if (selectedTables.value.size === 0) return t('backup.unknownSize')
+  return formatSize(estimatedSizeBytes.value)
+})
+
+const estimatedSeconds = computed(() => {
+  const tableCount = selectedTables.value.size
+  let seconds = 0
+  if (includeStructure.value) seconds += tableCount * 0.3
+  if (includeData.value) seconds += (totalSelectedRows.value / 1000) * 1.2
+  return Math.max(1, Math.round(seconds))
+})
+
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${seconds} 秒`
+  if (seconds < 3600) {
+    const minutes = Math.floor(seconds / 60)
+    const restSeconds = seconds % 60
+    return restSeconds > 0 ? `${minutes} 分钟 ${restSeconds} 秒` : `${minutes} 分钟`
+  }
+  const hours = Math.floor(seconds / 3600)
+  const minutes = Math.floor((seconds % 3600) / 60)
+  return minutes > 0 ? `${hours} 小时 ${minutes} 分钟` : `${hours} 小时`
+}
+
+const estimatedTimeText = computed(() => {
+  if (selectedTables.value.size === 0) return t('backup.unknownTime')
+  return formatDuration(estimatedSeconds.value)
+})
+
+async function selectOutputPath() {
+  const path = await save({
+    defaultPath: outputPath.value || `${props.database}_backup.sql`,
+    filters: [{ name: 'SQL Files', extensions: ['sql'] }],
+  })
+  if (path) outputPath.value = path
+}
+
 async function startBackup() {
   if (selectedTables.value.size === 0) {
     toast.warning(t('backup.noTablesSelected'))
@@ -177,11 +240,10 @@ async function startBackup() {
     return
   }
 
-  const outputPath = await save({
-    defaultPath: `${props.database}_backup.sql`,
-    filters: [{ name: 'SQL Files', extensions: ['sql'] }],
-  })
-  if (!outputPath) return
+  if (!outputPath.value) {
+    await selectOutputPath()
+    if (!outputPath.value) return
+  }
 
   backing.value = true
   backupDone.value = false
@@ -216,7 +278,7 @@ async function startBackup() {
       [...selectedTables.value],
       includeStructure.value,
       includeData.value,
-      outputPath,
+      outputPath.value,
     )
     backupDone.value = true
     backupSuccess.value = true
@@ -245,6 +307,7 @@ function reset() {
   totalTables.value = 0
   rowsExported.value = 0
   tableSearch.value = ''
+  outputPath.value = ''
   stopTimer()
   elapsedSeconds.value = 0
 }
@@ -378,6 +441,52 @@ onBeforeUnmount(() => {
                 />
                 <span class="text-xs">{{ t('backup.includeData') }}</span>
               </label>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div class="space-y-3">
+            <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {{ t('backup.exportSettings') }}
+            </span>
+
+            <div class="space-y-1.5">
+              <div class="flex items-center gap-2">
+                <FolderOpen class="size-3.5 text-muted-foreground" />
+                <span class="text-xs text-muted-foreground">{{ t('backup.saveLocation') }}</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <input
+                  readonly
+                  :value="outputPath || t('backup.saveLocationPlaceholder')"
+                  type="text"
+                  class="flex-1 min-w-0 truncate rounded border border-input bg-background px-2.5 py-1.5 text-xs text-foreground/80 focus:outline-none focus:ring-1 focus:ring-ring"
+                  :class="{ 'text-muted-foreground/50': !outputPath }"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-7 shrink-0 px-2.5 text-xs"
+                  :disabled="backing"
+                  @click="selectOutputPath"
+                >
+                  {{ t('backup.browse') }}
+                </Button>
+              </div>
+            </div>
+
+            <div v-if="selectedTables.size > 0 && (includeStructure || includeData)" class="flex items-center gap-4">
+              <div class="flex items-center gap-1.5" :title="t('backup.estimatedSizeHint')">
+                <FileText class="size-3.5 text-muted-foreground/70" />
+                <span class="text-xs text-muted-foreground">{{ t('backup.estimatedSize') }}:</span>
+                <span class="text-xs font-medium text-foreground">{{ estimatedSizeText }}</span>
+              </div>
+              <div class="flex items-center gap-1.5" :title="t('backup.estimatedTimeHint')">
+                <Clock class="size-3.5 text-muted-foreground/70" />
+                <span class="text-xs text-muted-foreground">{{ t('backup.estimatedTime') }}:</span>
+                <span class="text-xs font-medium text-foreground">{{ estimatedTimeText }}</span>
+              </div>
             </div>
           </div>
 
