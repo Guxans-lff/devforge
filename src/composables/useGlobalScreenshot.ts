@@ -12,12 +12,14 @@ import { useToast } from '@/composables/useToast'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useI18n } from 'vue-i18n'
 import type { CaptureResult } from '@/types/screenshot'
+import { createLogger } from '@/utils/logger'
 
 /** 防重入标志 */
 let regionSelectBusy = false
 
 /** 存储所有事件监听的取消函数 */
 const unlisteners: Array<() => void> = []
+const log = createLogger('global.screenshot')
 
 /**
  * 初始化全局截图事件监听
@@ -57,7 +59,7 @@ export function useGlobalScreenshot() {
       })
 
       regionWin.once('tauri://error', (e) => {
-        console.error('[GlobalScreenshot] 窗口创建失败:', e)
+        log.error('window_create_failed', undefined, e)
         regionSelectBusy = false
         mainWin.show()
       })
@@ -67,7 +69,7 @@ export function useGlobalScreenshot() {
         mainWin.show()
       })
     } catch (e) {
-      console.error('[GlobalScreenshot] 创建窗口异常:', e)
+      log.error('create_window_exception', undefined, e)
       regionSelectBusy = false
       mainWin.show()
     }

@@ -5,6 +5,7 @@
 import { ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from '@/composables/useToast'
+import { limitScreenshotHistory } from '@/composables/screenshotHistoryLimit'
 import type {
   MonitorInfo,
   CaptureResult,
@@ -60,7 +61,7 @@ export function useScreenshot() {
         screenshotListHistory(),
       ])
       monitors.value = m
-      historyList.value = h
+      historyList.value = limitScreenshotHistory(h)
     } catch (e) {
       toast.error(t('screenshot.message.captureFailed'), String(e))
     } finally {
@@ -71,7 +72,7 @@ export function useScreenshot() {
   /** 刷新历史列表 */
   async function refreshHistory() {
     try {
-      historyList.value = await screenshotListHistory()
+      historyList.value = limitScreenshotHistory(await screenshotListHistory())
     } catch (e) {
       toast.error(t('screenshot.message.captureFailed'), String(e))
     }

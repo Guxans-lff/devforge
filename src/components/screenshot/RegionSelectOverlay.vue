@@ -19,6 +19,9 @@ import { useToast } from '@/composables/useToast'
 import AnnotationCanvas from './AnnotationCanvas.vue'
 import FloatingAnnotationBar from './FloatingAnnotationBar.vue'
 import type { CaptureResult, WindowInfo, AnnotationTool, AnnotationStyle } from '@/types/screenshot'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('screenshot.region')
 
 const props = withDefaults(defineProps<{
   /** 全局快捷键预截图（可选，避免重复截图） */
@@ -136,7 +139,7 @@ onMounted(async () => {
 
     const img = new Image()
     img.onerror = (e) => {
-      console.error('[RegionSelect] 图片加载失败:', imgUrl, e)
+      if (import.meta.env.DEV) console.error('[RegionSelect] 图片加载失败:', imgUrl, e)
       emit('cancel')
     }
     img.onload = async () => {
@@ -149,7 +152,7 @@ onMounted(async () => {
     }
     img.src = imgUrl
   } catch (e) {
-    console.error('[RegionSelect] onMounted 异常:', e)
+    log.error('onMounted_exception', undefined, e)
     emit('cancel')
   }
 
@@ -197,7 +200,7 @@ function initCanvas() {
   const canvas = canvasRef.value
   const img = backgroundImage.value
   if (!canvas || !img) {
-    console.error('[RegionSelect] initCanvas 失败: canvas=', !!canvas, 'img=', !!img)
+    log.error('initCanvas_failed', { hasCanvas: !!canvas, hasImg: !!img })
     return
   }
 
@@ -536,7 +539,7 @@ async function handleConfirm() {
     toastSuccess(t('screenshot.message.copySuccess'))
     emit('close')
   } catch (e) {
-    console.error('[RegionSelect] handleConfirm 异常:', e)
+    log.error('handleConfirm_exception', undefined, e)
     emit('close')
   }
 }
