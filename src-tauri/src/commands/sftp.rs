@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tauri::{Emitter, Manager};
 
@@ -254,18 +255,18 @@ pub async fn local_list_dir(path: String) -> Result<Vec<FileEntry>, AppError> {
     let mut read_dir = tokio::fs::read_dir(&path).await?;
 
     while let Some(entry) = read_dir.next_entry().await? {
-        let metadata = entry.metadata().await?;
-
         let name = entry.file_name().to_string_lossy().to_string();
-        let full_path = entry.path().to_string_lossy().to_string();
+        let entry_path = entry.path();
+        let metadata = tokio::fs::symlink_metadata(&entry_path).await?;
+        let full_path = entry_path.to_string_lossy().to_string();
         let is_dir = metadata.is_dir();
         let size = if is_dir { 0 } else { metadata.len() };
 
         let modified = metadata
             .modified()
             .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64);
+            .and_then(|time: SystemTime| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration: Duration| duration.as_secs() as i64);
 
         entries.push(FileEntry {
             name,
@@ -307,7 +308,7 @@ pub async fn local_touch(path: String) -> Result<(), AppError> {
 #[tauri::command]
 pub async fn local_delete(path: String) -> Result<(), AppError> {
     // std::io::Error 已有 From，直接 ?
-    let metadata = tokio::fs::metadata(&path).await?;
+    let metadata = tokio::fs::symlink_metadata(&path).await?;
     if metadata.is_dir() {
         tokio::fs::remove_dir_all(&path).await?;
     } else {
