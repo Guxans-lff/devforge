@@ -30,10 +30,11 @@ function createMockScrollElement() {
         listeners[event] = listeners[event].filter(h => h !== handler)
       }
     },
-    /** 模拟滚动：设置 scrollTop 并触发 scroll 事件 */
+    /** 模拟滚动：设置 scrollTop 并触发 scroll 事件，然后 flush rAF */
     simulateScroll(newScrollTop: number) {
       scrollTop = newScrollTop
       listeners['scroll']?.forEach(h => h())
+      ;(globalThis as any).__flushRaf?.()
     },
   }
 
@@ -41,6 +42,10 @@ function createMockScrollElement() {
 }
 
 describe('useAdaptiveOverscan', () => {
+  let rafCallbacks: Array<(time: number) => void> = []
+  let rafIdCounter = 0
+  const activeRafIds = new Set<number>()
+
   beforeEach(() => {
     vi.useFakeTimers()
     // 模拟 performance.now()
@@ -48,12 +53,37 @@ describe('useAdaptiveOverscan', () => {
     vi.spyOn(performance, 'now').mockImplementation(() => mockTime)
     // 暴露给测试用的时间推进函数
     ;(globalThis as any).__advanceTime = (ms: number) => { mockTime += ms }
+    // 模拟 requestAnimationFrame / cancelAnimationFrame
+    rafCallbacks = []
+    rafIdCounter = 0
+    activeRafIds.clear()
+    vi.stubGlobal('requestAnimationFrame', (cb: (time: number) => void) => {
+      const id = ++rafIdCounter
+      activeRafIds.add(id)
+      rafCallbacks.push((time: number) => {
+        if (activeRafIds.has(id)) {
+          activeRafIds.delete(id)
+          cb(time)
+        }
+      })
+      return id
+    })
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => {
+      activeRafIds.delete(id)
+    })
+    ;(globalThis as any).__flushRaf = () => {
+      const cbs = [...rafCallbacks]
+      rafCallbacks = []
+      cbs.forEach(cb => cb(mockTime))
+    }
   })
 
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+    vi.unstubAllGlobals()
     delete (globalThis as any).__advanceTime
+    delete (globalThis as any).__flushRaf
   })
 
   const advanceTime = (ms: number) => (globalThis as any).__advanceTime(ms)
@@ -111,8 +141,8 @@ describe('useAdaptiveOverscan', () => {
     mockEl.simulateScroll(500)
     expect(overscan.value).toBeGreaterThan(20)
 
-    // 等待回落
-    vi.advanceTimersByTime(300)
+    // 等待回落（decayDelay + 第二次阶梯回落）
+    vi.advanceTimersByTime(300 + 200 + 50)
     expect(overscan.value).toBe(20)
   })
 

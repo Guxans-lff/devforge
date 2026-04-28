@@ -8,7 +8,7 @@
  *
  * @module useAdaptiveOverscan
  */
-import { ref, onBeforeUnmount, type Ref } from 'vue'
+import { ref, onBeforeUnmount, getCurrentInstance, type Ref } from 'vue'
 
 /** 配置参数 */
 export interface AdaptiveOverscanOptions {
@@ -150,10 +150,9 @@ export function useAdaptiveOverscan(
   }
 
   // 安全注册生命周期钩子（在非组件上下文中优雅降级）
-  try {
+  const currentInstance = getCurrentInstance()
+  if (currentInstance) {
     onBeforeUnmount(detach)
-  } catch {
-    // 在非组件上下文中调用时忽略（如单元测试）
   }
 
   return {
