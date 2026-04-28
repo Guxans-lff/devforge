@@ -321,42 +321,43 @@ pub async fn generate_migration_sql(
         // 需要修改的列
         for modification in &table_diff.columns_modified {
             let col = &modification.source;
+            let target_col = &modification.target;
             let changes_comment = modification.changes.join(", ");
 
             if driver == "postgresql" {
                 // PostgreSQL 用 ALTER COLUMN
-                for change in &modification.changes {
-                    if change.starts_with("类型:") {
+                if col.data_type.to_lowercase() != target_col.data_type.to_lowercase() {
+                    statements.push(format!(
+                        "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} TYPE {};  -- {}",
+                        target_database, tbl, col.name, col.data_type, changes_comment
+                    ));
+                }
+
+                if col.nullable != target_col.nullable {
+                    if col.nullable {
                         statements.push(format!(
-                            "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} TYPE {};  -- {}",
-                            target_database, tbl, col.name, col.data_type, changes_comment
+                            "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} DROP NOT NULL;",
+                            target_database, tbl, col.name
+                        ));
+                    } else {
+                        statements.push(format!(
+                            "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} SET NOT NULL;",
+                            target_database, tbl, col.name
                         ));
                     }
-                    if change.starts_with("可空:") {
-                        if col.nullable {
-                            statements.push(format!(
-                                "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} DROP NOT NULL;",
-                                target_database, tbl, col.name
-                            ));
-                        } else {
-                            statements.push(format!(
-                                "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} SET NOT NULL;",
-                                target_database, tbl, col.name
-                            ));
-                        }
-                    }
-                    if change.starts_with("默认值:") {
-                        if let Some(ref dv) = col.default_value {
-                            statements.push(format!(
-                                "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} SET DEFAULT {};",
-                                target_database, tbl, col.name, format_default_value(dv)
-                            ));
-                        } else {
-                            statements.push(format!(
-                                "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} DROP DEFAULT;",
-                                target_database, tbl, col.name
-                            ));
-                        }
+                }
+
+                if col.default_value != target_col.default_value {
+                    if let Some(ref dv) = col.default_value {
+                        statements.push(format!(
+                            "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} SET DEFAULT {};",
+                            target_database, tbl, col.name, format_default_value(dv)
+                        ));
+                    } else {
+                        statements.push(format!(
+                            "ALTER TABLE {q}{}{q}.{q}{}{q} ALTER COLUMN {q}{}{q} DROP DEFAULT;",
+                            target_database, tbl, col.name
+                        ));
                     }
                 }
             } else {
