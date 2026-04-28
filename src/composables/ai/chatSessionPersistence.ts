@@ -19,8 +19,9 @@ export function saveNewSessionShellIfMissing(params: {
   provider: ProviderConfig
   model: ModelConfig
   log: Logger
+  goal?: string
 }): void {
-  const { store, sessionId, titleSource, provider, model, log } = params
+  const { store, sessionId, titleSource, provider, model, log, goal } = params
   if (store.sessions.some(session => session.id === sessionId)) return
 
   const now = Date.now()
@@ -34,6 +35,8 @@ export function saveNewSessionShellIfMissing(params: {
     estimatedCost: 0,
     createdAt: now,
     updatedAt: now,
+    goal: goal || buildSessionTitle(titleSource),
+    status: 'idle',
   }).catch(error => log.warn('eager_save_session_failed', { sessionId }, error))
 }
 
@@ -49,6 +52,8 @@ export function saveFinalSession(params: {
   createdAt: number
   workDir?: string
   log: Logger
+  status?: AiSession['status']
+  lastCompactSummary?: string
 }): void {
   const {
     store,
@@ -62,8 +67,11 @@ export function saveFinalSession(params: {
     createdAt,
     workDir,
     log,
+    status,
+    lastCompactSummary,
   } = params
 
+  const existing = store.sessions.find(s => s.id === sessionId)
   const session: AiSession = {
     id: sessionId,
     title: buildSessionTitle(titleSource),
@@ -76,6 +84,9 @@ export function saveFinalSession(params: {
     createdAt,
     updatedAt: Date.now(),
     workDir: workDir || undefined,
+    goal: existing?.goal || buildSessionTitle(titleSource),
+    status: status ?? existing?.status ?? 'idle',
+    lastCompactSummary: lastCompactSummary ?? existing?.lastCompactSummary,
   }
 
   store.saveSession(session).catch(error => log.warn('save_session_failed', { sessionId }, error))

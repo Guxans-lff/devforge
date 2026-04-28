@@ -1,16 +1,16 @@
 import { aiReadContextFile, aiSaveMessage, type ChatMessage } from '@/api/ai'
 import type { useAiChatStore } from '@/stores/ai-chat'
 import type { useAiMemoryStore } from '@/stores/ai-memory'
-import type { AiMessage, AiMessageRecord, FileAttachment, ModelConfig, ProviderConfig, WorkspaceConfig } from '@/types/ai'
+import type { AiMessage, AiMessageRecord, FileAttachment, ModelConfig, ProviderConfig } from '@/types/ai'
 import type { Logger } from '@/utils/logger'
 import { buildFileMarkedContent } from '@/utils/file-markers'
 import { buildChatMessagesWithOptions } from './chatMessageBuilder'
 import { genId } from './chatHelpers'
 import { saveNewSessionShellIfMissing } from './chatSessionPersistence'
+import { buildWorkspaceSkillsPrompt } from '@/ai-gui/workspaceSkills'
 
 type AiChatStore = ReturnType<typeof useAiChatStore>
 type AiMemoryStore = ReturnType<typeof useAiMemoryStore>
-type WorkspaceContextFile = NonNullable<WorkspaceConfig['contextFiles']>[number]
 
 const CONTEXT_FILE_MAX_LINES = 400
 const CONTEXT_FILE_MAX_CHARS = 12_000
@@ -62,13 +62,15 @@ export interface PrepareSendContextParams {
   log: Logger
 }
 
+type ContextFiles = NonNullable<NonNullable<AiChatStore['currentWorkspaceConfig']>['contextFiles']>
+
 interface ContextFileReadResult {
-  entry: WorkspaceContextFile
+  entry: ContextFiles[number]
   fileContent: string
 }
 
 async function readContextFiles(
-  contextFiles: WorkspaceContextFile[],
+  contextFiles: ContextFiles,
   workDir: string,
   log: Logger,
 ): Promise<Array<ContextFileReadResult | null>> {
@@ -144,6 +146,7 @@ export async function prepareSendContext(params: PrepareSendContextParams): Prom
     provider,
     model,
     log,
+    goal: content.slice(0, 120),
   })
 
   let enrichedSystemPrompt = systemPrompt
@@ -156,9 +159,8 @@ export async function prepareSendContext(params: PrepareSendContextParams): Prom
     : Promise.resolve('')
 
   const workspaceConfig = aiStore.currentWorkspaceConfig
-  const contextFiles = workspaceConfig?.contextFiles ?? []
-  const contextFileReadsPromise = workDir && contextFiles.length > 0
-    ? readContextFiles(contextFiles, workDir, log)
+  const contextFileReadsPromise = workspaceConfig && workDir && workspaceConfig.contextFiles && workspaceConfig.contextFiles.length > 0
+    ? readContextFiles(workspaceConfig.contextFiles, workDir, log)
     : Promise.resolve([])
 
   const recalled = await recallPromise
@@ -171,7 +173,12 @@ export async function prepareSendContext(params: PrepareSendContextParams): Prom
       enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n${workspaceConfig.systemPromptExtra}`
     }
 
-    if (contextFiles.length > 0) {
+    const skillsPrompt = buildWorkspaceSkillsPrompt(workspaceConfig.skills)
+    if (skillsPrompt) {
+      enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n${skillsPrompt}`
+    }
+
+    if (workspaceConfig.contextFiles && workspaceConfig.contextFiles.length > 0) {
       const contextFileReads = await contextFileReadsPromise
       const contextParts: string[] = []
       let totalContextChars = 0
@@ -203,7 +210,21 @@ export async function prepareSendContext(params: PrepareSendContextParams): Prom
   }
 
   if (planGateEnabled && !planApproved) {
-    enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n[PLAN GATE ACTIVE] 你必须先输出清晰的执行计划（步骤列表），不能调用任何工具，等待用户确认后才开始执行。计划中每个步骤请以 "- " 开头。`
+    enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n[PLAN GATE ACTIVE] 你必须先输出清晰的执行计划（步骤列表），不能调用任何工具，等待用户确认后才开始执行。请按以下格式输出计划：
+
+计划标题
+
+1. 第一步标题
+   第一步的详细说明（可选）
+2. 第二步标题
+   第二步的详细说明（可选）
+
+或
+
+- Step 1: 第一步标题
+  详细说明
+- Step 2: 第二步标题
+  详细说明`
   }
 
   const hasVisionCapability = model.capabilities.vision

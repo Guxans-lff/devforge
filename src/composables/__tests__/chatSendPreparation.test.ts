@@ -47,6 +47,10 @@ function createParams() {
       sessions: [],
       currentWorkspaceConfig: {
         systemPromptExtra: 'workspace prompt',
+        skills: [
+          { id: 'frontend', name: 'Frontend Design', description: 'UI work', path: '.agents/skills/frontend-design/SKILL.md', enabled: true },
+          { id: 'disabled', name: 'Disabled Skill', enabled: false },
+        ],
         contextFiles: [
           { path: 'a.txt', reason: 'first' },
           { path: 'b.txt', reason: 'second' },
@@ -107,8 +111,15 @@ describe('chatSendPreparation', () => {
     expect(prepared.enrichedSystemPrompt).toContain('base prompt')
     expect(prepared.enrichedSystemPrompt).toContain('memory recall')
     expect(prepared.enrichedSystemPrompt).toContain('workspace prompt')
+    expect(prepared.enrichedSystemPrompt).toContain('<workspace-skills>')
+    expect(prepared.enrichedSystemPrompt).toContain('Frontend Design')
+    expect(prepared.enrichedSystemPrompt).toContain('.agents/skills/frontend-design/SKILL.md')
+    expect(prepared.enrichedSystemPrompt).not.toContain('Disabled Skill')
     expect(prepared.enrichedSystemPrompt).toContain('# a.txt (first)')
     expect(prepared.enrichedSystemPrompt).toContain('# b.txt (second)')
+    expect(prepared.enrichedSystemPrompt!.indexOf('<workspace-skills>')).toBeLessThan(
+      prepared.enrichedSystemPrompt!.indexOf('# a.txt (first)'),
+    )
     expect(prepared.enrichedSystemPrompt!.indexOf('# a.txt (first)')).toBeLessThan(
       prepared.enrichedSystemPrompt!.indexOf('# b.txt (second)'),
     )
