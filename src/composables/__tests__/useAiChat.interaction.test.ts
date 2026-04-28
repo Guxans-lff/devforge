@@ -1,7 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { nextTick, ref } from 'vue'
 import { useAiChat } from '@/composables/useAiChat'
-import { invalidateChatHistoryCache } from '@/composables/ai/chatHistoryLoad'
+import {
+  HISTORY_LOAD_STEP,
+  HISTORY_RECENT_RECORD_LIMIT,
+  invalidateChatHistoryCache,
+} from '@/composables/ai/chatHistoryLoad'
 import type { AiSessionDetail } from '@/types/ai'
 
 const { aiGetSessionMock } = vi.hoisted(() => ({
@@ -104,52 +108,54 @@ describe('useAiChat interaction behavior', () => {
   })
 
   it('loads a larger history window when loadMoreHistory is triggered', async () => {
+    const expandedLimit = HISTORY_RECENT_RECORD_LIMIT + HISTORY_LOAD_STEP
     aiGetSessionMock
-      .mockResolvedValueOnce(makeSessionDetail(300, 700, 300))
-      .mockResolvedValueOnce(makeSessionDetail(600, 700, 600))
+      .mockResolvedValueOnce(makeSessionDetail(HISTORY_RECENT_RECORD_LIMIT, 700, HISTORY_RECENT_RECORD_LIMIT))
+      .mockResolvedValueOnce(makeSessionDetail(expandedLimit, 700, expandedLimit))
 
     const chat = useAiChat({ sessionId: ref('session-1') })
 
     await chat.loadHistory()
     expect(chat.canLoadMoreHistory.value).toBe(true)
-    expect(aiGetSessionMock).toHaveBeenNthCalledWith(1, 'session-1', 300)
+    expect(aiGetSessionMock).toHaveBeenNthCalledWith(1, 'session-1', HISTORY_RECENT_RECORD_LIMIT)
     expect(chat.messages.value[0]?.type).toBe('divider')
 
     await chat.loadMoreHistory()
 
-    expect(aiGetSessionMock).toHaveBeenNthCalledWith(2, 'session-1', 600)
-    expect(chat.historyLoadedRecords.value).toBe(600)
+    expect(aiGetSessionMock).toHaveBeenNthCalledWith(2, 'session-1', expandedLimit)
+    expect(chat.historyLoadedRecords.value).toBe(expandedLimit)
     expect(chat.historyTotalRecords.value).toBe(700)
-    expect(chat.historyRemainingRecords.value).toBe(100)
+    expect(chat.historyRemainingRecords.value).toBe(700 - expandedLimit)
     expect(chat.messages.value[0]?.type).toBe('divider')
     expect(chat.messages.value[0]?.dividerMeta).toMatchObject({
       kind: 'history-window',
-      loadedRecords: 600,
+      loadedRecords: expandedLimit,
       totalRecords: 700,
-      remainingRecords: 100,
+      remainingRecords: 700 - expandedLimit,
     })
     expect(chat.observability.value.historyRestoreCount).toBe(chat.messages.value.length)
     expect(chat.observability.value.loadHistoryDurationMs).not.toBeNull()
   })
 
-  it('preloads the next history window after restoring a truncated session', async () => {
-    aiGetSessionMock
-      .mockResolvedValueOnce(makeSessionDetail(300, 700, 300))
-      .mockResolvedValueOnce(makeSessionDetail(600, 700, 600))
+  it('does not automatically preload a larger history window after restoring a truncated session', async () => {
+    aiGetSessionMock.mockResolvedValueOnce(
+      makeSessionDetail(HISTORY_RECENT_RECORD_LIMIT, 700, HISTORY_RECENT_RECORD_LIMIT),
+    )
 
     const chat = useAiChat({ sessionId: ref('session-1') })
 
     await chat.loadHistory()
     await Promise.resolve()
 
-    expect(aiGetSessionMock).toHaveBeenNthCalledWith(1, 'session-1', 300)
-    expect(aiGetSessionMock).toHaveBeenNthCalledWith(2, 'session-1', 600)
+    expect(aiGetSessionMock).toHaveBeenCalledTimes(1)
+    expect(aiGetSessionMock).toHaveBeenNthCalledWith(1, 'session-1', HISTORY_RECENT_RECORD_LIMIT)
   })
 
-  it('reuses the inflight preloaded history request when loadMoreHistory is triggered', async () => {
+  it('ignores duplicate loadMoreHistory calls while a manual expansion is pending', async () => {
+    const expandedLimit = HISTORY_RECENT_RECORD_LIMIT + HISTORY_LOAD_STEP
     let resolveWarmup: ((value: AiSessionDetail) => void) | null = null
     aiGetSessionMock
-      .mockResolvedValueOnce(makeSessionDetail(300, 700, 300))
+      .mockResolvedValueOnce(makeSessionDetail(HISTORY_RECENT_RECORD_LIMIT, 700, HISTORY_RECENT_RECORD_LIMIT))
       .mockImplementationOnce(() => new Promise<AiSessionDetail>((resolve) => {
         resolveWarmup = resolve
       }))
@@ -164,17 +170,17 @@ describe('useAiChat interaction behavior', () => {
     await secondLoadMorePromise
     expect(aiGetSessionMock).toHaveBeenCalledTimes(2)
 
-    resolveWarmup?.(makeSessionDetail(600, 700, 600))
+    resolveWarmup?.(makeSessionDetail(expandedLimit, 700, expandedLimit))
     await loadMorePromise
 
-    expect(aiGetSessionMock).toHaveBeenCalledTimes(3)
-    expect(aiGetSessionMock).toHaveBeenLastCalledWith('session-1', 700)
-    expect(chat.historyLoadedRecords.value).toBe(600)
+    expect(aiGetSessionMock).toHaveBeenCalledTimes(2)
+    expect(aiGetSessionMock).toHaveBeenLastCalledWith('session-1', expandedLimit)
+    expect(chat.historyLoadedRecords.value).toBe(expandedLimit)
     expect(chat.messages.value[0]?.type).toBe('divider')
   })
 
   it('does not load more history when the current window is complete', async () => {
-    aiGetSessionMock.mockResolvedValueOnce(makeSessionDetail(120, 120, 300))
+    aiGetSessionMock.mockResolvedValueOnce(makeSessionDetail(120, 120, HISTORY_RECENT_RECORD_LIMIT))
 
     const chat = useAiChat({ sessionId: ref('session-1') })
 
@@ -188,7 +194,7 @@ describe('useAiChat interaction behavior', () => {
 
   it('keeps the current history window intact when loadMoreHistory fails', async () => {
     aiGetSessionMock
-      .mockResolvedValueOnce(makeSessionDetail(300, 700, 300))
+      .mockResolvedValueOnce(makeSessionDetail(HISTORY_RECENT_RECORD_LIMIT, 700, HISTORY_RECENT_RECORD_LIMIT))
       .mockRejectedValueOnce(new Error('load more failed'))
 
     const chat = useAiChat({ sessionId: ref('session-1') })
@@ -200,13 +206,13 @@ describe('useAiChat interaction behavior', () => {
 
     expect(chat.historyLoadMorePending.value).toBe(false)
     expect(chat.historyLoadMoreError.value).toBe('load more failed')
-    expect(chat.historyLoadedRecords.value).toBe(300)
+    expect(chat.historyLoadedRecords.value).toBe(HISTORY_RECENT_RECORD_LIMIT)
     expect(chat.historyTotalRecords.value).toBe(700)
     expect(chat.messages.value.map(message => message.id)).toEqual(beforeIds)
   })
 
   it('reuses cached history for the same session window', async () => {
-    aiGetSessionMock.mockResolvedValueOnce(makeSessionDetail(120, 120, 300))
+    aiGetSessionMock.mockResolvedValueOnce(makeSessionDetail(120, 120, HISTORY_RECENT_RECORD_LIMIT))
 
     const chat = useAiChat({ sessionId: ref('session-1') })
 
@@ -217,9 +223,7 @@ describe('useAiChat interaction behavior', () => {
     expect(chat.messages.value).toHaveLength(120)
   })
 
-  it('preloads history for another session without mutating current chat state', async () => {
-    aiGetSessionMock.mockResolvedValueOnce(makeSessionDetail(120, 120, 300, { sessionId: 'session-2' }))
-
+  it('does not preload history for another session', async () => {
     const chat = useAiChat({ sessionId: ref('session-1') })
     chat.messages.value = [{
       id: 'existing',
@@ -230,7 +234,7 @@ describe('useAiChat interaction behavior', () => {
 
     await chat.preloadHistory('session-2')
 
-    expect(aiGetSessionMock).toHaveBeenCalledWith('session-2', 300)
+    expect(aiGetSessionMock).not.toHaveBeenCalled()
     expect(chat.messages.value).toEqual([{
       id: 'existing',
       role: 'assistant',
@@ -241,8 +245,8 @@ describe('useAiChat interaction behavior', () => {
 
   it('clears session-scoped runtime state when restoring another session', async () => {
     aiGetSessionMock
-      .mockResolvedValueOnce(makeSessionDetail(2, 2, 300, { sessionId: 'session-1', workDir: 'D:/workspace-a' }))
-      .mockResolvedValueOnce(makeSessionDetail(1, 1, 300, { sessionId: 'session-2', workDir: undefined }))
+      .mockResolvedValueOnce(makeSessionDetail(2, 2, HISTORY_RECENT_RECORD_LIMIT, { sessionId: 'session-1', workDir: 'D:/workspace-a' }))
+      .mockResolvedValueOnce(makeSessionDetail(1, 1, HISTORY_RECENT_RECORD_LIMIT, { sessionId: 'session-2', workDir: undefined }))
 
     const sessionId = ref('session-1')
     const chat = useAiChat({ sessionId })
@@ -274,7 +278,7 @@ describe('useAiChat interaction behavior', () => {
 
   it('falls back to the current workspace root when restored session has no saved work directory', async () => {
     aiGetSessionMock.mockResolvedValueOnce(
-      makeSessionDetail(1, 1, 300, { sessionId: 'session-empty-workdir', workDir: undefined }),
+      makeSessionDetail(1, 1, HISTORY_RECENT_RECORD_LIMIT, { sessionId: 'session-empty-workdir', workDir: undefined }),
     )
 
     const chat = useAiChat({ sessionId: ref('session-empty-workdir') })

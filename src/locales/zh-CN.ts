@@ -2257,6 +2257,7 @@ export default {
     },
     history: {
       windowLoaded: '已加载最近 {loaded} / {total} 条历史记录',
+
       loadMore: '加载更早历史（剩余 {count}）',
       loadingMore: '加载中…',
       loadMoreFailed: '加载更早历史失败，请重试',

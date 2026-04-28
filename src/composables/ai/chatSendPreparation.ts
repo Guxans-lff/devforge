@@ -1,7 +1,7 @@
 import { aiReadContextFile, aiSaveMessage, type ChatMessage } from '@/api/ai'
 import type { useAiChatStore } from '@/stores/ai-chat'
 import type { useAiMemoryStore } from '@/stores/ai-memory'
-import type { AiMessage, AiMessageRecord, FileAttachment, ModelConfig, ProviderConfig } from '@/types/ai'
+import type { AiMessage, AiMessageRecord, FileAttachment, ModelConfig, ProviderConfig, WorkspaceConfig } from '@/types/ai'
 import type { Logger } from '@/utils/logger'
 import { buildFileMarkedContent } from '@/utils/file-markers'
 import { buildChatMessagesWithOptions } from './chatMessageBuilder'
@@ -10,6 +10,7 @@ import { saveNewSessionShellIfMissing } from './chatSessionPersistence'
 
 type AiChatStore = ReturnType<typeof useAiChatStore>
 type AiMemoryStore = ReturnType<typeof useAiMemoryStore>
+type WorkspaceContextFile = NonNullable<WorkspaceConfig['contextFiles']>[number]
 
 const CONTEXT_FILE_MAX_LINES = 400
 const CONTEXT_FILE_MAX_CHARS = 12_000
@@ -62,12 +63,12 @@ export interface PrepareSendContextParams {
 }
 
 interface ContextFileReadResult {
-  entry: NonNullable<AiChatStore['currentWorkspaceConfig']>['contextFiles'][number]
+  entry: WorkspaceContextFile
   fileContent: string
 }
 
 async function readContextFiles(
-  contextFiles: NonNullable<AiChatStore['currentWorkspaceConfig']>['contextFiles'],
+  contextFiles: WorkspaceContextFile[],
   workDir: string,
   log: Logger,
 ): Promise<Array<ContextFileReadResult | null>> {
@@ -155,8 +156,9 @@ export async function prepareSendContext(params: PrepareSendContextParams): Prom
     : Promise.resolve('')
 
   const workspaceConfig = aiStore.currentWorkspaceConfig
-  const contextFileReadsPromise = workspaceConfig && workDir && workspaceConfig.contextFiles && workspaceConfig.contextFiles.length > 0
-    ? readContextFiles(workspaceConfig.contextFiles, workDir, log)
+  const contextFiles = workspaceConfig?.contextFiles ?? []
+  const contextFileReadsPromise = workDir && contextFiles.length > 0
+    ? readContextFiles(contextFiles, workDir, log)
     : Promise.resolve([])
 
   const recalled = await recallPromise
@@ -169,7 +171,7 @@ export async function prepareSendContext(params: PrepareSendContextParams): Prom
       enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n${workspaceConfig.systemPromptExtra}`
     }
 
-    if (workspaceConfig.contextFiles && workspaceConfig.contextFiles.length > 0) {
+    if (contextFiles.length > 0) {
       const contextFileReads = await contextFileReadsPromise
       const contextParts: string[] = []
       let totalContextChars = 0

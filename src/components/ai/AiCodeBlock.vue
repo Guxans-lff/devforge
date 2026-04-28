@@ -4,7 +4,7 @@
  *
  * 支持语法高亮（shiki）、复制、语言标签、行号。
  */
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { Copy, Check, Download } from 'lucide-vue-next'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeTextFile } from '@/api/database'
@@ -23,6 +23,9 @@ const props = withDefaults(defineProps<{
 
 const copied = ref(false)
 const highlightedHtml = ref('')
+const codeBlockRoot = ref<HTMLElement | null>(null)
+let hasHighlighted = false
+let observer: IntersectionObserver | null = null
 
 /** 语言 → 文件扩展名映射 */
 const LANG_EXT: Record<string, string> = {
@@ -106,12 +109,30 @@ async function highlight() {
   }
 }
 
-onMounted(highlight)
-watch(() => [props.code, props.language], () => { if (!props.isStreaming) highlight() })
+onMounted(() => {
+  if (!codeBlockRoot.value) return
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries[0]?.isIntersecting && !hasHighlighted) {
+        hasHighlighted = true
+        highlight()
+        observer?.disconnect()
+      }
+    },
+    { rootMargin: '200px' },
+  )
+  observer.observe(codeBlockRoot.value)
+})
+
+onBeforeUnmount(() => {
+  observer?.disconnect()
+})
+
+watch(() => [props.code, props.language], () => { if (!props.isStreaming && hasHighlighted) highlight() })
 </script>
 
 <template>
-  <div class="rounded-lg border border-border/50 overflow-hidden bg-muted/30">
+  <div ref="codeBlockRoot" class="rounded-lg border border-border/50 overflow-hidden bg-muted/30">
     <!-- 顶栏 -->
     <div class="flex items-center justify-between px-3 py-1.5 border-b border-border/50 bg-muted/50">
       <span class="text-[10px] font-mono font-medium text-muted-foreground">

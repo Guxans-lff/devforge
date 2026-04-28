@@ -2138,6 +2138,7 @@ export default {
     },
     history: {
       windowLoaded: 'Loaded recent {loaded} / {total} history records',
+
       loadMore: 'Load earlier history ({count} remaining)',
       loadingMore: 'Loading…',
       loadMoreFailed: 'Failed to load earlier history. Please retry.',

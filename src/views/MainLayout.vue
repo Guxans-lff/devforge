@@ -106,6 +106,9 @@ const activeTabProps = computed(() => {
   if (tab.type === 'file-editor' && tab.meta?.absolutePath) {
     return { tabId: tab.id, absolutePath: tab.meta.absolutePath }
   }
+  if (tab.type === 'ai-chat') {
+    return { tabId: tab.id }
+  }
   if (tab.connectionId) {
     const base: Record<string, string> = {
       connectionId: tab.connectionId,

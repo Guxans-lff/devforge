@@ -1,5 +1,4 @@
-import { computed, nextTick, onUnmounted, reactive, ref, toRef, watch, type MaybeRef, type Ref } from 'vue'
-import { aiAbortStream } from '@/api/ai'
+import { computed, nextTick, onUnmounted, reactive, ref, shallowRef, toRef, triggerRef, watch, type MaybeRef, type Ref } from 'vue'
 import { useAutoCompact } from '@/composables/useAutoCompact'
 import { abortChat } from '@/composables/ai/chatAbort'
 import {
@@ -8,7 +7,6 @@ import {
   HISTORY_RECENT_RECORD_LIMIT,
   invalidateChatHistoryCache,
   loadChatHistoryWindow,
-  preloadChatHistoryWindow,
 } from '@/composables/ai/chatHistoryLoad'
 import { runAiChatSessionTurn, type AiChatSessionRunnerResult } from '@/composables/ai/chatSessionRunner'
 import { useAiChatObservability } from '@/composables/ai/useAiChatObservability'
@@ -40,6 +38,7 @@ import { createLogger } from '@/utils/logger'
 const log = createLogger('ai.chat')
 
 const MAX_TOOL_LOOPS = 50
+const HISTORY_LOAD_TIMEOUT_MS = 8_000
 
 export interface UseAiChatOptions {
   sessionId: MaybeRef<string>
@@ -54,9 +53,10 @@ export function useAiChat(options: UseAiChatOptions) {
   const observability = useAiChatObservability()
   const filesStore = useWorkspaceFilesStore()
 
-  const messages = ref<AiMessage[]>([])
+  const messages = shallowRef<AiMessage[]>([])
   const isStreaming = ref(false)
   const isLoading = ref(false)
+  const isHistoryLoading = ref(false)
   const error = ref<string | null>(null)
   const userScrolled = ref(false)
   const workDir = ref('')
@@ -305,6 +305,7 @@ export function useAiChat(options: UseAiChatOptions) {
     }
     if (index !== -1) {
       messages.value[index] = updater(messages.value[index]!)
+      triggerRef(messages)
     }
   }
 
@@ -409,7 +410,11 @@ export function useAiChat(options: UseAiChatOptions) {
     error.value = null
 
     try {
-      const result = await loadChatHistoryWindow(sid, requestedWindowSize)
+      const result = await withTimeout(
+        loadChatHistoryWindow(sid, requestedWindowSize),
+        HISTORY_LOAD_TIMEOUT_MS,
+        '历史会话加载超时，已停止本次恢复。请重启应用后再试，或清理该会话历史。',
+      )
       if (seq !== loadSeq) return
 
       log.info('load_history', {
@@ -431,27 +436,28 @@ export function useAiChat(options: UseAiChatOptions) {
       const currentIds = messages.value.map(message => message.id).join('|')
       const nextIds = result.messages.map(message => message.id).join('|')
       if (currentIds !== nextIds) {
-        messages.value = result.messages
+        isHistoryLoading.value = true
         streamingMessageIndex = -1
+
+        // isHistoryLoading=true 期间 groupedMessages 短路返回空数组，
+        // 所以这里一次性赋值不会触发 DOM 渲染
+        messages.value = result.messages
+
+        // 让出主线程，确保 loading 状态的 UI 先绘制
+        await nextTick()
+
+        // 解除 loading → groupedMessages 重算 → 一次性渲染所有可见消息
+        isHistoryLoading.value = false
+        await nextTick()
       }
       lastLoadedHistoryKey = requestKey
       observability.markHistoryLoadComplete(result.messages.length)
-      scheduleHistoryPreload(sid, result.window)
     } catch (err) {
       error.value = ensureErrorString(err)
       log.error('load_history_failed', { sessionId: sid }, err)
     } finally {
       isLoading.value = false
     }
-  }
-
-  function scheduleHistoryPreload(sid: string, window: { loadedRecords: number; totalRecords: number; windowSize: number }): void {
-    if (!canExpandHistoryWindow(window)) return
-    const nextWindowSize = Math.min(
-      getExpandedHistoryWindowSize(window.windowSize),
-      window.totalRecords,
-    )
-    void preloadChatHistoryWindow(sid, nextWindowSize)
   }
 
   async function send(
@@ -621,9 +627,8 @@ export function useAiChat(options: UseAiChatOptions) {
   }
 
   async function preloadHistory(overrideSessionId?: string, options?: { windowSize?: number }): Promise<void> {
-    const sid = overrideSessionId ?? sessionIdRef.value
-    if (!sid) return
-    await preloadChatHistoryWindow(sid, options?.windowSize ?? HISTORY_RECENT_RECORD_LIMIT)
+    void overrideSessionId
+    void options
   }
 
   function scrollToBottom(): void {
@@ -659,6 +664,7 @@ export function useAiChat(options: UseAiChatOptions) {
     messages,
     isStreaming,
     isLoading,
+    isHistoryLoading,
     error,
     totalTokens,
     latestUsage,
@@ -703,4 +709,15 @@ export function useAiChat(options: UseAiChatOptions) {
     handleScroll,
     scrollToBottom,
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
 }

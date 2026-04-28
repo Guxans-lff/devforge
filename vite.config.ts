@@ -34,12 +34,18 @@ export default defineConfig({
     target: 'esnext',
     rollupOptions: {
       output: {
-        manualChunks: {
-          'monaco': ['monaco-editor'],
-          'xterm': ['@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-web-links'],
-          'vue-vendor': ['vue', 'vue-router', 'pinia', 'vue-i18n'],
-          'shiki': ['shiki'],
-          'diff': ['diff'],
+        manualChunks(id) {
+          if (id.includes('node_modules/monaco-editor')) return 'monaco'
+          if (id.includes('node_modules/@xterm/')) return 'xterm'
+          if (id.includes('node_modules/vue')
+            || id.includes('node_modules/vue-router')
+            || id.includes('node_modules/pinia')
+            || id.includes('node_modules/vue-i18n')) {
+            return 'vue-vendor'
+          }
+          if (id.includes('node_modules/shiki')) return 'shiki'
+          if (id.includes('node_modules/diff')) return 'diff'
+          return undefined
         },
       },
     },

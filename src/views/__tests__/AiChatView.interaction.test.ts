@@ -117,11 +117,10 @@ const AiMessageListVirtualStub = defineComponent({
 
 const AiSessionDrawerStub = defineComponent({
   name: 'AiSessionDrawer',
-  emits: ['select', 'create', 'delete', 'preload', 'update:open'],
+  emits: ['select', 'create', 'delete', 'update:open'],
   setup(_props, { emit }) {
     return () => h('div', { class: 'ai-session-drawer-stub' }, [
       h('button', { class: 'select-session', onClick: () => emit('select', 'session-2') }, 'select-session'),
-      h('button', { class: 'preload-session', onMouseenter: () => emit('preload', 'session-2') }, 'preload-session'),
       h('button', { class: 'create-session', onClick: () => emit('create') }, 'create-session'),
     ])
   },
@@ -179,7 +178,6 @@ const AiChatShellStub = defineComponent({
     'selectSession',
     'createSession',
     'deleteSession',
-    'preloadSession',
     'filePickerConfirm',
     'exitImmersive',
     'toggleSideRail',
@@ -196,7 +194,6 @@ const AiChatShellStub = defineComponent({
     })
       return () => h('div', { class: 'ai-chat-shell-stub' }, [
         h('button', { class: 'select-session', onClick: () => emit('selectSession', 'session-2') }, 'select-session'),
-        h('button', { class: 'preload-session', onMouseenter: () => emit('preloadSession', 'session-2') }, 'preload-session'),
         h('button', { class: 'create-session', onClick: () => emit('createSession') }, 'create-session'),
       h('button', { class: 'send-first', onClick: () => emit('send', 'first request') }, 'send-first'),
       h('button', { class: 'send-second', onClick: () => emit('send', 'second request') }, 'send-second'),
@@ -282,6 +279,7 @@ function createChatMock(messages: AiMessage[] = []) {
     messages: ref(messages),
     isStreaming: ref(false),
     isLoading: ref(false),
+    isHistoryLoading: ref(false),
     canLoadMoreHistory: ref(false),
     historyRemainingRecords: ref(0),
     historyLoadMorePending: ref(false),
@@ -352,8 +350,9 @@ function createChatMock(messages: AiMessage[] = []) {
   }
 }
 
-function mountView() {
+function mountView(props: Record<string, unknown> = {}) {
   const wrapper = mount(AiChatView, {
+    props,
     global: {
       stubs: {
         AiChatShell: AiChatShellStub,
@@ -407,6 +406,10 @@ const mountedWrappers: VueWrapper[] = []
 
 describe('AiChatView interaction', () => {
   beforeEach(() => {
+    // jsdom 不提供 requestIdleCallback/cancelIdleCallback
+    globalThis.requestIdleCallback ??= ((cb: () => void) => setTimeout(cb, 0)) as any
+    globalThis.cancelIdleCallback ??= ((id: number) => clearTimeout(id)) as any
+
     mocks.state.shellDraft = ''
     const provider = makeProvider()
     mocks.state.chat = createChatMock()
@@ -645,6 +648,59 @@ describe('AiChatView interaction', () => {
     expect(mocks.state.chat.loadMoreHistory).toHaveBeenCalledTimes(1)
   })
 
+  it('does not auto-load history for an inactive cached AI tab', async () => {
+    mocks.state.workspaceStore.activeTabId = 'ai-tab-active'
+    mocks.state.workspaceStore.tabs = [
+      {
+        id: 'ai-tab-active',
+        type: 'ai-chat',
+        title: 'Active Chat',
+        closable: true,
+        meta: { sessionId: 'session-active' },
+      },
+      {
+        id: 'ai-tab-cached',
+        type: 'ai-chat',
+        title: 'Cached Chat',
+        closable: true,
+        meta: { sessionId: 'session-cached' },
+      },
+    ]
+
+    mountView({ tabId: 'ai-tab-cached' })
+    await flushPromises()
+
+    expect(mocks.state.chat.loadHistory).not.toHaveBeenCalled()
+    expect(mocks.setActiveSessionIdMock).not.toHaveBeenCalledWith('session-cached')
+  })
+
+  it('auto-loads history only for the active AI tab instance', async () => {
+    mocks.state.workspaceStore.activeTabId = 'ai-tab-active'
+    mocks.state.workspaceStore.tabs = [
+      {
+        id: 'ai-tab-active',
+        type: 'ai-chat',
+        title: 'Active Chat',
+        closable: true,
+        meta: { sessionId: 'session-active' },
+      },
+      {
+        id: 'ai-tab-cached',
+        type: 'ai-chat',
+        title: 'Cached Chat',
+        closable: true,
+        meta: { sessionId: 'session-cached' },
+      },
+    ]
+
+    mountView({ tabId: 'ai-tab-active' })
+    await flushPromises()
+    await new Promise(resolve => requestAnimationFrame(() => resolve(undefined)))
+
+    expect(mocks.state.chat.loadHistory).toHaveBeenCalledTimes(1)
+    expect(mocks.state.chat.loadHistory).toHaveBeenCalledWith('session-active')
+  })
+
   it('loads history once when selecting another session', async () => {
     const wrapper = mountView()
     await flushPromises()
@@ -659,15 +715,6 @@ describe('AiChatView interaction', () => {
     expect(mocks.state.aiStore.setActiveSession).toHaveBeenCalledWith('session-2')
     expect(mocks.state.chat.loadHistory).toHaveBeenCalledTimes(1)
     expect(mocks.state.chat.loadHistory).toHaveBeenCalledWith('session-2')
-  })
-
-  it('preloads a session when the session drawer requests it', async () => {
-    const wrapper = mountView()
-    await flushPromises()
-
-    await wrapper.find('.preload-session').trigger('mouseenter')
-
-    expect(mocks.state.chat.preloadHistory).toHaveBeenCalledWith('session-2')
   })
 
   it('dispatches spawned tasks into tabs and marks them complete explicitly', async () => {
@@ -727,6 +774,8 @@ describe('AiChatView interaction', () => {
     }]
 
     mountView()
+    await flushPromises()
+    await new Promise(resolve => requestAnimationFrame(() => resolve(undefined)))
     await flushPromises()
 
     expect(mocks.state.chat.send).toHaveBeenCalledWith(

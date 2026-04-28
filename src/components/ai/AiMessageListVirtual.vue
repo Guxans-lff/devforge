@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, shallowRef, type ComponentPublicInstance } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch, type ComponentPublicInstance } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
@@ -42,6 +42,8 @@ const emit = defineEmits<{
 const scrollContainer = ref<HTMLElement | null>(null)
 const virtualItemEls = shallowRef<HTMLElement[]>([])
 const { t } = useI18n()
+const pendingMeasureIndexes = new Set<number>()
+let measureRafId: number | null = null
 
 function estimateItemHeight(item: MessageListItem): number {
   if (item.message.type === 'divider') return 44
@@ -56,15 +58,30 @@ const virtualizer = useVirtualizer(computed(() => ({
   count: props.items.length,
   getScrollElement: () => scrollContainer.value,
   estimateSize: (index: number) => estimateItemHeight(props.items[index]!),
-  overscan: 6,
+  overscan: 3,
   measureElement: (el: Element) => el.getBoundingClientRect().height,
 })))
 
 const virtualItems = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
-const stickyItem = computed(() =>
-  [...props.items].reverse().find(item => item.message.role === 'user' && item.stickyCompact) ?? null,
-)
+
+let prevItemCount = 0
+watch(() => props.items.length, (count) => {
+  if (count > 0 && prevItemCount === 0 && scrollContainer.value?.clientHeight) {
+    nextTick(() => {
+      virtualizer.value.scrollToIndex(count - 1, { align: 'end' })
+    })
+  }
+  prevItemCount = count
+})
+
+const stickyItem = computed(() => {
+  for (let i = props.items.length - 1; i >= 0; i--) {
+    const item = props.items[i]!
+    if (item.message.role === 'user' && item.stickyCompact) return item
+  }
+  return null
+})
 const stickyItemIndex = computed(() =>
   stickyItem.value ? props.items.findIndex(item => item.key === stickyItem.value?.key) : -1,
 )
@@ -76,10 +93,23 @@ const showStickyItem = computed(() => {
 })
 
 function measureAllVisible(): void {
-  nextTick(() => {
-    for (const item of virtualItems.value) {
-      const el = virtualItemEls.value[item.index]
-      if (el) virtualizer.value.measureElement(el)
+  for (const item of virtualItems.value) {
+    scheduleMeasure(item.index)
+  }
+}
+
+function scheduleMeasure(index: number): void {
+  pendingMeasureIndexes.add(index)
+  if (measureRafId !== null) return
+
+  measureRafId = requestAnimationFrame(() => {
+    measureRafId = null
+    const indexes = Array.from(pendingMeasureIndexes)
+    pendingMeasureIndexes.clear()
+
+    for (const itemIndex of indexes) {
+      const el = virtualItemEls.value[itemIndex]
+      if (el?.isConnected) virtualizer.value.measureElement(el)
     }
   })
 }
@@ -87,19 +117,13 @@ function measureAllVisible(): void {
 function setVirtualItemRef(index: number, el: Element | ComponentPublicInstance | null): void {
   if (!(el instanceof HTMLElement)) return
   virtualItemEls.value[index] = el
-  virtualizer.value.measureElement(el)
+  scheduleMeasure(index)
 }
 
 function scrollToBottom(): void {
-  const container = scrollContainer.value
-  if (!container) return
-  nextTick(() => {
-    container.scrollTop = container.scrollHeight
-    requestAnimationFrame(() => {
-      const latest = scrollContainer.value
-      if (latest) latest.scrollTop = latest.scrollHeight
-    })
-  })
+  if (props.items.length > 0) {
+    virtualizer.value.scrollToIndex(props.items.length - 1, { align: 'end' })
+  }
 }
 
 function getDividerText(message: AiMessage): string {
@@ -123,18 +147,27 @@ defineExpose({
   measureAllVisible,
   scrollContainer,
 })
+
+onBeforeUnmount(() => {
+  if (measureRafId !== null) {
+    cancelAnimationFrame(measureRafId)
+    measureRafId = null
+  }
+  pendingMeasureIndexes.clear()
+})
 </script>
 
 <template>
-  <div ref="scrollContainer" class="min-h-0 flex-1 overflow-y-auto" @scroll="emit('scroll', $event)">
+  <div ref="scrollContainer" class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain" @scroll="emit('scroll', $event)">
     <div
       v-if="showStickyItem && stickyItem"
-      class="sticky top-0 z-20 border-b border-border/20 bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      class="pointer-events-none absolute left-0 right-0 top-0 z-20 border-b border-border/20 bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
     >
       <AiMessageBubble
         :message="stickyItem.message"
         :session-id="sessionId"
         :sticky-compact="true"
+        class="pointer-events-auto"
       />
     </div>
 

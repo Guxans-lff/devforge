@@ -1,8 +1,10 @@
 import { mount } from '@vue/test-utils'
-import { describe, it, expect, vi } from 'vitest'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
 import AiMessageListVirtual from '@/components/ai/AiMessageListVirtual.vue'
 import type { AiMessage } from '@/types/ai'
+
+const scrollToIndexMock = vi.fn()
 
 vi.mock('@tanstack/vue-virtual', () => ({
   useVirtualizer: (optionsRef: { value: { count: number } }) => ({
@@ -15,6 +17,7 @@ vi.mock('@tanstack/vue-virtual', () => ({
         })),
       getTotalSize: () => optionsRef.value.count * 100,
       measureElement: vi.fn(),
+      scrollToIndex: scrollToIndexMock,
     },
   }),
 }))
@@ -48,6 +51,10 @@ function makeMessage(id: string, role: AiMessage['role'], extra: Partial<AiMessa
 }
 
 describe('AiMessageListVirtual', () => {
+  beforeEach(() => {
+    scrollToIndexMock.mockClear()
+  })
+
   it('renders messages and forwards bubble events', async () => {
     const wrapper = mount(AiMessageListVirtual, {
       props: {
@@ -214,6 +221,6 @@ describe('AiMessageListVirtual', () => {
     await nextTick()
     await new Promise(resolve => requestAnimationFrame(resolve))
 
-    expect(container.scrollTop).toBe(640)
+    expect(scrollToIndexMock).toHaveBeenCalledWith(0, { align: 'end' })
   })
 })

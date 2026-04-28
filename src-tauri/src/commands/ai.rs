@@ -16,6 +16,9 @@ use crate::utils::error::AppError;
 /// AI 引擎状态类型
 pub type AiEngineState = Arc<AiEngine>;
 
+const HISTORY_PREVIEW_TEXT_LIMIT: usize = 12_000;
+const HISTORY_PREVIEW_TOOL_RESULT_LIMIT: usize = 4_000;
+
 // ─────────────────────────────────── 流式对话 ───────────────────────────────────
 
 /// 流式对话
@@ -310,11 +313,12 @@ pub async fn ai_get_session(
 
     match session {
         Some(s) => {
-            let messages = if requested_limit > 0 {
+            let mut messages = if requested_limit > 0 {
                 session_store::get_messages_recent(&pool, &id, requested_limit).await?
             } else {
                 session_store::get_messages(&pool, &id).await?
             };
+            sanitize_history_preview_messages(&mut messages);
             let loaded_records = messages.len() as u32;
             Ok(Some(AiSessionDetail {
                 session: s,
@@ -325,18 +329,28 @@ pub async fn ai_get_session(
             }))
         }
         None => {
-            let messages = session_store::get_messages(&pool, &id).await?;
-            if messages.is_empty() {
+            if total_records == 0 {
                 return Ok(None);
             }
-            let first_ts = messages.first().map(|m| m.created_at).unwrap_or_else(|| {
+
+            let mut loaded_messages = if requested_limit > 0 {
+                session_store::get_messages_recent(&pool, &id, requested_limit).await?
+            } else {
+                session_store::get_messages(&pool, &id).await?
+            };
+            if loaded_messages.is_empty() {
+                return Ok(None);
+            }
+            sanitize_history_preview_messages(&mut loaded_messages);
+
+            let first_ts = loaded_messages.first().map(|m| m.created_at).unwrap_or_else(|| {
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
                     .as_millis() as i64
             });
-            let last_ts = messages.last().map(|m| m.created_at).unwrap_or(first_ts);
-            let title = messages
+            let last_ts = loaded_messages.last().map(|m| m.created_at).unwrap_or(first_ts);
+            let title = loaded_messages
                 .iter()
                 .find(|m| m.role == "user")
                 .map(|m| m.content.chars().take(20).collect::<String>())
@@ -347,7 +361,7 @@ pub async fn ai_get_session(
                 provider_id: String::new(),
                 model: String::new(),
                 system_prompt: None,
-                message_count: messages.len() as u32,
+                message_count: total_records,
                 total_tokens: 0,
                 estimated_cost: 0.0,
                 tags: None,
@@ -356,11 +370,6 @@ pub async fn ai_get_session(
                 work_dir: None,
             };
             let _ = session_store::save_session(&pool, &skeleton).await;
-            let loaded_messages = if requested_limit > 0 {
-                session_store::get_messages_recent(&pool, &id, requested_limit).await?
-            } else {
-                messages
-            };
             let loaded_records = loaded_messages.len() as u32;
             Ok(Some(AiSessionDetail {
                 session: skeleton,
@@ -374,6 +383,77 @@ pub async fn ai_get_session(
 }
 
 /// 删除会话
+fn sanitize_history_preview_messages(messages: &mut [AiMessageRecord]) {
+    for message in messages {
+        if message.content_type != "tool_calls" {
+            message.content = sanitize_history_file_markers(&message.content);
+        }
+
+        let limit = match message.content_type.as_str() {
+            "tool_calls" => continue,
+            "tool_result" => HISTORY_PREVIEW_TOOL_RESULT_LIMIT,
+            _ => HISTORY_PREVIEW_TEXT_LIMIT,
+        };
+        message.content = truncate_history_preview_content(&message.content, limit);
+    }
+}
+
+fn sanitize_history_file_markers(content: &str) -> String {
+    if !content.contains("<file ") {
+        return content.to_string();
+    }
+
+    let file_marker = match regex::Regex::new(
+        r#"(?s)<file\s+name="([^"]*?)"\s+path="([^"]*?)"\s+size="(\d+)"\s+lines="(\d+)"(?:\s+type="([^"]*?)")?>\n?(.*?)\n?</file>"#,
+    ) {
+        Ok(regex) => regex,
+        Err(_) => return content.to_string(),
+    };
+
+    file_marker
+        .replace_all(content, |captures: &regex::Captures| {
+            let name = captures.get(1).map(|item| item.as_str()).unwrap_or("unknown");
+            let path = captures.get(2).map(|item| item.as_str()).unwrap_or("");
+            let size = captures.get(3).map(|item| item.as_str()).unwrap_or("0");
+            let lines = captures.get(4).map(|item| item.as_str()).unwrap_or("0");
+            let file_type = captures.get(5).map(|item| item.as_str());
+            let file_content = captures.get(6).map(|item| item.as_str()).unwrap_or("");
+
+            if file_type == Some("image") {
+                let formatted_size = size
+                    .parse::<usize>()
+                    .map(format_history_bytes)
+                    .unwrap_or_else(|_| "未知".to_string());
+                return format!(
+                    "[历史图片附件已折叠：{name}，路径：{path}，大小：{formatted_size}。完整图片仍保留在本地历史库中。]"
+                );
+            }
+
+            let preview = truncate_history_preview_content(file_content, HISTORY_PREVIEW_TEXT_LIMIT);
+            format!(r#"<file name="{name}" path="{path}" size="{size}" lines="{lines}">{preview}</file>"#)
+        })
+        .into_owned()
+}
+
+fn format_history_bytes(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1} MB", bytes as f64 / 1024.0 / 1024.0)
+    }
+}
+
+fn truncate_history_preview_content(content: &str, limit: usize) -> String {
+    if content.chars().count() <= limit {
+        return content.to_string();
+    }
+
+    let preview: String = content.chars().take(limit).collect();
+    format!("{preview}\n\n[历史内容过大，已截断预览。完整内容仍保留在本地历史库中。]")
+}
+
 #[tauri::command]
 pub async fn ai_delete_session(
     id: String,

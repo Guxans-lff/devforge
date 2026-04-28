@@ -143,6 +143,10 @@ const CHAT_MODE_CONFIG: Record<ChatMode, {
 
 const LAST_SESSION_KEY = 'devforge:ai:lastSessionId'
 
+const props = defineProps<{
+  tabId?: string
+}>()
+
 const store = useAiChatStore()
 const workspace = useWorkspaceStore()
 const wsFiles = useWorkspaceFilesStore()
@@ -163,24 +167,56 @@ const expandedTaskCardIds = ref<string[]>([])
 const chatShellRef = ref<AiChatShellExposed | null>(null)
 const scrollContainer = computed(() => chatShellRef.value?.scrollContainer ?? null)
 
-const ownTabId = workspace.activeTabId
-const ownTab = workspace.tabs.find(tab => tab.id === ownTabId)
-const sourceTaskId = typeof ownTab?.meta?.sourceTaskId === 'string'
-  ? ownTab.meta.sourceTaskId
+const ownTabId = props.tabId ?? workspace.activeTabId
+const ownTab = computed(() => workspace.tabs.find(tab => tab.id === ownTabId))
+const isOwnTabActive = computed(() => workspace.activeTabId === ownTabId)
+const sourceTaskId = typeof ownTab.value?.meta?.sourceTaskId === 'string'
+  ? ownTab.value.meta.sourceTaskId
   : null
 const taskCancelRequested = computed(() => Boolean(
-  sourceTaskId && workspace.tabs.find(tab => tab.id === ownTabId)?.meta?.taskCancelRequested,
+  sourceTaskId && ownTab.value?.meta?.taskCancelRequested,
 ))
 
 const currentSessionId = ref<string>(
-  (ownTab?.meta?.sessionId as string | undefined)
+  (ownTab.value?.meta?.sessionId as string | undefined)
     ?? localStorage.getItem(LAST_SESSION_KEY)
     ?? `session-${crypto.randomUUID()}`,
 )
 const pendingSessionLoadId = ref<string | null>(null)
+const mountedHistoryLoaded = ref(false)
+
+function canRestoreHistoryForThisTab(): boolean {
+  return isOwnTabActive.value
+}
+
+async function loadHistoryForActiveTab(
+  sessionId = currentSessionId.value,
+  options: { clearBeforeLoad?: boolean; markMounted?: boolean } = {},
+): Promise<boolean> {
+  if (!sessionId || !canRestoreHistoryForThisTab()) return false
+
+  if (options.clearBeforeLoad) {
+    chat.clearMessages()
+  }
+
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+
+  if (!canRestoreHistoryForThisTab() || currentSessionId.value !== sessionId) {
+    return false
+  }
+
+  const t0 = performance.now()
+  await chat.loadHistory(sessionId)
+  console.warn(`[perf] loadHistory returned: ${(performance.now() - t0).toFixed(1)}ms`)
+  if (options.markMounted) {
+    mountedHistoryLoaded.value = true
+  }
+  console.warn(`[perf] loadHistoryForActiveTab done: ${(performance.now() - t0).toFixed(1)}ms`)
+  return true
+}
 
 watch(
-  () => workspace.tabs.find(tab => tab.id === ownTabId)?.meta?.sessionId,
+  () => ownTab.value?.meta?.sessionId,
   (sessionId) => {
     if (typeof sessionId === 'string' && sessionId && sessionId !== currentSessionId.value) {
       currentSessionId.value = sessionId
@@ -194,6 +230,7 @@ const chat = useAiChat({
 })
 
 const latestAssistantSummary = computed(() => {
+  if (chat.isHistoryLoading.value) return undefined
   for (let index = chat.messages.value.length - 1; index >= 0; index -= 1) {
     const message = chat.messages.value[index]
     if (message?.role === 'assistant' && message.content.trim()) {
@@ -260,7 +297,18 @@ function resolveReferencedPaths(text: string): string[] {
   const trimmed = text.trim()
   if (!trimmed || workspaceRootPaths.value.length === 0) return []
 
-  const matches = trimmed.match(/([A-Za-z]:[\\/][^\s`"'<>|]+|(?:src|docs|packages|apps|scripts|tests)[\\/][^\s`"'<>|]+|(?:(?!https?:\/\/)(?:[A-Za-z0-9_.-]+[\\/])+[A-Za-z0-9_.-]+\.[A-Za-z0-9_-]{1,8}))/g) ?? []
+  // 逐行匹配避免正则在大段文本上回溯；跳过代码块内容
+  const lines = trimmed.split('\n')
+  const matches: string[] = []
+  let inCodeBlock = false
+  const lineRegex = /([A-Za-z]:[\\/][^\s`"'<>|]+|(?:src|docs|packages|apps|scripts|tests)[\\/][^\s`"'<>|]+|(?:[A-Za-z0-9_.-]+[\\/]){1,10}[A-Za-z0-9_.-]+\.[A-Za-z0-9_-]{1,8})/g
+  for (const line of lines) {
+    if (line.startsWith('```')) { inCodeBlock = !inCodeBlock; continue }
+    if (inCodeBlock) continue
+    if (line.length > 500) continue
+    const lineMatches = line.match(lineRegex)
+    if (lineMatches) matches.push(...lineMatches)
+  }
   const referenced = new Set<string>()
 
   for (const rawMatch of matches) {
@@ -285,11 +333,30 @@ function resolveReferencedPaths(text: string): string[] {
   return Array.from(referenced)
 }
 
-const aiReferencedPaths = computed(() => {
-  const attachedPaths = fileAttachment.attachments.value.map(attachment => attachment.path)
-  const latestMessagePaths = chat.messages.value.slice(-8).flatMap(message => resolveReferencedPaths(message.content))
-  return collectUniquePaths([...attachedPaths, ...latestMessagePaths])
-})
+const aiReferencedPaths = ref<string[]>([])
+let _aiRefPathsRicHandle: number | null = null
+watch(
+  () => ({
+    loading: chat.isHistoryLoading.value,
+    msgLen: chat.messages.value.length,
+    lastMsgId: chat.messages.value[chat.messages.value.length - 1]?.id,
+    attachLen: fileAttachment.attachments.value.length,
+  }),
+  ({ loading }) => {
+    if (_aiRefPathsRicHandle != null) { cancelIdleCallback(_aiRefPathsRicHandle); _aiRefPathsRicHandle = null }
+    if (loading) { aiReferencedPaths.value = []; return }
+    _aiRefPathsRicHandle = requestIdleCallback(() => {
+      _aiRefPathsRicHandle = null
+      const t0 = performance.now()
+      const attachedPaths = fileAttachment.attachments.value.map(a => a.path)
+      const latestMessagePaths = chat.messages.value.slice(-8).flatMap(m => resolveReferencedPaths(m.content))
+      aiReferencedPaths.value = collectUniquePaths([...attachedPaths, ...latestMessagePaths])
+      const elapsed = performance.now() - t0
+      if (elapsed > 2) console.warn('[perf] aiReferencedPaths:', elapsed.toFixed(1), 'ms, messages:', chat.messages.value.length)
+    }, { timeout: 500 })
+  },
+  { immediate: true },
+)
 
 const taskReferencedPaths = computed(() => {
   const taskPaths = chat.spawnedTasks.value.flatMap(task => [
@@ -342,8 +409,7 @@ function resolveWorkspaceFilePath(path: string): string | null {
 }
 
 const currentAiTabMeta = computed<Record<string, unknown>>(() => {
-  const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
-  return (tab?.meta as Record<string, unknown> | undefined) ?? {}
+  return (ownTab.value?.meta as Record<string, unknown> | undefined) ?? {}
 })
 
 const focusedTaskId = computed(() =>
@@ -623,18 +689,21 @@ const {
 let watchLoadTimer: ReturnType<typeof setTimeout> | null = null
 watch(currentSessionId, (sessionId, oldSessionId) => {
   if (sessionId) {
-    localStorage.setItem(LAST_SESSION_KEY, sessionId)
-    setActiveSessionId(sessionId)
+    if (canRestoreHistoryForThisTab()) {
+      localStorage.setItem(LAST_SESSION_KEY, sessionId)
+      setActiveSessionId(sessionId)
+    }
   }
   if (sessionId && oldSessionId && sessionId !== oldSessionId) {
     if (watchLoadTimer) clearTimeout(watchLoadTimer)
     watchLoadTimer = setTimeout(() => {
       watchLoadTimer = null
+      if (!canRestoreHistoryForThisTab()) return
       if (pendingSessionLoadId.value === sessionId) {
         pendingSessionLoadId.value = null
         return
       }
-      chat.loadHistory(sessionId).catch((error) => {
+      loadHistoryForActiveTab(sessionId).catch((error) => {
         console.warn('[AiChatView] watch loadHistory failed:', error)
       })
     }, 50)
@@ -642,9 +711,11 @@ watch(currentSessionId, (sessionId, oldSessionId) => {
 }, { immediate: true })
 
 watch(
-  () => ({
-    taskStatus: sourceTaskId
-      ? taskCancelRequested.value
+  () => {
+    const t0 = performance.now()
+    if (!sourceTaskId || chat.isHistoryLoading.value) return null
+    const result = {
+      taskStatus: taskCancelRequested.value
         ? 'cancelled'
         : chat.error.value
         ? 'error'
@@ -652,20 +723,24 @@ watch(
           ? 'running'
           : chat.messages.value.some(message => message.role === 'assistant' && message.content.trim())
             ? 'done'
-            : 'running'
-      : null,
-    taskError: taskCancelRequested.value ? t('ai.tasks.taskCancelled') : chat.error.value,
-    taskSummary: latestAssistantSummary.value,
-  }),
-  ({ taskStatus, taskError, taskSummary }) => {
-    if (!sourceTaskId || !taskStatus) return
-    workspace.updateTabMeta(ownTabId, {
-      taskStatus,
-      taskError: taskError ?? undefined,
-      taskSummary: taskSummary ?? undefined,
+            : 'running',
+      taskError: taskCancelRequested.value ? t('ai.tasks.taskCancelled') : chat.error.value,
+      taskSummary: latestAssistantSummary.value,
+    }
+    const elapsed = performance.now() - t0
+    if (elapsed > 2) console.warn('[perf] taskStatus-source:', elapsed.toFixed(1), 'ms')
+    return result
+  },
+  (result) => {
+    if (!result) return
+    requestAnimationFrame(() => {
+      workspace.updateTabMeta(ownTabId, {
+        taskStatus: result.taskStatus,
+        taskError: result.taskError ?? undefined,
+        taskSummary: result.taskSummary ?? undefined,
+      })
     })
   },
-  { deep: true },
 )
 
 watch(taskCancelRequested, (cancelRequested) => {
@@ -682,16 +757,27 @@ watch(taskCancelRequested, (cancelRequested) => {
   })
 }, { immediate: true })
 
+let referencedPathsTimer: ReturnType<typeof setTimeout> | null = null
 watch(
-  () => ({
-    aiReferencedPaths: aiReferencedPaths.value,
-    taskReferencedPaths: taskReferencedPaths.value,
-  }),
+  () => {
+    const t0 = performance.now()
+    const result = {
+      aiReferencedPaths: aiReferencedPaths.value,
+      taskReferencedPaths: taskReferencedPaths.value,
+    }
+    const elapsed = performance.now() - t0
+    if (elapsed > 2) console.warn('[perf] referencedPaths-source:', elapsed.toFixed(1), 'ms')
+    return result
+  },
   ({ aiReferencedPaths: nextAiReferencedPaths, taskReferencedPaths: nextTaskReferencedPaths }) => {
-    workspace.updateTabMeta(ownTabId, {
-      aiReferencedPaths: nextAiReferencedPaths,
-      taskReferencedPaths: nextTaskReferencedPaths,
-    })
+    if (referencedPathsTimer) clearTimeout(referencedPathsTimer)
+    referencedPathsTimer = setTimeout(() => {
+      referencedPathsTimer = null
+      workspace.updateTabMeta(ownTabId, {
+        aiReferencedPaths: nextAiReferencedPaths,
+        taskReferencedPaths: nextTaskReferencedPaths,
+      })
+    }, 200)
   },
   { deep: true, immediate: true },
 )
@@ -705,6 +791,7 @@ watch(
     taskSummary: tab.meta?.taskSummary,
   })),
   (taskTabs) => {
+    if (chat.spawnedTasks.value.length === 0) return
     for (const task of chat.spawnedTasks.value) {
       if (task.status !== 'running' || !task.taskTabId) continue
 
@@ -757,13 +844,15 @@ watch(
 )
 
 const groupedMessages = computed<MessageGroup[]>(() => {
+  if (chat.isHistoryLoading.value) return []
+  const t0 = performance.now()
   const result: MessageGroup[] = []
   const messages = chat.messages.value
   let index = 0
 
   while (index < messages.length) {
     const msg = messages[index]!
-    if (msg.type === 'divider' || msg.role === 'user' || msg.role === 'error') {
+    if (msg.type === 'divider' || msg.role !== 'assistant') {
       result.push({ isGroupStart: true, isGroupEnd: true, groupSize: 1, msg })
       index += 1
       continue
@@ -786,6 +875,8 @@ const groupedMessages = computed<MessageGroup[]>(() => {
     index = end
   }
 
+  const elapsed = performance.now() - t0
+  if (elapsed > 2) console.warn('[perf] groupedMessages:', elapsed.toFixed(1), 'ms, count:', result.length)
   return result
 })
 
@@ -797,16 +888,20 @@ const latestUserMessageId = computed(() => {
   return null
 })
 
-const messageItems = computed(() =>
-  groupedMessages.value.map((item, index) => ({
+const messageItems = computed(() => {
+  const t0 = performance.now()
+  const items = groupedMessages.value.map((item, index) => ({
     key: `${item.msg.id}-${index}${item.msg.isStreaming ? '-s' : ''}`,
     message: item.msg,
     hideHeader: !item.isGroupStart,
     isGroupEnd: item.isGroupEnd,
     inGroup: item.groupSize > 1,
     stickyCompact: item.msg.id === latestUserMessageId.value,
-  })),
-)
+  }))
+  const elapsed = performance.now() - t0
+  if (elapsed > 2) console.warn('[perf] messageItems:', elapsed.toFixed(1), 'ms, count:', items.length)
+  return items
+})
 
 onMounted(async () => {
   try {
@@ -824,22 +919,29 @@ onMounted(async () => {
     return
   }
 
-  if (currentSessionId.value) {
-    await chat.loadHistory()
+  if (currentSessionId.value && canRestoreHistoryForThisTab()) {
+    pendingSessionLoadId.value = currentSessionId.value
+    await loadHistoryForActiveTab(currentSessionId.value, { markMounted: true })
   }
 
   if (chat.workDir.value) {
+    const wsT0 = performance.now()
     await memoryStore.setWorkspace(chat.workDir.value)
+    console.warn(`[perf] onMounted: setWorkspace done: ${(performance.now() - wsT0).toFixed(1)}ms`)
+    const cfgT0 = performance.now()
     await store.loadWorkspaceConfig(chat.workDir.value)
+    console.warn(`[perf] onMounted: loadWorkspaceConfig done: ${(performance.now() - cfgT0).toFixed(1)}ms`)
     applyWorkspacePreferredModel(store.currentWorkspaceConfig?.preferredModel)
+    syncDefaultProviderSelection()
   }
 
   await maybeAutoStartTaskTab()
+  console.warn('[perf] onMounted: all done')
 })
 
 onActivated(async () => {
   const sessionId = currentSessionId.value
-  if (!sessionId) return
+  if (!sessionId || !canRestoreHistoryForThisTab()) return
 
   setActiveSessionId(sessionId)
   requestAnimationFrame(() => {
@@ -847,10 +949,10 @@ onActivated(async () => {
     setTimeout(() => chat.scrollToBottom(), 60)
   })
 
-  if (chat.isStreaming.value || chat.messages.value.length > 0) return
+  if (chat.isStreaming.value || chat.messages.value.length > 0 || mountedHistoryLoaded.value) return
 
   try {
-    await chat.loadHistory(sessionId)
+    await loadHistoryForActiveTab(sessionId, { markMounted: true })
   } catch (error) {
     console.warn('[AiChatView] onActivated loadHistory failed:', error)
   }
@@ -888,13 +990,13 @@ function getDispatcherDefaultMode(): 'headless' | 'tab' {
 }
 
 function appendDispatcherNotice(kind: 'warn' | 'error' | 'info', text: string): void {
-  chat.messages.value.push({
+  chat.messages.value = [...chat.messages.value, {
     id: `dispatcher-notice-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    role: 'system',
+    role: 'system' as const,
     content: '',
     timestamp: Date.now(),
     notice: { kind, text },
-  })
+  }]
 }
 
 function formatTaskStatusLabel(status: SpawnedTask['status']): string {
@@ -998,13 +1100,13 @@ function openTaskTab(task: SpawnedTask): {
 }
 
 async function maybeAutoStartTaskTab(): Promise<void> {
+  if (!canRestoreHistoryForThisTab()) return
   if (autoStartingTaskTab.value || chat.isStreaming.value || chat.isLoading.value) return
 
-  const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
-  const initialMessage = typeof tab?.meta?.initialMessage === 'string'
-    ? tab.meta.initialMessage.trim()
+  const initialMessage = typeof ownTab.value?.meta?.initialMessage === 'string'
+    ? ownTab.value.meta.initialMessage.trim()
     : ''
-  const shouldAutoStart = tab?.meta?.taskAutoStarted === true
+  const shouldAutoStart = ownTab.value?.meta?.taskAutoStarted === true
 
   if (!shouldAutoStart || !initialMessage) return
 
@@ -1035,9 +1137,9 @@ async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
 }> {
   const startedAt = Date.now()
   const taskSessionId = task.taskSessionId ?? `session-headless-${task.id}-${startedAt}`
-  let provider = currentProvider.value
-  let model = currentModel.value
-  if (!provider || !model) {
+  const selectedProvider = currentProvider.value
+  const selectedModel = currentModel.value
+  if (!selectedProvider || !selectedModel) {
     return {
       status: 'error',
       error: t('ai.messages.initFailed'),
@@ -1047,6 +1149,8 @@ async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
       retryable: false,
     }
   }
+  let provider: ProviderConfig = selectedProvider
+  let model: ModelConfig = selectedModel
 
   let apiKey = await getCredential(`ai-provider-${provider.id}`) ?? ''
   if (!apiKey) {
@@ -1284,7 +1388,7 @@ async function doSend(
 ): Promise<void> {
   const beforeTaskIds = new Set(chat.spawnedTasks.value.map(task => task.id))
   const sendOutcome = await sendMessageNow(content, attachments, (cleanContent) => {
-    const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
+    const tab = ownTab.value
     if (!tab) return
     if (!isDefaultAiTabTitle(tab.title)) return
     if (!cleanContent.trim()) return
@@ -1523,14 +1627,14 @@ function handleModelChange(newModelId: string): void {
   if (chat.messages.value.length === 0) return
 
   const modelLabel = currentProvider.value?.models.find(model => model.id === newModelId)?.name ?? newModelId
-  chat.messages.value.push({
+  chat.messages.value = [...chat.messages.value, {
     id: `divider-${Date.now()}`,
-    role: 'system',
-    type: 'divider',
+    role: 'system' as const,
+    type: 'divider' as const,
     dividerText: t('ai.messages.modelChanged', { modelLabel }),
     content: '',
     timestamp: Date.now(),
-  })
+  }]
 }
 
 async function handleCompact(): Promise<void> {
@@ -1553,7 +1657,7 @@ async function handleCompact(): Promise<void> {
 
 function handleCreateSession(): void {
   const sessionId = `session-${Date.now()}`
-  const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
+  const tab = ownTab.value
   if (tab) {
     workspace.updateTabMeta(tab.id, { sessionId })
     workspace.updateTabTitle(tab.id, defaultChatTitle.value)
@@ -1563,11 +1667,8 @@ function handleCreateSession(): void {
 }
 
 async function handleSelectSession(id: string): Promise<void> {
+  if (!canRestoreHistoryForThisTab()) return
   await switchSession(id, { persistToTab: true, loadHistory: true })
-}
-
-function handlePreloadSession(id: string): void {
-  void chat.preloadHistory(id)
 }
 
 async function handleDeleteSession(id: string): Promise<void> {
@@ -1614,6 +1715,7 @@ async function persistWorkDir(dir: string): Promise<void> {
       console.warn('[AiChatView] load workspace config failed:', error)
     })
     applyWorkspacePreferredModel(store.currentWorkspaceConfig?.preferredModel)
+    syncDefaultProviderSelection()
   }
 
   const sessionId = currentSessionId.value
@@ -1652,10 +1754,15 @@ async function switchSession(
   if (!sessionId) return
 
   if (options?.persistToTab) {
-    const tab = workspace.tabs.find(candidate => candidate.id === ownTabId)
+    const tab = ownTab.value
     if (tab) {
       workspace.updateTabMeta(tab.id, { sessionId })
     }
+  }
+
+  if (options?.loadHistory) {
+    pendingSessionLoadId.value = sessionId
+    chat.clearMessages()
   }
 
   currentSessionId.value = sessionId
@@ -1666,10 +1773,9 @@ async function switchSession(
   }
 
   if (options?.loadHistory) {
-    pendingSessionLoadId.value = sessionId
-    await chat.loadHistory(sessionId)
+    const loaded = await loadHistoryForActiveTab(sessionId)
 
-    if (chat.workDir.value) {
+    if (loaded && chat.workDir.value) {
       await memoryStore.setWorkspace(chat.workDir.value)
     }
   }
@@ -1752,7 +1858,6 @@ async function switchSession(
     @select-session="handleSelectSession"
     @create-session="handleCreateSession"
     @delete-session="handleDeleteSession"
-    @preload-session="handlePreloadSession"
     @file-picker-confirm="handleFilePickerConfirm"
     @exit-immersive="exitImmersive"
     @toggle-side-rail="toggleTaskRail"

@@ -135,6 +135,18 @@ describe('useAiChatViewState', () => {
     expect(state.currentModel.value?.id).toBe('model-1')
   })
 
+  it('recovers a missing model selection for the selected provider', () => {
+    const { state } = makeHarness()
+
+    state.selectedProviderId.value = 'provider-1'
+    state.selectedModelId.value = 'missing-model'
+    state.syncDefaultProviderSelection()
+
+    expect(state.selectedProviderId.value).toBe('provider-1')
+    expect(state.selectedModelId.value).toBe('model-1')
+    expect(state.currentModel.value?.id).toBe('model-1')
+  })
+
   it('maps chat mode to approval mode and calls mode change hook', async () => {
     const onModeChanged = vi.fn()
     const { chatMode } = useAiChatViewState({

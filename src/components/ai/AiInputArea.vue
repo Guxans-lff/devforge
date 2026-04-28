@@ -198,7 +198,7 @@ const showSlashPopover = ref(false)
 const slashQuery = ref('')
 const slashAnchorPos = ref({ x: 0, y: 0 })
 
-const canSend = computed(() => inputText.value.trim().length > 0 && !props.disabled && !props.isStreaming)
+const canSelectModel = computed(() => props.providers.length > 0)
 
 // ─────────── 提示词优化（G14） ───────────
 const showEnhancer = ref(false)
@@ -219,6 +219,12 @@ const currentProvider = computed(() =>
 /** 当前模型 */
 const currentModel = computed(() =>
   currentProvider.value?.models.find(m => m.id === props.selectedModelId) ?? null,
+)
+const canSend = computed(() =>
+  inputText.value.trim().length > 0
+  && !props.disabled
+  && !props.isStreaming
+  && !!currentModel.value,
 )
 
 /** 模式配置 */
@@ -615,7 +621,7 @@ defineExpose({ focus, setDraft })
               <DropdownMenuTrigger as-child>
                 <button
                   class="flex h-7 min-w-0 items-center gap-1.5 rounded-full border border-border/25 bg-background/60 px-2.5 text-[11px] text-muted-foreground transition-colors hover:border-border/45 hover:bg-muted/25 hover:text-foreground"
-                  :disabled="disabled"
+                  :disabled="!canSelectModel"
                   :title="currentModel?.name || t('ai.input.selectModel')"
                 >
                   <AtSign class="h-3 w-3 shrink-0" />

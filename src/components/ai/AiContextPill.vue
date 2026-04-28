@@ -82,11 +82,12 @@ const pillStateClass = computed(() => {
   }
 })
 
-/** Hover 预览：取结果前 12 行 */
-const previewText = computed(() => {
+/** Hover 预览：取结果前 12 行，仅在 hover 时生成 */
+const previewText = ref('')
+
+function generatePreview(): string {
   const raw = props.toolCall.result ?? props.toolCall.error ?? ''
   if (!raw) return ''
-  // read_file 结果首行通常是 [文件: ... | N 行 | X KB]，跳过它
   let body = raw
   if (props.toolCall.name === 'read_file' && raw.startsWith('[文件:')) {
     const nl = raw.indexOf('\n')
@@ -95,15 +96,18 @@ const previewText = computed(() => {
   const lines = body.split('\n')
   const head = lines.slice(0, 12).join('\n')
   return lines.length > 12 ? `${head}\n…（共 ${lines.length} 行）` : head
-})
+}
 
-const hasPreview = computed(() => !!previewText.value)
+const hasPreview = computed(() => !!(props.toolCall.result || props.toolCall.error))
 
 const open = ref(false)
 let closeTimer: number | undefined
 function onEnter() {
   if (closeTimer) { window.clearTimeout(closeTimer); closeTimer = undefined }
-  if (hasPreview.value) open.value = true
+  if (hasPreview.value) {
+    if (!previewText.value) previewText.value = generatePreview()
+    open.value = true
+  }
 }
 function onLeave() {
   closeTimer = window.setTimeout(() => { open.value = false }, 120)

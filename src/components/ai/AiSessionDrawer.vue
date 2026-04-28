@@ -4,7 +4,7 @@
  *
  * 从左侧滑出，展示历史对话列表，支持搜索、切换、删除。
  */
-import { ref, computed, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiSession } from '@/types/ai'
 import {
@@ -30,12 +30,10 @@ const emit = defineEmits<{
   select: [id: string]
   create: []
   delete: [id: string]
-  preload: [id: string]
 }>()
 
 const { t } = useI18n()
 const searchQuery = ref('')
-const SESSION_DRAWER_PRELOAD_COUNT = 3
 
 /** 待确认删除的会话 ID */
 const deleteConfirmId = ref<string | null>(null)
@@ -70,26 +68,6 @@ function handleCreate() {
   emit('create')
   emit('update:open', false)
 }
-
-function preloadRecentSessions(): void {
-  const recentSessions = [...props.sessions]
-    .filter(session => session.id !== props.activeSessionId)
-    .sort((left, right) => right.updatedAt - left.updatedAt)
-    .slice(0, SESSION_DRAWER_PRELOAD_COUNT)
-
-  for (const session of recentSessions) {
-    emit('preload', session.id)
-  }
-}
-
-watch(
-  () => props.open,
-  (isOpen, wasOpen) => {
-    if (isOpen && !wasOpen) {
-      preloadRecentSessions()
-    }
-  },
-)
 </script>
 
 <template>
@@ -145,8 +123,6 @@ watch(
               class="group w-full flex items-start gap-2.5 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
               :class="{ 'bg-primary/5 border border-primary/10': session.id === activeSessionId }"
               @click="handleSelect(session.id)"
-              @mouseenter="emit('preload', session.id)"
-              @focus="emit('preload', session.id)"
             >
               <MessageSquare class="h-4 w-4 shrink-0 mt-0.5 text-muted-foreground" />
               <div class="min-w-0 flex-1">

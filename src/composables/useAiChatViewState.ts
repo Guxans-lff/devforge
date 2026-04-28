@@ -175,12 +175,17 @@ export function useAiChatViewState({
   const currentModeConfig = computed(() => modeConfigs[chatMode.value])
 
   function syncDefaultProviderSelection(): void {
-    if (store.providers.length === 0 || selectedProviderId.value) return
-    const defaultProvider = store.defaultProvider
+    if (store.providers.length === 0) return
+
+    const selectedProvider = store.providers.find(provider => provider.id === selectedProviderId.value)
+    const defaultProvider = selectedProvider ?? store.defaultProvider ?? store.providers[0]
     if (!defaultProvider) return
+
+    const selectedModel = defaultProvider.models.find(model => model.id === selectedModelId.value)
+    const firstModel = selectedModel ?? defaultProvider.models[0]
+
     selectedProviderId.value = defaultProvider.id
-    const firstModel = defaultProvider.models[0]
-    if (firstModel) selectedModelId.value = firstModel.id
+    selectedModelId.value = firstModel?.id ?? null
   }
 
   function applyWorkspacePreferredModel(preferredModel?: string): void {

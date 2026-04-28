@@ -228,10 +228,6 @@ async function handleSelectSession(id: string): Promise<void> {
   await switchSession(id, { loadHistory: true, updateUserPicked: true })
 }
 
-function handlePreloadSession(id: string): void {
-  void chat.preloadHistory(id)
-}
-
 async function handleDeleteSession(id: string): Promise<void> {
   await store.removeSession(id)
 }
@@ -266,6 +262,10 @@ async function switchSession(
 ): Promise<void> {
   if (!sessionId) return
 
+  if (options?.loadHistory) {
+    chat.clearMessages()
+  }
+
   currentSessionId.value = sessionId
   if (options?.updateUserPicked !== undefined) {
     userPickedSession.value = options.updateUserPicked
@@ -277,6 +277,7 @@ async function switchSession(
   }
 
   if (options?.loadHistory) {
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
     await chat.loadHistory(sessionId)
 
     if (chat.workDir.value) {
@@ -354,7 +355,6 @@ async function switchSession(
     @select-session="handleSelectSession"
     @create-session="handleCreateSession"
     @delete-session="handleDeleteSession"
-    @preload-session="handlePreloadSession"
     @file-picker-confirm="handleFilePickerConfirm"
   >
     <template #after-compact>

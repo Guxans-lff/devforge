@@ -74,7 +74,6 @@ const USER_COLLAPSE_LINES = 3
 const userExpanded = ref(false)
 const userLineCount = computed(() => (props.message.content ?? '').split('\n').length)
 const userNeedsCollapse = computed(() => isUser.value && userLineCount.value > USER_COLLAPSE_LINES)
-const effectiveExpanded = computed(() => userExpanded.value)
 
 /** 可恢复的错误消息（流式超时/中断/未完成） */
 const canContinue = computed(() => {
@@ -174,24 +173,23 @@ async function exportMarkdown() {
 const contentSegments = computed(() => {
   const text = props.message.content
   if (!text) return []
+  if (text.includes('历史工具调用已折叠') || text.includes('历史消息过大') || text.includes('较早历史内容已折叠')) {
+    return [{ type: 'text' as const, content: text }]
+  }
   return parseFileMarkers(text)
 })
 
-/** 用户消息也走 markdown 渲染（列表、加粗、行内代码） */
-const userRenderedSegments = computed(() =>
-  contentSegments.value.map(seg => ({
+/** 缓存 Markdown 渲染结果，用户消息和助手消息共用 */
+const renderedSegments = computed(() => {
+  const t0 = performance.now()
+  const result = contentSegments.value.map(seg => ({
     ...seg,
     html: seg.type === 'text' ? renderBlock(seg.content) : '',
   }))
-)
-
-/** 缓存 Markdown 渲染结果，避免每帧重算 */
-const renderedSegments = computed(() =>
-  contentSegments.value.map(seg => ({
-    ...seg,
-    html: seg.type === 'text' ? renderBlock(seg.content) : '',
-  }))
-)
+  const elapsed = performance.now() - t0
+  if (elapsed > 5) console.warn('[perf] renderedSegments:', elapsed.toFixed(1), 'ms, id:', props.message.id, 'chars:', props.message.content.length)
+  return result
+})
 
 /** 转义 HTML */
 function esc(s: string): string {
@@ -298,7 +296,7 @@ function renderBlock(text: string): string {
         v-if="stickyCompact && userExpanded"
         class="mt-2 text-[13px] text-foreground/85 leading-[1.65] select-text border-t border-white/[0.04] pt-2"
       >
-        <template v-for="(seg, i) in userRenderedSegments" :key="i">
+        <template v-for="(seg, i) in renderedSegments" :key="i">
           <div v-if="seg.type === 'text'" v-html="seg.html" />
         </template>
       </div>
@@ -308,9 +306,9 @@ function renderBlock(text: string): string {
         <!-- 用户消息：走 markdown 渲染（解析列表、加粗、行内代码） -->
         <div
           class="text-[13px] text-foreground leading-[1.65] select-text transition-[max-height] duration-200"
-          :style="userNeedsCollapse && !effectiveExpanded ? { maxHeight: '3.5em', overflow: 'hidden' } : { maxHeight: 'none' }"
+          :style="userNeedsCollapse && !userExpanded ? { maxHeight: '3.5em', overflow: 'hidden' } : { maxHeight: 'none' }"
         >
-          <template v-for="(seg, i) in userRenderedSegments" :key="i">
+          <template v-for="(seg, i) in renderedSegments" :key="i">
             <div v-if="seg.type === 'text'" v-html="seg.html" />
             <AiFileCard
               v-else-if="seg.type === 'file'"
@@ -329,8 +327,8 @@ function renderBlock(text: string): string {
             class="cursor-pointer flex items-center gap-1 text-[11px] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
             @click.stop="userExpanded = !userExpanded"
           >
-            <ChevronRight class="h-3 w-3 transition-transform duration-150" :class="effectiveExpanded ? '-rotate-90' : 'rotate-90'" />
-            {{ effectiveExpanded ? '收起' : `展开全部（${userLineCount} 行）` }}
+            <ChevronRight class="h-3 w-3 transition-transform duration-150" :class="userExpanded ? '-rotate-90' : 'rotate-90'" />
+            {{ userExpanded ? '收起' : `展开全部（${userLineCount} 行）` }}
           </button>
         </div>
       </template>

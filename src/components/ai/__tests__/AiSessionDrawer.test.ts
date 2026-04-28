@@ -48,7 +48,7 @@ const InputStub = defineComponent({
 })
 
 describe('AiSessionDrawer', () => {
-  it('preloads the most recent non-active sessions when the drawer opens', async () => {
+  it('does not preload sessions when the drawer opens', async () => {
     vi.setSystemTime(new Date('2026-04-21T10:00:00Z'))
 
     const wrapper = mount(AiSessionDrawer, {
@@ -133,14 +133,10 @@ describe('AiSessionDrawer', () => {
 
     await wrapper.setProps({ open: true })
 
-    expect(wrapper.emitted('preload')).toEqual([
-      ['session-2'],
-      ['session-3'],
-      ['session-4'],
-    ])
+    expect(wrapper.emitted('preload')).toBeUndefined()
   })
 
-  it('filters sessions and emits preload/select/delete actions', async () => {
+  it('filters sessions and emits select/delete actions', async () => {
     vi.setSystemTime(new Date('2026-04-21T10:00:00Z'))
 
     const wrapper = mount(AiSessionDrawer, {
@@ -192,7 +188,7 @@ describe('AiSessionDrawer', () => {
 
     const sessionButtons = wrapper.findAll('button').filter(button => button.text().includes('task'))
     await sessionButtons[0]!.trigger('mouseenter')
-    expect(wrapper.emitted('preload')).toEqual([['session-1']])
+    expect(wrapper.emitted('preload')).toBeUndefined()
 
     await sessionButtons[0]!.trigger('click')
     expect(wrapper.emitted('select')).toEqual([['session-1']])
