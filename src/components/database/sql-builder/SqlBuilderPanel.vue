@@ -19,7 +19,7 @@ import type { JoinType, SqlOperator } from '@/types/sql-builder'
 import type { Node, Edge, Connection } from '@vue-flow/core'
 import {
   Search, Layout, Maximize2, Trash2, Plus, Copy, Play, X,
-  ArrowUpDown, Filter,
+  ArrowUpDown, Filter, MousePointer2, Link2, ListChecks,
 } from 'lucide-vue-next'
 
 import SqlBuilderTableNode from './SqlBuilderTableNode.vue'
@@ -132,7 +132,10 @@ async function getColumns(tableName: string): Promise<ColumnInfo[]> {
 
 /** 双击表名添加到画布 */
 async function handleAddTable(tableName: string) {
-  if (builder.addedTableNames.value.has(tableName)) return
+  if (builder.addedTableNames.value.has(tableName)) {
+    toast.info('SQL Builder', `${tableName} 已在画布中`)
+    return
+  }
   const columns = await getColumns(tableName)
   needsLayout = true
   builder.addTable(tableName, columns)
@@ -140,6 +143,26 @@ async function handleAddTable(tableName: string) {
   builder.autoDetectJoins(foreignKeys.value)
   await nextTick()
   fitView({ padding: 0.2, duration: 300 })
+}
+
+const relatedTableNames = computed(() => {
+  const names = new Set<string>()
+  for (const table of builder.state.value.tables) {
+    for (const fk of foreignKeys.value) {
+      if (fk.tableName === table.tableName) names.add(fk.referencedTableName)
+      if (fk.referencedTableName === table.tableName) names.add(fk.tableName)
+    }
+  }
+  for (const table of builder.state.value.tables) names.delete(table.tableName)
+  return names
+})
+
+const suggestedTables = computed(() =>
+  tableList.value.filter(table => relatedTableNames.value.has(table.name)).slice(0, 8),
+)
+
+async function addSuggestedTable(tableName: string) {
+  await handleAddTable(tableName)
 }
 
 // ── vue-flow 节点/边事件 ─────────────────────────────────────────
@@ -260,14 +283,21 @@ onMounted(loadTableList)
             </div>
             <div
               v-for="table in filteredTables" :key="table.name"
-              class="flex items-center px-2 py-1 text-xs cursor-pointer hover:bg-accent/40"
+              class="group flex items-center px-2 py-1 text-xs cursor-pointer hover:bg-accent/40"
               :class="builder.addedTableNames.value.has(table.name) ? 'opacity-40' : ''"
               @dblclick="handleAddTable(table.name)"
             >
-              <span class="truncate">{{ table.name }}</span>
-              <span v-if="table.comment" class="ml-auto text-[9px] text-muted-foreground/50 truncate max-w-[60px]">
+              <span class="min-w-0 flex-1 truncate">{{ table.name }}</span>
+              <span v-if="table.comment" class="text-[9px] text-muted-foreground/50 truncate max-w-[60px]">
                 {{ table.comment }}
               </span>
+              <button
+                class="hidden shrink-0 rounded px-1 text-[10px] text-primary group-hover:inline-flex hover:bg-primary/10 disabled:text-muted-foreground/40"
+                :disabled="builder.addedTableNames.value.has(table.name)"
+                @click.stop="handleAddTable(table.name)"
+              >
+                添加
+              </button>
             </div>
           </div>
           <div class="px-2 py-1 text-[10px] text-muted-foreground/50 border-t border-border">
@@ -336,6 +366,31 @@ onMounted(loadTableList)
                   @remove-join="onEdgeRemoveJoin(edgeProps.id)"
                 />
               </template>
+              <div
+                v-if="nodes.length === 0"
+                class="pointer-events-none absolute inset-0 flex items-center justify-center p-6"
+              >
+                <div class="pointer-events-auto max-w-md rounded-2xl border border-border/60 bg-background/95 p-5 shadow-xl">
+                  <div class="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <MousePointer2 class="h-4 w-4 text-primary" />
+                    从左侧添加第一张表
+                  </div>
+                  <div class="grid gap-2 text-xs text-muted-foreground">
+                    <div class="flex items-start gap-2">
+                      <ListChecks class="mt-0.5 h-3.5 w-3.5 text-primary/70" />
+                      <span>双击表名或点击“添加”，表会出现在画布中。</span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                      <MousePointer2 class="mt-0.5 h-3.5 w-3.5 text-primary/70" />
+                      <span>勾选字段后，底部会实时生成 SELECT SQL。</span>
+                    </div>
+                    <div class="flex items-start gap-2">
+                      <Link2 class="mt-0.5 h-3.5 w-3.5 text-primary/70" />
+                      <span>添加多张有关联的表时，会自动生成 JOIN。</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </VueFlow>
           </div>
         </div>
@@ -344,6 +399,24 @@ onMounted(loadTableList)
       <!-- 右栏：属性面板 -->
       <Pane :size="27" :min-size="18" :max-size="40">
         <div class="flex flex-col h-full border-l border-border overflow-y-auto">
+          <div
+            v-if="suggestedTables.length > 0"
+            class="border-b border-border bg-primary/5 px-3 py-2"
+          >
+            <div class="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-primary">
+              <Link2 class="h-3.5 w-3.5" /> 推荐关联表
+            </div>
+            <div class="flex flex-wrap gap-1">
+              <button
+                v-for="table in suggestedTables"
+                :key="table.name"
+                class="rounded-full border border-primary/20 bg-background/70 px-2 py-0.5 text-[10px] text-foreground/80 hover:border-primary/40 hover:text-primary"
+                @click="addSuggestedTable(table.name)"
+              >
+                {{ table.name }}
+              </button>
+            </div>
+          </div>
           <!-- WHERE 条件 -->
           <div class="border-b border-border">
             <div class="flex items-center justify-between px-3 py-1.5 bg-muted/30">

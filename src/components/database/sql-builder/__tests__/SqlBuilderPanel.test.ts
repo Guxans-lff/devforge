@@ -91,6 +91,9 @@ vi.mock('lucide-vue-next', () => ({
   X: defineComponent({ name: 'X', setup: () => () => h('svg') }),
   ArrowUpDown: defineComponent({ name: 'ArrowUpDown', setup: () => () => h('svg') }),
   Filter: defineComponent({ name: 'Filter', setup: () => () => h('svg') }),
+  MousePointer2: defineComponent({ name: 'MousePointer2', setup: () => () => h('svg') }),
+  Link2: defineComponent({ name: 'Link2', setup: () => () => h('svg') }),
+  ListChecks: defineComponent({ name: 'ListChecks', setup: () => () => h('svg') }),
 }))
 
 vi.mock('@/components/database/SqlEditorLazy.vue', () => ({
