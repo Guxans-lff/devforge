@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DevForge AI Module · Conversation Redesign</title>
+<style>
+  * { box-sizing: border-box; }
+  :root {
+    --ink: #f4f4f5;
+    --muted: #a1a1aa;
+    --faint: #71717a;
+    --hair: rgba(244,244,245,.08);
+    --hair-2: rgba(244,244,245,.12);
+    --panel: #121216;
+    --panel-2: #17171d;
+    --panel-3: #1d1d25;
+    --void: #09090b;
+    --green: #31d096;
+    --blue: #62a8ff;
+    --amber: #f0b35a;
+    --red: #ef6666;
+    --violet: #9b8cff;
+    --radius: 14px;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: #050506;
+    color: var(--ink);
+    font-family: var(--sans);
+    overflow: hidden;
+  }
+  button { font: inherit; }
+  .switcher {
+    height: 42px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: #08080a;
+    border-bottom: 1px solid var(--hair);
+  }
+  .switcher .label { color: var(--faint); font-size: 12px; margin-right: 8px; }
+  .switcher button {
+    border: 1px solid var(--hair-2);
+    color: var(--muted);
+    background: transparent;
+    border-radius: 999px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .switcher button.active { background: #f4f4f5; color: #09090b; border-color: #f4f4f5; font-weight: 700; }
+  .stage { height: calc(100vh - 42px); }
+  .variant { display: none; height: 100%; background: var(--void); }
+  .variant.active { display: grid; }
+  .muted { color: var(--muted); }
+  .faint { color: var(--faint); }
+  .mono { font-family: var(--mono); }
+
+  .v1 { grid-template-columns: 56px 308px minmax(540px, 1fr) 342px; }
+  .rail {
+    background: #0b0b0e;
+    border-right: 1px solid var(--hair);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0;
+    gap: 10px;
+  }
+  .mark { width: 34px; height: 34px; border-radius: 10px; background: #f4f4f5; color: #0b0b0e; display:flex; align-items:center; justify-content:center; font-weight:900; }
+  .rail-btn { width: 36px; height: 36px; border: 0; border-radius: 10px; background: transparent; color: #6f6f78; display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .rail-btn.active { background: #1b1b21; color: #fff; box-shadow: inset 3px 0 0 var(--blue); }
+  .rail-spacer { flex: 1; }
+  .workspace {
+    background: #101014;
+    border-right: 1px solid var(--hair);
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .workspace-head { padding: 16px; border-bottom: 1px solid var(--hair); }
+  .kicker { font-size: 10px; letter-spacing: .16em; text-transform: uppercase; color: var(--faint); font-weight: 800; }
+  .workspace-title { margin-top: 8px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .workspace-title strong { font-size: 15px; }
+  .pill { border: 1px solid var(--hair-2); border-radius: 999px; padding: 4px 8px; color: var(--muted); font-size: 11px; background: rgba(255,255,255,.025); }
+  .session-list { padding: 10px; overflow: auto; }
+  .session-group { margin: 10px 0 6px; padding: 0 8px; color: #5e5e66; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+  .session {
+    padding: 10px;
+    border-radius: 10px;
+    color: var(--muted);
+    font-size: 12px;
+    display: grid;
+    gap: 4px;
+    cursor: pointer;
+  }
+  .session.active { background: #1a1a22; color: var(--ink); outline: 1px solid var(--hair); }
+  .session-meta { display:flex; justify-content:space-between; color: var(--faint); font-size: 10px; }
+  .workspace-card { margin: 12px; padding: 12px; border: 1px solid var(--hair); border-radius: 12px; background: #141419; }
+  .mini-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .mini-stat { border: 1px solid var(--hair); border-radius: 10px; padding: 8px; background:#101014; }
+  .mini-stat b { display:block; font-size: 15px; }
+  .mini-stat span { color: var(--faint); font-size: 10px; }
+
+  .chat-shell { display:flex; flex-direction:column; min-width:0; background: radial-gradient(circle at 50% -160px, rgba(98,168,255,.10), transparent 420px), #0d0d10; }
+  .chat-top { height: 54px; display:flex; align-items:center; justify-content:space-between; padding:0 18px; border-bottom: 1px solid var(--hair); }
+  .crumbs { display:flex; align-items:center; gap:8px; font-size:12px; color: var(--muted); }
+  .dot { width: 6px; height:6px; border-radius:50%; background: var(--green); box-shadow:0 0 14px rgba(49,208,150,.6); }
+  .top-actions { display:flex; gap:8px; }
+  .ghost { border:1px solid var(--hair-2); background:rgba(255,255,255,.025); color:var(--muted); border-radius:9px; padding:7px 10px; font-size:12px; cursor:pointer; }
+  .chat-scroll { flex:1; overflow:auto; padding: 22px 24px 18px; }
+  .thread { max-width: 920px; margin: 0 auto; display:grid; gap:18px; }
+  .assumption {
+    border: 1px dashed rgba(98,168,255,.32);
+    background: rgba(98,168,255,.055);
+    border-radius: 14px;
+    padding: 14px;
+    color: #bad9ff;
+    font-size: 12px;
+    line-height: 1.7;
+  }
+  .message {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 14px;
+    position: relative;
+  }
+  .message::before {
+    content: "";
+    position: absolute;
+    left: 82px;
+    top: 0;
+    bottom: -18px;
+    width: 1px;
+    background: var(--hair);
+  }
+  .message:last-child::before { bottom: 0; }
+  .speaker {
+    padding-top: 2px;
+    color: var(--faint);
+    font-size: 11px;
+    font-family: var(--mono);
+    text-align: right;
+    line-height: 1.45;
+  }
+  .speaker strong {
+    display: block;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 12px;
+    margin-bottom: 3px;
+  }
+  .speaker.ai strong { color: #dbe8ff; }
+  .message-body { min-width:0; position: relative; }
+  .message-body::before {
+    content: "";
+    position: absolute;
+    left: -18px;
+    top: 8px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #3f3f46;
+    box-shadow: 0 0 0 4px #0d0d10;
+  }
+  .message.ai .message-body::before { background: var(--blue); }
+  .msg-meta { display:flex; align-items:center; gap:8px; margin-bottom:8px; font-size:12px; color:var(--faint); }
+  .msg-card { border:1px solid var(--hair); background:rgba(23,23,29,.66); border-radius: var(--radius); padding:14px 16px; line-height:1.72; font-size:13.5px; color:#d8d8dc; }
+  .msg-card code { font-family:var(--mono); background:#22222b; color:#eac17a; padding:2px 5px; border-radius:5px; }
+  .plan-table { width:100%; margin-top:10px; border-collapse:collapse; font-size:12px; }
+  .plan-table td { padding:7px 0; border-top:1px solid var(--hair); color:var(--muted); }
+  .plan-table td:first-child { color:#fff; width:60px; font-weight:700; }
+  .tool-step { margin-top:10px; border:1px solid var(--hair); border-radius:11px; background:#101014; overflow:hidden; }
+  .tool-line { display:grid; grid-template-columns: 90px 1fr 74px; gap:10px; padding:10px 12px; border-top:1px solid var(--hair); font-size:12px; align-items:center; }
+  .tool-line:first-child { border-top:0; }
+  .status { color:var(--green); font-family:var(--mono); font-size:11px; }
+  .status.run { color:var(--amber); }
+  .context-strip { display:grid; grid-template-columns: 1fr auto; gap:12px; align-items:center; margin-top:10px; padding:10px 12px; border-radius:10px; background:rgba(239,102,102,.08); border:1px solid rgba(239,102,102,.25); }
+  .bar { height:6px; background:#26262d; border-radius:999px; overflow:hidden; margin-top:7px; }
+  .bar i { display:block; height:100%; background:linear-gradient(90deg, var(--amber), var(--red)); width:92%; }
+  .composer-zone { padding: 14px 24px 18px; border-top:1px solid var(--hair); background:rgba(9,9,11,.72); backdrop-filter: blur(14px); }
+  .composer { max-width: 920px; margin:0 auto; border:1px solid var(--hair-2); border-radius:16px; background:#121217; overflow:hidden; box-shadow: 0 18px 45px rgba(0,0,0,.34); }
+  .composer-tools { display:flex; align-items:center; gap:7px; padding:10px 12px; border-bottom:1px solid var(--hair); }
+  .tool-chip { padding:5px 8px; border:1px solid var(--hair); border-radius:999px; color:var(--muted); font-size:11px; background:#15151b; }
+  .tool-chip.hot { color:#bff5df; border-color:rgba(49,208,150,.3); background:rgba(49,208,150,.08); }
+  .composer textarea { width:100%; min-height:64px; resize:none; border:0; outline:0; padding:14px 14px 4px; background:transparent; color:var(--ink); font: 14px/1.55 var(--sans); }
+  .composer-bottom { display:flex; align-items:center; justify-content:space-between; padding: 8px 10px 10px; color:var(--faint); font-size:11px; }
+  .send { border:0; border-radius:10px; padding:8px 13px; color:#06110d; background:var(--green); font-weight:800; cursor:pointer; }
+
+  .inspector { background:#101014; border-left:1px solid var(--hair); display:flex; flex-direction:column; min-width:0; }
+  .inspector-head { padding:16px; border-bottom:1px solid var(--hair); }
+  .inspector-title { display:flex; align-items:center; justify-content:space-between; margin-top:6px; }
+  .inspector-body { padding:12px; overflow:auto; display:grid; gap:12px; }
+  .side-card { border:1px solid var(--hair); border-radius:13px; background:#15151b; padding:12px; }
+  .side-card h4 { margin:0 0 10px; font-size:12px; color:#e7e7ea; }
+  .meter-ring { display:grid; grid-template-columns:64px 1fr; gap:12px; align-items:center; }
+  .ring { width:64px; height:64px; border-radius:50%; background:conic-gradient(var(--red) 0 92%, #2a2a31 92%); display:grid; place-items:center; }
+  .ring span { width:48px; height:48px; border-radius:50%; background:#15151b; display:grid; place-items:center; font-size:12px; font-weight:900; }
+  .kv { display:flex; justify-content:space-between; padding:7px 0; border-top:1px solid var(--hair); font-size:12px; color:var(--muted); }
+  .kv:first-child { border-top:0; }
+  .review-action { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .review-action button { border:1px solid var(--hair); background:#111116; color:var(--muted); border-radius:10px; padding:9px 8px; font-size:12px; cursor:pointer; }
+  .risk-item { padding:9px; border:1px solid var(--hair); border-radius:10px; margin-top:8px; background:#111116; font-size:12px; color:var(--muted); }
+  .risk-item strong { color:#fff; display:block; margin-bottom:4px; }
+
+  .v2 { grid-template-columns: 76px minmax(560px, 1fr) 420px; background:#08080a; }
+  .v2 .rail { border-right: 0; background:#08080a; }
+  .v2-main { display:grid; grid-template-rows: 58px 1fr 178px; min-width:0; background:#0e0e12; border-left:1px solid var(--hair); border-right:1px solid var(--hair); }
+  .v2-top { display:flex; align-items:center; justify-content:space-between; padding:0 18px; border-bottom:1px solid var(--hair); }
+  .tabs { display:flex; gap:6px; }
+  .tab { padding:8px 12px; border-radius:10px; color:var(--faint); font-size:12px; }
+  .tab.active { background:#1b1b22; color:#fff; }
+  .canvas { overflow:auto; padding: 18px; }
+  .focus-stack { max-width: 980px; margin:0 auto; display:grid; gap:14px; }
+  .objective { border:1px solid rgba(98,168,255,.22); background:linear-gradient(180deg, rgba(98,168,255,.10), rgba(98,168,255,.025)); border-radius:18px; padding:18px; }
+  .objective h2 { margin:0 0 8px; font-size:20px; letter-spacing:-.02em; }
+  .objective p { margin:0; color:var(--muted); line-height:1.65; font-size:13px; }
+  .run-timeline { display:grid; gap:10px; }
+  .run-card { display:grid; grid-template-columns: 112px 1fr auto; gap:14px; align-items:center; padding:14px; border:1px solid var(--hair); background:#15151b; border-radius:15px; }
+  .run-card.active { border-color:rgba(49,208,150,.32); box-shadow:0 0 0 1px rgba(49,208,150,.08); }
+  .run-kind { color:var(--faint); font-size:11px; font-family:var(--mono); }
+  .run-title { font-size:13px; color:#f4f4f5; margin-bottom:5px; }
+  .run-copy { color:var(--muted); font-size:12px; }
+  .progress-cell { width:180px; }
+  .progress-cell .bar i { background:var(--green); width:68%; }
+  .v2-composer { padding:14px 18px; border-top:1px solid var(--hair); background:#0b0b0e; }
+  .wide-input { height:100%; border:1px solid var(--hair-2); border-radius:18px; background:#141419; display:grid; grid-template-rows: 1fr 36px; overflow:hidden; }
+  .wide-input textarea { border:0; outline:0; resize:none; background:transparent; color:#fff; padding:15px; font:14px/1.5 var(--sans); }
+  .wide-bottom { display:flex; justify-content:space-between; align-items:center; padding:0 10px 10px; }
+  .v2-side { display:grid; grid-template-rows: 58px 1fr; background:#0d0d10; }
+  .v2-side-head { display:flex; align-items:center; padding:0 16px; border-bottom:1px solid var(--hair); font-size:13px; font-weight:800; }
+  .ops { padding:14px; overflow:auto; display:grid; gap:12px; align-content:start; }
+  .ops-card { border:1px solid var(--hair); border-radius:16px; background:#141419; padding:14px; }
+  .ops-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px; }
+  .ops-cell { background:#0e0e12; border:1px solid var(--hair); border-radius:12px; padding:10px; }
+  .ops-cell b { display:block; font-size:17px; }
+  .ops-cell span { color:var(--faint); font-size:11px; }
+  .budget-alert { background:rgba(240,179,90,.08); border-color:rgba(240,179,90,.26); }
+  .patch-list { display:grid; gap:8px; }
+  .patch { display:flex; align-items:center; justify-content:space-between; padding:9px 10px; border:1px solid var(--hair); border-radius:11px; font-size:12px; color:var(--muted); }
+  .patch.ok { color:#bff5df; border-color:rgba(49,208,150,.2); }
+
+  .v3 { grid-template-columns: 260px minmax(640px, 1fr); background:#08080a; }
+  .command-pane { border-right:1px solid var(--hair); background:#0c0c10; padding:14px; display:flex; flex-direction:column; gap:12px; }
+  .search { height:36px; border:1px solid var(--hair); background:#131318; border-radius:10px; padding:0 11px; color:var(--muted); display:flex; align-items:center; font-size:12px; }
+  .nav-section { display:grid; gap:6px; }
+  .nav-section h4 { margin:8px 0 2px; color:var(--faint); font-size:10px; letter-spacing:.12em; text-transform:uppercase; }
+  .nav-row { padding:9px 10px; border-radius:10px; color:var(--muted); font-size:12px; display:flex; justify-content:space-between; }
+  .nav-row.active { background:#1a1a22; color:#fff; }
+  .mini-health { margin-top:auto; border:1px solid var(--hair); border-radius:14px; padding:12px; background:#121217; }
+  .v3-work { display:grid; grid-template-rows: 56px 1fr 150px; min-width:0; }
+  .v3-head { border-bottom:1px solid var(--hair); display:flex; align-items:center; justify-content:space-between; padding:0 18px; }
+  .split-content { display:grid; grid-template-columns: minmax(440px, 1fr) 360px; min-height:0; }
+  .doc-thread { overflow:auto; padding:28px; }
+  .doc-inner { max-width:820px; margin:0 auto; }
+  .doc-block { border-bottom:1px solid var(--hair); padding:18px 0; }
+  .doc-block:first-child { padding-top:0; }
+  .doc-block h3 { margin:0 0 10px; font-size:15px; }
+  .doc-block p { margin:0 0 10px; color:var(--muted); line-height:1.75; font-size:13.5px; }
+  .check-row { display:grid; grid-template-columns: 22px 1fr auto; gap:10px; padding:10px 0; border-top:1px solid var(--hair); align-items:center; }
+  .check-row .box { width:16px; height:16px; border-radius:5px; border:1px solid var(--hair-2); background:#111116; }
+  .check-row.done .box { background:var(--green); border-color:var(--green); }
+  .ambient-panel { border-left:1px solid var(--hair); background:#0d0d10; padding:14px; overflow:auto; display:grid; gap:12px; align-content:start; }
+  .activity { border-left:1px solid var(--hair-2); padding-left:14px; display:grid; gap:12px; }
+  .activity-item { position:relative; color:var(--muted); font-size:12px; line-height:1.5; }
+  .activity-item::before { content:""; position:absolute; left:-19px; top:4px; width:8px; height:8px; border-radius:50%; background:var(--blue); box-shadow:0 0 0 4px #0d0d10; }
+  .command-composer { border-top:1px solid var(--hair); padding:12px 18px; background:#0a0a0c; }
+  .command-box { max-width:1120px; margin:0 auto; height:100%; border:1px solid var(--hair-2); border-radius:14px; background:#121217; display:flex; align-items:center; gap:12px; padding:0 12px; }
+  .command-box input { flex:1; border:0; outline:0; background:transparent; color:#fff; font-size:14px; }
+  .key { border:1px solid var(--hair); background:#18181f; color:var(--faint); border-radius:6px; padding:3px 6px; font-size:11px; font-family:var(--mono); }
+</style>
+</head>
+<body>
+  <div class="switcher">
+    <span class="label">DevForge AI 对话重构：</span>
+    <button class="active" onclick="showVariant('v1', this)">A · 指挥舱</button>
+    <button onclick="showVariant('v2', this)">B · 运行中心</button>
+    <button onclick="showVariant('v3', this)">C · 命令流</button>
+  </div>
+
+  <main class="stage">
+    <section class="variant v1 active" id="v1">
+      <nav class="rail">
+        <div class="mark">DF</div>
+        <button class="rail-btn">⌘</button><button class="rail-btn active">▣</button><button class="rail-btn">⌕</button><button class="rail-btn">⚙</button>
+        <div class="rail-spacer"></div><button class="rail-btn">?</button>
+      </nav>
+      <aside class="workspace">
+        <div class="workspace-head">
+          <div class="kicker">当前上下文</div>
+          <div class="workspace-title"><strong>DEVFORGE</strong><span class="pill">相关 8</span></div>
+        </div>
+        <div class="session-list">
+          <div class="session-group">今天</div>
+          <div class="session active"><span>AI 模块对话页面重构</span><div class="session-meta"><span>213k tokens</span><span>进行中</span></div></div>
+          <div class="session"><span>Tauri 命令链路修复</span><div class="session-meta"><span>88k tokens</span><span>2 小时前</span></div></div>
+          <div class="session-group">本周</div>
+          <div class="session"><span>i18n 完整性检查</span><div class="session-meta"><span>94k tokens</span><span>昨天</span></div></div>
+          <div class="session"><span>Patch Review 验证中心</span><div class="session-meta"><span>41k tokens</span><span>周三</span></div></div>
+        </div>
+        <div class="workspace-card">
+          <div class="kicker">项目健康</div>
+          <div class="mini-grid">
+            <div class="mini-stat"><b>10</b><span>可用工具</span></div>
+            <div class="mini-stat"><b>0</b><span>MCP servers</span></div>
+            <div class="mini-stat"><b>6</b><span>文件工具路</span></div>
+            <div class="mini-stat"><b>1</b><span>Shell 工具路</span></div>
+          </div>
+        </div>
+      </aside>
+      <section class="chat-shell">
+        <header class="chat-top">
+          <div class="crumbs"><span class="dot"></span><strong>你好</strong><span>/</span><span>AI 模块设计审查</span></div>
+          <div class="top-actions"><button class="ghost">新会话</button><button class="ghost">弹出</button><button class="ghost">更多</button></div>
+        </header>
+        <div class="chat-scroll">
+          <div class="thread">
+            <div class="assumption"><strong>设计假设：</strong>这是开发者全天驻留的 AI 工作台，不做消费级聊天气泡；主线是「目标 → 执行 → 风险 → 下一步」，把上下文预算、工具状态、补丁验证从底部孤岛提升为右侧检查器。</div>
+            <div class="message user">
+              <div class="speaker"><strong>你</strong><span>11:18<br>当前 Patch</span></div>
+              <div class="message-body"><div class="msg-card">现在准备对项目的 AI 模块对话进行页面重构优化，用 huashu-design 实现设计。这是目前的样子。</div></div>
+            </div>
+            <div class="message ai">
+              <div class="speaker ai"><strong>DevForge AI</strong><span>设计输出<br>进行中</span></div>
+              <div class="message-body">
+                <div class="msg-card">
+                  <p>我会把页面拆成三层：<strong>会话主线</strong>保留对话叙事，<strong>执行状态</strong>变成可追踪的工具流水线，<strong>风险与验证</strong>固定在右侧，避免用户在长对话里滚动找状态。</p>
+                  <table class="plan-table"><tr><td>P1</td><td>对话区从长 Markdown 改为目标卡 + 关键结论 + 可折叠细节</td></tr><tr><td>P1</td><td>工具就绪、上下文预算、Patch Review 统一进入右侧 Inspector</td></tr><tr><td>P2</td><td>底部输入区绑定当前运行模式，减少按钮散落</td></tr></table>
+                  <div class="tool-step"><div class="tool-line"><span class="status">ready</span><span>文件工具、Shell 工具、网络工具完成自检</span><span class="mono">10 tools</span></div><div class="tool-line"><span class="status run">running</span><span>生成 3 个设计变体并准备截图验证</span><span class="mono">68%</span></div></div>
+                  <div class="context-strip"><div><strong>上下文预算偏高</strong><div class="bar"><i></i></div></div><span class="mono">92%</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer class="composer-zone">
+          <div class="composer">
+            <div class="composer-tools"><span class="tool-chip hot">普通 · DeepSeek V3</span><span class="tool-chip">附件</span><span class="tool-chip">上下文 52%</span><span class="tool-chip">Patch 已检测</span></div>
+            <textarea placeholder="输入消息，或用 / 指令插入工作流步骤..."></textarea>
+            <div class="composer-bottom"><span>Enter 发送 · Shift Enter 换行 · Ctrl K 命令面板</span><button class="send">发送</button></div>
+          </div>
+        </footer>
+      </section>
+      <aside class="inspector">
+        <div class="inspector-head"><div class="kicker">Inspector</div><div class="inspector-title"><strong>运行与验证</strong><span class="pill">实时</span></div></div>
+        <div class="inspector-body">
+          <div class="side-card"><h4>上下文预算</h4><div class="meter-ring"><div class="ring"><span>92%</span></div><div class="muted" style="font-size:12px;line-height:1.6">已用 213,082 / 232,000 tokens。建议压缩历史或拆分会话。</div></div></div>
+          <div class="side-card"><h4>工具就绪</h4><div class="kv"><span>文件工具</span><strong style="color:var(--green)">6 路</strong></div><div class="kv"><span>Shell 工具</span><strong style="color:var(--green)">1 路</strong></div><div class="kv"><span>MCP</span><strong>0 / 0</strong></div></div>
+          <div class="side-card"><h4>Patch Review / Verification Center</h4><div class="review-action"><button>审查 diff</button><button>跑建议验证</button><button>重跑上次</button><button>代码智能</button></div><div class="risk-item"><strong>Workspace Isolation Preview</strong>当前 patch 触碰 8 个文件，建议记录后再执行清理。</div></div>
+        </div>
+      </aside>
+    </section>
+
+    <section class="variant v2" id="v2">
+      <nav class="rail"><div class="mark">DF</div><button class="rail-btn active">▦</button><button class="rail-btn">⌁</button><button class="rail-btn">⌘</button><div class="rail-spacer"></div><button class="rail-btn">⚙</button></nav>
+      <section class="v2-main">
+        <header class="v2-top"><div class="tabs"><span class="tab active">任务</span><span class="tab">对话</span><span class="tab">文件</span><span class="tab">终端</span></div><button class="ghost">记录当前 Patch</button></header>
+        <div class="canvas"><div class="focus-stack">
+          <div class="objective"><div class="kicker">Current objective</div><h2>重构 AI 对话页，让状态、风险、验证不再埋在长聊天里</h2><p>该方向把 AI 页面从「聊天窗口」升级为「运行中心」：中间只呈现任务推进，右侧承载操作面板，适合 DevForge 的开发工具定位。</p></div>
+          <div class="run-timeline"><div class="run-card active"><div class="run-kind">PHASE 01</div><div><div class="run-title">理解截图与现有设计上下文</div><div class="run-copy">已读取 design context：JetBrains / DataGrip、暗色优先、信息密度高但不拥挤。</div></div><span class="status">done</span></div><div class="run-card active"><div class="run-kind">PHASE 02</div><div><div class="run-title">生成 huashu-design 高保真原型</div><div class="run-copy">输出 3 个方向：指挥舱、运行中心、命令流。</div></div><div class="progress-cell"><span class="status run">running</span><div class="bar"><i></i></div></div></div><div class="run-card"><div class="run-kind">PHASE 03</div><div><div class="run-title">验证与落地拆分</div><div class="run-copy">将设计映射到 Vue 组件：ConversationShell、RuntimePanel、VerificationCenter、Composer。</div></div><span class="faint">next</span></div></div>
+        </div></div>
+        <footer class="v2-composer"><div class="wide-input"><textarea placeholder="描述下一步，或直接让 AI 执行当前阶段..."></textarea><div class="wide-bottom"><div><span class="tool-chip hot">Autonomous</span><span class="tool-chip">需要审批</span></div><button class="send">执行当前步</button></div></div></footer>
+      </section>
+      <aside class="v2-side"><header class="v2-side-head">运行中心</header><div class="ops"><div class="ops-card"><div class="kicker">Runtime</div><div class="ops-grid"><div class="ops-cell"><b>68%</b><span>当前阶段</span></div><div class="ops-cell"><b>3</b><span>待验证项</span></div><div class="ops-cell"><b>10</b><span>工具可用</span></div><div class="ops-cell"><b>0</b><span>MCP 缺失</span></div></div></div><div class="ops-card budget-alert"><strong>上下文预算预警</strong><p class="muted" style="font-size:12px;line-height:1.6">超 90% 时不在聊天流中插红卡，而固定在运行侧栏，避免打断阅读。</p><div class="bar"><i></i></div></div><div class="ops-card"><h4 style="margin:0 0 10px">Patch Review</h4><div class="patch-list"><div class="patch ok"><span>审查 diff</span><span>ready</span></div><div class="patch"><span>跑建议验证</span><span>queued</span></div><div class="patch"><span>冲突审查</span><span>manual</span></div></div></div></div></aside>
+    </section>
+
+    <section class="variant v3" id="v3">
+      <aside class="command-pane"><div class="mark">DF</div><div class="search">⌘ K · 命令、会话、文件</div><div class="nav-section"><h4>工作区</h4><div class="nav-row active"><span>AI 对话</span><span>⌥1</span></div><div class="nav-row"><span>Patch Review</span><span>⌥2</span></div><div class="nav-row"><span>Workflow Runtime</span><span>⌥3</span></div><div class="nav-row"><span>Context Budget</span><span>⌥4</span></div></div><div class="nav-section"><h4>最近任务</h4><div class="nav-row"><span>i18n 检查</span><span>92%</span></div><div class="nav-row"><span>Tauri 命令链路</span><span>done</span></div><div class="nav-row"><span>AI 模块规划</span><span>hot</span></div></div><div class="mini-health"><div class="kicker">System</div><div class="kv"><span>Tools</span><strong style="color:var(--green)">ready</strong></div><div class="kv"><span>Context</span><strong style="color:var(--amber)">high</strong></div></div></aside>
+      <section class="v3-work"><header class="v3-head"><strong>AI Module Redesign</strong><div class="top-actions"><button class="ghost">Fork</button><button class="ghost">Compact</button><button class="ghost">Verify</button></div></header><div class="split-content"><main class="doc-thread"><div class="doc-inner"><div class="doc-block"><div class="kicker">Executive summary</div><h3>核心结论先行，长推理默认折叠</h3><p>命令流方向适合键盘用户：把 AI 回复视为一份可执行工作记录，而不是聊天泡泡。每段输出都可以转换成任务、命令或验证步骤。</p></div><div class="doc-block"><h3>优先级行动清单</h3><div class="check-row done"><span class="box"></span><span>拆分超大文件与可维护性风险</span><span class="status">done</span></div><div class="check-row done"><span class="box"></span><span>把工具状态从聊天正文抽离为 Ambient Panel</span><span class="status">done</span></div><div class="check-row"><span class="box"></span><span>扩展 vitest coverage 到核心组件</span><span class="status run">next</span></div></div><div class="doc-block"><h3>设计理由</h3><p>DevForge 的用户是开发者与运维人员，最重要的是掌控感、可审计、可快速恢复上下文；因此该方向减少装饰容器，强调信息结构与命令入口。</p></div></div></main><aside class="ambient-panel"><div class="side-card"><h4>Ambient Status</h4><div class="activity"><div class="activity-item">文件工具路 6 已就绪，可读取与写入当前工作区。</div><div class="activity-item">Shell 工具路 1 已就绪，等待验证命令。</div><div class="activity-item">上下文 92%，建议本轮结束后执行 Compact。</div></div></div><div class="side-card"><h4>Verification Queue</h4><div class="patch ok"><span>HTML 原型</span><span>ready</span></div><div class="patch"><span>Playwright 截图</span><span>pending</span></div><div class="patch"><span>Vue 落地映射</span><span>pending</span></div></div></aside></div><footer class="command-composer"><div class="command-box"><span class="key">/</span><input placeholder="输入指令：生成组件、审查 diff、压缩上下文、运行验证..."/><button class="send">Run</button></div></footer></section>
+    </section>
+  </main>
+<script>
+  function showVariant(id, btn) {
+    document.querySelectorAll('.variant').forEach(v => v.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    document.querySelectorAll('.switcher button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  }
+</script>
+</body>
+</html>
