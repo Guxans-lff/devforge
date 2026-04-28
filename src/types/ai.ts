@@ -500,3 +500,22 @@ export interface AiWorkflowScript {
   description: string
   steps: AiWorkflowStep[]
 }
+
+export type AiProactiveTaskStatus = 'idle' | 'waiting' | 'running' | 'paused' | 'done' | 'failed'
+
+export interface AiProactiveTask {
+  id: string
+  sessionId: string
+  objective: string
+  tickIntervalMs: number
+  maxTicks: number
+  tickCount: number
+  nextTickAt: number
+  allowedTools: string[]
+  stopConditions: string[]
+  status: AiProactiveTaskStatus
+  createdAt: number
+  updatedAt: number
+  lastTickSummary?: string
+  error?: string
+}
