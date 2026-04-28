@@ -464,6 +464,37 @@ pub async fn get_tables(
     Ok(tables)
 }
 
+pub async fn get_tables_light(
+    pool: &PgPool,
+    schema: &str,
+) -> Result<Vec<TableInfo>, AppError> {
+    let rows: Vec<PgRow> = sqlx::query(
+        "SELECT table_name as name,
+                table_type as table_type
+         FROM information_schema.tables
+         WHERE table_schema = $1
+         ORDER BY table_name",
+    )
+    .bind(schema)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to list tables: {}", e)))?;
+
+    Ok(rows.iter().map(|row| {
+        let raw_type: String = row.try_get("table_type").unwrap_or_default();
+        TableInfo {
+            name: row.try_get::<String, _>("name").unwrap_or_default(),
+            table_type: if raw_type.contains("VIEW") {
+                "VIEW".to_string()
+            } else {
+                "BASE TABLE".to_string()
+            },
+            row_count: None,
+            comment: None,
+        }
+    }).collect())
+}
+
 /// For PostgreSQL, the `database` parameter is the schema name.
 pub async fn get_columns(
     pool: &PgPool,

@@ -356,6 +356,7 @@ pub fn run() {
             db::db_cancel_sql_import,
             db::db_get_databases,
             db::db_get_tables,
+            db::db_get_tables_light,
             db::db_get_columns,
             db::db_get_table_data,
             db::db_get_create_table,

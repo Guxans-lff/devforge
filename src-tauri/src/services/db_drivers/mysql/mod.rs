@@ -53,6 +53,25 @@ pub async fn get_tables(pool: &MySqlPool, database: &str) -> Result<Vec<TableInf
     }).collect())
 }
 
+pub async fn get_tables_light(pool: &MySqlPool, database: &str) -> Result<Vec<TableInfo>, AppError> {
+    let rows: Vec<MySqlRow> = sqlx::query(
+        "SELECT CAST(TABLE_NAME AS CHAR) as name,
+                CAST(TABLE_TYPE AS CHAR) as table_type
+         FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? ORDER BY TABLE_NAME",
+    )
+    .bind(database)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("Failed to list tables: {}", e)))?;
+
+    Ok(rows.iter().map(|row| TableInfo {
+        name: get_string(row, "name"),
+        table_type: get_string(row, "table_type"),
+        row_count: None,
+        comment: None,
+    }).collect())
+}
+
 pub async fn get_columns(pool: &MySqlPool, database: &str, table: &str) -> Result<Vec<ColumnInfo>, AppError> {
     let rows: Vec<MySqlRow> = sqlx::query(
         "SELECT CAST(COLUMN_NAME AS CHAR) as name,

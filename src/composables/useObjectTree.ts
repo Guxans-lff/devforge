@@ -296,7 +296,7 @@ export function useObjectTree(options: UseObjectTreeOptions) {
               meta: markRaw({ database, table: tbl.name, comment: tbl.comment ?? undefined }),
             }))
           }
-          const { data: tables } = await fetchWithCache(cacheKey, () => dbApi.dbGetTables(connectionId.value, database), { onRefresh: applyTables })
+          const { data: tables } = await fetchWithCache(cacheKey, () => dbApi.dbGetTablesLight(connectionId.value, database), { onRefresh: applyTables })
           applyTables(tables)
           break
         }

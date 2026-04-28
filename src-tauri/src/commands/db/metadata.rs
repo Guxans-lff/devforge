@@ -29,6 +29,16 @@ pub async fn db_get_tables(
 }
 
 #[command]
+pub async fn db_get_tables_light(
+    app: AppHandle,
+    connection_id: String,
+    database: String,
+) -> Result<Vec<TableInfo>, AppError> {
+    let engine = app.state::<DbEngineState>().inner().clone();
+    engine.clone().get_tables_light(connection_id, database).await
+}
+
+#[command]
 pub async fn db_get_columns(
     app: AppHandle,
     connection_id: String,

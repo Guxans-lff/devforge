@@ -59,6 +59,7 @@ vi.mock('@/composables/useMetadataCache', () => ({
 vi.mock('@/api/database', () => ({
   dbGetDatabases: vi.fn(),
   dbGetTables: vi.fn(),
+  dbGetTablesLight: vi.fn(),
   dbGetViews: vi.fn(),
   dbGetProcedures: vi.fn(),
   dbGetFunctions: vi.fn(),
@@ -75,6 +76,7 @@ describe('useObjectTree', () => {
 
     vi.mocked(dbApi.dbGetDatabases).mockResolvedValue([{ name: 'demo', characterSet: null, collation: null }])
     vi.mocked(dbApi.dbGetTables).mockResolvedValue([{ name: 'users', tableType: 'BASE TABLE', rowCount: null, comment: null }])
+    vi.mocked(dbApi.dbGetTablesLight).mockResolvedValue([{ name: 'users', tableType: 'BASE TABLE', rowCount: null, comment: null }])
     vi.mocked(dbApi.dbGetColumns).mockResolvedValue([
       { name: 'id', dataType: 'INT', nullable: false, defaultValue: null, isPrimaryKey: true, comment: null },
     ])
@@ -134,7 +136,7 @@ describe('useObjectTree', () => {
     expect(invalidateMock).toHaveBeenCalledWith('conn-1:databases')
     expect(invalidateMock).toHaveBeenCalledWith('conn-1:demo:tables')
     expect(invalidateMock).toHaveBeenCalledWith('conn-1:demo:users:columns')
-    expect(dbApi.dbGetTables).toHaveBeenCalledWith('conn-1', 'demo')
+    expect(dbApi.dbGetTablesLight).toHaveBeenCalledWith('conn-1', 'demo')
     expect(dbApi.dbGetColumns).toHaveBeenCalledWith('conn-1', 'demo', 'users')
   })
 })

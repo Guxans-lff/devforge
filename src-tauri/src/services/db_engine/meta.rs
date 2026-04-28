@@ -31,6 +31,14 @@ impl DbEngine {
         }
     }
 
+    pub async fn get_tables_light(self: Arc<Self>, connection_id: String, database: String) -> Result<Vec<TableInfo>, AppError> {
+        let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
+        match pool.as_ref() {
+            DriverPool::MySql(p) => mysql::get_tables_light(p, &database).await,
+            DriverPool::Postgres(p) => postgres::get_tables_light(p, &database).await,
+        }
+    }
+
     pub async fn get_columns(self: Arc<Self>, connection_id: String, database: String, table: String) -> Result<Vec<ColumnInfo>, AppError> {
         let pool: Arc<DriverPool> = self.get_pool(connection_id).await?;
         match pool.as_ref() {

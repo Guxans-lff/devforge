@@ -95,6 +95,10 @@ export function dbGetTables(connectionId: string, database: string): Promise<Tab
   return invokeCommand('db_get_tables', { connectionId, database })
 }
 
+export function dbGetTablesLight(connectionId: string, database: string): Promise<TableInfo[]> {
+  return invokeCommand('db_get_tables_light', { connectionId, database })
+}
+
 export function dbGetColumns(
   connectionId: string,
   database: string,
