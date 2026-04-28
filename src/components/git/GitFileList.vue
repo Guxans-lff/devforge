@@ -8,6 +8,7 @@ import { useToast } from '@/composables/useToast'
 import { parseBackendError } from '@/types/error'
 import { Plus, Minus, ChevronDown, ChevronRight, FilePlus, Undo2 } from 'lucide-vue-next'
 import { gitStatusColor as statusColor, gitStatusIcon as statusIcon } from '@/composables/useGitUtils'
+import { confirmGitRisk } from '@/composables/git/gitRisk'
 
 const props = defineProps<{
   repoPath: string
@@ -90,6 +91,7 @@ async function handleUnstageAll() {
 }
 
 async function handleDiscardFile(filePath: string) {
+  if (!confirmGitRisk({ operation: 'discard', filePath })) return
   try {
     await store.discardFile(props.repoPath, filePath)
     toast.success(t('git.discardSuccess'))
