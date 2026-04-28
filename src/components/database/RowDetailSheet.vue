@@ -13,6 +13,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useToast } from '@/composables/useToast'
 import type { ColumnDef } from '@/types/database'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('row.detail')
 
 const props = defineProps<{
   /** 是否打开 */
@@ -94,7 +97,7 @@ function copyValue(val: unknown) {
   const text = formatValue(val)
   navigator.clipboard.writeText(text).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch((e: unknown) => console.warn('[RowDetail]', e))
+  }).catch((e: unknown) => log.warn('copy_failed', undefined, e))
 }
 
 /** 构建引号标识符 */
@@ -111,7 +114,7 @@ function copyAsJson() {
   })
   navigator.clipboard.writeText(JSON.stringify(obj, null, 2)).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch((e: unknown) => console.warn('[RowDetail]', e))
+  }).catch((e: unknown) => log.warn('copy_failed', undefined, e))
 }
 
 /** 复制为 SQL INSERT */
@@ -127,7 +130,7 @@ function copyAsSqlInsert() {
   const sql = `INSERT INTO (${cols}) VALUES (${vals});`
   navigator.clipboard.writeText(sql).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch((e: unknown) => console.warn('[RowDetail]', e))
+  }).catch((e: unknown) => log.warn('copy_failed', undefined, e))
 }
 
 /** 导航：上一行 */

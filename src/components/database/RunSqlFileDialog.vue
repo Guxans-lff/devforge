@@ -15,6 +15,9 @@ import {
   Check, FolderOpen, Zap, ShieldCheck, Timer, ArrowRight, Copy
 } from 'lucide-vue-next'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('sql.file.dialog')
 
 const props = defineProps<{
   connectionId: string
@@ -255,7 +258,7 @@ function handleCopyLog(id: string, event: MouseEvent, text?: string) {
       copyStates.value[id] = false
     }, 2000)
   } catch (err) {
-    console.error('Failed to copy log:', err)
+    log.error('copy_log_failed', undefined, err)
   }
 }
 
@@ -270,7 +273,7 @@ async function handleSelectFile() {
       selectedFilePath.value = selected
     }
   } catch (e) {
-    console.error('Failed to select file:', e)
+    log.error('select_file_failed', undefined, e)
   }
 }
 </script>

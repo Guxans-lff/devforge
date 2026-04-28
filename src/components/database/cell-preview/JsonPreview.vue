@@ -3,6 +3,9 @@ import { computed, ref } from 'vue'
 import { Copy, ChevronRight, ChevronDown, Table2, Code2, Search } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { useI18n } from 'vue-i18n'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('json.preview')
 
 const props = defineProps<{
   /** JSON 字符串或已解析的对象 */
@@ -82,14 +85,14 @@ function collapseAll() {
 function copyPath(path: string) {
   navigator.clipboard.writeText(path).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch((e: unknown) => console.warn('[JsonPreview]', e))
+  }).catch((e: unknown) => log.warn('copy_path_failed', undefined, e))
 }
 
 /** 复制整个格式化 JSON */
 function copyFormatted() {
   navigator.clipboard.writeText(formattedJson.value).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch((e: unknown) => console.warn('[JsonPreview]', e))
+  }).catch((e: unknown) => log.warn('copy_formatted_failed', undefined, e))
 }
 
 /** 递归渲染节点所需的类型 */

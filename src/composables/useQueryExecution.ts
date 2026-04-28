@@ -20,6 +20,7 @@ import type { QueryTabContext, SubStatementResult } from '@/types/database-works
 import { isMultiStatement, extractTableName } from '@/utils/sqlParser'
 import type { EnvironmentType } from '@/types/environment'
 import { parseBackendError, ensureErrorString } from '@/types/error'
+import { createLogger } from '@/utils/logger'
 
 /** useQueryExecution 入参 */
 export interface UseQueryExecutionOptions {
@@ -46,6 +47,7 @@ const STREAM_RESULT_UPDATE_INTERVAL_MS = 32
  * 负责：SQL 执行（流式/非流式/多语句）、表浏览、事务管理、EXPLAIN、危险操作确认
  */
 export function useQueryExecution(options: UseQueryExecutionOptions) {
+  const log = createLogger('query.execution')
   const {
     connectionId, connectionName, tabId, isConnected,
     ensureConnected,
@@ -298,7 +300,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       await dbApi.dbAcquireSession(connectionId.value, tabId.value)
       return true
     } catch (e: unknown) {
-      console.warn('[useQueryExecution] restore session failed', e)
+      log.warn('restore_session_failed', undefined, e)
       return false
     }
   }
@@ -561,7 +563,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
         && /not implemented|unsupported|stream/i.test(errorMessage)
 
       if (shouldFallback) {
-        console.warn('stream query unavailable, falling back to non-stream execution:', e)
+        log.warn('stream_query_unavailable', undefined, e)
         await handleNonStreamExecute(sql, startTime, execVersion)
         return
       }
@@ -742,7 +744,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       affectedRows: result.affectedRows,
       rowCount: result.totalCount ?? (result.isError ? null : result.rows.length),
       executedAt: Date.now(),
-    }).catch((e: unknown) => console.warn('[useQueryExecution]', e))
+    }).catch((e: unknown) => log.warn('save_history_failed', undefined, e))
   }
 
   // ===== 取消查询 =====
@@ -784,7 +786,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
       emit('databaseChanged', database)
     } catch (e) {
       notification.error(t('database.queryFailed'), parseBackendError(e).message, true)
-      console.warn('[Session] 切换数据库失败:', e)
+      log.warn('switch_database_failed', undefined, e)
     }
   }
 

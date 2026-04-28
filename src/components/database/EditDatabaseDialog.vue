@@ -18,7 +18,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Database, Loader2 } from 'lucide-vue-next'
+import { createLogger } from '@/utils/logger'
 import * as dbApi from '@/api/database'
+
+const log = createLogger('edit.database.dialog')
 
 const props = defineProps<{
   connectionId: string
@@ -290,7 +293,7 @@ watch(() => props.open, async (val) => {
         }
       }
     } catch (e) {
-      console.error('Failed to fetch database properties:', e)
+      log.error('fetch_properties_failed', undefined, e)
     } finally {
       isLoading.value = false
     }

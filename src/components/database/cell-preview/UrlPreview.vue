@@ -3,6 +3,9 @@ import { computed } from 'vue'
 import { ExternalLink, Copy } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { useI18n } from 'vue-i18n'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('url.preview')
 
 const props = defineProps<{
   /** URL 字符串 */
@@ -39,7 +42,7 @@ function openUrl() {
 function copyUrl() {
   navigator.clipboard.writeText(props.value).then(() => {
     toast.success(t('toast.copySuccess'))
-  }).catch((e: unknown) => console.warn('[UrlPreview]', e))
+  }).catch((e: unknown) => log.warn('copy_url_failed', undefined, e))
 }
 </script>
 

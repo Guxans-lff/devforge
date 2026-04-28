@@ -18,6 +18,7 @@ import { computeColumnStatsAsync, type ColumnStatsResult } from '@/utils/columnS
 import { fetchPrimaryKeys } from '@/composables/usePrimaryKey'
 import { extractNumericCursorValue, isIntegerResultColumn } from '@/composables/useTableSeek'
 import type { QueryResult as QueryResultType } from '@/types/database'
+import { createLogger } from '@/utils/logger'
 import { parseBackendError } from '@/types/error'
 
 export type RowData = Record<string, unknown> & { __originalIndex: number }
@@ -46,6 +47,7 @@ const CHUNK_SIZE = 200
 const ROW_HEIGHT = 28
 
 export function useQueryResult(options: UseQueryResultOptions) {
+  const log = createLogger('query-result')
   const {
     result, loading: _loading, loadingMore, hasMoreServerRows, showReconnect: _showReconnect,
     connectionId, database, tableName, driver, isTableBrowse,
@@ -323,7 +325,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     result.value.columns.forEach((col, i) => { obj[col.name] = row[i] })
     navigator.clipboard.writeText(JSON.stringify(obj, null, 2)).then(() => {
       toast.success(t('toast.copySuccess'))
-    }).catch((e: unknown) => console.warn('[useQueryResult]', e))
+    }).catch((e: unknown) => log.warn('copy_json_failed', undefined, e))
   }
 
   /** 复制行数据为 INSERT SQL 语句 */
@@ -344,7 +346,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     const sql = `INSERT INTO ${quoteId(tbl)} (${cols}) VALUES (${vals});`
     navigator.clipboard.writeText(sql).then(() => {
       toast.success(t('toast.copySuccess'))
-    }).catch((e: unknown) => console.warn('[useQueryResult]', e))
+    }).catch((e: unknown) => log.warn('copy_sql_failed', undefined, e))
   }
 
   async function triggerColumnStats(columnName: string) {
@@ -377,7 +379,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
       const text = value === null || value === undefined ? 'NULL' : String(value)
       navigator.clipboard.writeText(text).then(() => {
         toast.success(t('toast.copySuccess'))
-      }).catch(err => console.warn('Failed to copy to clipboard:', err))
+      }).catch(err => log.warn('copy_clipboard_failed', undefined, err))
     }, 250)
   }
 

@@ -17,6 +17,9 @@ import {
 import { queryAuditLogs, getAuditStats, cleanupAuditLogs } from '@/api/database'
 import type { AuditLogEntry, AuditStats } from '@/types/database'
 import { useMessage } from '@/stores/message-center'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('audit.log')
 
 const props = defineProps<{
   connectionId?: string
@@ -123,7 +126,7 @@ async function loadLogs(append = false) {
 async function loadStats() {
   try {
     stats.value = await getAuditStats(props.connectionId)
-  } catch (e) { console.warn('[AuditLog] loadStats', e) }
+  } catch (e) { log.warn('load_stats_failed', undefined, e) }
 }
 
 async function handleCleanup() {
