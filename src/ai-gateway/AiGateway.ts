@@ -1,0 +1,504 @@
+﻿/**
+ * AI Provider Gateway 缁熶竴鍏ュ彛
+ *
+ * 灏佽鎵€鏈?AI 璇锋眰锛屾彁渚?requestId銆佽拷韪€乽sage 璁板綍銆? * 鍐呴儴璋冪敤鐜版湁鐨?`aiChatStream`锛屼繚鎸佸悜鍚庡吋瀹广€? */
+
+import { aiChatStream, aiAbortStream } from '@/api/ai'
+import type { ModelConfig } from '@/types/ai'
+import { createLogger } from '@/utils/logger'
+import type {
+  AiGatewayRequest,
+  AiGatewayResult,
+  AiGatewayContext,
+  AiGatewayUsage,
+  AiGatewayCost,
+  AiGatewayEventHandler,
+} from './types'
+import { AiGatewayError } from './types'
+import { recordUsage } from './usageTracker'
+import { consumeQuota } from './rateLimiter'
+import { recordProviderSuccess, recordProviderFailure, nextFallbackCandidate } from './router'
+import { estimateRequestTokens, type TokenEstimateResult } from './tokenEstimator'
+import { checkEndpointSecurity, getDefaultSecurityConfig } from './security'
+import { applyGatewayOverrides, hasActiveOverrides } from './override'
+
+const log = createLogger('ai.gateway')
+
+function startSpan(name: string, parentId?: string, attributes?: Record<string, unknown>): string {
+  const spanId = `gateway-span-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  log.debug('span_start', { spanId, name, parentId, ...attributes })
+  return spanId
+}
+
+function endSpan(spanId: string, status: string, attributes?: Record<string, unknown>): void {
+  log.debug('span_end', { spanId, status, ...attributes })
+}
+
+/** 鐢熸垚 requestId */
+function generateRequestId(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID()
+  }
+  return `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+/** 灏嗗師濮嬮敊璇垎绫讳负 GatewayError */
+function classifyError(err: unknown): AiGatewayError {
+  // 提取 message：优先从对象属性读取，再尝试 Error.message，最后 String()
+  let message: string
+  let retryable: boolean | undefined
+
+  if (err && typeof err === 'object') {
+    const obj = err as Record<string, unknown>
+    if (typeof obj.message === 'string') {
+      message = obj.message
+    } else if (err instanceof Error) {
+      message = err.message
+    } else {
+      message = String(err)
+    }
+    if (typeof obj.retryable === 'boolean') {
+      retryable = obj.retryable
+    }
+  } else if (err instanceof Error) {
+    message = err.message
+  } else {
+    message = String(err)
+  }
+
+  if (retryable !== undefined) {
+    // 缁撴瀯鍖栭敊璇璞★細淇濈暀鍏?retryable锛岀被鍨嬪厹搴曚负 unknown
+    return new AiGatewayError('unknown', message, retryable, err)
+  }
+
+  if (/cancel|abort|user_rejected/i.test(message)) {
+    return new AiGatewayError('cancelled', message, false, err)
+  }
+  if (/timeout|timed out/i.test(message)) {
+    return new AiGatewayError('timeout', message, true, err)
+  }
+  if (/rate.limit|429/i.test(message)) {
+    return new AiGatewayError('rate_limit', message, true, err)
+  }
+  if (/auth|key|unauthorized|401/i.test(message)) {
+    return new AiGatewayError('auth', message, false, err)
+  }
+  if (/context.too.long|too.many.tokens|413/i.test(message)) {
+    return new AiGatewayError('context_too_long', message, false, err)
+  }
+  if (/network|connection|fetch failed|5\d{2}/i.test(message)) {
+    return new AiGatewayError('network', message, true, err)
+  }
+  return new AiGatewayError('unknown', message, true, err)
+}
+
+/** 璁＄畻鎴愭湰 */
+function computeCost(usage: AiGatewayUsage, model: ModelConfig): AiGatewayCost | undefined {
+  const pricing = model.capabilities.pricing
+  if (!pricing) return undefined
+
+  const inputCost = (usage.promptTokens / 1_000_000) * pricing.inputPer1m
+  const outputCost = (usage.completionTokens / 1_000_000) * pricing.outputPer1m
+  const cacheReadCost = usage.cacheReadTokens
+    ? (usage.cacheReadTokens / 1_000_000) * (pricing.inputPer1m * 0.5)
+    : 0
+
+  return {
+    inputCost,
+    outputCost,
+    cacheReadCost,
+    totalCost: inputCost + outputCost + cacheReadCost,
+    currency: pricing.currency,
+  }
+}
+
+/** 鏋勫缓 GatewayContext */
+function buildContext(
+  request: AiGatewayRequest,
+  requestId: string,
+): AiGatewayContext {
+  return {
+    requestId,
+    sessionId: request.sessionId,
+    source: request.source,
+    kind: request.kind,
+    providerProfileId: request.provider.id,
+    providerType: request.provider.providerType,
+    model: request.model.id,
+    upstreamModel: request.model.id,
+    stream: request.stream ?? true,
+    retryIndex: 0,
+    startedAt: Date.now(),
+  }
+}
+
+function applyRequestOverrides(request: AiGatewayRequest, requestId: string): AiGatewayRequest {
+  if (!hasActiveOverrides()) return request
+
+  const overrideResult = applyGatewayOverrides(request)
+  if (overrideResult.applied.length === 0) return request
+
+  log.info('gateway_override_applied', {
+    requestId,
+    fields: overrideResult.applied,
+  })
+
+  return {
+    ...request,
+    ...overrideResult.overridden,
+  }
+}
+
+function assertEndpointAllowed(request: AiGatewayRequest, requestId: string): void {
+  const securityResult = checkEndpointSecurity(request.provider.endpoint, {
+    ...getDefaultSecurityConfig(),
+    ...request.provider.security,
+  })
+  if (!securityResult.allowed) {
+    log.warn('gateway_endpoint_security_blocked', {
+      requestId,
+      endpoint: request.provider.endpoint,
+      providerId: request.provider.id,
+      reason: securityResult.reason,
+    })
+    throw new AiGatewayError(
+      'provider_error',
+      `Endpoint security check failed: ${securityResult.reason}`,
+      false,
+    )
+  }
+}
+
+function estimateAndAssertTokenBudget(request: AiGatewayRequest, requestId: string): TokenEstimateResult {
+  const tokenEstimate = estimateRequestTokens({
+    messages: request.messages,
+    systemPrompt: request.systemPrompt,
+    enableTools: request.enableTools,
+    model: request.model,
+    targetMaxTokens: request.maxTokens,
+  })
+
+  if (!tokenEstimate.withinBudget) {
+    log.warn('gateway_token_budget_exceeded', {
+      requestId,
+      estimatedTotal: tokenEstimate.estimatedTotalTokens,
+      maxContext: request.model.capabilities.maxContext,
+      model: request.model.id,
+      providerId: request.provider.id,
+    })
+    throw new AiGatewayError(
+      'context_too_long',
+      `Estimated tokens (${tokenEstimate.estimatedTotalTokens}) exceed model context limit (${request.model.capabilities.maxContext}). Consider compacting history or switching to a model with larger context.`,
+      false,
+    )
+  }
+
+  return tokenEstimate
+}
+
+function preflightGatewayRequest(request: AiGatewayRequest, requestId: string): TokenEstimateResult {
+  assertEndpointAllowed(request, requestId)
+  return estimateAndAssertTokenBudget(request, requestId)
+}
+
+/**
+ * 鎵ц鍗曟潯娴佸紡璇锋眰锛堝唴閮ㄤ娇鐢級
+ */
+async function executeSingleRequest(
+  request: AiGatewayRequest,
+  onEvent: AiGatewayEventHandler,
+  context: AiGatewayContext,
+): Promise<AiGatewayResult> {
+  const startedAt = Date.now()
+  const spanId = startSpan('gateway_request', undefined, {
+    requestId: context.requestId,
+    source: request.source,
+    kind: request.kind,
+    provider: request.provider.id,
+    model: request.model.id,
+    retryIndex: context.retryIndex,
+  })
+
+  log.info('gateway_request_start', {
+    requestId: context.requestId,
+    sessionId: request.sessionId,
+    source: request.source,
+    kind: request.kind,
+    provider: request.provider.id,
+    model: request.model.id,
+    retryIndex: context.retryIndex,
+  })
+
+  let content = ''
+  let finishReason = ''
+  let usage: AiGatewayUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 }
+  let firstTokenReceived = false
+
+  const wrappedHandler: AiGatewayEventHandler = (event) => {
+    switch (event.type) {
+      case 'TextDelta':
+        content += event.delta
+        break
+      case 'ThinkingDelta':
+        break
+      case 'Usage':
+        usage = {
+          promptTokens: event.prompt_tokens,
+          completionTokens: event.completion_tokens,
+          totalTokens: event.prompt_tokens + event.completion_tokens,
+          cacheReadTokens: event.cache_read_tokens,
+        }
+        break
+      case 'Done':
+        finishReason = event.finish_reason
+        break
+    }
+
+    if (!firstTokenReceived && (event.type === 'TextDelta' || event.type === 'ThinkingDelta')) {
+      firstTokenReceived = true
+      context.firstTokenAt = Date.now()
+      log.info('gateway_first_token', { requestId: context.requestId, ttfbMs: context.firstTokenAt - startedAt })
+    }
+
+    onEvent(event)
+  }
+
+  try {
+    const result = await aiChatStream(
+      {
+        sessionId: request.sessionId,
+        messages: request.messages,
+        providerType: request.provider.providerType,
+        model: request.model.id,
+        apiKey: request.apiKey,
+        endpoint: request.provider.endpoint,
+        maxTokens: request.maxTokens,
+        temperature: request.temperature,
+        systemPrompt: request.systemPrompt,
+        enableTools: request.enableTools,
+        thinkingBudget: request.thinkingBudget,
+      },
+      wrappedHandler,
+    )
+
+    if (usage.promptTokens === 0 && result && result.promptTokens > 0) {
+      usage = {
+        promptTokens: result.promptTokens,
+        completionTokens: result.completionTokens,
+        totalTokens: result.promptTokens + result.completionTokens,
+      }
+    }
+
+    const finishedAt = Date.now()
+    context.finishedAt = finishedAt
+
+    const cost = computeCost(usage, request.model)
+    context.usage = usage
+    context.cost = cost
+
+    recordUsage({
+      requestId: context.requestId,
+      sessionId: request.sessionId,
+      source: request.source,
+      kind: request.kind,
+      providerId: request.provider.id,
+      model: request.model.id,
+      primaryProviderId: context.primaryProviderId,
+      primaryModel: context.primaryModel,
+      fallbackReason: context.fallbackReason,
+      retryIndex: context.retryIndex,
+      startedAt,
+      finishedAt,
+      status: 'success',
+      usage,
+      cost,
+    })
+
+    recordProviderSuccess(request.provider.id)
+
+    endSpan(spanId, 'ok', {
+      requestId: context.requestId,
+      durationMs: finishedAt - startedAt,
+      ttfbMs: context.firstTokenAt ? context.firstTokenAt - startedAt : null,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+    })
+
+    log.info('gateway_request_done', {
+      requestId: context.requestId,
+      durationMs: finishedAt - startedAt,
+      promptTokens: usage.promptTokens,
+      completionTokens: usage.completionTokens,
+    })
+
+    return {
+      status: 'success',
+      content: result?.content || content,
+      model: result?.model || request.model.id,
+      finishReason: result?.finishReason || finishReason,
+      usage,
+      cost,
+      context,
+    }
+  } catch (err) {
+    const gatewayError = classifyError(err)
+    const finishedAt = Date.now()
+    context.finishedAt = finishedAt
+    context.lastError = gatewayError
+
+    recordUsage({
+      requestId: context.requestId,
+      sessionId: request.sessionId,
+      source: request.source,
+      kind: request.kind,
+      providerId: request.provider.id,
+      model: request.model.id,
+      primaryProviderId: context.primaryProviderId,
+      primaryModel: context.primaryModel,
+      fallbackReason: context.fallbackReason,
+      retryIndex: context.retryIndex,
+      startedAt,
+      finishedAt,
+      status: gatewayError.type === 'cancelled' ? 'cancelled' : 'error',
+      error: gatewayError,
+    })
+
+    recordProviderFailure(request.provider.id)
+
+    endSpan(spanId, gatewayError.type === 'cancelled' ? 'cancelled' : 'error', {
+      requestId: context.requestId,
+      errorType: gatewayError.type,
+      errorMessage: gatewayError.message,
+      retryable: gatewayError.retryable,
+    })
+
+    log.warn('gateway_request_error', {
+      requestId: context.requestId,
+      errorType: gatewayError.type,
+      errorMessage: gatewayError.message,
+      retryable: gatewayError.retryable,
+      retryIndex: context.retryIndex,
+    })
+
+    throw gatewayError
+  }
+}
+
+/**
+ * 鎵ц Gateway 璇锋眰锛堝惈闄愭祦妫€鏌?+ Fallback 閲嶈瘯锛? *
+ * @param request Gateway 璇锋眰鍙傛暟
+ * @param onEvent 娴佸紡浜嬩欢鍥炶皟
+ * @returns Gateway 鎵ц缁撴灉
+ */
+export async function executeGatewayRequest(
+  request: AiGatewayRequest,
+  onEvent: AiGatewayEventHandler,
+): Promise<AiGatewayResult> {
+  const requestId = request.requestId ?? generateRequestId()
+
+  request = applyRequestOverrides(request, requestId)
+
+  const tokenEstimate = preflightGatewayRequest(request, requestId)
+
+  const context = buildContext(request, requestId)
+  context.tokenEstimate = tokenEstimate
+
+  const limitResult = consumeQuota(request.provider.id, request.rateLimit)
+  if (!limitResult.allowed) {
+    log.warn('gateway_rate_limited', { requestId, providerId: request.provider.id })
+    throw new AiGatewayError(
+      'rate_limit',
+      `Rate limit exceeded for provider ${request.provider.name}: ${limitResult.currentCount}/${limitResult.remaining + limitResult.currentCount} requests`,
+      true,
+    )
+  }
+
+  try {
+    return await executeSingleRequest(request, onEvent, context)
+  } catch (err) {
+    const gatewayError = err instanceof AiGatewayError ? err : classifyError(err)
+
+    // 不可重试的错误直接抛出
+    if (!gatewayError.retryable || request.signal?.aborted) {
+      throw gatewayError
+    }
+
+    // 鍙栨秷閿欒鐩存帴鎶涘嚭
+    if (gatewayError.type === 'cancelled') {
+      throw gatewayError
+    }
+
+    // 灏濊瘯 Fallback chain
+    const chain = request.fallbackChain ?? []
+    if (chain.length === 0) {
+      throw gatewayError
+    }
+
+    let lastError = gatewayError
+    for (let i = 0; i < chain.length; i++) {
+      const candidate = nextFallbackCandidate(chain, i)
+      if (!candidate) break
+
+      log.info('gateway_fallback_attempt', {
+        requestId,
+        fallbackIndex: i,
+        reason: candidate.reason,
+        provider: candidate.provider.id,
+        model: candidate.model.id,
+      })
+
+      const fallbackRequest: AiGatewayRequest = {
+        ...request,
+        provider: candidate.provider,
+        model: candidate.model,
+        apiKey: request.apiKeysByProvider?.[candidate.provider.id] ?? request.apiKey,
+      }
+      const fallbackContext = buildContext(fallbackRequest, requestId)
+      fallbackContext.retryIndex = i + 1
+      fallbackContext.lastError = lastError
+      fallbackContext.primaryProviderId = request.provider.id
+      fallbackContext.primaryModel = request.model.id
+      fallbackContext.fallbackReason = candidate.reason
+      fallbackContext.fallbackChainId = `${request.provider.id}->${candidate.provider.id}`
+
+      try {
+        fallbackContext.tokenEstimate = preflightGatewayRequest(fallbackRequest, requestId)
+
+        const fbLimit = consumeQuota(candidate.provider.id, request.rateLimit)
+        if (!fbLimit.allowed) {
+          log.warn('gateway_fallback_rate_limited', {
+            requestId,
+            fallbackProvider: candidate.provider.id,
+          })
+          continue
+        }
+
+        const result = await executeSingleRequest(fallbackRequest, onEvent, fallbackContext)
+        log.info('gateway_fallback_success', {
+          requestId,
+          fallbackIndex: i,
+          provider: candidate.provider.id,
+        })
+        return result
+      } catch (fbErr) {
+        lastError = fbErr instanceof AiGatewayError ? fbErr : classifyError(fbErr)
+        log.warn('gateway_fallback_failed', {
+          requestId,
+          fallbackIndex: i,
+          errorType: lastError.type,
+          errorMessage: lastError.message,
+        })
+      }
+    }
+
+    // 所有 fallback 都失败，抛出最后一个错误
+    log.error('gateway_all_fallbacks_failed', { requestId, lastErrorType: lastError.type })
+    throw lastError
+  }
+}
+
+/**
+ * 鍙栨秷鎸囧畾浼氳瘽鐨勬祦寮忚姹? */
+export async function abortGatewayRequest(sessionId: string): Promise<boolean> {
+  return aiAbortStream(sessionId)
+}

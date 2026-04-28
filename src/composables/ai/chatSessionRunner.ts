@@ -2,6 +2,8 @@ import { aiAbortStream, type ChatMessage } from '@/api/ai'
 import type { useAiChatStore } from '@/stores/ai-chat'
 import type { useAiMemoryStore } from '@/stores/ai-memory'
 import type { AiMessage, AiStreamEvent, FileAttachment, ModelConfig, ProviderConfig, ToolCallInfo, ToolResultInfo } from '@/types/ai'
+import { buildFallbackChain, type FallbackCandidate } from '@/ai-gateway/router'
+import { collectFallbackApiKeys } from '@/ai-gateway/fallbackKeys'
 import { ensureErrorString, readStructuredRetryable } from '@/types/error'
 import type { Logger } from '@/utils/logger'
 import { finalizeSend } from './chatSendFinalize'
@@ -76,6 +78,8 @@ export interface AiChatSessionRunnerParams {
   onRecovery?: () => void
   signal?: AbortSignal
   summaryMode?: 'brief' | 'normal'
+  fallbackChain?: FallbackCandidate[]
+  apiKeysByProvider?: Record<string, string | undefined>
 }
 
 const RETRYABLE_ERROR_PATTERNS = [
@@ -136,6 +140,8 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
   }
 
   let prepared: Awaited<ReturnType<typeof prepareSendContext>> | null = null
+  let gatewayFallbackChain: FallbackCandidate[] | undefined
+  let gatewayApiKeysByProvider: Record<string, string | undefined> | undefined
 
   try {
     params.error.value = null
@@ -157,6 +163,12 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
     params.onPrepareComplete?.()
 
     params.isStreaming.value = true
+    const availableProviders = Array.isArray(params.aiStore.providers) && params.aiStore.providers.length > 0
+      ? params.aiStore.providers
+      : [params.provider]
+    gatewayFallbackChain = params.fallbackChain ?? buildFallbackChain(availableProviders, params.provider, params.model)
+    gatewayApiKeysByProvider = params.apiKeysByProvider
+      ?? await collectFallbackApiKeys(params.provider.id, gatewayFallbackChain)
 
     const streamWithToolLoop = (
       streamSessionId: string,
@@ -172,6 +184,8 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
       provider,
       model,
       apiKey,
+      apiKeysByProvider: gatewayApiKeysByProvider,
+      fallbackChain: gatewayFallbackChain,
       systemPrompt,
       enableTools,
       log: params.log,
@@ -186,6 +200,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
       updateStreamingMessage: params.updateStreamingMessage,
       onStreamEvent,
       onRequestStart: params.onRequestStart,
+      signal: params.signal,
       executeToolCalls: (toolCalls, toolSessionId) =>
         params.executeToolCalls(toolCalls, toolSessionId, params.signal),
       parseAndWriteJournalSections: params.parseAndWriteJournalSections,
@@ -240,6 +255,8 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
           provider,
           model,
           apiKey,
+          apiKeysByProvider: gatewayApiKeysByProvider,
+          fallbackChain: gatewayFallbackChain,
           systemPrompt,
           enableTools,
           log: params.log,
@@ -254,6 +271,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
           updateStreamingMessage: params.updateStreamingMessage,
           onStreamEvent,
           onRequestStart: params.onRequestStart,
+          signal: params.signal,
           executeToolCalls: (toolCalls, toolSessionId) =>
             params.executeToolCalls(toolCalls, toolSessionId, params.signal),
           parseAndWriteJournalSections: params.parseAndWriteJournalSections,

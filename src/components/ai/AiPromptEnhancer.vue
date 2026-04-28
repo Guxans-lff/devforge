@@ -3,6 +3,9 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ProviderConfig, ModelConfig } from '@/types/ai'
 import { getCredential } from '@/api/connection'
+import { useAiChatStore } from '@/stores/ai-chat'
+import { buildFallbackChain } from '@/ai-gateway/router'
+import { collectFallbackApiKeys } from '@/ai-gateway/fallbackKeys'
 import { iteratePrompt, optimizePrompt } from '@/composables/ai/promptOptimizer'
 import type { PromptOptimizerTemplate } from '@/composables/ai/promptOptimizerTemplates'
 import { diffWords } from 'diff'
@@ -28,6 +31,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const aiStore = useAiChatStore()
 const templateOptions = computed<Array<{ value: Exclude<PromptOptimizerTemplate['id'], 'iterate-optimize'>; label: string }>>(() => [
   { value: 'general-optimize', label: t('ai.promptEnhancer.templateGeneral') },
   { value: 'code-optimize', label: t('ai.promptEnhancer.templateCode') },
@@ -83,6 +87,10 @@ async function runEnhance() {
       error.value = t('ai.promptEnhancer.apiKeyMissing')
       return
     }
+    const providers = aiStore.providers.length > 0 ? aiStore.providers : [props.provider]
+    const fallbackChain = buildFallbackChain(providers, props.provider, props.model)
+    const apiKeysByProvider = await collectFallbackApiKeys(props.provider.id, fallbackChain)
+    if (requestId !== activeRequestId || controller.signal.aborted) return
 
     const result = await optimizePrompt(
       {
@@ -91,6 +99,10 @@ async function runEnhance() {
         model: props.model.id,
         apiKey,
         endpoint: props.provider.endpoint ?? '',
+        provider: props.provider,
+        modelConfig: props.model,
+        apiKeysByProvider,
+        fallbackChain,
         templateId: selectedTemplateId.value,
         sessionId: `prompt-enhance-${Date.now()}-${requestId}`,
         signal: controller.signal,
@@ -136,6 +148,10 @@ async function runIterate() {
       error.value = t('ai.promptEnhancer.apiKeyMissing')
       return
     }
+    const providers = aiStore.providers.length > 0 ? aiStore.providers : [props.provider]
+    const fallbackChain = buildFallbackChain(providers, props.provider, props.model)
+    const apiKeysByProvider = await collectFallbackApiKeys(props.provider.id, fallbackChain)
+    if (requestId !== activeRequestId || controller.signal.aborted) return
 
     const result = await iteratePrompt(
       {
@@ -146,6 +162,10 @@ async function runIterate() {
         model: props.model.id,
         apiKey,
         endpoint: props.provider.endpoint ?? '',
+        provider: props.provider,
+        modelConfig: props.model,
+        apiKeysByProvider,
+        fallbackChain,
         sessionId: `prompt-iterate-${Date.now()}-${requestId}`,
         signal: controller.signal,
       },

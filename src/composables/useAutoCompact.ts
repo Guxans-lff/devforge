@@ -8,8 +8,11 @@
 
 import { ref } from 'vue'
 import { useAiMemoryStore } from '@/stores/ai-memory'
+import { useAiChatStore } from '@/stores/ai-chat'
 import { aiSaveCompaction } from '@/api/ai-memory'
-import { aiChatStream } from '@/api/ai'
+import { executeGatewayRequest } from '@/ai-gateway/AiGateway'
+import { collectFallbackApiKeys } from '@/ai-gateway/fallbackKeys'
+import { buildFallbackChain } from '@/ai-gateway/router'
 import { createLogger } from '@/utils/logger'
 import type { AiMessage, AiMemory, AiStreamEvent, ProviderConfig, ModelConfig, CompactRule, AiCompaction } from '@/types/ai'
 
@@ -59,6 +62,7 @@ export function useAutoCompact() {
   const isCompacting = ref(false)
   const consecutiveFailures = ref(0)
   const memoryStore = useAiMemoryStore()
+  const aiStore = useAiChatStore()
 
   /**
    * 检测并执行自动压缩
@@ -146,16 +150,23 @@ export function useAutoCompact() {
 
     // 调用 AI 生成摘要（非流式收集完整结果）
     let summary = ''
-    await aiChatStream(
+    const fallbackChain = buildFallbackChain(aiStore.providers, provider, model)
+    const apiKeysByProvider = await collectFallbackApiKeys(provider.id, fallbackChain)
+
+    await executeGatewayRequest(
       {
         sessionId: `compact-${sessionId}`,
         messages: [{ role: 'user', content: prompt }],
-        providerType: provider.providerType,
-        model: model.id,
+        provider,
+        model,
         apiKey,
-        endpoint: provider.endpoint,
+        apiKeysByProvider,
+        fallbackChain,
         maxTokens: Math.min(model.capabilities.maxOutput, 4096),
         systemPrompt: '你是一个专业的对话压缩助手，严格按照规则压缩对话内容。',
+        enableTools: false,
+        source: 'compact',
+        kind: 'compact',
       },
       (event: AiStreamEvent) => {
         if (event.type === 'TextDelta') summary += event.delta

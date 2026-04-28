@@ -1,5 +1,7 @@
-import { aiAbortStream, aiChatStream } from '@/api/ai'
-import type { AiStreamEvent, ProviderType } from '@/types/ai'
+import { aiAbortStream } from '@/api/ai'
+import { executeGatewayRequest } from '@/ai-gateway/AiGateway'
+import type { FallbackCandidate } from '@/ai-gateway/router'
+import type { AiStreamEvent, ModelConfig, ProviderConfig, ProviderType } from '@/types/ai'
 import { getPromptOptimizerTemplate, renderTemplate, type PromptOptimizerTemplate } from '@/composables/ai/promptOptimizerTemplates'
 
 export interface OptimizePromptInput {
@@ -9,6 +11,10 @@ export interface OptimizePromptInput {
   model: string
   apiKey: string
   endpoint?: string
+  provider?: ProviderConfig
+  modelConfig?: ModelConfig
+  apiKeysByProvider?: Record<string, string | undefined>
+  fallbackChain?: FallbackCandidate[]
   sessionId?: string
   signal?: AbortSignal
 }
@@ -21,6 +27,10 @@ export interface IteratePromptInput {
   model: string
   apiKey: string
   endpoint?: string
+  provider?: ProviderConfig
+  modelConfig?: ModelConfig
+  apiKeysByProvider?: Record<string, string | undefined>
+  fallbackChain?: FallbackCandidate[]
   sessionId?: string
   signal?: AbortSignal
 }
@@ -54,6 +64,10 @@ export async function optimizePrompt(
     model: input.model,
     apiKey: input.apiKey,
     endpoint: input.endpoint,
+    provider: input.provider,
+    modelConfig: input.modelConfig,
+    apiKeysByProvider: input.apiKeysByProvider,
+    fallbackChain: input.fallbackChain,
     systemPrompt,
     userMessage,
     signal: input.signal,
@@ -80,6 +94,10 @@ export async function iteratePrompt(
     model: input.model,
     apiKey: input.apiKey,
     endpoint: input.endpoint,
+    provider: input.provider,
+    modelConfig: input.modelConfig,
+    apiKeysByProvider: input.apiKeysByProvider,
+    fallbackChain: input.fallbackChain,
     systemPrompt,
     userMessage,
     signal: input.signal,
@@ -93,6 +111,10 @@ async function runPromptOptimization(
     model: string
     apiKey: string
     endpoint?: string
+    provider?: ProviderConfig
+    modelConfig?: ModelConfig
+    apiKeysByProvider?: Record<string, string | undefined>
+    fallbackChain?: FallbackCandidate[]
     systemPrompt: string
     userMessage: string
     signal?: AbortSignal
@@ -114,26 +136,57 @@ async function runPromptOptimization(
   input.signal?.addEventListener('abort', handleAbort, { once: true })
 
   try {
-    await aiChatStream(
-      {
-        sessionId: input.sessionId,
-        messages: [{ role: 'user', content: input.userMessage }],
-        providerType: input.providerType,
-        model: input.model,
-        apiKey: input.apiKey,
-        endpoint: input.endpoint ?? '',
-        systemPrompt: input.systemPrompt,
-        enableTools: false,
-      },
-      (event) => {
-        options.onEvent?.(event)
-        if (aborted || input.signal?.aborted) return
-        if (event.type === 'TextDelta') {
-          text += event.delta
-          options.onDelta?.(event.delta)
-        }
-      },
-    )
+    const onGatewayEvent = (event: AiStreamEvent) => {
+      options.onEvent?.(event)
+      if (aborted || input.signal?.aborted) return
+      if (event.type === 'TextDelta') {
+        text += event.delta
+        options.onDelta?.(event.delta)
+      }
+    }
+
+    if (input.provider && input.modelConfig) {
+      await executeGatewayRequest(
+        {
+          sessionId: input.sessionId,
+          messages: [{ role: 'user', content: input.userMessage }],
+          provider: input.provider,
+          model: input.modelConfig,
+          apiKey: input.apiKey,
+          apiKeysByProvider: input.apiKeysByProvider,
+          fallbackChain: input.fallbackChain,
+          systemPrompt: input.systemPrompt,
+          enableTools: false,
+          source: 'prompt_optimize',
+          kind: 'prompt_optimize',
+          signal: input.signal,
+        },
+        onGatewayEvent,
+      )
+    } else {
+      const provider = buildPromptOptimizerProvider(input)
+      const model = buildPromptOptimizerModel(input.model)
+      const fallbackChain: FallbackCandidate[] = []
+      const apiKeysByProvider: Record<string, string | undefined> | undefined = undefined
+
+      await executeGatewayRequest(
+        {
+          sessionId: input.sessionId,
+          messages: [{ role: 'user', content: input.userMessage }],
+          provider,
+          model,
+          apiKey: input.apiKey,
+          apiKeysByProvider,
+          fallbackChain,
+          systemPrompt: input.systemPrompt,
+          enableTools: false,
+          source: 'prompt_optimize',
+          kind: 'prompt_optimize',
+          signal: input.signal,
+        },
+        onGatewayEvent,
+      )
+    }
   } finally {
     input.signal?.removeEventListener('abort', handleAbort)
   }
@@ -155,4 +208,37 @@ async function runPromptOptimization(
 
 function createAbortError(): Error {
   return new DOMException('The operation was aborted.', 'AbortError')
+}
+
+function buildPromptOptimizerProvider(input: {
+  providerType: ProviderType
+  endpoint?: string
+}): ProviderConfig {
+  return {
+    id: `prompt-optimizer-${input.providerType}`,
+    name: 'Prompt Optimizer',
+    providerType: input.providerType,
+    endpoint: input.endpoint ?? 'https://prompt-optimizer.local',
+    models: [buildPromptOptimizerModel('prompt-optimizer')],
+    isDefault: false,
+    createdAt: Date.now(),
+    security: {
+      allowlist: ['prompt-optimizer.local'],
+    },
+  }
+}
+
+function buildPromptOptimizerModel(modelId: string): ModelConfig {
+  return {
+    id: modelId,
+    name: modelId,
+    capabilities: {
+      streaming: true,
+      vision: false,
+      thinking: false,
+      toolUse: false,
+      maxContext: 128_000,
+      maxOutput: 4096,
+    },
+  }
 }

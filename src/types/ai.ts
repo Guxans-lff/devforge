@@ -80,6 +80,22 @@ export interface ProviderConfig {
   models: ModelConfig[]
   isDefault: boolean
   createdAt: number
+  health?: AiProviderHealth
+  security?: {
+    allowlist?: string[]
+    allowLocalhost?: boolean
+    allowPrivateIP?: boolean
+  }
+}
+
+export interface AiProviderHealth {
+  status: 'unknown' | 'healthy' | 'degraded' | 'unhealthy'
+  checkedAt: number | null
+  latencyMs: number | null
+  supportsStream: boolean | null
+  supportsTools: boolean | null
+  supportsUsage: boolean | null
+  lastError: string | null
 }
 
 // ─────────────────────────────────── 流式事件 ───────────────────────────────────
@@ -105,6 +121,8 @@ export interface ChatResult {
   finishReason: string
 }
 
+export type AiSessionStatus = 'idle' | 'streaming' | 'waiting_tool' | 'background_job' | 'error'
+
 // ─────────────────────────────────── 会话 ───────────────────────────────────
 
 /** AI 会话 */
@@ -121,6 +139,9 @@ export interface AiSession {
   createdAt: number
   updatedAt: number
   workDir?: string
+  goal?: string
+  status?: AiSessionStatus
+  lastCompactSummary?: string
 }
 
 /** AI 消息（持久化记录） */
@@ -136,6 +157,9 @@ export interface AiMessageRecord {
   success?: boolean
   toolName?: string
   createdAt: number
+  type?: 'divider' | 'compact-boundary' | 'rewind-boundary'
+  compactMetadata?: AiMessage['compactMetadata']
+  rewindMetadata?: AiMessage['rewindMetadata']
 }
 
 export interface AiSessionDetail {
@@ -166,7 +190,7 @@ export interface AiMessage {
   /** 消息持久化状态（仅 assistant/user 消息关心） */
   saveStatus?: 'saving' | 'saved' | 'error'
   /** 分割线类型（换模型/手动标记），此类消息不参与 AI 上下文 */
-  type?: 'divider'
+  type?: 'divider' | 'compact-boundary' | 'rewind-boundary'
   /** 分割线显示文本 */
   dividerText?: string
   /** 分割线元数据（历史恢复窗口等） */
@@ -175,6 +199,20 @@ export interface AiMessage {
     loadedRecords: number
     totalRecords: number
     remainingRecords: number
+  }
+  compactMetadata?: {
+    trigger: 'manual' | 'auto' | 'recovery'
+    preTokens: number
+    summarizedMessages: number
+    createdAt: number
+    summaryMessageId: string
+    source: 'ai' | 'local'
+  }
+  rewindMetadata?: {
+    targetMessageId: string
+    targetMessageRole: 'user' | 'assistant' | 'system' | 'error'
+    hiddenMessages: number
+    createdAt: number
   }
   /** 系统提示横幅（如工具调用超限、流被中断等），独立于 content 渲染 */
   notice?: {
@@ -261,7 +299,7 @@ export interface ToolExecutionMetadata {
   hardTimeout: boolean
   timedOut?: boolean
   cancelled?: boolean
-  errorKind?: 'timeout' | 'cancelled' | 'tool_error' | 'exception' | 'circuit_open' | 'user_rejected'
+  errorKind?: 'timeout' | 'cancelled' | 'tool_error' | 'exception' | 'circuit_open' | 'user_rejected' | 'permission_denied'
 }
 
 export interface ToolResultMetadata {
@@ -288,6 +326,23 @@ export interface ToolDefinition {
     description: string
     parameters: Record<string, unknown>
   }
+}
+
+export interface McpServerRuntimeStatus {
+  name: string
+  transport: 'stdio' | 'sse' | 'http' | 'unknown' | string
+  command?: string
+  url?: string
+  disabled: boolean
+  status: 'configured' | 'disabled' | 'unknown' | 'connected' | 'error' | string
+  message?: string
+}
+
+export interface McpStatusResult {
+  configPath?: string | null
+  configExists: boolean
+  parseError?: string | null
+  servers: McpServerRuntimeStatus[]
 }
 
 /** 工具执行结果（后端返回） */
@@ -357,7 +412,20 @@ export interface WorkspaceConfig {
   dispatcherAutoRetryCount?: number
   /** Dispatcher 默认执行形态，默认 headless */
   dispatcherDefaultMode?: 'headless' | 'tab'
+  features?: Record<string, boolean>
+  skills?: WorkspaceSkillConfig[]
 }
+
+export interface WorkspaceSkillConfig {
+  id: string
+  name: string
+  description?: string
+  path?: string
+  permissions?: WorkspaceSkillPermission[]
+  enabled?: boolean
+}
+
+export type WorkspaceSkillPermission = 'read' | 'write' | 'execute' | 'network' | 'mcp'
 
 
 /** 旧版 AI 配置（保留兼容） */
@@ -416,4 +484,19 @@ export interface CompactRule {
   p2: string
   /** 压缩比目标（如 0.2 表示压缩到 20%） */
   ratio: number
+}
+
+export type AiWorkflowStepType = 'inspect' | 'edit' | 'test' | 'summarize' | 'send'
+
+export interface AiWorkflowStep {
+  type: AiWorkflowStepType
+  prompt?: string
+  command?: string
+}
+
+export interface AiWorkflowScript {
+  id: string
+  name: string
+  description: string
+  steps: AiWorkflowStep[]
 }

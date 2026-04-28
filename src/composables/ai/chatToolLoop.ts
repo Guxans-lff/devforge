@@ -1,4 +1,6 @@
-import { aiChatStream, aiSaveMessage, type ChatMessage } from '@/api/ai'
+import { aiSaveMessage, type ChatMessage } from '@/api/ai'
+import { executeGatewayRequest } from '@/ai-gateway/AiGateway'
+import type { FallbackCandidate } from '@/ai-gateway/router'
 import type { AiMessage, AiMessageRecord, AiStreamEvent, ModelConfig, ProviderConfig, ToolCallInfo, ToolResultInfo } from '@/types/ai'
 import type { Logger } from '@/utils/logger'
 import { genId, hashArgs, resolveRequestMaxTokens, thinkingEffortToBudget } from './chatHelpers'
@@ -10,6 +12,8 @@ export interface StreamWithToolLoopParams {
   provider: ProviderConfig
   model: ModelConfig
   apiKey: string
+  apiKeysByProvider?: Record<string, string | undefined>
+  fallbackChain?: FallbackCandidate[]
   systemPrompt?: string
   enableTools: boolean
   log: Logger
@@ -24,6 +28,7 @@ export interface StreamWithToolLoopParams {
   updateStreamingMessage: (updater: (msg: AiMessage) => AiMessage) => void
   onStreamEvent: (event: AiStreamEvent) => void
   onRequestStart?: () => void
+  signal?: AbortSignal
   executeToolCalls: (toolCalls: ToolCallInfo[], sessionId: string) => Promise<ToolResultInfo[]>
   parseAndWriteJournalSections: (text: string, workDirPath: string) => void
   parseSpawnedTasks: (text: string) => void
@@ -35,6 +40,8 @@ export async function streamWithToolLoop({
   provider,
   model,
   apiKey,
+  apiKeysByProvider,
+  fallbackChain,
   systemPrompt,
   enableTools,
   log,
@@ -49,6 +56,7 @@ export async function streamWithToolLoop({
   updateStreamingMessage,
   onStreamEvent,
   onRequestStart,
+  signal,
   executeToolCalls,
   parseAndWriteJournalSections,
   parseSpawnedTasks,
@@ -82,17 +90,21 @@ export async function streamWithToolLoop({
 
     resetWatchdog()
     onRequestStart?.()
-    await aiChatStream(
+    await executeGatewayRequest(
       {
         sessionId: sid,
         messages: chatMessages,
-        providerType: provider.providerType,
-        model: model.id,
+        provider,
+        model,
         apiKey,
-        endpoint: provider.endpoint,
+        apiKeysByProvider,
+        fallbackChain,
         maxTokens: resolveRequestMaxTokens(model, { enableTools }),
         systemPrompt,
         enableTools,
+        source: 'chat',
+        kind: 'chat_completions',
+        signal,
         thinkingBudget: model.capabilities.thinking && !disableAnthropicThinkingForToolLoop
           ? thinkingEffortToBudget(model.thinkingEffort)
           : undefined,
