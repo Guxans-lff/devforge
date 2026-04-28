@@ -47,7 +47,12 @@ function emit(level: LogLevel, tag: string, event: string, fields?: Record<strin
   if (LEVEL_ORDER[level] < currentMinLevel()) return
   const [prefix, payload] = format(tag, event, fields)
   const args: unknown[] = payload ? [prefix, payload] : [prefix]
-  if (err !== undefined) args.push(err)
+  if (err !== undefined) {
+    args.push(err)
+    if (err instanceof Error && err.stack) {
+      args.push(err.stack)
+    }
+  }
   switch (level) {
     case 'debug': console.debug(...args); break
     case 'info':  console.info(...args); break

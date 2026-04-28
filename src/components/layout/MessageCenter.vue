@@ -82,6 +82,7 @@ const groupedMessages = computed(() => {
   <!-- Backdrop (click to close) -->
   <div
     v-if="messageCenter.isOpen"
+    data-devforge-blocking-layer="true"
     class="fixed inset-0 z-[99]"
     @click="messageCenter.togglePanel()"
   />

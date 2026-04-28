@@ -27,6 +27,7 @@ impl ScreenshotEngine {
     }
 
     /// 获取截图存储目录
+    #[allow(dead_code)]
     pub fn screenshots_dir(&self) -> &PathBuf {
         &self.screenshots_dir
     }

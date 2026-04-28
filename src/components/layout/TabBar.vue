@@ -305,6 +305,7 @@ onBeforeUnmount(() => {
   <Teleport to="body">
     <div
       v-if="contextMenu.visible"
+      data-devforge-blocking-layer="true"
       class="fixed inset-0 z-50"
       @click="closeContextMenu"
       @contextmenu.prevent="closeContextMenu"

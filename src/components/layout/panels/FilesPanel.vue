@@ -543,6 +543,7 @@ watch(
         <div
           v-for="item in virtualItems"
           :key="String(item.key)"
+          class="py-0.5"
           :style="{
             position: 'absolute',
             top: 0,

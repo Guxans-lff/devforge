@@ -101,6 +101,7 @@ impl FileWatcher {
     }
 
     /// 停止所有监听
+    #[allow(dead_code)]
     pub async fn unwatch_all(&self) {
         self.watchers.write().await.clear();
     }

@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 coverage
+.superpowers/brainstorm/
+*.events
+ts-errors.txt
 src-tauri/target/
 
 # Editor directories and files
