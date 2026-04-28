@@ -1,4 +1,4 @@
-import { detectDangerousStatements, isReadOnlyStatement } from '../dangerousSqlDetector'
+import { detectDangerousStatements, isMutationStatement, isReadOnlyStatement } from '../dangerousSqlDetector'
 
 // ────────────────────────────────────────────────────────────
 // detectDangerousStatements 测试套件
@@ -333,6 +333,32 @@ describe('detectDangerousStatements', () => {
     it('CREATE TABLE 不应有结果', () => {
       expect(detectDangerousStatements('CREATE TABLE new_table (id INT);')).toEqual([])
     })
+  })
+})
+
+describe('dangerousSqlDetector extended rules', () => {
+  it('detects privilege and rename operations', () => {
+    const types = detectDangerousStatements(`
+      GRANT SELECT ON app.* TO 'u'@'%';
+      REVOKE SELECT ON app.* FROM 'u'@'%';
+      RENAME TABLE old_name TO new_name;
+    `).map((item) => item.type)
+
+    expect(types).toContain('GRANT')
+    expect(types).toContain('REVOKE')
+    expect(types).toContain('RENAME_TABLE')
+  })
+
+  it('detects create table as select', () => {
+    const result = detectDangerousStatements('CREATE TABLE backup_users AS SELECT * FROM users;')
+    expect(result.map((item) => item.type)).toContain('CREATE_TABLE_AS')
+  })
+
+  it('classifies mutation statements', () => {
+    expect(isMutationStatement('SELECT * FROM users;')).toBe(false)
+    expect(isMutationStatement('INSERT INTO users(id) VALUES (1);')).toBe(true)
+    expect(isMutationStatement('UPDATE users SET name = "a" WHERE id = 1;')).toBe(true)
+    expect(isMutationStatement('DROP TABLE users;')).toBe(true)
   })
 })
 

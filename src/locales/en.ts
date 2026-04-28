@@ -1316,6 +1316,10 @@ export default {
     dangerUpdateNoWhere: 'Update All Rows (UPDATE without WHERE)',
     dangerAlterDropColumn: 'Drop Column (ALTER DROP COLUMN)',
     dangerDropIndex: 'Drop Index (DROP INDEX)',
+    dangerGrant: 'Privilege Change (GRANT)',
+    dangerRevoke: 'Privilege Revoke (REVOKE)',
+    dangerCreateTableAs: 'Create Table As Select (CREATE TABLE AS SELECT)',
+    dangerRenameTable: 'Rename Table (RENAME TABLE)',
   },
   search: {
     tables: 'Tables/Views',

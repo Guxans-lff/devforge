@@ -35,45 +35,69 @@ interface DetectionRule {
 const DETECTION_RULES: DetectionRule[] = [
   {
     type: 'DROP_TABLE',
-    pattern: /\bDROP\s+TABLE\b/gi,
+    pattern: /\bDROP\s+TABLE\b/i,
     severity: 'critical',
     descriptionKey: 'environment.dangerDropTable',
   },
   {
     type: 'DROP_DATABASE',
-    pattern: /\bDROP\s+DATABASE\b/gi,
+    pattern: /\bDROP\s+DATABASE\b/i,
     severity: 'critical',
     descriptionKey: 'environment.dangerDropDatabase',
   },
   {
     type: 'TRUNCATE',
-    pattern: /\bTRUNCATE\s+(?:TABLE\s+)?\w/gi,
+    pattern: /\bTRUNCATE\s+(?:TABLE\s+)?\w/i,
     severity: 'critical',
     descriptionKey: 'environment.dangerTruncate',
   },
   {
     type: 'DELETE_NO_WHERE',
-    pattern: /\bDELETE\s+FROM\s+\S+\s*(?:;|$)/gi,
+    pattern: /\bDELETE\s+FROM\s+\S+\s*(?:;|$)/i,
     severity: 'critical',
     descriptionKey: 'environment.dangerDeleteNoWhere',
   },
   {
     type: 'UPDATE_NO_WHERE',
-    pattern: /\bUPDATE\s+\S+\s+SET\s+[^;]*(?:;|$)/gi,
+    pattern: /\bUPDATE\s+\S+\s+SET\s+[^;]*(?:;|$)/i,
     severity: 'warning',
     descriptionKey: 'environment.dangerUpdateNoWhere',
   },
   {
     type: 'ALTER_DROP_COLUMN',
-    pattern: /\bALTER\s+TABLE\s+\S+\s+DROP\s+(?:COLUMN\s+)?\w/gi,
+    pattern: /\bALTER\s+TABLE\s+\S+\s+DROP\s+(?:COLUMN\s+)?\w/i,
     severity: 'warning',
     descriptionKey: 'environment.dangerAlterDropColumn',
   },
   {
     type: 'DROP_INDEX',
-    pattern: /\bDROP\s+INDEX\b/gi,
+    pattern: /\bDROP\s+INDEX\b/i,
     severity: 'warning',
     descriptionKey: 'environment.dangerDropIndex',
+  },
+  {
+    type: 'GRANT',
+    pattern: /\bGRANT\s+/i,
+    severity: 'warning',
+    descriptionKey: 'environment.dangerGrant',
+  },
+  {
+    type: 'REVOKE',
+    pattern: /\bREVOKE\s+/i,
+    severity: 'warning',
+    descriptionKey: 'environment.dangerRevoke',
+  },
+  {
+    type: 'CREATE_TABLE_AS',
+    pattern: /\bCREATE\s+TABLE\s+\S+\s+AS\s+SELECT\b/i,
+    severity: 'warning',
+    descriptionKey: 'environment.dangerCreateTableAs',
+  },
+  {
+    type: 'RENAME_TABLE',
+    pattern: /\bRENAME\s+TABLE\b/i,
+    severity: 'warning',
+    descriptionKey: 'environment.dangerRenameTable',
   },
 ]
 
@@ -82,7 +106,7 @@ const DETECTION_RULES: DetectionRule[] = [
  * 需要对清理后的 SQL 做更精确的判断
  */
 function isDeleteWithoutWhere(cleanedSql: string): boolean {
-  // 找到所有 DELETE FROM ... 语句并逐个检查
+  // 找到所有 DELETE FROM ... 语句并逐个检查（使用局部正则，避免 lastIndex 污染）
   const deletePattern = /\bDELETE\s+FROM\s+\S+\s*(.*?)(?:;|$)/gi
   let match: RegExpExecArray | null
   while ((match = deletePattern.exec(cleanedSql)) !== null) {
@@ -145,17 +169,15 @@ export function detectDangerousStatements(sql: string): DangerousStatement[] {
       continue
     }
 
-    // 其他规则直接正则匹配
-    if (rule.pattern.test(cleaned)) {
-      // 重置 lastIndex（因为用了 global flag）
-      rule.pattern.lastIndex = 0
+    // 其他规则直接正则匹配（使用副本避免 lastIndex 污染）
+    const patternCopy = new RegExp(rule.pattern.source, rule.pattern.flags)
+    if (patternCopy.test(cleaned)) {
       results.push({
         type: rule.type,
         description: rule.descriptionKey,
         severity: rule.severity,
-        sql: extractMatchContext(sql, rule.pattern),
+        sql: extractMatchContext(sql, new RegExp(rule.pattern.source, rule.pattern.flags)),
       })
-      rule.pattern.lastIndex = 0
     }
   }
 
@@ -170,7 +192,6 @@ function extractMatchContext(sql: string, pattern: RegExp): string {
   if (!match) return sql.slice(0, 60)
   const start = Math.max(0, match.index)
   const end = Math.min(sql.length, match.index + match[0].length + 30)
-  pattern.lastIndex = 0
   return sql.slice(start, end).trim()
 }
 
@@ -183,4 +204,16 @@ export function isReadOnlyStatement(sql: string): boolean {
   const statements = cleaned.split(';').filter((s) => s.trim())
   const readOnlyPattern = /^\s*(SELECT|SHOW|DESCRIBE|DESC|EXPLAIN|USE|SET)\b/i
   return statements.every((stmt) => readOnlyPattern.test(stmt.trim()))
+}
+
+/**
+ * 检查 SQL 是否包含数据库变更操作（写操作）
+ */
+export function isMutationStatement(sql: string): boolean {
+  const dangerous = detectDangerousStatements(sql)
+  if (dangerous.length > 0) return true
+  const cleaned = stripCommentsAndStrings(sql).trim()
+  const statements = cleaned.split(';').filter((s) => s.trim())
+  const mutationPattern = /^\s*(INSERT|UPDATE|DELETE|REPLACE|MERGE|CALL|EXECUTE)\b/i
+  return statements.some((stmt) => mutationPattern.test(stmt.trim()))
 }

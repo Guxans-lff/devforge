@@ -1424,6 +1424,10 @@ export default {
     dangerUpdateNoWhere: '更新全表数据 (UPDATE 无 WHERE)',
     dangerAlterDropColumn: '删除列 (ALTER DROP COLUMN)',
     dangerDropIndex: '删除索引 (DROP INDEX)',
+    dangerGrant: '授权变更 (GRANT)',
+    dangerRevoke: '权限回收 (REVOKE)',
+    dangerCreateTableAs: '基于查询创建表 (CREATE TABLE AS SELECT)',
+    dangerRenameTable: '重命名表 (RENAME TABLE)',
   },
   search: {
     tables: '表/视图',
