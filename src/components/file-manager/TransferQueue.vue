@@ -5,6 +5,7 @@ import { useTransferStore, type TransferTask } from '@/stores/transfer'
 import { pauseTransfer, resumeTransfer, cancelTransfer, startUploadChunked, startDownloadChunked } from '@/api/sftp'
 import { useToast } from '@/composables/useToast'
 import { useNotification } from '@/composables/useNotification'
+import { formatSftpError } from '@/composables/sftp/sftpErrors'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import {
@@ -76,7 +77,7 @@ async function handlePause(id: string) {
       transferStore.tasks = new Map(transferStore.tasks)
     }
   } catch (error) {
-    toast.error(t('transfer.pauseFailed'), String(error))
+    toast.error(t('transfer.pauseFailed'), formatSftpError(error))
   }
 }
 
@@ -97,7 +98,7 @@ async function handleResume(id: string) {
       transferStore.tasks.set(id, { ...current, status: 'paused' })
       transferStore.tasks = new Map(transferStore.tasks)
     }
-    toast.error(t('transfer.resumeFailed'), String(error))
+    toast.error(t('transfer.resumeFailed'), formatSftpError(error))
   }
 }
 
@@ -122,12 +123,36 @@ async function handleCancel(id: string) {
     dismissTaskNotification(id)
     transferStore.removeTask(id)
   } catch (error) {
-    toast.error(t('transfer.cancelFailed'), String(error))
+    toast.error(t('transfer.cancelFailed'), formatSftpError(error))
   }
 }
 
 function handleClearCompleted() {
   transferStore.clearCompleted()
+}
+
+async function handlePauseAll() {
+  await Promise.allSettled(
+    activeTasks.value
+      .filter(task => task.status === 'transferring')
+      .map(task => handlePause(task.id)),
+  )
+}
+
+async function handleResumeAll() {
+  await Promise.allSettled(
+    activeTasks.value
+      .filter(task => task.status === 'paused')
+      .map(task => handleResume(task.id)),
+  )
+}
+
+async function handleRetryAll() {
+  await Promise.allSettled(
+    activeTasks.value
+      .filter(task => task.status === 'error' && task.retryable !== false)
+      .map(task => handleRetry(task.id)),
+  )
 }
 
 async function handleRetry(id: string) {
@@ -157,7 +182,7 @@ async function handleRetry(id: string) {
       await startDownloadChunked(newId, task.connectionId, task.remotePath, task.localPath)
     }
   } catch (error) {
-    toast.error(t('transfer.retryFailed'), String(error))
+    toast.error(t('transfer.retryFailed'), formatSftpError(error))
   }
 }
 
@@ -178,6 +203,12 @@ const totalRemaining = computed(() => {
 })
 const errorCount = computed(() =>
   activeTasks.value.filter(t => t.status === 'error').length,
+)
+const pausedCount = computed(() =>
+  activeTasks.value.filter(t => t.status === 'paused').length,
+)
+const retryableErrorCount = computed(() =>
+  activeTasks.value.filter(t => t.status === 'error' && t.retryable !== false).length,
 )
 const totalElapsed = computed(() => {
   // 取所有传输中任务中最早的开始时间
@@ -243,16 +274,48 @@ watch(
           {{ t('transfer.activeTransfers') }} ({{ activeTasks.length }})
         </span>
       </div>
-      <Button
-        v-if="hasActiveTasks"
-        variant="ghost"
-        size="sm"
-        class="h-6 px-2 text-[10px] font-bold hover:bg-destructive/10 hover:text-destructive"
-        @click="handleClearCompleted"
-      >
-        <Trash2 class="mr-1 h-2.5 w-2.5" />
-        {{ t('transfer.clearCompleted') }}
-      </Button>
+      <div class="flex items-center gap-1">
+        <Button
+          v-if="transferringTasks.length > 0"
+          variant="ghost"
+          size="sm"
+          class="h-6 px-2 text-[10px] font-bold"
+          @click="handlePauseAll"
+        >
+          <Pause class="mr-1 h-2.5 w-2.5" />
+          暂停全部
+        </Button>
+        <Button
+          v-if="pausedCount > 0"
+          variant="ghost"
+          size="sm"
+          class="h-6 px-2 text-[10px] font-bold"
+          @click="handleResumeAll"
+        >
+          <Play class="mr-1 h-2.5 w-2.5" />
+          恢复全部
+        </Button>
+        <Button
+          v-if="retryableErrorCount > 0"
+          variant="ghost"
+          size="sm"
+          class="h-6 px-2 text-[10px] font-bold"
+          @click="handleRetryAll"
+        >
+          <RotateCcw class="mr-1 h-2.5 w-2.5" />
+          重试全部
+        </Button>
+        <Button
+          v-if="hasActiveTasks"
+          variant="ghost"
+          size="sm"
+          class="h-6 px-2 text-[10px] font-bold hover:bg-destructive/10 hover:text-destructive"
+          @click="handleClearCompleted"
+        >
+          <Trash2 class="mr-1 h-2.5 w-2.5" />
+          {{ t('transfer.clearCompleted') }}
+        </Button>
+      </div>
     </div>
 
     <!-- Empty State -->
@@ -306,7 +369,7 @@ watch(
                 class="h-4 w-4 text-df-success"
               />
               <template v-else-if="task.status === 'error'">
-                <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-primary/10" @click="handleRetry(task.id)">
+                <Button v-if="task.retryable !== false" variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-primary/10" @click="handleRetry(task.id)">
                   <RotateCcw class="h-3 w-3" />
                 </Button>
                 <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-destructive/10 hover:text-destructive" @click="handleRemove(task.id)">
@@ -395,7 +458,10 @@ watch(
                 </span>
                 <span v-else-if="task.status === 'paused'" class="text-df-warning uppercase tracking-widest text-[9px]">{{ t('transfer.paused') }}</span>
                 <span v-else-if="task.status === 'completed'" class="text-df-success uppercase tracking-widest text-[9px]">{{ t('transfer.completed') }} · {{ getElapsedTime(task) }}</span>
-                <span v-else-if="task.status === 'error'" class="text-destructive uppercase tracking-widest text-[9px]">{{ task.error || t('transfer.failed') }}</span>
+                <span v-else-if="task.status === 'error'" class="text-destructive uppercase tracking-widest text-[9px]">
+                  <span v-if="task.errorKind" class="mr-1 rounded bg-destructive/10 px-1">{{ task.errorKind }}</span>
+                  {{ task.error || t('transfer.failed') }}
+                </span>
               </div>
             </div>
           </div>

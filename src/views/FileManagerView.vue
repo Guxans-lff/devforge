@@ -21,6 +21,13 @@ import { Loader2, Terminal as TerminalIcon, PanelRightClose, PanelRightOpen, Wif
 import * as sftpApi from '@/api/sftp'
 import { sftpChmod } from '@/api/file-editor'
 import { useToast } from '@/composables/useToast'
+import {
+  invalidateSftpDirectory,
+  invalidateSftpDirectoryTree,
+  loadSftpDirectoryCached,
+} from '@/composables/sftp/useSftpDirectoryCache'
+import { formatSftpError } from '@/composables/sftp/sftpErrors'
+import { getRemoteDeleteRisk, resolveTransferConflict } from '@/composables/sftp/sftpConflictPolicy'
 import type { FileEntry } from '@/types/fileManager'
 
 const props = defineProps<{
@@ -150,16 +157,21 @@ async function loadLocal(path?: string) {
   }
 }
 
-async function loadRemote(path?: string) {
+async function loadRemote(path?: string, options: { force?: boolean } = {}) {
   if (status.value !== 'connected') return
   remoteLoading.value = true
+  const target = path ?? remotePath.value
   try {
-    const target = path ?? remotePath.value
-    const entries = await sftpApi.sftpListDir(props.connectionId, target)
+    const { entries } = await loadSftpDirectoryCached(
+      props.connectionId,
+      target,
+      () => sftpApi.sftpListDir(props.connectionId, target),
+      options,
+    )
     remoteEntries.value = entries
     remotePath.value = target
   } catch (e) {
-    toast.error(t('toast.operationFailed'), ensureErrorString(e))
+    toast.error(t('toast.operationFailed'), formatSftpError(e))
   } finally {
     remoteLoading.value = false
   }
@@ -192,9 +204,10 @@ async function handleRemoteMkdir(name: string) {
       ? `${remotePath.value}${name}`
       : `${remotePath.value}/${name}`
     await sftpApi.sftpMkdir(props.connectionId, newPath)
-    await loadRemote()
+    invalidateSftpDirectory(props.connectionId, remotePath.value)
+    await loadRemote(undefined, { force: true })
   } catch (e) {
-    toast.error(t('toast.operationFailed'), ensureErrorString(e))
+    toast.error(t('toast.operationFailed'), formatSftpError(e))
   }
 }
 
@@ -217,9 +230,10 @@ async function handleRemoteNewFile(name: string) {
       ? `${remotePath.value}${name}`
       : `${remotePath.value}/${name}`
     await sftpApi.sftpTouch(props.connectionId, newPath)
-    await loadRemote()
+    invalidateSftpDirectory(props.connectionId, remotePath.value)
+    await loadRemote(undefined, { force: true })
   } catch (e) {
-    toast.error(t('toast.operationFailed'), ensureErrorString(e))
+    toast.error(t('toast.operationFailed'), formatSftpError(e))
   }
 }
 
@@ -239,9 +253,10 @@ function handleLocalDelete(entry: FileEntry) {
 }
 
 function handleRemoteDelete(entry: FileEntry) {
+  const risk = getRemoteDeleteRisk([entry])
   requestDeleteConfirm(
     t('fileManager.confirmDelete', { name: entry.name }),
-    entry.path,
+    `${entry.path}\n\n${risk.summary}`,
     async () => {
       try {
         if (entry.isDir) {
@@ -257,9 +272,13 @@ function handleRemoteDelete(entry: FileEntry) {
         } else {
           await sftpApi.sftpDelete(props.connectionId, entry.path, false)
         }
-        await loadRemote()
+        if (entry.isDir) {
+          invalidateSftpDirectoryTree(props.connectionId, entry.path)
+        }
+        invalidateSftpDirectory(props.connectionId, remotePath.value)
+        await loadRemote(undefined, { force: true })
       } catch (e) {
-        toast.error(t('toast.deleteFailed'), ensureErrorString(e))
+        toast.error(t('toast.deleteFailed'), formatSftpError(e))
       }
     },
   )
@@ -282,24 +301,29 @@ async function handleRemoteRename(entry: FileEntry, newName: string) {
     const parentPath = entry.path.substring(0, entry.path.lastIndexOf('/'))
     const newPath = `${parentPath}/${newName}`
     await sftpApi.sftpRename(props.connectionId, entry.path, newPath)
-    await loadRemote()
+    invalidateSftpDirectory(props.connectionId, parentPath || '/')
+    await loadRemote(undefined, { force: true })
   } catch (e) {
-    toast.error(t('toast.operationFailed'), ensureErrorString(e))
+    toast.error(t('toast.operationFailed'), formatSftpError(e))
   }
 }
 
 async function handleUpload(entry: FileEntry) {
   // Upload local file/folder to remote current directory
   try {
-    const remoteTarget = remotePath.value.endsWith('/')
-      ? `${remotePath.value}${entry.name}`
-      : `${remotePath.value}/${entry.name}`
+    const conflict = resolveTransferConflict(remoteEntries.value, remotePath.value, entry.name, 'rename')
+    if (conflict.action === 'skip') return
+    const remoteTarget = conflict.targetPath
 
     if (entry.isDir) {
       // 文件夹：使用递归上传（后台执行，立即返回）
       workspace.setBottomPanelTab('transfer', true)
       sftpApi.uploadFolderRecursive(props.connectionId, entry.path, remoteTarget)
-        .catch((e: unknown) => toast.error(t('toast.uploadFailed'), ensureErrorString(e)))
+        .then(() => {
+          invalidateSftpDirectory(props.connectionId, remotePath.value)
+          debouncedLoadRemote()
+        })
+        .catch((e: unknown) => toast.error(t('toast.uploadFailed'), formatSftpError(e)))
     } else {
       // 单文件：分块上传
       const transferId = crypto.randomUUID()
@@ -318,7 +342,7 @@ async function handleUpload(entry: FileEntry) {
       await sftpApi.startUploadChunked(transferId, props.connectionId, entry.path, remoteTarget)
     }
   } catch (e) {
-    toast.error(t('toast.uploadFailed'), ensureErrorString(e))
+    toast.error(t('toast.uploadFailed'), formatSftpError(e))
   }
 }
 
@@ -400,7 +424,8 @@ function handleLocalBatchDelete(entries: FileEntry[]) {
 }
 
 function handleRemoteBatchDelete(entries: FileEntry[]) {
-  const names = entries.map((e) => e.name).join(', ')
+  const risk = getRemoteDeleteRisk(entries)
+  const names = `${entries.map((e) => e.name).join(', ')}\n\n${risk.summary}`
   const hasDirs = entries.some((e) => e.isDir)
   requestDeleteConfirm(
     t('fileManager.deleteSelected', { count: entries.length }),
@@ -424,9 +449,13 @@ function handleRemoteBatchDelete(entries: FileEntry[]) {
             await sftpApi.sftpDelete(props.connectionId, entry.path, entry.isDir)
           }
         }
-        await loadRemote()
+        for (const entry of entries) {
+          if (entry.isDir) invalidateSftpDirectoryTree(props.connectionId, entry.path)
+        }
+        invalidateSftpDirectory(props.connectionId, remotePath.value)
+        await loadRemote(undefined, { force: true })
       } catch (e) {
-        toast.error(t('toast.deleteFailed'), ensureErrorString(e))
+        toast.error(t('toast.deleteFailed'), formatSftpError(e))
       }
     },
   )
@@ -445,9 +474,12 @@ async function handleDropToRemote(entries: FileEntry[], targetPath: string) {
       await handleBatchUpload([entry])
     } else {
       // Upload single file
-      const remoteTarget = targetPath.endsWith('/')
-        ? `${targetPath}${entry.name}`
-        : `${targetPath}/${entry.name}`
+      const targetEntries = targetPath === remotePath.value
+        ? remoteEntries.value
+        : []
+      const conflict = resolveTransferConflict(targetEntries, targetPath, entry.name, 'rename')
+      if (conflict.action === 'skip') continue
+      const remoteTarget = conflict.targetPath
 
       const transferId = crypto.randomUUID()
       transferStore.addTask({
@@ -587,7 +619,7 @@ function debouncedLoadRemote() {
   if (refreshRemoteTimer) clearTimeout(refreshRemoteTimer)
   refreshRemoteTimer = setTimeout(() => {
     refreshRemoteTimer = null
-    loadRemote()
+    loadRemote(undefined, { force: true })
   }, 500)
 }
 
@@ -620,6 +652,7 @@ onMounted(async () => {
       const task = transferStore.tasks.get(event.payload.id)
       if (task) {
         if (task.type === 'upload') {
+          invalidateSftpDirectory(props.connectionId, remotePath.value)
           debouncedLoadRemote()
         } else {
           debouncedLoadLocal()
@@ -815,7 +848,7 @@ onBeforeUnmount(async () => {
             :loading="remoteLoading"
             show-transfer-action="download"
             @navigate="handleRemoteNavigate"
-            @refresh="loadRemote()"
+            @refresh="loadRemote(undefined, { force: true })"
             @mkdir="handleRemoteMkdir"
             @new-file="handleRemoteNewFile"
             @delete="handleRemoteDelete"

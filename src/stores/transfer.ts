@@ -3,6 +3,7 @@ import { shallowRef, triggerRef } from 'vue'
 import { listen } from '@tauri-apps/api/event'
 import { useLogStore } from './log'
 import { t } from '@/utils/i18n-helper'
+import { classifySftpError, type SftpErrorKind } from '@/composables/sftp/sftpErrors'
 
 export interface TransferTask {
   id: string
@@ -16,6 +17,9 @@ export interface TransferTask {
   speed: number // bytes per second
   status: 'pending' | 'transferring' | 'completed' | 'error' | 'paused'
   error?: string
+  errorKind?: SftpErrorKind
+  retryable?: boolean
+  resumeHint?: 'restart' | 'resume' | 'reconnect'
   startTime?: number
   endTime?: number
   /** 打包传输阶段：packing / uploading / extracting / completed */
@@ -27,6 +31,7 @@ export interface TransferTask {
 }
 
 export const useTransferStore = defineStore('transfer', () => {
+  const STORAGE_KEY = 'devforge:sftp:transfer-state:v1'
   const tasks = shallowRef<Map<string, TransferTask>>(new Map())
   const history = shallowRef<TransferTask[]>([])
   const logStore = useLogStore()
@@ -39,15 +44,52 @@ export const useTransferStore = defineStore('transfer', () => {
 
   function flushProgressUpdates() {
     if (pendingProgressUpdates) {
-      triggerRef(tasks)
+      commitTasks()
       pendingProgressUpdates = false
     }
     progressThrottleTimer = null
   }
 
+  function persistState() {
+    const active = Array.from(tasks.value.values()).map(task => {
+      if (task.status === 'transferring' || task.status === 'pending') {
+        return {
+          ...task,
+          status: 'error' as const,
+          error: '应用已重启，传输已中断，可重新开始',
+          errorKind: 'cancelled' as SftpErrorKind,
+          retryable: true,
+          resumeHint: 'restart' as const,
+          endTime: Date.now(),
+        }
+      }
+      return task
+    })
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ active, history: history.value.slice(0, 100) }))
+  }
+
+  function restoreState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as { active?: TransferTask[]; history?: TransferTask[] }
+      tasks.value = new Map((parsed.active ?? []).map(task => [task.id, task]))
+      history.value = parsed.history ?? []
+      triggerRef(tasks)
+    } catch {
+      localStorage.removeItem(STORAGE_KEY)
+    }
+  }
+
+  function commitTasks() {
+    triggerRef(tasks)
+    persistState()
+  }
+
   async function setupListeners() {
     if (listenersSetup) return
     listenersSetup = true
+    restoreState()
 
     // 后端批量入队时自动注册任务（文件夹递归上传场景）
     unlistenFns.push(await listen<{
@@ -76,7 +118,7 @@ export const useTransferStore = defineStore('transfer', () => {
             status: 'pending',
             startTime: Date.now(),
           })
-          triggerRef(tasks)
+          commitTasks()
         }
       },
     ))
@@ -120,7 +162,7 @@ export const useTransferStore = defineStore('transfer', () => {
               archivePhase: 'extracting',
               status: 'transferring',
             })
-            triggerRef(tasks)
+            commitTasks()
             return
           }
 
@@ -137,14 +179,14 @@ export const useTransferStore = defineStore('transfer', () => {
           const next = [{ ...completed }, ...history.value]
           history.value = next.length > 100 ? next.slice(0, 100) : next
           // 触发响应式更新
-          triggerRef(tasks)
+          commitTasks()
           // 3秒后从活动列表移除（检查状态防止删除被复用的任务）
           const completedId = event.payload.id
           setTimeout(() => {
             const current = tasks.value.get(completedId)
             if (current && current.status === 'completed') {
               tasks.value.delete(completedId)
-              triggerRef(tasks)
+              commitTasks()
             }
           }, 3000)
         }
@@ -157,10 +199,14 @@ export const useTransferStore = defineStore('transfer', () => {
       (event) => {
         const task = tasks.value.get(event.payload.id)
         if (task) {
+          const classified = classifySftpError(event.payload.error)
           tasks.value.set(event.payload.id, {
             ...task,
             status: 'error',
-            error: event.payload.error,
+            error: classified.message,
+            errorKind: classified.kind,
+            retryable: classified.retryable,
+            resumeHint: classified.action === 'reconnect' ? 'reconnect' : 'restart',
             endTime: Date.now(),
           })
 
@@ -170,7 +216,7 @@ export const useTransferStore = defineStore('transfer', () => {
           })
 
           // 触发响应式更新
-          triggerRef(tasks)
+          commitTasks()
         }
       },
     ))
@@ -228,12 +274,12 @@ export const useTransferStore = defineStore('transfer', () => {
             const current = tasks.value.get(id)
             if (current && current.status === 'completed') {
               tasks.value.delete(id)
-              triggerRef(tasks)
+              commitTasks()
             }
           }, 3000)
         }
 
-        triggerRef(tasks)
+        commitTasks()
       },
     ))
   }
@@ -253,12 +299,12 @@ export const useTransferStore = defineStore('transfer', () => {
       remote: task.remotePath
     })
 
-    triggerRef(tasks)
+    commitTasks()
   }
 
   function removeTask(id: string) {
     tasks.value.delete(id)
-    triggerRef(tasks)
+    commitTasks()
   }
 
   function clearCompleted() {
@@ -269,20 +315,29 @@ export const useTransferStore = defineStore('transfer', () => {
       }
     }
     toDelete.forEach(id => tasks.value.delete(id))
-    triggerRef(tasks)
+    commitTasks()
   }
 
   /** 将任务标记为失败 */
   function failTask(id: string, error: string) {
     const task = tasks.value.get(id)
     if (task) {
-      tasks.value.set(id, { ...task, status: 'error', error })
-      triggerRef(tasks)
+      const classified = classifySftpError(error)
+      tasks.value.set(id, {
+        ...task,
+        status: 'error',
+        error: classified.message,
+        errorKind: classified.kind,
+        retryable: classified.retryable,
+        resumeHint: classified.action === 'reconnect' ? 'reconnect' : 'restart',
+      })
+      commitTasks()
     }
   }
 
   function clearHistory() {
     history.value = []
+    persistState()
   }
 
   return {
