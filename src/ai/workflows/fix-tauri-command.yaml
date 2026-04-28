@@ -1,0 +1,29 @@
+﻿id: fix-tauri-command
+name: 修复 Tauri 命令链路
+description: 排查 Tauri 前端命令调用失败或前后端数据不一致问题
+steps:
+  - type: inspect
+    prompt: |
+      Tauri 命令调用出现问题。请帮我排查：
+      1. 检查前端 invoke 调用的参数类型和字段名
+      2. 检查后端 command 函数的参数定义和返回类型
+      3. 确认前后端类型是否一致（特别关注 Option<T> 和枚举序列化）
+      4. 列出所有不匹配的地方
+  - type: edit
+    prompt: |
+      修复前后端不一致的问题：
+      1. 统一字段命名（camelCase / snake_case）
+      2. 修正类型不匹配
+      3. 确保错误处理路径能正确传递信息到前端
+  - type: test
+    prompt: |
+      验证修复：
+      1. 确认 cargo check 通过
+      2. 确认前端 TypeScript 类型检查通过
+      3. 运行时测试命令能正常返回
+  - type: summarize
+    prompt: |
+      总结 Tauri 链路修复：
+      - 根因（序列化/字段名/类型不匹配）
+      - 修改的文件
+      - 预防类似问题的建议

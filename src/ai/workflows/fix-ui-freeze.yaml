@@ -1,0 +1,26 @@
+﻿id: fix-ui-freeze
+name: 修复 UI 卡顿
+description: 排查并修复前端 UI 卡顿/无响应问题
+steps:
+  - type: inspect
+    prompt: |
+      当前项目出现了 UI 卡顿/无响应问题。请帮我：
+      1. 检查最近修改的前端组件、composable 或 store
+      2. 定位可能导致大量重渲染、内存泄漏或长任务的代码
+      3. 列出可疑文件和具体行号范围
+  - type: edit
+    prompt: |
+      基于上面的排查结果，请给出最小必要修复方案：
+      1. 具体的代码修改（使用 edit_file 或 write_file）
+      2. 解释为什么这些修改能解决卡顿
+  - type: test
+    prompt: |
+      验证修复是否有效：
+      1. 检查是否还有明显的性能瓶颈
+      2. 确认没有引入新的 bug
+  - type: summarize
+    prompt: |
+      总结本次修复：
+      - 根因是什么
+      - 修改了哪些文件
+      - 预期性能提升

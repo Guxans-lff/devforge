@@ -1,22 +1,31 @@
 <script setup lang="ts">
 /**
- * 斜杠命令浮层 — 浮在输入框上方，命令式精炼卡片
+ * 斜杠命令浮层
  *
- * 锚点语义：anchorPos 为 textarea 左上角屏幕坐标；浮层渲染时向上偏移自身高度 + 间距。
+ * 锚点语义：anchorPos 为 textarea 左上角屏幕坐标；浮层向上偏移自身高度和间距。
  */
-import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
-  BookOpen, Wrench, FlaskConical, GitCompare, Trash2,
-  Sparkles, Minimize2,
+  BookOpen,
+  FlaskConical,
+  GitCompare,
+  Minimize2,
+  Sparkles,
+  Trash2,
+  Workflow,
+  Wrench,
 } from 'lucide-vue-next'
+import { getWorkflowFirstPrompt, loadBuiltinWorkflows } from '@/composables/useWorkflowScripts'
+import type { AiWorkflowScript } from '@/types/ai'
 
 export interface SlashCommand {
   name: string
   desc: string
   template: string
   icon: typeof BookOpen
-  /** Tailwind 色调类 */
   color: string
+  isWorkflow?: boolean
+  workflow?: AiWorkflowScript
 }
 
 const props = defineProps<{
@@ -30,7 +39,9 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const COMMANDS: SlashCommand[] = [
+const workflows = loadBuiltinWorkflows()
+
+const BUILTIN_COMMANDS: SlashCommand[] = [
   {
     name: 'explain',
     desc: '解释选中代码或当前文件',
@@ -75,35 +86,49 @@ const COMMANDS: SlashCommand[] = [
   },
 ]
 
+const WORKFLOW_COMMANDS: SlashCommand[] = workflows.map(workflow => ({
+  name: workflow.id,
+  desc: workflow.description,
+  template: getWorkflowFirstPrompt(workflow),
+  icon: Workflow,
+  color: 'text-orange-400',
+  isWorkflow: true,
+  workflow,
+}))
+
+const COMMANDS: SlashCommand[] = [...BUILTIN_COMMANDS, ...WORKFLOW_COMMANDS]
 const selectedIndex = ref(0)
 
 const filtered = computed<SlashCommand[]>(() => {
   const q = props.query.trim().toLowerCase()
   if (!q) return COMMANDS
-  return COMMANDS.filter(c => c.name.startsWith(q) || c.name.includes(q))
+  return COMMANDS.filter(command => command.name.startsWith(q) || command.name.includes(q))
 })
 
 function confirmSelect() {
   const cmd = filtered.value[selectedIndex.value]
   if (cmd) emit('select', cmd)
 }
-function handleItemClick(cmd: SlashCommand) { emit('select', cmd) }
 
-function onKeydown(e: KeyboardEvent) {
+function handleItemClick(cmd: SlashCommand) {
+  emit('select', cmd)
+}
+
+function onKeydown(event: KeyboardEvent) {
   if (!props.visible) return
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
     selectedIndex.value = Math.min(selectedIndex.value + 1, filtered.value.length - 1)
     scrollToSelected()
-  } else if (e.key === 'ArrowUp') {
-    e.preventDefault()
+  } else if (event.key === 'ArrowUp') {
+    event.preventDefault()
     selectedIndex.value = Math.max(selectedIndex.value - 1, 0)
     scrollToSelected()
-  } else if (e.key === 'Enter' || e.key === 'Tab') {
-    e.preventDefault()
+  } else if (event.key === 'Enter' || event.key === 'Tab') {
+    event.preventDefault()
     confirmSelect()
-  } else if (e.key === 'Escape') {
-    e.preventDefault()
+  } else if (event.key === 'Escape') {
+    event.preventDefault()
     emit('close')
   }
 }
@@ -112,6 +137,7 @@ defineExpose({ onKeydown })
 
 const popoverEl = ref<HTMLElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
+const popoverStyle = ref<{ left: string; top: string }>({ left: '0px', top: '0px' })
 
 function scrollToSelected() {
   nextTick(() => {
@@ -122,16 +148,25 @@ function scrollToSelected() {
   })
 }
 
-function onDocumentClick(e: MouseEvent) {
+function onDocumentClick(event: MouseEvent) {
   if (!props.visible) return
-  if (popoverEl.value && !popoverEl.value.contains(e.target as Node)) {
+  if (popoverEl.value && !popoverEl.value.contains(event.target as Node)) {
     emit('close')
   }
 }
 
+function adjustPosition() {
+  const el = popoverEl.value
+  if (!el) return
+  popoverStyle.value = {
+    left: `${props.anchorPos.x}px`,
+    top: `${props.anchorPos.y - el.offsetHeight - 8}px`,
+  }
+}
+
 watch(() => props.query, () => { selectedIndex.value = 0 })
-watch(() => props.visible, (val) => {
-  if (val) {
+watch(() => props.visible, (visible) => {
+  if (visible) {
     document.addEventListener('keydown', onKeydown)
     document.addEventListener('mousedown', onDocumentClick)
     nextTick(adjustPosition)
@@ -140,18 +175,6 @@ watch(() => props.visible, (val) => {
     document.removeEventListener('mousedown', onDocumentClick)
   }
 })
-
-/** 悬浮坐标：浮层贴在输入框上方 8px，左对齐 */
-const popoverStyle = ref<{ left: string; top: string }>({ left: '0px', top: '0px' })
-function adjustPosition() {
-  const el = popoverEl.value
-  if (!el) return
-  const h = el.offsetHeight
-  popoverStyle.value = {
-    left: `${props.anchorPos.x}px`,
-    top: `${props.anchorPos.y - h - 8}px`,
-  }
-}
 watch(() => props.anchorPos, () => { if (props.visible) nextTick(adjustPosition) })
 watch(filtered, () => { if (props.visible) nextTick(adjustPosition) })
 
@@ -162,6 +185,7 @@ onMounted(() => {
     nextTick(adjustPosition)
   }
 })
+
 onUnmounted(() => {
   document.removeEventListener('keydown', onKeydown)
   document.removeEventListener('mousedown', onDocumentClick)
@@ -173,27 +197,24 @@ onUnmounted(() => {
     <div
       v-if="visible"
       ref="popoverEl"
-      class="fixed z-50 w-[360px] overflow-hidden rounded-xl border border-border/60 bg-popover/95 backdrop-blur-xl shadow-2xl shadow-black/40 text-popover-foreground animate-in fade-in slide-in-from-bottom-1 duration-150"
+      class="fixed z-50 w-[360px] overflow-hidden rounded-xl border border-border/60 bg-popover/95 text-popover-foreground shadow-2xl shadow-black/40 backdrop-blur-xl animate-in fade-in slide-in-from-bottom-1 duration-150"
       :style="popoverStyle"
     >
-      <!-- 标题栏 -->
-      <div class="flex items-center gap-2 px-3 py-2 border-b border-border/40 bg-muted/30">
+      <div class="flex items-center gap-2 border-b border-border/40 bg-muted/30 px-3 py-2">
         <Sparkles class="h-3.5 w-3.5 text-primary/80" />
         <span class="text-[11px] font-medium text-foreground/90">斜杠命令</span>
-        <span class="ml-auto text-[10px] text-muted-foreground/60 font-mono">{{ filtered.length }}/{{ COMMANDS.length }}</span>
+        <span class="ml-auto font-mono text-[10px] text-muted-foreground/60">{{ filtered.length }}/{{ COMMANDS.length }}</span>
       </div>
 
-      <div
-        v-if="filtered.length === 0"
-        class="px-4 py-8 text-center text-[12px] text-muted-foreground"
-      >
+      <div v-if="filtered.length === 0" class="px-4 py-8 text-center text-[12px] text-muted-foreground">
         无匹配命令
       </div>
-      <ul v-else ref="listEl" class="py-1 max-h-[320px] overflow-y-auto">
+
+      <ul v-else ref="listEl" class="max-h-[320px] overflow-y-auto py-1">
         <li
           v-for="(cmd, index) in filtered"
           :key="cmd.name"
-          class="group flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors"
+          class="group flex cursor-pointer items-center gap-3 px-3 py-2 transition-colors"
           :class="index === selectedIndex ? 'bg-accent/70' : 'hover:bg-accent/30'"
           @mousedown.prevent="handleItemClick(cmd)"
           @mouseenter="selectedIndex = index"
@@ -204,21 +225,20 @@ onUnmounted(() => {
           >
             <component :is="cmd.icon" class="h-3.5 w-3.5" :class="cmd.color" />
           </div>
-          <div class="flex flex-col min-w-0 flex-1">
+          <div class="flex min-w-0 flex-1 flex-col">
             <span class="font-mono text-[12.5px] leading-tight text-foreground">
               <span class="text-muted-foreground/60">/</span>{{ cmd.name }}
             </span>
-            <span class="truncate text-[11px] text-muted-foreground/80 leading-tight mt-0.5">{{ cmd.desc }}</span>
+            <span class="mt-0.5 truncate text-[11px] leading-tight text-muted-foreground/80">{{ cmd.desc }}</span>
           </div>
           <kbd
             v-if="index === selectedIndex"
-            class="shrink-0 text-[9px] font-mono px-1.5 py-0.5 rounded border border-border/50 bg-background/60 text-muted-foreground"
-          >↵</kbd>
+            class="shrink-0 rounded border border-border/50 bg-background/60 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground"
+          >Enter</kbd>
         </li>
       </ul>
 
-      <!-- 底部快捷键提示 -->
-      <div class="flex items-center gap-3 px-3 py-1.5 border-t border-border/40 bg-muted/20 text-[10px] text-muted-foreground/60">
+      <div class="flex items-center gap-3 border-t border-border/40 bg-muted/20 px-3 py-1.5 text-[10px] text-muted-foreground/60">
         <span><kbd class="font-mono">↑↓</kbd> 导航</span>
         <span><kbd class="font-mono">Enter</kbd> 选中</span>
         <span><kbd class="font-mono">Esc</kbd> 关闭</span>
