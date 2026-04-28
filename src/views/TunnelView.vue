@@ -26,6 +26,7 @@ import {
 } from '@/components/ui/select'
 import { tunnelOpen, tunnelClose, tunnelList } from '@/api/tunnel'
 import { getCredential } from '@/api/connection'
+import { confirmTunnelRisk } from '@/composables/tunnelRisk'
 import type { TunnelInfo } from '@/types/tunnel'
 
 const { t } = useI18n()
@@ -108,6 +109,14 @@ async function handleSelectConnection(connId: string | number | boolean | bigint
 }
 
 async function handleOpen() {
+  if (!confirmTunnelRisk({
+    sshHost: form.value.sshHost,
+    localPort: Number(form.value.localPort),
+    remoteHost: form.value.remoteHost,
+    remotePort: Number(form.value.remotePort),
+    existingLocalPorts: tunnels.value.filter((tunnel) => tunnel.status === 'active').map((tunnel) => tunnel.localPort),
+  })) return
+
   opening.value = true
   try {
     const info = await tunnelOpen({

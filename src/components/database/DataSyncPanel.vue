@@ -30,6 +30,7 @@ import {
 import { useConnectionStore } from '@/stores/connections'
 import { useDataSync } from '@/composables/useDataSync'
 import { useNotification } from '@/composables/useNotification'
+import { confirmDataSyncRisk, summarizeDataSyncRisk } from '@/composables/dataSyncRisk'
 import { parseBackendError } from '@/types/error'
 import * as dbApi from '@/api/database'
 import type { SyncConfig } from '@/types/data-sync'
@@ -135,6 +136,11 @@ const canPreview = computed(() => syncConfig.value !== null && !previewing.value
 
 /** 是否可以执行 */
 const canExecute = computed(() => syncConfig.value !== null && preview.value.length > 0 && !syncing.value)
+
+const syncRisk = computed(() => {
+  if (!syncConfig.value || preview.value.length === 0) return null
+  return summarizeDataSyncRisk(syncConfig.value, preview.value)
+})
 
 /** 进度百分比 */
 const progressPercent = computed(() => {
@@ -255,6 +261,7 @@ async function handlePreview() {
 /** 执行同步 */
 async function handleExecute() {
   if (!syncConfig.value) return
+  if (!confirmDataSyncRisk(syncConfig.value, preview.value)) return
   try {
     const result = await executeSync(syncConfig.value)
     notification.success(t('dataSync.syncSuccess'), result, 5000)
@@ -530,6 +537,15 @@ loadDatabases(props.connectionId, 'source')
 
         <!-- 预览结果 -->
         <div v-if="preview.length > 0" class="space-y-2">
+          <div
+            v-if="syncRisk"
+            class="rounded-md border p-3 text-xs"
+            :class="syncRisk.destructive ? 'border-destructive/30 bg-destructive/5 text-destructive' : 'border-df-warning/30 bg-df-warning/5 text-df-warning'"
+          >
+            <div class="font-medium">{{ syncRisk.title }}</div>
+            <div class="mt-1 whitespace-pre-line">{{ syncRisk.message }}</div>
+          </div>
+
           <div class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
             {{ t('dataSync.previewResult') }} ({{ preview.length }} {{ t('dataSync.tablesCount') }})
           </div>
