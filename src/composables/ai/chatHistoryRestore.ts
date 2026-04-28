@@ -123,6 +123,9 @@ export function restoreMessagesFromRecords(records: AiMessageRecord[]): AiMessag
       timestamp: record.createdAt,
       tokens: record.tokens,
       totalTokens: record.tokens,
+      type: record.type,
+      compactMetadata: record.compactMetadata,
+      rewindMetadata: record.rewindMetadata,
     })
   }
 

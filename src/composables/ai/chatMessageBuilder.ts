@@ -92,6 +92,17 @@ export interface BuildChatMessagesOptions {
   replayToolContext?: boolean
 }
 
+/**
+ * 找到最后一个 compact-boundary 的索引
+ */
+function findLastContextBoundaryIndex(msgs: AiMessage[]): number {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const type = msgs[i]!.type
+    if (type === 'compact-boundary' || type === 'rewind-boundary') return i
+  }
+  return -1
+}
+
 export function buildChatMessagesWithOptions(
   msgs: AiMessage[],
   options: BuildChatMessagesOptions = {},
@@ -102,9 +113,15 @@ export function buildChatMessagesWithOptions(
   } = options
   const result: ChatMessage[] = []
 
-  for (const msg of msgs) {
+  // 只使用最后一个 compact-boundary 之后的消息（包含 boundary 后的摘要消息）
+  const boundaryIdx = findLastContextBoundaryIndex(msgs)
+  const contextMsgs = boundaryIdx === -1 ? msgs : msgs.slice(boundaryIdx + 1)
+
+  for (const msg of contextMsgs) {
     if (msg.role === 'error') continue
     if (msg.type === 'divider') continue
+    if (msg.type === 'compact-boundary') continue
+    if (msg.type === 'rewind-boundary') continue
 
     if (msg.role === 'user') {
       if (hasVision && containsImages(msg.content)) {
@@ -117,6 +134,11 @@ export function buildChatMessagesWithOptions(
       } else {
         result.push({ role: 'user', content: msg.content })
       }
+      continue
+    }
+
+    if (msg.role === 'system') {
+      result.push({ role: 'system', content: msg.content })
       continue
     }
 

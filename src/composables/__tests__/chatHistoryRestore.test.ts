@@ -15,6 +15,8 @@ function createRecord(overrides: Partial<AiMessageRecord>): AiMessageRecord {
     success: overrides.success,
     toolName: overrides.toolName,
     createdAt: overrides.createdAt ?? 1,
+    type: overrides.type,
+    compactMetadata: overrides.compactMetadata,
   }
 }
 
@@ -194,6 +196,62 @@ describe('restoreMessagesFromRecords', () => {
       id: 'assistant-2',
       role: 'assistant',
       content: '处理完成',
+    })
+  })
+
+  it('restores compact-boundary type and compactMetadata from record', () => {
+    const records: AiMessageRecord[] = [
+      createRecord({
+        id: 'boundary-1',
+        role: 'system',
+        content: '',
+        type: 'compact-boundary',
+        compactMetadata: {
+          trigger: 'auto',
+          preTokens: 5000,
+          summarizedMessages: 10,
+          createdAt: 1700000000000,
+          summaryMessageId: 'summary-1',
+          source: 'ai',
+        },
+      }),
+      createRecord({
+        id: 'summary-1',
+        role: 'system',
+        content: 'This is a summary',
+      }),
+      createRecord({
+        id: 'user-1',
+        role: 'user',
+        content: 'hello',
+      }),
+    ]
+
+    const restored = restoreMessagesFromRecords(records)
+
+    expect(restored).toHaveLength(3)
+    expect(restored[0]).toMatchObject({
+      id: 'boundary-1',
+      role: 'system',
+      type: 'compact-boundary',
+      compactMetadata: {
+        trigger: 'auto',
+        preTokens: 5000,
+        summarizedMessages: 10,
+        createdAt: 1700000000000,
+        summaryMessageId: 'summary-1',
+        source: 'ai',
+      },
+    })
+    expect(restored[1]).toMatchObject({
+      id: 'summary-1',
+      role: 'system',
+      content: 'This is a summary',
+    })
+    expect(restored[2]).toMatchObject({
+      id: 'user-1',
+      role: 'user',
+      content: 'hello',
     })
   })
 })

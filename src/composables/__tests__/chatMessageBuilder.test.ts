@@ -200,4 +200,124 @@ describe('chatMessageBuilder', () => {
       },
     ])
   })
+
+  it('includes summary message after compact-boundary in model context', () => {
+    const messages = buildChatMessagesWithOptions([
+      {
+        id: 'user-old',
+        role: 'user',
+        content: 'old message',
+        timestamp: 1,
+      },
+      {
+        id: 'boundary-1',
+        role: 'system',
+        type: 'compact-boundary',
+        content: '',
+        timestamp: 2,
+        compactMetadata: {
+          trigger: 'auto',
+          preTokens: 1000,
+          summarizedMessages: 1,
+          createdAt: 2,
+          summaryMessageId: 'summary-1',
+          source: 'ai',
+        },
+      },
+      {
+        id: 'summary-1',
+        role: 'system',
+        content: 'This is a summary of old conversation.',
+        timestamp: 3,
+      },
+      {
+        id: 'user-new',
+        role: 'user',
+        content: 'new message',
+        timestamp: 4,
+      },
+    ])
+
+    // boundary 之前的老消息应被裁掉，summary 和后面的消息应保留
+    expect(messages).toEqual([
+      {
+        role: 'system',
+        content: 'This is a summary of old conversation.',
+      },
+      {
+        role: 'user',
+        content: 'new message',
+      },
+    ])
+  })
+
+  it('excludes compact-boundary itself from model context', () => {
+    const messages = buildChatMessagesWithOptions([
+      {
+        id: 'boundary-1',
+        role: 'system',
+        type: 'compact-boundary',
+        content: '',
+        timestamp: 1,
+        compactMetadata: {
+          trigger: 'auto',
+          preTokens: 1000,
+          summarizedMessages: 1,
+          createdAt: 1,
+          summaryMessageId: 'summary-1',
+          source: 'ai',
+        },
+      },
+      {
+        id: 'user-1',
+        role: 'user',
+        content: 'hello',
+        timestamp: 2,
+      },
+    ])
+
+    expect(messages).toEqual([
+      {
+        role: 'user',
+        content: 'hello',
+      },
+    ])
+  })
+
+  it('starts model context after the latest rewind-boundary', () => {
+    const messages = buildChatMessagesWithOptions([
+      {
+        id: 'user-old',
+        role: 'user',
+        content: 'old message',
+        timestamp: 1,
+      },
+      {
+        id: 'rewind-1',
+        role: 'system',
+        type: 'rewind-boundary',
+        content: '已回退到 user-old',
+        timestamp: 2,
+        rewindMetadata: {
+          targetMessageId: 'user-old',
+          targetMessageRole: 'user',
+          hiddenMessages: 2,
+          createdAt: 2,
+        },
+      },
+      {
+        id: 'user-new',
+        role: 'user',
+        content: 'new branch message',
+        timestamp: 3,
+      },
+    ])
+
+    expect(messages).toEqual([
+      {
+        role: 'user',
+        content: 'new branch message',
+      },
+    ])
+  })
 })
