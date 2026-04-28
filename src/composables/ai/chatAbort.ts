@@ -1,4 +1,5 @@
-import { aiAbortStream, aiSaveMessage } from '@/api/ai'
+import { aiSaveMessage } from '@/api/ai'
+import { abortGatewayRequest } from '@/ai-gateway/AiGateway'
 import type { AiMessage, AiMessageRecord } from '@/types/ai'
 import type { Logger } from '@/utils/logger'
 import { genId } from './chatHelpers'
@@ -32,7 +33,7 @@ export async function abortChat({
 
   clearWatchdog()
   try {
-    await aiAbortStream(sessionId)
+    await abortGatewayRequest(sessionId)
   } catch (error) {
     log.warn('abort_failed', { sessionId }, error)
   }

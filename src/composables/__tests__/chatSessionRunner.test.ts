@@ -10,6 +10,14 @@ const { aiChatStreamMock, aiAbortStreamMock, aiSaveMessageMock } = vi.hoisted(()
   aiSaveMessageMock: vi.fn(),
 }))
 
+vi.mock('@/ai-gateway/AiGateway', async () => {
+  const actual = await vi.importActual<typeof import('@/ai-gateway/AiGateway')>('@/ai-gateway/AiGateway')
+  return {
+    ...actual,
+    abortGatewayRequest: aiAbortStreamMock,
+  }
+})
+
 vi.mock('@/api/ai', () => ({
   aiChatStream: aiChatStreamMock,
   aiAbortStream: aiAbortStreamMock,

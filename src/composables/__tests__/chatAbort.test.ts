@@ -8,8 +8,11 @@ const { aiAbortStreamMock, aiSaveMessageMock } = vi.hoisted(() => ({
   aiSaveMessageMock: vi.fn(),
 }))
 
+vi.mock('@/ai-gateway/AiGateway', () => ({
+  abortGatewayRequest: aiAbortStreamMock,
+}))
+
 vi.mock('@/api/ai', () => ({
-  aiAbortStream: aiAbortStreamMock,
   aiSaveMessage: aiSaveMessageMock,
 }))
 
