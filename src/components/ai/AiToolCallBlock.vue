@@ -14,6 +14,7 @@ import AiApprovalDialog from './AiApprovalDialog.vue'
 import { inferLanguageFromPath } from '@/utils/file-markers'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { aiReadToolResultFile } from '@/api/ai'
+import { createLogger } from '@/utils/logger'
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+
+const log = createLogger('ai.tool_call')
 
 const props = defineProps<{
   toolCall: ToolCallInfo
@@ -206,7 +209,7 @@ async function copyFull() {
     copiedFull.value = true
     setTimeout(() => (copiedFull.value = false), 1500)
   } catch (e) {
-    console.warn('[AI] 复制失败:', e)
+    log.warn('copy_failed', undefined, e)
   }
 }
 
@@ -315,7 +318,7 @@ async function handleOpenReadFile() {
   try {
     await openPath(path)
   } catch (e) {
-    console.error('[AI] 打开文件失败:', e)
+    log.error('open_file_failed', undefined, e)
   }
 }
 
@@ -326,7 +329,7 @@ async function handleOpenFile() {
   try {
     await openPath(path)
   } catch (e) {
-    console.error('[AI] 打开文件失败:', e)
+    log.error('open_file_failed', undefined, e)
   }
 }
 

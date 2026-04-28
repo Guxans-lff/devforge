@@ -8,6 +8,9 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { Copy, Check, Download } from 'lucide-vue-next'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeTextFile } from '@/api/database'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('ai.code-block')
 
 const props = withDefaults(defineProps<{
   language: string
@@ -88,7 +91,7 @@ async function saveCode() {
   try {
     await writeTextFile(filePath, props.code)
   } catch (e) {
-    console.error('[AI] 保存代码失败:', e)
+    log.error('save_code_failed', undefined, e)
   }
 }
 
