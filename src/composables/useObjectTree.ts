@@ -10,6 +10,7 @@ import * as dbApi from '@/api/database'
 import { fetchWithCache, invalidate, invalidateByPrefix } from '@/composables/useMetadataCache'
 import { useObjectSearch } from '@/composables/useObjectSearch'
 import { useAdaptiveOverscan } from '@/composables/useAdaptiveOverscan'
+import { createLogger } from '@/utils/logger'
 import type { DatabaseTreeNode, DatabaseInfo } from '@/types/database'
 
 export interface UseObjectTreeOptions {
@@ -37,6 +38,7 @@ export interface FlatNodeWrapper {
 }
 
 export function useObjectTree(options: UseObjectTreeOptions) {
+  const log = createLogger('object.tree')
   const {
     connectionId, connecting: _connecting, parentRef,
     onSelectTable, onSelectDatabase, onSchemaUpdated,
@@ -360,7 +362,7 @@ export function useObjectTree(options: UseObjectTreeOptions) {
       node.children = []
       const msg = e instanceof Error ? e.message : String(e)
       toast.error(t('objectTree.loadFailed'), msg)
-      console.error(`[ObjectTree] 加载 ${node.folderType} 失败:`, e)
+      log.error('load_folder_failed', { folderType: node.folderType }, e)
     } finally {
       node.isLoading = false
       onSchemaUpdated()
@@ -388,7 +390,7 @@ export function useObjectTree(options: UseObjectTreeOptions) {
       node.children = []
       const msg = e instanceof Error ? e.message : String(e)
       toast.error(t('objectTree.loadFailed'), msg)
-      console.error(`[ObjectTree] 加载列信息失败:`, e)
+      log.error('load_columns_failed', undefined, e)
     } finally {
       node.isLoading = false
       onSchemaUpdated()

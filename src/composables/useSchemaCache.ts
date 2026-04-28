@@ -2,11 +2,13 @@ import { ref } from 'vue'
 import type { SchemaCache, DatabaseSchema, TableSchema, DatabaseTreeNode } from '@/types/database'
 import { dbGetForeignKeys, dbGetAllColumns } from '@/api/database'
 import { warmColumnMetadataCache } from '@/composables/useMetadataCache'
+import { createLogger } from '@/utils/logger'
 
 export function useSchemaCache(
   treeNodesGetter: () => DatabaseTreeNode[] | undefined,
   connectionIdGetter?: () => string | undefined,
 ) {
+  const log = createLogger('schema.cache')
   const schemaCache = ref<SchemaCache | null>(null)
   const isLoadingSchema = ref(false)
   const currentDatabase = ref<string | null>(null)
@@ -87,13 +89,13 @@ export function useSchemaCache(
       const allColumns = await dbGetAllColumns(connectionId, database)
       const cache = schemaCache.value
       if (!cache) {
-        console.warn(`[SchemaCache] schemaCache missing while preloading columns`)
+        log.warn('schemaCache_missing_preload_columns')
         return
       }
 
       const dbSchema = cache.databases.get(database)
       if (!dbSchema) {
-        console.warn(`[SchemaCache] database missing while preloading columns: ${database}`)
+        log.warn('database_missing_preload_columns', { database })
         return
       }
 
@@ -133,7 +135,7 @@ export function useSchemaCache(
     try {
       await task
     } catch (e) {
-      console.warn(`[SchemaCache] failed to preload columns [${database}]`, e)
+      log.warn('preload_columns_failed', { database }, e)
     } finally {
       columnPreloadInflight.delete(inflightKey)
     }
@@ -159,7 +161,7 @@ export function useSchemaCache(
         loadedForeignKeyDatabases.add(inflightKey)
         schemaCache.value = { databases: new Map(latestCache.databases) }
       } catch (e) {
-        console.warn(`[SchemaCache] failed to load foreign keys [${database}]`, e)
+        log.warn('load_foreign_keys_failed', { database }, e)
       }
     })()
 

@@ -16,6 +16,9 @@ import type { SchemaCache } from '@/types/database'
 import type { QueryTabContext } from '@/types/database-workspace'
 import type { EnvironmentType } from '@/types/environment'
 import type { SqlEditorExposed } from '@/types/component-exposed'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('query.panel')
 
 const props = defineProps<{
   connectionId: string
@@ -201,7 +204,7 @@ onMounted(() => {
   document.addEventListener('click', resultTabsManager.closeContextMenu)
   if (props.isConnected) {
     dbApi.dbAcquireSession(props.connectionId, props.tabId).catch((e) => {
-      console.warn('[Session] 获取 Session 连接失败，将降级到传统模式:', e)
+      log.warn('session_acquire_failed_fallback', undefined, e)
     })
   }
   // 挂载时检查：如果 context 中有 tableBrowse 但没有 result，说明需要执行 browseTable
@@ -223,14 +226,14 @@ function checkPendingBrowse() {
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', resultTabsManager.closeContextMenu)
-  dbApi.dbReleaseSession(props.connectionId, props.tabId).catch((e: unknown) => console.warn('[QueryPanel]', e))
+  dbApi.dbReleaseSession(props.connectionId, props.tabId).catch((e: unknown) => log.warn('release_session_failed', undefined, e))
   execution.clearLongRunningNotify()
 })
 
 watch(() => props.isConnected, (connected) => {
   if (connected) {
     dbApi.dbAcquireSession(props.connectionId, props.tabId).catch((e) => {
-      console.warn('[Session] 连接恢复后获取 Session 失败:', e)
+      log.warn('reconnect_session_acquire_failed', undefined, e)
     })
   }
 })
