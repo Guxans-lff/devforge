@@ -29,6 +29,7 @@ const props = defineProps<{
 }>()
 
 const pending = usePendingApproval(props.sessionId)
+const confirmingAllow = ref(false)
 
 /** 是否应当展示 */
 const shouldShow = computed(() => {
@@ -112,11 +113,22 @@ const diffStats = computed(() => {
 const expanded = ref(false)
 watch(
   () => pending.value?.target,
-  () => { expanded.value = false },
+  () => {
+    expanded.value = false
+    confirmingAllow.value = false
+  },
 )
 
 /** 预览区域限高（折叠时 ~5 行；展开时放高让其滚动） */
 const previewMaxHeight = computed(() => (expanded.value ? '70vh' : '100px'))
+
+function handleAllow() {
+  if (pending.value?.requiresDoubleConfirm && !confirmingAllow.value) {
+    confirmingAllow.value = true
+    return
+  }
+  resolveApproval('allow')
+}
 </script>
 
 <template>
@@ -188,6 +200,13 @@ const previewMaxHeight = computed(() => (expanded.value ? '70vh' : '100px'))
           </span>
         </template>
         <div class="flex-1" />
+        <span
+          v-if="pending?.requiresDoubleConfirm && confirmingAllow"
+          class="text-[10px] font-medium text-amber-500"
+          :title="pending?.warning"
+        >
+          需要二次确认
+        </span>
         <button
           class="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] text-muted-foreground/70 hover:text-foreground hover:bg-muted/40 transition-colors"
           @click="resolveApproval('deny')"
@@ -202,7 +221,7 @@ const previewMaxHeight = computed(() => (expanded.value ? '70vh' : '100px'))
         </button>
         <button
           class="flex items-center gap-1 rounded bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/25 transition-colors"
-          @click="resolveApproval('allow')"
+          @click="handleAllow"
         >
           <ShieldCheck class="h-3 w-3" /> 允许一次
         </button>

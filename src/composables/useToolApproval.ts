@@ -40,6 +40,8 @@ export interface PendingApproval {
   preview: string
   /** 编辑场景下的旧串（仅 edit_file 使用，用于可选 diff 展示） */
   oldPreview?: string
+  warning?: string
+  requiresDoubleConfirm?: boolean
   /** 大哥点"信任"时作为短路 key 的值（write/edit = 路径；bash = 命令本身） */
   trustKey: string
   /** 内部 promise resolver */
@@ -166,6 +168,8 @@ export interface RequestApprovalOptions {
   newContent?: string
   /** 旧内容（edit_file 可选） */
   oldContent?: string
+  warning?: string
+  requiresDoubleConfirm?: boolean
   /** 所属会话 ID（必填，避免跨 Tab 串扰） */
   sessionId: string
 }
@@ -219,6 +223,8 @@ export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalD
           ? (opts.url ?? '')
           : (opts.newContent ?? ''),
       oldPreview: opts.oldContent,
+      warning: opts.warning,
+      requiresDoubleConfirm: opts.requiresDoubleConfirm,
       trustKey,
       resolve,
     }
