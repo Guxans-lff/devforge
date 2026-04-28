@@ -274,7 +274,7 @@ watch(
           {{ t('transfer.activeTransfers') }} ({{ activeTasks.length }})
         </span>
       </div>
-      <div class="flex items-center gap-1">
+      <div v-if="hasActiveTasks" class="flex items-center gap-1">
         <Button
           v-if="transferringTasks.length > 0"
           variant="ghost"
@@ -303,10 +303,19 @@ watch(
           @click="handleRetryAll"
         >
           <RotateCcw class="mr-1 h-2.5 w-2.5" />
-          重试全部
+          重试失败
         </Button>
         <Button
-          v-if="hasActiveTasks"
+          v-if="errorCount > 0"
+          variant="ghost"
+          size="sm"
+          class="h-6 px-2 text-[10px] font-bold hover:bg-destructive/10 hover:text-destructive"
+          @click="transferStore.clearErrors()"
+        >
+          <X class="mr-1 h-2.5 w-2.5" />
+          清理失败
+        </Button>
+        <Button
           variant="ghost"
           size="sm"
           class="h-6 px-2 text-[10px] font-bold hover:bg-destructive/10 hover:text-destructive"
@@ -369,7 +378,7 @@ watch(
                 class="h-4 w-4 text-df-success"
               />
               <template v-else-if="task.status === 'error'">
-                <Button v-if="task.retryable !== false" variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-primary/10" @click="handleRetry(task.id)">
+                <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-primary/10" @click="handleRetry(task.id)">
                   <RotateCcw class="h-3 w-3" />
                 </Button>
                 <Button variant="ghost" size="icon" class="h-6 w-6 rounded-md hover:bg-destructive/10 hover:text-destructive" @click="handleRemove(task.id)">
@@ -459,8 +468,8 @@ watch(
                 <span v-else-if="task.status === 'paused'" class="text-df-warning uppercase tracking-widest text-[9px]">{{ t('transfer.paused') }}</span>
                 <span v-else-if="task.status === 'completed'" class="text-df-success uppercase tracking-widest text-[9px]">{{ t('transfer.completed') }} · {{ getElapsedTime(task) }}</span>
                 <span v-else-if="task.status === 'error'" class="text-destructive uppercase tracking-widest text-[9px]">
-                  <span v-if="task.errorKind" class="mr-1 rounded bg-destructive/10 px-1">{{ task.errorKind }}</span>
-                  {{ task.error || t('transfer.failed') }}
+                  {{ task.errorKind ? `[${task.errorKind}] ` : '' }}{{ task.error || t('transfer.failed') }}
+                  <span v-if="task.resumeHint === 'reconnect'" class="ml-1 text-muted-foreground/60">建议重连</span>
                 </span>
               </div>
             </div>

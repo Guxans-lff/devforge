@@ -318,6 +318,13 @@ export const useTransferStore = defineStore('transfer', () => {
     commitTasks()
   }
 
+  function clearErrors() {
+    for (const [id, task] of tasks.value.entries()) {
+      if (task.status === 'error') tasks.value.delete(id)
+    }
+    commitTasks()
+  }
+
   /** 将任务标记为失败 */
   function failTask(id: string, error: string) {
     const task = tasks.value.get(id)
@@ -349,5 +356,6 @@ export const useTransferStore = defineStore('transfer', () => {
     failTask,
     clearCompleted,
     clearHistory,
+    clearErrors,
   }
 })
