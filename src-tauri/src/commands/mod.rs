@@ -1,6 +1,7 @@
 pub mod ai;
 pub mod app_state;
 pub mod audit_log;
+pub mod background_job;
 pub mod command_snippet;
 pub mod connection;
 pub mod data_sync;
@@ -8,6 +9,7 @@ pub mod db;
 pub mod db_backup;
 pub mod diagnostics;
 pub mod file_editor;
+pub mod feature_gate;
 pub mod import;
 pub mod import_export;
 pub mod local_shell;

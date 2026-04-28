@@ -23,7 +23,9 @@ use commands::sql_snippet;
 use commands::command_snippet;
 use commands::app_state;
 use commands::audit_log;
+use commands::background_job;
 use commands::ssh::{self, SshEngineState};
+use commands::feature_gate;
 use commands::git::{self as git_cmd, GitEngineState};
 use commands::screenshot::{self as screenshot_cmd, ScreenshotEngineState};
 use commands::workspace_fs::{self, FileWatcherState};
@@ -260,6 +262,11 @@ pub fn run() {
                         } else {
                             log::info!("AI tables initialized");
                         }
+                        if let Err(e) = services::background_job::init_table(&pool).await {
+                            log::error!("background_jobs 琛ㄥ垵濮嬪寲澶辫触: {}", e);
+                        } else {
+                            log::info!("Background job table initialized");
+                        }
                     });
 
                     // 启动定时调度器（需在 Tokio 运行时上下文中 spawn）
@@ -491,6 +498,15 @@ pub fn run() {
             app_state::set_app_state,
             app_state::delete_app_state,
             app_state::list_app_state,
+            background_job::submit_background_job,
+            background_job::update_background_job,
+            background_job::get_background_job,
+            background_job::list_background_jobs,
+            background_job::delete_background_job,
+            background_job::cleanup_background_jobs,
+            feature_gate::read_feature_gates,
+            feature_gate::write_feature_gate,
+            feature_gate::delete_feature_gate,
             // 审计日志
             audit_log::query_audit_logs,
             audit_log::get_audit_stats,
