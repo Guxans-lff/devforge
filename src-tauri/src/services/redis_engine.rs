@@ -5,7 +5,7 @@ use tokio::sync::RwLock;
 use redis::aio::MultiplexedConnection;
 use redis::cluster::ClusterClient;
 use redis::cluster_async::ClusterConnection;
-use redis::{AsyncCommands, Client, Cmd, Value};
+use redis::{Client, Cmd, Value};
 
 use crate::models::redis::{
     ClusterNodeInfo, HashField, RedisCliResult, RedisKeyInfo, RedisScanResult, RedisServerInfo,

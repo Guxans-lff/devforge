@@ -133,6 +133,7 @@ pub struct PubSubSubscription {
 /// Redis 连接配置（存储在 config_json 中）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct RedisConfig {
     /// 数据库索引（默认 0）
     #[serde(default)]
@@ -166,6 +167,7 @@ pub struct RedisConfig {
     pub sentinel_password: Option<String>,
 }
 
+#[allow(dead_code)]
 fn default_timeout() -> u64 {
     10
 }

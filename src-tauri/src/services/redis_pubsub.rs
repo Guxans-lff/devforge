@@ -36,6 +36,7 @@ impl RedisPubSubManager {
     }
 
     /// 构建连接 URL（复用 redis_engine 的逻辑）
+    #[allow(dead_code)]
     pub fn build_url(
         host: &str,
         port: u16,
@@ -233,6 +234,7 @@ impl RedisPubSubManager {
     }
 
     /// 通过现有 MultiplexedConnection 发布消息（不需要 PubSub 连接）
+    #[allow(dead_code)]
     pub async fn publish(
         &self,
         connection_id: &str,
@@ -244,6 +246,7 @@ impl RedisPubSubManager {
     }
 
     /// 停止所有连接的 PubSub
+    #[allow(dead_code)]
     pub async fn stop_all(&self) {
         let mut sessions = self.sessions.write().await;
         for (_, session) in sessions.drain() {

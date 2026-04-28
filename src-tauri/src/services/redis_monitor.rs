@@ -95,7 +95,7 @@ impl RedisMonitorManager {
                     }
                     // 从连接读取 MONITOR 输出
                     result = async {
-                        let mut cmd = redis::cmd("");
+                        let cmd = redis::cmd("");
                         cmd.query_async::<String>(&mut conn).await
                     } => {
                         match result {
@@ -132,6 +132,7 @@ impl RedisMonitorManager {
     }
 
     /// 停止所有 MONITOR 会话
+    #[allow(dead_code)]
     pub async fn stop_all(&self) {
         let mut sessions = self.sessions.write().await;
         for (_, session) in sessions.drain() {

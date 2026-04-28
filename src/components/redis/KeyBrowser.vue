@@ -15,6 +15,7 @@ import {
 import { Search, CheckSquare, Trash2, Clock, Download, Upload, CheckCheck, XSquare, Database } from 'lucide-vue-next'
 import KeyTreeItem from './KeyTreeItem.vue'
 import type { TreeNode } from './KeyTreeItem.vue'
+import { buildRedisKeyTree, removeRedisKeys } from './redisKeyTree'
 import { redisScanKeys, redisGetKeyInfo, redisDeleteKeys, redisRenameKey, redisSetTtl, redisBatchDelete, redisBatchSetTtl, redisBatchExport, redisBatchImport } from '@/api/redis'
 import { useToast } from '@/composables/useToast'
 import { parseBackendError } from '@/types/error'
@@ -40,6 +41,7 @@ const keys = ref<string[]>([])
 const cursor = ref(0)
 const hasMore = ref(false)
 const treeData = ref<TreeNode[]>([])
+const keyInfoCache = ref<Map<string, RedisKeyInfo>>(new Map())
 
 /** 扁平化版本号：展开/折叠时递增，触发 flatVisibleNodes 重算 */
 const flatVersion = ref(0)
@@ -95,7 +97,7 @@ async function loadKeys(reset = true) {
     if (reset) {
       keys.value = result.keys
     } else {
-      keys.value = [...keys.value, ...result.keys]
+      keys.value = [...new Set([...keys.value, ...result.keys])]
     }
     cursor.value = result.cursor
     hasMore.value = result.cursor !== 0
@@ -115,54 +117,8 @@ async function loadMore() {
 
 /** 构建前缀树 */
 function buildTree() {
-  const separator = ':'
-  const root: TreeNode[] = []
-  const sorted = [...keys.value].sort()
-
-  for (const key of sorted) {
-    const parts = key.split(separator)
-    let current = root
-
-    for (let i = 0; i < parts.length; i++) {
-      const part = parts[i]!
-      const isLast = i === parts.length - 1
-      const fullKey = parts.slice(0, i + 1).join(separator)
-
-      let node = current.find(n => n.name === part && n.isLeaf === isLast)
-      if (!node) {
-        node = {
-          name: part,
-          fullKey: isLast ? key : fullKey,
-          isLeaf: isLast,
-          children: [],
-          expanded: false,
-        }
-        current.push(node)
-      }
-      current = node.children
-    }
-  }
-
-  // 折叠单链路径
-  function collapse(nodes: TreeNode[]): TreeNode[] {
-    return nodes.map(node => {
-      if (!node.isLeaf && node.children.length === 1 && !node.children[0]!.isLeaf) {
-        const child = node.children[0]!
-        return {
-          ...node,
-          name: `${node.name}${separator}${child.name}`,
-          fullKey: child.fullKey,
-          children: collapse(child.children),
-        }
-      }
-      if (!node.isLeaf) {
-        node.children = collapse(node.children)
-      }
-      return node
-    })
-  }
-
-  treeData.value = collapse(root)
+  treeData.value = buildRedisKeyTree(keys.value, { previousTree: treeData.value })
+  flatVersion.value++
 }
 
 /** 选中键 */
@@ -173,7 +129,9 @@ async function handleSelect(node: TreeNode) {
     return
   }
   try {
-    const info = await redisGetKeyInfo(props.connectionId, node.fullKey)
+    const cached = keyInfoCache.value.get(node.fullKey)
+    const info = cached ?? await redisGetKeyInfo(props.connectionId, node.fullKey)
+    if (!cached) keyInfoCache.value.set(node.fullKey, info)
     node.keyType = info.keyType
     emit('select', node.fullKey, info)
   } catch (e) {
@@ -187,7 +145,8 @@ async function handleDeleteKey(key: string, event: Event) {
   try {
     await redisDeleteKeys(props.connectionId, [key])
     toast.success(t('redis.keyDeleted'))
-    keys.value = keys.value.filter(k => k !== key)
+    keys.value = removeRedisKeys(keys.value, [key])
+    keyInfoCache.value.delete(key)
     buildTree()
     emit('delete')
   } catch (e) {
@@ -254,7 +213,8 @@ async function confirmBatchDelete() {
     toast.success(t('redis.batch.deleteSuccess', { count }))
     // 本地移除已删键，避免全量 SCAN
     const deletedSet = new Set(deletedKeys)
-    keys.value = keys.value.filter(k => !deletedSet.has(k))
+    keys.value = removeRedisKeys(keys.value, deletedSet)
+    for (const key of deletedSet) keyInfoCache.value.delete(key)
     buildTree()
     selectedKeys.value = new Set()
     emit('delete')
@@ -408,7 +368,8 @@ async function confirmKeyDelete() {
   try {
     await redisDeleteKeys(props.connectionId, [contextKey.value])
     toast.success(t('redis.keyDeleted'))
-    keys.value = keys.value.filter(k => k !== contextKey.value)
+    keys.value = removeRedisKeys(keys.value, [contextKey.value])
+    keyInfoCache.value.delete(contextKey.value)
     buildTree()
     emit('delete')
   } catch (e) {
