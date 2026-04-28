@@ -77,6 +77,20 @@ export function tryParseJson(str: string): Record<string, unknown> | undefined {
 }
 
 export function pickApprovalTool(name: string): ApprovalToolName | null {
-  if (name === 'write_file' || name === 'edit_file' || name === 'bash' || name === 'web_fetch') return name
+  if (
+    name === 'read_file'
+    || name === 'list_files'
+    || name === 'list_directory'
+    || name === 'search_files'
+    || name === 'read_tool_result'
+    || name === 'write_file'
+    || name === 'edit_file'
+    || name === 'delete_file'
+    || name === 'bash'
+    || name === 'web_fetch'
+    || name === 'web_search'
+    || name === 'db_execute'
+    || name === 'db_migration'
+  ) return name
   return null
 }

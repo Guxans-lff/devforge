@@ -2,10 +2,15 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import {
   clearApprovalStateForTests,
   clearTrustedKeys,
+  getPermissionMode,
   requestApproval,
   resolveApproval,
   setActiveSessionId,
+  setPermissionMode,
+  useApprovalMode,
   usePendingApproval,
+  usePendingToolRiskLevel,
+  usePermissionMode,
   useTrustedKeys,
 } from '@/composables/useToolApproval'
 
@@ -18,7 +23,7 @@ describe('useToolApproval', () => {
     setActiveSessionId(sessionId)
   })
 
-  it('allow 单次放行，不进入信任集合', async () => {
+  it('allow 单次放行不进入信任集合', async () => {
     const pending = usePendingApproval(sessionId)
     const trusted = useTrustedKeys(sessionId)
 
@@ -45,12 +50,13 @@ describe('useToolApproval', () => {
       command: 'cargo check',
       sessionId,
     })
+
     await Promise.resolve()
     resolveApproval('deny', sessionId)
     await expect(p).resolves.toBe('deny')
   })
 
-  it('trust 一次后，同 session 同 key 下次自动放行', async () => {
+  it('trust 后同 session 同 key 自动放行', async () => {
     const pending = usePendingApproval(sessionId)
     const trusted = useTrustedKeys(sessionId)
 
@@ -105,7 +111,7 @@ describe('useToolApproval', () => {
     await expect(p2).resolves.toBe('deny')
   })
 
-  it('清空信任集合后，同 key 重新要求审批', async () => {
+  it('清空信任集合后同 key 重新审批', async () => {
     const pending = usePendingApproval(sessionId)
     const p1 = requestApproval({
       toolName: 'write_file',
@@ -131,7 +137,7 @@ describe('useToolApproval', () => {
     await p2
   })
 
-  it('信任的 trustKey 区分 bash 命令与路径', async () => {
+  it('trustKey 区分 bash 命令与路径', async () => {
     const trusted = useTrustedKeys(sessionId)
 
     const pBash = requestApproval({
@@ -145,5 +151,78 @@ describe('useToolApproval', () => {
 
     expect(trusted.value.has('cargo test')).toBe(true)
     expect(trusted.value.has('D:/workspace/x.txt')).toBe(false)
+  })
+
+  it('dangerous_bypass 模式下所有工具自动放行', async () => {
+    setPermissionMode('dangerous_bypass', sessionId)
+
+    const decision = await requestApproval({
+      toolName: 'delete_file',
+      path: 'D:/workspace/x.txt',
+      sessionId,
+    })
+
+    expect(decision).toBe('allow')
+    expect(useApprovalMode().value).toBe('auto')
+  })
+
+  it('read_only 模式下只允许只读工具', async () => {
+    setPermissionMode('read_only', sessionId)
+
+    await expect(requestApproval({
+      toolName: 'read_file',
+      path: 'D:/workspace/x.txt',
+      sessionId,
+    })).resolves.toBe('allow')
+
+    await expect(requestApproval({
+      toolName: 'write_file',
+      path: 'D:/workspace/x.txt',
+      newContent: 'a',
+      sessionId,
+    })).resolves.toBe('deny')
+  })
+
+  it('accept_edits 模式下 read/write 自动放行，bash 仍需确认', async () => {
+    setPermissionMode('accept_edits', sessionId)
+
+    await expect(requestApproval({
+      toolName: 'write_file',
+      path: 'D:/workspace/x.txt',
+      newContent: 'a',
+      sessionId,
+    })).resolves.toBe('allow')
+
+    const pending = usePendingApproval(sessionId)
+    const p = requestApproval({
+      toolName: 'bash',
+      command: 'cargo test',
+      sessionId,
+    })
+
+    await Promise.resolve()
+    expect(pending.value?.toolName).toBe('bash')
+    resolveApproval('deny', sessionId)
+    await expect(p).resolves.toBe('deny')
+  })
+
+  it('暴露 PermissionMode 与 pending 风险等级', async () => {
+    setPermissionMode('safe_auto', sessionId)
+    expect(usePermissionMode().value).toBe('safe_auto')
+    expect(getPermissionMode(sessionId)).toBe('safe_auto')
+
+    setPermissionMode('default', sessionId)
+    const riskLevel = usePendingToolRiskLevel(sessionId)
+    const p = requestApproval({
+      toolName: 'web_fetch',
+      url: 'https://example.com',
+      sessionId,
+    })
+
+    await Promise.resolve()
+    expect(riskLevel.value).toBe('network')
+    resolveApproval('allow', sessionId)
+    await p
+    expect(riskLevel.value).toBeNull()
   })
 })

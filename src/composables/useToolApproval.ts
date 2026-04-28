@@ -1,108 +1,90 @@
 /**
- * AI 工具写操作审批流
+ * AI 工具审批流。
  *
- * 为 `write_file` / `edit_file` / `bash` 等副作用工具增加一道用户确认关卡。
- * - 会话内的"信任路径/信任命令"集合短路后续同目标的审批弹窗
- * - Promise 驱动：`requestApproval()` 在 composable 层 await，弹窗决定 resolve
- * - 按 sessionId 分区隔离，多 Tab 并发互不干扰
+ * 按 sessionId 隔离待审批请求、信任集合和权限模式，避免多会话互相串扰。
  */
 
-import { ref, computed, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { getToolRiskLevel, isAutoAllowedByMode, isDeniedByMode, type ToolRiskLevel } from '@/composables/ai/toolRisk'
 import { createLogger } from '@/utils/logger'
 
 const log = createLogger('ai.approval')
 
-/** 需要审批的工具类型 */
-export type ApprovalToolName = 'write_file' | 'edit_file' | 'bash' | 'web_fetch'
+export type ApprovalToolName =
+  | 'read_file'
+  | 'list_files'
+  | 'list_directory'
+  | 'search_files'
+  | 'read_tool_result'
+  | 'write_file'
+  | 'edit_file'
+  | 'delete_file'
+  | 'bash'
+  | 'web_fetch'
+  | 'web_search'
+  | 'db_execute'
+  | 'db_migration'
 
-/** 审批决定 */
 export type ApprovalDecision = 'allow' | 'trust' | 'deny'
 
 /**
- * 会话级审批模式（三态）
- * - `ask`    默认，副作用工具均弹窗
- * - `auto`   全自动：所有副作用工具自动放行（仅在大哥明确授权的 chatMode=auto 下使用）
- * - `deny`   全拒绝：禁用副作用工具（用于 plan 模式 / 只读探索）
+ * 兼容旧 UI 的三态审批模式。
  */
 export type ApprovalMode = 'ask' | 'auto' | 'deny'
 
-// ─────────────────────── 按 sessionId 分区的状态 ───────────────────────
+/**
+ * 文档要求的完整权限分层。
+ */
+export type PermissionMode =
+  | 'default'
+  | 'plan'
+  | 'accept_edits'
+  | 'read_only'
+  | 'safe_auto'
+  | 'dangerous_bypass'
 
-/** 待审批的请求元数据（送入弹窗展示） */
 export interface PendingApproval {
-  /** 工具名 */
   toolName: ApprovalToolName
-  /** 主标识：write/edit 显示路径；bash 显示命令 */
   target: string
-  /** 预览标签（path/command） */
   targetLabel: string
-  /** 预览内容：write_file 的 content / edit_file 的 new_string / bash 的 command */
   preview: string
-  /** 编辑场景下的旧串（仅 edit_file 使用，用于可选 diff 展示） */
   oldPreview?: string
   warning?: string
   requiresDoubleConfirm?: boolean
-  /** 大哥点"信任"时作为短路 key 的值（write/edit = 路径；bash = 命令本身） */
   trustKey: string
-  /** 内部 promise resolver */
   resolve: (decision: ApprovalDecision) => void
 }
 
-/** 每个 session 的审批状态 */
 interface SessionApprovalState {
   mode: ApprovalMode
+  permissionMode: PermissionMode
   pending: PendingApproval | null
   timer: ReturnType<typeof setTimeout> | null
 }
 
 const sessionStates = ref<Map<string, SessionApprovalState>>(new Map())
-
-/** 当前活跃的 sessionId（由 AiChatView 在激活时设置） */
 const activeSessionId = ref<string>('')
 
-/** 5 分钟无操作自动拒绝（防止 AI 挂起等待） */
 const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000
+const STORAGE_KEY = 'ai.trustedKeysBySession'
+const LEGACY_STORAGE_KEY = 'ai.trustedPaths'
+const trustedKeysBySession = ref<Map<string, Set<string>>>(new Map())
 
 function getOrCreateState(sessionId: string): SessionApprovalState {
   if (!sessionStates.value.has(sessionId)) {
-    sessionStates.value.set(sessionId, { mode: 'ask', pending: null, timer: null })
+    sessionStates.value.set(sessionId, {
+      mode: 'ask',
+      permissionMode: 'default',
+      pending: null,
+      timer: null,
+    })
   }
   return sessionStates.value.get(sessionId)!
 }
 
-// ─────────────────────── 活跃 session 设置 ───────────────────────
-
-/** 设置当前活跃的 sessionId（由 AiChatView onActivated 调用） */
-export function setActiveSessionId(sessionId: string): void {
-  activeSessionId.value = sessionId
+function cloneSessionStates(): void {
+  sessionStates.value = new Map(sessionStates.value)
 }
-
-// ─────────────────────── 审批模式 ───────────────────────
-
-/** 供 UI 订阅当前模式（基于活跃 session） */
-export function useApprovalMode() {
-  return computed(() => {
-    const sid = activeSessionId.value
-    if (!sid) return 'ask' as ApprovalMode
-    return getOrCreateState(sid).mode
-  })
-}
-
-/** 设置指定会话的审批模式 */
-export function setApprovalMode(mode: ApprovalMode, sessionId?: string): void {
-  const sid = sessionId ?? activeSessionId.value
-  if (!sid) return
-  const state = getOrCreateState(sid)
-  if (state.mode === mode) return
-  log.info('approval_mode_changed', { sessionId: sid, from: state.mode, to: mode })
-  state.mode = mode
-}
-
-// ─────────────────────── 持久化信任集合 ───────────────────────
-
-const STORAGE_KEY = 'ai.trustedKeysBySession'
-const LEGACY_STORAGE_KEY = 'ai.trustedPaths'
-const trustedKeysBySession = ref<Map<string, Set<string>>>(new Map())
 
 function getTrustedKeys(sessionId: string): Set<string> {
   const existing = trustedKeysBySession.value.get(sessionId)
@@ -133,8 +115,8 @@ function loadTrusted(): void {
     if (localStorage.getItem(LEGACY_STORAGE_KEY)) {
       localStorage.removeItem(LEGACY_STORAGE_KEY)
     }
-  } catch (e) {
-    log.warn('load_trusted_failed', {}, e)
+  } catch (error) {
+    log.warn('load_trusted_failed', {}, error)
   }
 }
 
@@ -147,52 +129,142 @@ function persistTrusted(): void {
       ]),
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload))
-  } catch (e) {
-    log.warn('persist_trusted_failed', {}, e)
+  } catch (error) {
+    log.warn('persist_trusted_failed', {}, error)
   }
+}
+
+function approvalModeForPermissionMode(mode: PermissionMode): ApprovalMode {
+  if (mode === 'dangerous_bypass') return 'auto'
+  if (mode === 'read_only' || mode === 'plan') return 'deny'
+  return 'ask'
+}
+
+function resolveTrustKey(opts: RequestApprovalOptions): string {
+  if (opts.toolName === 'bash') return (opts.command ?? '').trim()
+  if (opts.toolName === 'web_fetch' || opts.toolName === 'web_search') return (opts.url ?? '').trim()
+  return (opts.path ?? '').trim()
+}
+
+function resolveTargetLabel(toolName: ApprovalToolName): string {
+  if (toolName === 'bash') return 'command'
+  if (toolName === 'web_fetch' || toolName === 'web_search') return 'url'
+  if (toolName === 'db_execute' || toolName === 'db_migration') return 'database'
+  return 'path'
+}
+
+function resolvePreview(opts: RequestApprovalOptions): string {
+  if (opts.toolName === 'bash') return opts.command ?? ''
+  if (opts.toolName === 'web_fetch' || opts.toolName === 'web_search') return opts.url ?? ''
+  return opts.newContent ?? ''
 }
 
 loadTrusted()
 
-// ─────────────────────── 对外 API ───────────────────────
-
 export interface RequestApprovalOptions {
   toolName: ApprovalToolName
-  /** 写/编辑场景的路径；bash 场景不填（用 command 代替） */
   path?: string
-  /** bash 场景的命令 */
   command?: string
-  /** web_fetch 场景的 URL */
   url?: string
-  /** 新内容预览 */
   newContent?: string
-  /** 旧内容（edit_file 可选） */
   oldContent?: string
   warning?: string
   requiresDoubleConfirm?: boolean
-  /** 所属会话 ID（必填，避免跨 Tab 串扰） */
   sessionId: string
 }
 
-/**
- * 请求审批。若目标已在信任集合中则立即 resolve 'allow'。
- * 否则展示弹窗并返回一个 Promise，用户点击按钮后 resolve。
- */
+export function setActiveSessionId(sessionId: string): void {
+  activeSessionId.value = sessionId
+}
+
+export function useApprovalMode() {
+  return computed(() => {
+    const sid = activeSessionId.value
+    if (!sid) return 'ask' as ApprovalMode
+    return getOrCreateState(sid).mode
+  })
+}
+
+export function setApprovalMode(mode: ApprovalMode, sessionId?: string): void {
+  const sid = sessionId ?? activeSessionId.value
+  if (!sid) return
+  const state = getOrCreateState(sid)
+  if (state.mode === mode) return
+  log.info('approval_mode_changed', { sessionId: sid, from: state.mode, to: mode })
+  state.mode = mode
+  cloneSessionStates()
+}
+
+export function usePermissionMode() {
+  return computed(() => {
+    const sid = activeSessionId.value
+    if (!sid) return 'default' as PermissionMode
+    return getOrCreateState(sid).permissionMode
+  })
+}
+
+export function getPermissionMode(sessionId?: string): PermissionMode {
+  const sid = sessionId ?? activeSessionId.value
+  if (!sid) return 'default'
+  return getOrCreateState(sid).permissionMode
+}
+
+export function setPermissionMode(mode: PermissionMode, sessionId?: string): void {
+  const sid = sessionId ?? activeSessionId.value
+  if (!sid) return
+  const state = getOrCreateState(sid)
+  if (state.permissionMode === mode) return
+  log.info('permission_mode_changed', { sessionId: sid, from: state.permissionMode, to: mode })
+  state.permissionMode = mode
+  state.mode = approvalModeForPermissionMode(mode)
+  cloneSessionStates()
+}
+
+export function usePendingToolRiskLevel(sessionId?: string) {
+  return computed<ToolRiskLevel | null>(() => {
+    const sid = sessionId ?? activeSessionId.value
+    if (!sid) return null
+    const pending = sessionStates.value.get(sid)?.pending
+    return pending ? getToolRiskLevel(pending.toolName) : null
+  })
+}
+
 export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalDecision> {
   const { sessionId } = opts
   const state = getOrCreateState(sessionId)
+  const trustKey = resolveTrustKey(opts)
+  const riskLevel = getToolRiskLevel(opts.toolName)
 
-  const trustKey = opts.toolName === 'bash'
-    ? (opts.command ?? '').trim()
-    : opts.toolName === 'web_fetch'
-      ? (opts.url ?? '').trim()
-      : (opts.path ?? '').trim()
+  if (state.permissionMode === 'dangerous_bypass') {
+    log.info('permission_dangerous_bypass_allow', { toolName: opts.toolName, riskLevel, sessionId })
+    return Promise.resolve('allow')
+  }
 
-  // 会话级审批模式短路
+  if (isDeniedByMode(state.permissionMode, riskLevel)) {
+    log.info('permission_mode_reject', {
+      toolName: opts.toolName,
+      riskLevel,
+      permissionMode: state.permissionMode,
+      sessionId,
+    })
+    return Promise.resolve('deny')
+  }
+
+  if (isAutoAllowedByMode(state.permissionMode, riskLevel)) {
+    log.info('permission_mode_auto_allow', {
+      toolName: opts.toolName,
+      riskLevel,
+      permissionMode: state.permissionMode,
+      sessionId,
+    })
+    return Promise.resolve('allow')
+  }
+
   if (state.mode === 'auto') {
     log.info('approval_auto_mode_allow', { toolName: opts.toolName, trustKey, sessionId })
     return Promise.resolve('allow')
   }
+
   if (state.mode === 'deny') {
     log.info('approval_deny_mode_reject', { toolName: opts.toolName, trustKey, sessionId })
     return Promise.resolve('deny')
@@ -203,36 +275,26 @@ export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalD
     return Promise.resolve('allow')
   }
 
-  // 若该 session 已经有 pending，排队等前一个结束（串行）
   const prev = state.pending
   const run = () => new Promise<ApprovalDecision>((resolve) => {
-    // 清理旧定时器
-    if (state.timer) { clearTimeout(state.timer); state.timer = null }
+    if (state.timer) {
+      clearTimeout(state.timer)
+      state.timer = null
+    }
 
     state.pending = {
       toolName: opts.toolName,
       target: trustKey,
-      targetLabel: opts.toolName === 'bash'
-        ? 'command'
-        : opts.toolName === 'web_fetch'
-          ? 'url'
-          : 'path',
-      preview: opts.toolName === 'bash'
-        ? (opts.command ?? '')
-        : opts.toolName === 'web_fetch'
-          ? (opts.url ?? '')
-          : (opts.newContent ?? ''),
+      targetLabel: resolveTargetLabel(opts.toolName),
+      preview: resolvePreview(opts),
       oldPreview: opts.oldContent,
       warning: opts.warning,
       requiresDoubleConfirm: opts.requiresDoubleConfirm,
       trustKey,
       resolve,
     }
+    cloneSessionStates()
 
-    // 强制触发响应式更新
-    sessionStates.value = new Map(sessionStates.value)
-
-    // 超时自动拒绝
     const target = trustKey
     state.timer = setTimeout(() => {
       state.timer = null
@@ -244,7 +306,7 @@ export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalD
   })
 
   if (!prev) return run()
-  // 等 prev 解决后再排队
+
   return new Promise<ApprovalDecision>((resolve) => {
     const stop = watch(
       () => state.pending,
@@ -259,7 +321,6 @@ export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalD
   })
 }
 
-/** 弹窗按钮回调：做出决定 */
 export function resolveApproval(decision: ApprovalDecision, sessionId?: string): void {
   const sid = sessionId ?? activeSessionId.value
   if (!sid) return
@@ -268,10 +329,12 @@ export function resolveApproval(decision: ApprovalDecision, sessionId?: string):
   const cur = state.pending
   if (!cur) return
 
-  if (state.timer) { clearTimeout(state.timer); state.timer = null }
+  if (state.timer) {
+    clearTimeout(state.timer)
+    state.timer = null
+  }
   state.pending = null
-  // 强制触发响应式更新
-  sessionStates.value = new Map(sessionStates.value)
+  cloneSessionStates()
 
   if (decision === 'trust' && cur.trustKey) {
     getTrustedKeys(sid).add(cur.trustKey)
@@ -286,7 +349,6 @@ export function resolveApproval(decision: ApprovalDecision, sessionId?: string):
   cur.resolve(decision)
 }
 
-/** 取消当前待审批（如组件卸载/关闭弹窗） — 当作 deny 处理 */
 export function cancelApproval(sessionId?: string): void {
   const sid = sessionId ?? activeSessionId.value
   if (!sid) return
@@ -294,7 +356,6 @@ export function cancelApproval(sessionId?: string): void {
   if (state?.pending) resolveApproval('deny', sid)
 }
 
-/** 暴露只读 pending 给 UI（基于活跃 session） */
 export function usePendingApproval(sessionId?: string) {
   return computed(() => {
     const sid = sessionId ?? activeSessionId.value
@@ -303,18 +364,15 @@ export function usePendingApproval(sessionId?: string) {
   })
 }
 
-/** 暴露指定 session 的 pending（供 AiApprovalDialog 使用） */
 export function useSessionPendingApproval(sessionId: string) {
   return computed(() => sessionStates.value.get(sessionId)?.pending ?? null)
 }
 
-/** 清空信任集合（供设置页使用） */
 export function clearTrustedKeys(): void {
   trustedKeysBySession.value = new Map()
   persistTrusted()
 }
 
-/** 查询当前信任列表（供设置页展示） */
 export function useTrustedKeys(sessionId?: string) {
   return computed(() => {
     const sid = sessionId ?? activeSessionId.value
@@ -343,13 +401,11 @@ export function clearApprovalStateForTests(): void {
   clearTrustedKeys()
 }
 
-/** 清理会话状态（会话关闭时调用） */
 export function cleanupSessionApproval(sessionId: string): void {
   const state = sessionStates.value.get(sessionId)
-  if (state) {
-    if (state.timer) clearTimeout(state.timer)
-    if (state.pending) state.pending.resolve('deny')
-    sessionStates.value.delete(sessionId)
-    sessionStates.value = new Map(sessionStates.value)
-  }
+  if (!state) return
+  if (state.timer) clearTimeout(state.timer)
+  if (state.pending) state.pending.resolve('deny')
+  sessionStates.value.delete(sessionId)
+  cloneSessionStates()
 }

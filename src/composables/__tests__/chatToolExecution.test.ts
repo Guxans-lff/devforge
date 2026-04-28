@@ -64,6 +64,7 @@ describe('chatToolExecution', () => {
 
   afterEach(() => {
     clearApprovalStateForTests()
+    localStorage.clear()
   })
 
   it('keeps result order while running reads before web, writes, and bash', async () => {
@@ -124,8 +125,9 @@ describe('chatToolExecution', () => {
     })
 
     const pending = executeToolCalls(makeParams(toolCalls))
-    await Promise.resolve()
-    await Promise.resolve()
+    for (let i = 0; i < 10 && maxActive < 2; i += 1) {
+      await Promise.resolve()
+    }
 
     expect(maxActive).toBe(2)
 
@@ -168,6 +170,120 @@ describe('chatToolExecution', () => {
     expect(params.refreshWorkspaceDirectoryForToolPath).toHaveBeenNthCalledWith(1, 'D:/workspace/src/a.ts')
     expect(params.refreshWorkspaceDirectoryForToolPath).toHaveBeenNthCalledWith(2, 'D:/workspace/src/b.ts')
     expect(params.refreshWorkspaceDirectoryForToolPath).toHaveBeenNthCalledWith(3, 'D:/workspace/src/c.ts')
+    expect(localStorage.getItem('devforge.ai.workspace.isolation.v1')).toContain('write_file:write-1')
+    expect(localStorage.getItem('devforge.ai.workspace.isolation.v1')).toContain('edit_file:edit-1')
+  })
+
+  it('runs safe bash inspection commands without approval prompts', async () => {
+    setApprovalMode('ask', 'session-1')
+    const toolCalls = [
+      makeToolCall('bash-safe', 'bash', { command: 'dir /s /b src\\*.vue' }),
+    ]
+
+    aiExecuteToolMock.mockResolvedValue({
+      success: true,
+      content: 'src/components/App.vue',
+    })
+
+    const results = await executeToolCalls(makeParams(toolCalls))
+
+    expect(aiExecuteToolMock).toHaveBeenCalledTimes(1)
+    expect(toolCalls[0]?.approvalState).toBeUndefined()
+    expect(toolCalls[0]?.status).toBe('success')
+    expect(results[0]?.success).toBe(true)
+  })
+
+  it('blocks unsafe write paths before invoking backend tools', async () => {
+    const toolCalls = [
+      makeToolCall('write-unsafe', 'write_file', { path: '../outside.txt', content: 'x' }),
+    ]
+
+    const results = await executeToolCalls(makeParams(toolCalls))
+
+    expect(aiExecuteToolMock).not.toHaveBeenCalled()
+    expect(results).toHaveLength(1)
+    expect(results[0]?.success).toBe(false)
+    expect(results[0]?.content).toContain('[path_safety_blocked]')
+    expect(results[0]?.content).toContain('工作区外路径')
+    expect(toolCalls[0]?.status).toBe('error')
+  })
+
+  it('routes read tools through approval when strict provider permission is enabled', async () => {
+    setApprovalMode('deny', 'session-1')
+    const toolCalls = [
+      makeToolCall('read-1', 'read_file', { path: 'src/a.ts' }),
+    ]
+
+    const params = makeParams(toolCalls)
+    params.permissionContext = {
+      strictPermission: true,
+      model: {
+        id: 'm1',
+        name: 'Model',
+        capabilities: {
+          streaming: true,
+          vision: false,
+          thinking: false,
+          toolUse: true,
+          maxContext: 32000,
+          maxOutput: 4096,
+        },
+      },
+    }
+
+    const results = await executeToolCalls(params)
+
+    expect(aiExecuteToolMock).not.toHaveBeenCalled()
+    expect(toolCalls[0]?.approvalState).toBe('denied')
+    expect(results[0]?.success).toBe(false)
+    expect(results[0]?.content).toContain('[user_rejected]')
+  })
+
+  it('denies conflicting writes when workspace isolation policy is deny', async () => {
+    localStorage.setItem('devforge.ai.workspace.isolation.policy.v1', 'deny')
+    localStorage.setItem('devforge.ai.workspace.isolation.v1', JSON.stringify([
+      {
+        ownerId: 'tool:other:t1',
+        ownerLabel: 'other-write',
+        allowedPaths: [],
+        touchedPaths: ['src/a.ts'],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]))
+    const toolCalls = [
+      makeToolCall('write-deny', 'write_file', { path: 'src/a.ts', content: 'x' }),
+    ]
+
+    const results = await executeToolCalls(makeParams(toolCalls))
+
+    expect(aiExecuteToolMock).not.toHaveBeenCalled()
+    expect(results[0]?.success).toBe(false)
+    expect(results[0]?.content).toContain('[workspace_isolation_denied]')
+    expect(toolCalls[0]?.status).toBe('error')
+  })
+
+  it('denies cross-session conflicting writes when workspace isolation policy is smart', async () => {
+    localStorage.setItem('devforge.ai.workspace.isolation.policy.v1', 'smart')
+    localStorage.setItem('devforge.ai.workspace.isolation.v1', JSON.stringify([
+      {
+        ownerId: 'tool:other-session:t1',
+        ownerLabel: 'other-write',
+        allowedPaths: [],
+        touchedPaths: ['src/a.ts'],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]))
+    const toolCalls = [
+      makeToolCall('write-smart-deny', 'write_file', { path: 'src/a.ts', content: 'x' }),
+    ]
+
+    const results = await executeToolCalls(makeParams(toolCalls))
+
+    expect(aiExecuteToolMock).not.toHaveBeenCalled()
+    expect(results[0]?.success).toBe(false)
+    expect(results[0]?.content).toContain('[workspace_isolation_denied]')
   })
 
   it('retries transient timeout failures for read tools and records metadata', async () => {

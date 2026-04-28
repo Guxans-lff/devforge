@@ -9,8 +9,20 @@ import type {
 } from '@/types/ai'
 import { ensureErrorString } from '@/types/error'
 import type { Logger } from '@/utils/logger'
+import { checkWritePathSafety } from '@/ai-gui/pathSafety'
+import { shouldApproveTool, type ProviderPermissionContext } from '@/ai-gui/providerPermissionMapper'
+import {
+  checkWorkspaceWriteGuard,
+  decideWorkspaceIsolationPolicy,
+  loadWorkspaceIsolationPolicy,
+  loadWriteScopes,
+  pruneExpiredWriteScopes,
+  registerWorkspaceWrite,
+} from '@/ai-gui/workspaceIsolation'
 import { hashArgs, pickApprovalTool } from './chatHelpers'
 import { requestApprovalForTool } from './chatToolApproval'
+import { classifyBashCommand } from './bashCommandClassifier'
+import type { AiHookContext } from './AiHookManager'
 
 const MAX_SAME_TOOL_FAILURE = 3
 const WEB_TOOL_CONCURRENCY = 2
@@ -56,6 +68,9 @@ export interface ExecuteToolCallsParams {
   signal?: AbortSignal
   timeoutMsByClass?: Partial<Record<ToolExecutionClass, number>>
   retryCountByClass?: Partial<Record<ToolExecutionClass, number>>
+  hookManager?: { emit: (ctx: Extract<AiHookContext, { event: 'pre_tool_use' | 'post_tool_use' }>) => Promise<void> }
+  turnId?: string
+  permissionContext?: ProviderPermissionContext
 }
 
 function updateToolCalls(
@@ -79,6 +94,22 @@ function classifyTool(name: string): ToolExecutionClass {
     return 'read'
   }
   return 'other'
+}
+
+function shouldRequestApprovalForToolCall(
+  toolCall: ToolCallInfo,
+  context?: ProviderPermissionContext,
+): boolean {
+  if (!shouldApproveTool(toolCall.name, context)) return false
+
+  if (toolCall.name === 'bash') {
+    const command = typeof toolCall.parsedArgs?.command === 'string'
+      ? toolCall.parsedArgs.command
+      : ''
+    return classifyBashCommand(command).level !== 'safe'
+  }
+
+  return true
 }
 
 function queueForKind(kind: ToolExecutionClass): ToolQueue {
@@ -323,6 +354,8 @@ async function executeIndexedTool(
   const { toolCall, kind } = indexed
   const failureKey = `${toolCall.name}:${hashArgs(toolCall.arguments)}`
   const previousFailures = params.toolFailureCounter.get(failureKey) ?? 0
+  let isolationWarning: string | undefined
+  let isolationRequiresDoubleConfirm = false
 
   if (previousFailures >= MAX_SAME_TOOL_FAILURE) {
     const argsBrief = toolCall.arguments.length > 80
@@ -349,11 +382,90 @@ async function executeIndexedTool(
     }
   }
 
-  const approvalTool = pickApprovalTool(toolCall.name)
+  if (toolCall.name === 'write_file' || toolCall.name === 'edit_file') {
+    const targetPath = typeof toolCall.parsedArgs?.path === 'string'
+      ? toolCall.parsedArgs.path
+      : undefined
+    const safety = checkWritePathSafety(targetPath, params.workDir)
+
+    if (!safety.safe) {
+      const content = `[path_safety_blocked] ${safety.reason ?? '写入路径未通过安全检查。'}`
+      if (toolCall.execution) {
+        toolCall.execution.errorKind = 'permission_denied'
+        toolCall.execution.finishedAt = Date.now()
+      }
+      markToolCallState(toolCall, {
+        status: 'error',
+        error: content,
+        result: content,
+      })
+      params.log.warn('tool_path_safety_blocked', {
+        sessionId: params.sessionId,
+        tool: toolCall.name,
+        path: targetPath,
+        normalizedPath: safety.normalizedPath,
+        reason: safety.reason,
+      })
+      return {
+        result: {
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          success: false,
+          content,
+          metadata: toolCall.execution ? copyResultMetadata(toolCall.execution) : undefined,
+        },
+      }
+    }
+
+    if (targetPath) {
+      const ownerId = `tool:${params.sessionId}:${toolCall.id}`
+      const guard = checkWorkspaceWriteGuard(targetPath, ownerId, pruneExpiredWriteScopes(loadWriteScopes()))
+      if (!guard.allowed) {
+        const isolationPolicy = loadWorkspaceIsolationPolicy()
+        const policyDecision = decideWorkspaceIsolationPolicy(isolationPolicy, ownerId, guard.conflicts)
+        isolationWarning = `Workspace Isolation 检测到潜在覆盖：${guard.reason ?? guard.normalizedPath}。请确认是否继续写入。`
+        isolationRequiresDoubleConfirm = policyDecision.requiresDoubleConfirm === true
+        params.log.warn('workspace_isolation_conflict', {
+          sessionId: params.sessionId,
+          tool: toolCall.name,
+          path: targetPath,
+          policy: isolationPolicy,
+          decision: policyDecision.decision,
+          conflicts: guard.conflicts,
+        })
+
+        if (policyDecision.decision === 'deny') {
+          const content = `[workspace_isolation_denied] ${policyDecision.reason ?? guard.reason ?? guard.normalizedPath}`
+          if (toolCall.execution) {
+            toolCall.execution.errorKind = 'permission_denied'
+            toolCall.execution.finishedAt = Date.now()
+          }
+          markToolCallState(toolCall, {
+            status: 'error',
+            error: content,
+            result: content,
+          })
+          return {
+            result: {
+              toolCallId: toolCall.id,
+              toolName: toolCall.name,
+              success: false,
+              content,
+              metadata: toolCall.execution ? copyResultMetadata(toolCall.execution) : undefined,
+            },
+          }
+        }
+      }
+    }
+  }
+
+  const approvalTool = isolationWarning || shouldRequestApprovalForToolCall(toolCall, params.permissionContext)
+    ? pickApprovalTool(toolCall.name)
+    : null
   if (approvalTool) {
     const decision = await requestApprovalForTool(approvalTool, toolCall, params.sessionId, () => {
       updateToolCalls(params.toolCalls, params.updateStreamingMessage)
-    })
+    }, isolationWarning, isolationRequiresDoubleConfirm)
     updateToolCalls(params.toolCalls, params.updateStreamingMessage)
 
     if (decision === 'deny') {
@@ -426,6 +538,16 @@ async function executeIndexedTool(
 
     if (toolCall.name === 'write_file' || toolCall.name === 'edit_file') {
       const refreshPath = resolveToolFilePath(toolCall, params.workDir)
+      const targetPath = typeof toolCall.parsedArgs?.path === 'string'
+        ? toolCall.parsedArgs.path
+        : refreshPath
+      if (targetPath) {
+        registerWorkspaceWrite(
+          `tool:${params.sessionId}:${toolCall.id}`,
+          `${toolCall.name}:${toolCall.id}`,
+          targetPath,
+        )
+      }
       return {
         result: {
           toolCallId: toolCall.id,
@@ -479,6 +601,9 @@ export async function executeToolCalls({
   signal,
   timeoutMsByClass,
   retryCountByClass,
+  hookManager,
+  turnId,
+  permissionContext,
 }: ExecuteToolCallsParams): Promise<ToolResultInfo[]> {
   setInToolExec(true)
   clearWatchdog()
@@ -486,7 +611,8 @@ export async function executeToolCalls({
   try {
     const indexedToolCalls = indexToolCalls(toolCalls)
     for (const indexed of indexedToolCalls) {
-      const needApproval = pickApprovalTool(indexed.toolCall.name) !== null
+      const needApproval = shouldRequestApprovalForToolCall(indexed.toolCall, permissionContext)
+        && pickApprovalTool(indexed.toolCall.name) !== null
       indexed.toolCall.status = needApproval ? 'pending' : 'running'
       indexed.toolCall.execution = createExecutionMetadata(
         indexed,
@@ -512,6 +638,17 @@ export async function executeToolCalls({
         return
       }
 
+      if (hookManager) {
+        await hookManager.emit({
+          event: 'pre_tool_use',
+          context: {
+            sessionId,
+            turnId: turnId ?? '',
+            toolCall: indexed.toolCall,
+          },
+        })
+      }
+
       const executed = await executeIndexedTool(indexed, {
         sessionId,
         workDir,
@@ -525,9 +662,24 @@ export async function executeToolCalls({
         signal,
         timeoutMsByClass,
         retryCountByClass,
+        hookManager,
+        turnId,
+        permissionContext,
       })
 
       results[indexed.index] = executed.result
+
+      if (hookManager) {
+        await hookManager.emit({
+          event: 'post_tool_use',
+          context: {
+            sessionId,
+            turnId: turnId ?? '',
+            toolCall: indexed.toolCall,
+            result: executed.result,
+          },
+        })
+      }
 
       if (executed.refreshPath) {
         import('@/stores/local-file-editor').then(({ useLocalFileEditorStore }) => {
