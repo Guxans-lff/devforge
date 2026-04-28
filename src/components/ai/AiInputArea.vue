@@ -12,6 +12,7 @@ import type { FileNode } from '@/types/workspace-files'
 import AtMentionPopover from './AtMentionPopover.vue'
 import SlashCommandPopover, { type SlashCommand } from './SlashCommandPopover.vue'
 import AiPromptEnhancer from './AiPromptEnhancer.vue'
+import { resolveInputIntent } from '@/composables/ai/aiInputResolver'
 import {
   Send,
   Square,
@@ -22,7 +23,6 @@ import {
   Sparkles,
   Zap,
   Network,
-  AtSign,
   Paperclip,
 } from 'lucide-vue-next'
 import AiFilePreviewBar from './AiFilePreviewBar.vue'
@@ -87,6 +87,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const inputText = ref('')
 const textareaRef = ref<HTMLTextAreaElement | null>()
+const atMentionPopoverRef = ref<InstanceType<typeof AtMentionPopover> | null>(null)
+const slashCommandPopoverRef = ref<InstanceType<typeof SlashCommandPopover> | null>(null)
 const isDragOver = ref(false)
 
 // ─────────── 输入历史（G13） ───────────
@@ -198,7 +200,7 @@ const showSlashPopover = ref(false)
 const slashQuery = ref('')
 const slashAnchorPos = ref({ x: 0, y: 0 })
 
-const canSelectModel = computed(() => props.providers.length > 0)
+const canSend = computed(() => inputText.value.trim().length > 0 && !props.disabled && !props.isStreaming)
 
 // ─────────── 提示词优化（G14） ───────────
 const showEnhancer = ref(false)
@@ -219,12 +221,6 @@ const currentProvider = computed(() =>
 /** 当前模型 */
 const currentModel = computed(() =>
   currentProvider.value?.models.find(m => m.id === props.selectedModelId) ?? null,
-)
-const canSend = computed(() =>
-  inputText.value.trim().length > 0
-  && !props.disabled
-  && !props.isStreaming
-  && !!currentModel.value,
 )
 
 /** 模式配置 */
@@ -419,65 +415,69 @@ function handleAtSelect(node: FileNode) {
   })
 }
 
-/** 处理按键 */
+/** 处理按键 — 使用 Intent Resolver 统一仲裁 */
 function handleKeyDown(e: KeyboardEvent) {
-  // @ / 斜杠浮层可见时，拦截导航键交给 popover 处理
+  // 浮层可见时，导航键继续交给浮层处理（保持现有行为）
   if (showAtPopover.value || showSlashPopover.value) {
     if (['ArrowUp', 'ArrowDown', 'Enter', 'Escape', 'Tab'].includes(e.key)) {
       e.preventDefault()
       e.stopPropagation()
+      if (showAtPopover.value) {
+        atMentionPopoverRef.value?.onKeydown(e)
+      } else if (showSlashPopover.value) {
+        slashCommandPopoverRef.value?.onKeydown(e)
+      }
       return
     }
   }
 
-  // Ctrl+Z 撤销功能
-  if (e.key === 'z' && (e.ctrlKey || e.metaKey) && !e.shiftKey) {
-    e.preventDefault()
-    undo()
-    return
-  }
+  const el = textareaRef.value
+  const intent = resolveInputIntent(e, {
+    isComposing: e.isComposing,
+    slashPopoverOpen: showSlashPopover.value,
+    atPopoverOpen: showAtPopover.value,
+    popoverHasHighlight: showSlashPopover.value || showAtPopover.value,
+    sendMode: sendMode.value,
+    cursorAtStart: (el?.selectionStart ?? 0) === 0,
+    cursorAtEnd: el ? el.selectionStart === el.value.length : false,
+  })
 
-  // Ctrl+Y 或 Ctrl+Shift+Z 重做功能
-  if ((e.key === 'y' && (e.ctrlKey || e.metaKey)) ||
-      (e.key === 'z' && (e.ctrlKey || e.metaKey) && e.shiftKey)) {
-    e.preventDefault()
-    redo()
-    return
-  }
-
-  // 输入历史导航（仅在输入框无选区时，且非 Popover 状态）
-  if (e.key === 'ArrowUp' && !e.shiftKey && (textareaRef.value?.selectionStart ?? 0) === 0) {
-    e.preventDefault()
-    historyUp()
-    return
-  }
-  if (e.key === 'ArrowDown' && !e.shiftKey) {
-    const el = textareaRef.value
-    if (el && el.selectionStart === el.value.length) {
+  switch (intent.type) {
+    case 'noop':
+      return
+    case 'undo':
+      e.preventDefault()
+      undo()
+      return
+    case 'redo':
+      e.preventDefault()
+      redo()
+      return
+    case 'close_popover':
+      e.preventDefault()
+      closeAtPopover()
+      closeSlashPopover()
+      return
+    case 'history_up':
+      e.preventDefault()
+      historyUp()
+      return
+    case 'history_down':
       e.preventDefault()
       historyDown()
       return
-    }
-  }
-
-  // 发送逻辑
-  if (sendMode.value === 'enter') {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    case 'insert_newline':
+      // 允许默认换行行为
+      return
+    case 'submit_message':
       e.preventDefault()
-      if (canSend.value) handleSend()
-    }
-  } else {
-    // cmd 模式：Cmd/Ctrl+Enter 发送，Enter 换行（默认）
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      e.preventDefault()
-      if (canSend.value) handleSend()
-    }
+      if (canSend.value) submitMessage(inputText.value.trim())
+      return
   }
 }
 
-/** 发送消息 */
-function handleSend() {
-  const content = inputText.value.trim()
+/** 统一消息提交入口 */
+function submitMessage(content: string) {
   if (!content) return
   pushHistory(content)
   historyIndex.value = -1
@@ -485,6 +485,11 @@ function handleSend() {
   emit('send', content)
   inputText.value = ''
   nextTick(adjustHeight)
+}
+
+/** 发送按钮点击 — 统一走 submitMessage */
+function handleSend() {
+  submitMessage(inputText.value.trim())
 }
 
 /** 中断生成 */
@@ -577,12 +582,12 @@ defineExpose({ focus, setDraft })
 </script>
 
 <template>
-  <div class="border-t border-border/40 bg-background">
+  <div class="border-t border-white/[0.09] bg-[linear-gradient(180deg,rgba(8,8,10,0.35),#08080a)] backdrop-blur supports-[backdrop-filter]:bg-[#08080a]/86">
     <!-- 输入框区域 -->
-    <div class="px-4 py-3">
+    <div class="px-6 pb-4 pt-4 sm:px-10">
       <div
-        class="relative overflow-hidden rounded-2xl border bg-muted/15 shadow-[0_16px_40px_-32px_rgba(0,0,0,0.45)] transition-colors focus-within:border-primary/40 focus-within:bg-background focus-within:ring-1 focus-within:ring-primary/20"
-        :class="isDragOver ? 'border-primary/60 ring-2 ring-primary/30 bg-primary/5' : 'border-border/45'"
+        class="relative mx-auto grid max-w-[1180px] grid-rows-[1fr_auto] overflow-hidden rounded-[18px] border shadow-[0_22px_58px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.035)] transition-colors focus-within:border-white/[0.2]"
+        :class="isDragOver ? 'border-primary/50 ring-1 ring-primary/20 bg-primary/[0.02]' : 'border-white/[0.13] bg-[linear-gradient(180deg,#121217,#0e0e12)]'"
         @dragover="handleDragOver"
         @dragleave="handleDragLeave"
         @drop="handleDrop"
@@ -590,7 +595,7 @@ defineExpose({ focus, setDraft })
         <!-- 拖拽提示蒙层 -->
         <div
           v-if="isDragOver"
-          class="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-primary/5 pointer-events-none"
+          class="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-primary/[0.02] pointer-events-none"
         >
           <span class="text-xs text-primary font-medium">{{ t('ai.input.dropFiles') }}</span>
         </div>
@@ -600,31 +605,32 @@ defineExpose({ focus, setDraft })
           :attachments="attachments"
           @remove="emit('removeAttachment', $event)"
         />
+
         <!-- 文本输入 -->
-          <textarea
+        <textarea
           ref="textareaRef"
           v-model="inputText"
           :placeholder="inputPlaceholder"
           :disabled="disabled"
-          rows="1"
-          class="w-full resize-none bg-transparent px-4 pt-3 pb-1 text-sm leading-relaxed placeholder:text-muted-foreground/56 focus:outline-none disabled:opacity-50"
-          style="max-height: 200px"
+          rows="2"
+          class="w-full resize-none bg-transparent px-[18px] pb-2 pt-[15px] text-[14px] leading-[1.55] text-foreground placeholder:text-muted-foreground/48 focus:outline-none disabled:opacity-50"
+          style="max-height: 200px; min-height: 54px"
           @keydown="handleKeyDown"
           @input="adjustHeight(); detectAtMention(); detectSlashCommand(); pushToUndoStack(inputText)"
           @paste="handlePaste"
         />
 
         <!-- 状态与操作带 -->
-        <div class="flex flex-wrap items-center justify-between gap-2 px-3 pb-3 pt-1">
-          <div class="flex min-w-0 flex-wrap items-center gap-1.5">
+        <div class="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5 pt-0.5 text-muted-foreground">
+          <div class="flex min-w-0 flex-wrap items-center gap-1">
+            <!-- 模型选择 -->
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
                 <button
-                  class="flex h-7 min-w-0 items-center gap-1.5 rounded-full border border-border/25 bg-background/60 px-2.5 text-[11px] text-muted-foreground transition-colors hover:border-border/45 hover:bg-muted/25 hover:text-foreground"
-                  :disabled="!canSelectModel"
+                  class="composer-chip flex h-7 min-w-0 items-center gap-1 px-2.5"
+                  :disabled="disabled"
                   :title="currentModel?.name || t('ai.input.selectModel')"
                 >
-                  <AtSign class="h-3 w-3 shrink-0" />
                   <span v-if="currentModel" class="max-w-[120px] truncate">{{ currentModel.name }}</span>
                   <span v-else>{{ t('ai.input.selectModel') }}</span>
                   <ChevronDown class="h-3 w-3 shrink-0 opacity-50" />
@@ -660,10 +666,11 @@ defineExpose({ focus, setDraft })
               </DropdownMenuContent>
             </DropdownMenu>
 
+            <!-- 模式选择 -->
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
                 <button
-                  class="flex h-7 items-center gap-1.5 rounded-full border border-border/25 bg-background/60 px-2.5 text-[11px] transition-colors hover:border-border/45 hover:bg-muted/25"
+                  class="composer-chip flex h-7 items-center gap-1 px-2.5"
                   :class="currentModeConfig.color"
                   :title="currentModeConfig.label"
                 >
@@ -690,25 +697,24 @@ defineExpose({ focus, setDraft })
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </div>
 
-          <div class="ml-auto flex items-center gap-1.5">
+            <!-- 附件 -->
             <button
-              class="flex h-7 items-center gap-1.5 rounded-full border border-border/25 bg-background/60 px-2.5 text-[11px] text-muted-foreground transition-colors hover:border-border/45 hover:bg-muted/25 hover:text-foreground"
+              class="composer-chip flex h-7 items-center gap-1 px-2.5"
               :disabled="disabled"
               :title="t('ai.input.addFile')"
               @click="emit('selectFiles')"
             >
-              <Paperclip class="h-3.5 w-3.5" />
-              <span>附件</span>
-              <span v-if="attachments.length > 0" class="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
+              <Paperclip class="h-3 w-3" />
+              <span v-if="attachments.length > 0" class="rounded-full bg-primary/10 px-1 text-[10px] text-primary">
                 {{ attachments.length }}
               </span>
             </button>
 
+            <!-- 上下文预算 -->
             <div
               v-if="contextUsagePercent > 0"
-              class="flex h-7 items-center gap-1.5 rounded-full border border-border/25 bg-background/60 px-2.5 text-[11px] text-muted-foreground/70"
+              class="composer-chip flex h-7 items-center gap-1 px-2.5 text-muted-foreground/70"
               :title="t('ai.input.contextUsage', { percent: Math.round(contextUsagePercent) })"
             >
               <span
@@ -717,20 +723,24 @@ defineExpose({ focus, setDraft })
               />
               <span>{{ t('ai.input.contextUsageCompact', { percent: Math.round(contextUsagePercent) }) }}</span>
             </div>
+          </div>
 
+          <div class="ml-auto flex items-center gap-1">
+            <!-- Prompt 优化 -->
             <button
-              class="hidden h-7 items-center gap-1.5 rounded-full px-2.5 text-[11px] transition-colors sm:flex"
+              class="hidden h-7 items-center gap-1 rounded-full border border-transparent px-2.5 text-[11px] transition-colors sm:flex"
               :class="inputText.trim() ? 'text-violet-500/80 hover:bg-violet-500/10 hover:text-violet-500' : 'text-muted-foreground/25 cursor-not-allowed'"
               :disabled="!inputText.trim() || disabled"
               :title="t('ai.input.enhancePrompt')"
               @click="openEnhancer"
             >
-              <Sparkles class="h-3.5 w-3.5" />
+              <Sparkles class="h-3 w-3" />
               <span>{{ t('ai.input.enhancePromptShort') }}</span>
             </button>
 
+            <!-- 发送模式切换 -->
             <button
-              class="hidden h-7 items-center gap-1.5 rounded-full px-2 text-[10px] text-muted-foreground/45 transition-colors hover:bg-muted/25 hover:text-muted-foreground sm:flex"
+              class="hidden h-7 items-center gap-1 rounded-full border border-transparent px-2 text-[10px] text-muted-foreground/45 transition-colors hover:border-white/[0.08] hover:bg-white/[0.035] hover:text-muted-foreground sm:flex"
               :title="t('ai.input.toggleSendMode', {
                 mode: sendMode === 'enter' ? t('ai.input.sendModeEnter') : t('ai.input.sendModeCmd'),
               })"
@@ -739,22 +749,23 @@ defineExpose({ focus, setDraft })
               {{ sendMode === 'enter' ? t('ai.input.sendModeEnterShort') : t('ai.input.sendModeCmdShort') }}
             </button>
 
+            <!-- 停止 / 发送按钮 -->
             <Button
               v-if="isStreaming"
               variant="destructive"
               size="sm"
-              class="h-8 rounded-full px-3 text-xs"
+              class="h-8 rounded-lg px-3 text-xs"
               @click="handleAbort"
             >
-              <Square class="mr-1.5 h-3 w-3" />
+              <Square class="mr-1 h-3 w-3" />
               {{ t('ai.input.stopGenerating') }}
             </Button>
             <button
               v-else
               :disabled="!canSend"
-              class="flex h-8 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors"
+              class="flex h-8 items-center gap-1 rounded-lg px-3 text-xs font-medium transition-colors"
               :class="canSend
-                ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90'
+                ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                 : 'text-muted-foreground/25 cursor-not-allowed'"
               @click="handleSend"
             >
@@ -768,6 +779,7 @@ defineExpose({ focus, setDraft })
     </div>
 
     <AtMentionPopover
+      ref="atMentionPopoverRef"
       :query="atQuery"
       :anchor-pos="atAnchorPos"
       :visible="showAtPopover"
@@ -776,6 +788,7 @@ defineExpose({ focus, setDraft })
     />
 
     <SlashCommandPopover
+      ref="slashCommandPopoverRef"
       :query="slashQuery"
       :anchor-pos="slashAnchorPos"
       :visible="showSlashPopover"
@@ -786,6 +799,7 @@ defineExpose({ focus, setDraft })
     <p class="sr-only">{{ sendHint }} · {{ t('ai.input.replyDisclaimer') }}</p>
 
     <AiPromptEnhancer
+      v-if="showEnhancer"
       v-model:open="showEnhancer"
       :original-text="inputText"
       :provider="currentProvider"
@@ -794,3 +808,25 @@ defineExpose({ focus, setDraft })
     />
   </div>
 </template>
+
+<style scoped>
+.composer-chip {
+  border: 1px solid rgb(244 244 245 / 0.08);
+  border-radius: 999px;
+  background: rgb(8 8 10 / 0.72);
+  color: rgb(143 143 153 / 0.94);
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025);
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.composer-chip:hover {
+  border-color: rgb(244 244 245 / 0.14);
+  background: rgb(21 21 27 / 0.9);
+  color: rgb(244 244 245 / 0.86);
+}
+</style>

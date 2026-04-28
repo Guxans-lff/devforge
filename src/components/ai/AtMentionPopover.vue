@@ -78,6 +78,8 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 /** 点击组件外部时关闭 */
+defineExpose({ onKeydown })
+
 const popoverEl = ref<HTMLElement | null>(null)
 
 function onDocumentClick(e: MouseEvent) {

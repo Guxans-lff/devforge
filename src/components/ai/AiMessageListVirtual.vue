@@ -37,6 +37,8 @@ const emit = defineEmits<{
   (e: 'bumpMaxOutput', value: number): void
   (e: 'loadMoreHistory'): void
   (e: 'scroll', event: Event): void
+  (e: 'fork', messageId: string): void
+  (e: 'rewind', messageId: string): void
 }>()
 
 const scrollContainer = ref<HTMLElement | null>(null)
@@ -58,7 +60,7 @@ const virtualizer = useVirtualizer(computed(() => ({
   count: props.items.length,
   getScrollElement: () => scrollContainer.value,
   estimateSize: (index: number) => estimateItemHeight(props.items[index]!),
-  overscan: 3,
+  overscan: 6,
   measureElement: (el: Element) => el.getBoundingClientRect().height,
 })))
 
@@ -158,16 +160,17 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div ref="scrollContainer" class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain" @scroll="emit('scroll', $event)">
+  <div ref="scrollContainer" class="ai-message-scroll relative min-h-0 flex-1 overflow-y-auto bg-[#09090b]" @scroll="emit('scroll', $event)">
     <div
       v-if="showStickyItem && stickyItem"
-      class="pointer-events-none absolute left-0 right-0 top-0 z-20 border-b border-border/20 bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+      class="sticky top-0 z-20 border-b border-white/[0.08] bg-[#09090b]/92 px-10 py-2 backdrop-blur supports-[backdrop-filter]:bg-[#09090b]/78"
     >
       <AiMessageBubble
         :message="stickyItem.message"
         :session-id="sessionId"
         :sticky-compact="true"
-        class="pointer-events-auto"
+        @fork="emit('fork', $event)"
+        @rewind="emit('rewind', $event)"
       />
     </div>
 
@@ -188,7 +191,7 @@ onBeforeUnmount(() => {
           :key="items[virtualRow.index]!.key"
           :data-index="virtualRow.index"
           :ref="el => setVirtualItemRef(virtualRow.index, el)"
-          class="px-4 py-0.5"
+          class="ai-message-row px-8 py-0.5 sm:px-10"
         >
           <div
             v-if="items[virtualRow.index]!.message.type === 'divider'"
@@ -229,9 +232,25 @@ onBeforeUnmount(() => {
             :sticky-compact="items[virtualRow.index]!.stickyCompact"
             @continue="emit('continue')"
             @bump-max-output="emit('bumpMaxOutput', $event)"
+            @fork="emit('fork', $event)"
+            @rewind="emit('rewind', $event)"
           />
         </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.ai-message-scroll {
+  overflow-anchor: none;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  will-change: scroll-position;
+  transform: translateZ(0);
+}
+
+.ai-message-row {
+  contain: layout paint style;
+}
+</style>

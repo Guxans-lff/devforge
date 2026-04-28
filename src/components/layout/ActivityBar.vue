@@ -5,10 +5,11 @@
  * 上部：面板切换图标（连接/文件/搜索/AI）
  * 底部：本地终端、更多菜单、设置、主题切换、折叠按钮
  */
-import { computed } from 'vue'
+import { computed, onMounted, ref, unref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '@/stores/workspace'
 import { useConnectionStore } from '@/stores/connections'
+import { useAiChatStore } from '@/stores/ai-chat'
 import { useTheme } from '@/composables/useTheme'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -23,6 +24,7 @@ import {
   FolderOpen,
   Search,
   Bot,
+  Sparkles,
   Terminal,
   MoreHorizontal,
   Settings,
@@ -38,11 +40,17 @@ import {
 } from 'lucide-vue-next'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import type { SidePanelId } from '@/types/workspace'
+import AiPromptEnhancer from '@/components/ai/AiPromptEnhancer.vue'
 
 const { t } = useI18n()
 const workspace = useWorkspaceStore()
 const connectionStore = useConnectionStore()
+const aiStore = useAiChatStore()
 const { themeMode, toggleTheme } = useTheme()
+const showPromptEnhancer = ref(false)
+
+const promptEnhancerProvider = computed(() => unref(aiStore.defaultProvider))
+const promptEnhancerModel = computed(() => promptEnhancerProvider.value?.models?.[0] ?? null)
 
 // 主题图标
 const themeIcon = computed(() => {
@@ -64,6 +72,10 @@ const onlineCount = computed(() => {
 })
 
 // 上部面板切换图标
+onMounted(() => {
+  void aiStore.init().catch(() => {})
+})
+
 const panelItems: { id: SidePanelId; icon: typeof Database; label: string }[] = [
   { id: 'connections', icon: Database, label: 'sidebar.connections' },
   { id: 'files', icon: FolderOpen, label: 'tab.files' },
@@ -148,6 +160,21 @@ async function handleOpenGitRepo() {
         <!-- 本地终端 -->
         <Tooltip>
           <TooltipTrigger as-child>
+            <Button
+              data-testid="activity-prompt-optimizer-open"
+              variant="ghost"
+              size="icon"
+              class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10"
+              @click="showPromptEnhancer = true"
+            >
+              <Sparkles class="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right" class="text-[11px] font-medium"><p>{{ t('welcome.promptOptimizer') }}</p></TooltipContent>
+        </Tooltip>
+
+        <Tooltip>
+          <TooltipTrigger as-child>
             <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10" @click="openLocalTerminal">
               <Terminal class="h-4 w-4" />
             </Button>
@@ -157,16 +184,16 @@ async function handleOpenGitRepo() {
 
         <!-- 更多菜单 -->
         <DropdownMenu>
-          <Tooltip>
-            <TooltipTrigger as-child>
-              <DropdownMenuTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10">
-                  <MoreHorizontal class="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-            </TooltipTrigger>
-            <TooltipContent side="right" class="text-[11px] font-medium"><p>{{ t('sidebar.more') }}</p></TooltipContent>
-          </Tooltip>
+          <DropdownMenuTrigger as-child>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-primary/10 data-[state=open]:bg-primary/10 data-[state=open]:text-foreground"
+              :title="t('sidebar.more')"
+            >
+              <MoreHorizontal class="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
           <DropdownMenuContent side="right" align="end" class="min-w-[180px]">
             <DropdownMenuItem @click="workspace.addTab({ id: 'multi-exec', type: 'multi-exec', title: t('tab.multiExec'), closable: true })">
               <LayoutGrid class="mr-2 h-4 w-4" />
@@ -233,5 +260,12 @@ async function handleOpenGitRepo() {
         </Tooltip>
       </div>
     </TooltipProvider>
+
+    <AiPromptEnhancer
+      v-model:open="showPromptEnhancer"
+      original-text=""
+      :provider="promptEnhancerProvider"
+      :model="promptEnhancerModel"
+    />
   </div>
 </template>

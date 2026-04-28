@@ -39,6 +39,7 @@ import {
   recordProviderTransientFailure,
   resolveRetryableFailureFallback,
 } from '@/composables/ai/chatRuntimeRouting'
+import { genId } from '@/composables/ai/chatHelpers'
 import { createLogger } from '@/utils/logger'
 import AiChatShell from '@/components/ai/AiChatShell.vue'
 import AiDiagnosticsPanel from '@/components/ai/AiDiagnosticsPanel.vue'
@@ -1780,6 +1781,34 @@ async function switchSession(
     }
   }
 }
+
+async function handleForkMessage(messageId: string): Promise<void> {
+  const index = chat.messages.value.findIndex(message => message.id === messageId)
+  if (index < 0) return
+
+  const nextMessages = chat.messages.value
+    .slice(0, index + 1)
+    .map(message => ({
+      ...message,
+      id: genId(),
+      isStreaming: false,
+    }))
+  const nextSessionId = `session-${crypto.randomUUID()}`
+  chat.clearMessages()
+  chat.messages.value = nextMessages
+  await switchSession(nextSessionId, { persistToTab: true, loadHistory: false })
+}
+
+function handleRewindMessage(messageId: string): void {
+  const index = chat.messages.value.findIndex(message => message.id === messageId)
+  if (index < 0) return
+  chat.messages.value = chat.messages.value
+    .slice(0, index + 1)
+    .map(message => ({
+      ...message,
+      isStreaming: false,
+    }))
+}
 </script>
 
 <template>
@@ -1844,6 +1873,8 @@ async function switchSession(
     @bump-max-output="handleBumpMaxOutput"
     @load-more-history="chat.loadMoreHistory"
     @scroll-messages="chat.handleScroll"
+    @fork-message="handleForkMessage"
+    @rewind-message="handleRewindMessage"
     @send="handleSend"
     @abort="chat.abort"
     @clear-session="handleCreateSession"

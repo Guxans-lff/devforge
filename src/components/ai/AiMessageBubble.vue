@@ -10,7 +10,7 @@
 import { computed, ref } from 'vue'
 import type { AiMessage, FileOperation } from '@/types/ai'
 import { parseFileMarkers } from '@/utils/file-markers'
-import { ChevronRight, Copy, Check, AlertCircle, AlertTriangle, Info, Download, RotateCw } from 'lucide-vue-next'
+import { ChevronRight, Copy, Check, AlertCircle, AlertTriangle, Info, Download, RotateCw, GitFork, History } from 'lucide-vue-next'
 import { save } from '@tauri-apps/plugin-dialog'
 import { writeTextFile } from '@/api/database'
 import DOMPurify from 'dompurify'
@@ -18,7 +18,10 @@ import AiCodeBlock from './AiCodeBlock.vue'
 import AiFileCard from './AiFileCard.vue'
 import AiToolCallBlock from './AiToolCallBlock.vue'
 import AiFileOpsGroup from './AiFileOpsGroup.vue'
+import { createLogger } from '@/utils/logger'
 import AiContextPill from './AiContextPill.vue'
+
+const log = createLogger('ai.message.bubble')
 
 const props = defineProps<{
   message: AiMessage
@@ -36,6 +39,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'continue'): void
   (e: 'bumpMaxOutput', value: number): void
+  (e: 'fork', messageId: string): void
+  (e: 'rewind', messageId: string): void
 }>()
 
 /** 识别 [输出被 max_tokens 截断] 错误 → 显示一键调大按钮 */
@@ -68,12 +73,34 @@ const hasThinking = computed(() => !!sanitizedThinking.value)
 const isUser = computed(() => props.message.role === 'user')
 const isError = computed(() => props.message.role === 'error')
 const hasToolCalls = computed(() => (props.message.toolCalls?.length ?? 0) > 0)
+const rootSpacingClass = computed(() => props.stickyCompact ? 'my-0' : props.inGroup ? 'my-0' : 'my-3')
+const timelineDotClass = computed(() => {
+  if (isError.value) return 'bg-red-400 shadow-[0_0_0_5px_#09090b,0_0_18px_rgba(248,113,113,0.2)]'
+  if (isUser.value) return 'bg-[#74757d] shadow-[0_0_0_5px_#09090b]'
+  if (props.message.isStreaming) return 'bg-[#55d899] shadow-[0_0_0_5px_#09090b,0_0_18px_rgba(85,216,153,0.38)] animate-pulse'
+  return 'bg-[#55d899] shadow-[0_0_0_5px_#09090b,0_0_14px_rgba(85,216,153,0.16)]'
+})
+const timelineLineClass = computed(() => props.inGroup ? 'bg-white/[0.055]' : 'bg-white/[0.11]')
+const turnRoleLabel = computed(() => {
+  if (isUser.value) return 'You'
+  if (isError.value) return 'Error'
+  return 'DevForge AI'
+})
+const turnMetaLabel = computed(() => {
+  if (isError.value) return 'Action required'
+  if (isUser.value) return props.message.isStreaming ? 'Sending' : 'Prompt'
+  if (props.message.isStreaming) return 'Streaming'
+  if (props.message.tokens) return `${props.message.tokens} tokens`
+  if (hasToolCalls.value) return 'Tool activity'
+  return 'Answer'
+})
 
 /** 用户消息折叠：超过 3 行时默认收起（展示 2 行） */
 const USER_COLLAPSE_LINES = 3
 const userExpanded = ref(false)
 const userLineCount = computed(() => (props.message.content ?? '').split('\n').length)
 const userNeedsCollapse = computed(() => isUser.value && userLineCount.value > USER_COLLAPSE_LINES)
+const effectiveExpanded = computed(() => userExpanded.value)
 
 /** 可恢复的错误消息（流式超时/中断/未完成） */
 const canContinue = computed(() => {
@@ -119,6 +146,129 @@ const fullToolCalls = computed(() =>
 )
 
 /** Pill 点击 → 展开为完整卡片：把对应 toolCall id 加到强制展开集合 */
+type ActivityStepState = 'done' | 'active' | 'idle'
+type ActivityStepVisual = 'check' | 'dot' | 'bars' | 'pen' | 'spark'
+
+interface AssistantActivityStep {
+  key: string
+  label: string
+  detail?: string
+  state: ActivityStepState
+  visual: ActivityStepVisual
+}
+
+const toolCallRenderSignature = computed(() =>
+  (props.message.toolCalls ?? [])
+    .map(tc => `${tc.id}:${tc.name}:${tc.status}:${tc.approvalState ?? ''}:${tc.streamingChars ?? ''}`)
+    .join('|'),
+)
+
+function isToolRunning(status: string | undefined): boolean {
+  return status === 'pending' || status === 'running' || status === 'streaming'
+}
+
+function isEditingTool(name: string): boolean {
+  return /^(write|edit|delete|move|rename|create|apply|patch|bash|run|chmod|chown|mkdir|rm)/i.test(name)
+}
+
+function activityState(active: boolean, done: boolean): ActivityStepState {
+  if (active) return 'active'
+  if (done) return 'done'
+  return 'idle'
+}
+
+function formatToolName(name: string): string {
+  return name.replace(/_/g, ' ')
+}
+
+const runningToolCalls = computed(() =>
+  (props.message.toolCalls ?? []).filter(tc => isToolRunning(tc.status) || tc.approvalState === 'awaiting'),
+)
+const readonlyToolCalls = computed(() =>
+  (props.message.toolCalls ?? []).filter(tc => READONLY_TOOLS.has(tc.name)),
+)
+const editingToolCalls = computed(() =>
+  (props.message.toolCalls ?? []).filter(tc => isEditingTool(tc.name)),
+)
+const hasReadonlyDone = computed(() => readonlyToolCalls.value.some(tc => tc.status === 'success'))
+const hasEditingDone = computed(() => editingToolCalls.value.some(tc => tc.status === 'success'))
+const hasReadonlyActive = computed(() => readonlyToolCalls.value.some(tc => isToolRunning(tc.status)))
+const hasEditingActive = computed(() => editingToolCalls.value.some(tc => isToolRunning(tc.status) || tc.approvalState === 'awaiting'))
+const hasToolFailure = computed(() => (props.message.toolCalls ?? []).some(tc => tc.status === 'error'))
+const activeToolCall = computed(() => runningToolCalls.value[0])
+const assistantWorkActive = computed(() => props.message.isStreaming || runningToolCalls.value.length > 0)
+const isBoundaryMessage = computed(() =>
+  props.message.type === 'divider'
+  || props.message.type === 'compact-boundary'
+  || props.message.type === 'rewind-boundary',
+)
+
+const assistantActivityDetail = computed(() => {
+  const activeTool = activeToolCall.value
+  if (activeTool?.approvalState === 'awaiting') return 'awaiting approval'
+  if (activeTool) return formatToolName(activeTool.name)
+  if (hasEditingDone.value) return 'patch density'
+  if (hasToolCalls.value) {
+    const done = (props.message.toolCalls ?? []).filter(tc => tc.status === 'success').length
+    return `${done}/${props.message.toolCalls?.length ?? 0} tools`
+  }
+  if (props.message.isStreaming) return 'streaming answer'
+  return undefined
+})
+
+const showAssistantActivity = computed(() =>
+  !isUser.value
+  && !isError.value
+  && !isBoundaryMessage.value
+  && (props.message.isStreaming || hasToolCalls.value || hasThinking.value),
+)
+
+const assistantActivitySteps = computed<AssistantActivityStep[]>(() => {
+  const contextDone = hasThinking.value || hasToolCalls.value || !!props.message.promptTokens
+  const processingDone = !assistantWorkActive.value && (!!props.message.content || hasToolCalls.value)
+  const celebrateActive = processingDone && !hasToolFailure.value
+
+  return [
+    {
+      key: 'read',
+      label: 'Read',
+      state: activityState(hasReadonlyActive.value, hasReadonlyDone.value || contextPills.value.length > 0),
+      visual: hasReadonlyDone.value || contextPills.value.length > 0 ? 'check' : 'bars',
+    },
+    {
+      key: 'context',
+      label: 'Context',
+      state: activityState(!!props.message.isStreaming && !contextDone, contextDone),
+      visual: contextDone ? 'check' : 'dot',
+    },
+    {
+      key: 'processing',
+      label: assistantWorkActive.value ? 'Processing...' : 'Processed',
+      detail: assistantActivityDetail.value,
+      state: activityState(assistantWorkActive.value, processingDone),
+      visual: assistantWorkActive.value ? 'dot' : 'check',
+    },
+    {
+      key: 'reading',
+      label: 'Reading',
+      state: activityState(hasReadonlyActive.value, hasReadonlyDone.value),
+      visual: hasReadonlyDone.value ? 'check' : 'bars',
+    },
+    {
+      key: 'editing',
+      label: 'Editing',
+      state: activityState(hasEditingActive.value, hasEditingDone.value),
+      visual: hasEditingDone.value ? 'check' : 'pen',
+    },
+    {
+      key: 'celebrating',
+      label: 'Celebrating',
+      state: celebrateActive ? 'active' : 'idle',
+      visual: 'spark',
+    },
+  ]
+})
+
 const expandedPillIds = ref<Set<string>>(new Set())
 function expandPill(id: string) {
   const next = new Set(expandedPillIds.value)
@@ -165,7 +315,7 @@ async function exportMarkdown() {
   try {
     await writeTextFile(filePath, props.message.content)
   } catch (e) {
-    console.error('[AI] 导出 Markdown 失败:', e)
+    log.error('export_markdown_failed', undefined, e)
   }
 }
 
@@ -173,23 +323,24 @@ async function exportMarkdown() {
 const contentSegments = computed(() => {
   const text = props.message.content
   if (!text) return []
-  if (text.includes('历史工具调用已折叠') || text.includes('历史消息过大') || text.includes('较早历史内容已折叠')) {
-    return [{ type: 'text' as const, content: text }]
-  }
   return parseFileMarkers(text)
 })
 
-/** 缓存 Markdown 渲染结果，用户消息和助手消息共用 */
-const renderedSegments = computed(() => {
-  const t0 = performance.now()
-  const result = contentSegments.value.map(seg => ({
+/** 用户消息也走 markdown 渲染（列表、加粗、行内代码） */
+const userRenderedSegments = computed(() =>
+  contentSegments.value.map(seg => ({
     ...seg,
     html: seg.type === 'text' ? renderBlock(seg.content) : '',
   }))
-  const elapsed = performance.now() - t0
-  if (elapsed > 5) console.warn('[perf] renderedSegments:', elapsed.toFixed(1), 'ms, id:', props.message.id, 'chars:', props.message.content.length)
-  return result
-})
+)
+
+/** 缓存 Markdown 渲染结果，避免每帧重算 */
+const renderedSegments = computed(() =>
+  contentSegments.value.map(seg => ({
+    ...seg,
+    html: seg.type === 'text' ? renderBlock(seg.content) : '',
+  }))
+)
 
 /** 转义 HTML */
 function esc(s: string): string {
@@ -264,156 +415,217 @@ function renderBlock(text: string): string {
 
 <template>
   <!-- ==================== 用户消息 ==================== -->
-  <div v-if="isUser" :class="stickyCompact ? 'my-0 ai-prose' : 'my-3 ai-prose'">
-    <div
-      class="rounded-xl border border-white/[0.04]"
-      :class="stickyCompact ? 'bg-background shadow-[0_2px_8px_rgba(0,0,0,0.4)]' : 'bg-white/[0.03]'"
-      style="padding: 10px 14px;"
-    >
-      <!-- 吸顶极简态：单行省略 + 展开按钮 -->
-      <div v-if="stickyCompact" class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-        <span class="line-clamp-2 min-w-0 whitespace-pre-wrap break-words text-[12px] leading-[1.45] text-foreground/80">{{ message.content }}</span>
-        <div class="flex shrink-0 items-center gap-1">
-          <button
-            class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
-            :title="copied ? '已复制' : '快捷复制'"
-            @click.stop="copyContent"
-          >
-            <component :is="copied ? Check : Copy" class="h-3 w-3" />
-          </button>
-          <button
-            class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
-          title="展开完整提问"
-          @click.stop="userExpanded = !userExpanded"
-        >
-          <ChevronRight class="h-3 w-3" :class="userExpanded ? 'rotate-90' : 'rotate-0'" />
-          </button>
+  <div v-if="isUser" :class="rootSpacingClass">
+    <div class="group relative flex gap-4">
+      <!-- Timeline -->
+      <div class="relative flex w-[22px] shrink-0 flex-col items-center pt-2">
+        <div class="h-[9px] w-[9px] rounded-full" :class="timelineDotClass" />
+        <div v-if="!isGroupEnd" class="mt-2 w-px flex-1" :class="timelineLineClass" />
+      </div>
+
+      <!-- Content -->
+      <div class="flex-1 min-w-0 pr-1">
+        <!-- Turn Header -->
+        <div v-if="!hideHeader && !stickyCompact" class="mb-2 flex items-center gap-2 text-[12px] text-muted-foreground/70">
+          <strong class="text-[13px] font-semibold text-foreground/95">{{ turnRoleLabel }}</strong>
+          <span class="h-1 w-1 rounded-full bg-muted-foreground/35" />
+          <span class="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground/45">{{ turnMetaLabel }}</span>
         </div>
-      </div>
 
-      <!-- 吸顶展开态（点击展开按钮后） -->
-      <div
-        v-if="stickyCompact && userExpanded"
-        class="mt-2 text-[13px] text-foreground/85 leading-[1.65] select-text border-t border-white/[0.04] pt-2"
-      >
-        <template v-for="(seg, i) in renderedSegments" :key="i">
-          <div v-if="seg.type === 'text'" v-html="seg.html" />
-        </template>
-      </div>
-
-      <!-- 普通态 -->
-      <template v-else-if="!stickyCompact">
-        <!-- 用户消息：走 markdown 渲染（解析列表、加粗、行内代码） -->
+        <!-- User content card -->
         <div
-          class="text-[13px] text-foreground leading-[1.65] select-text transition-[max-height] duration-200"
-          :style="userNeedsCollapse && !userExpanded ? { maxHeight: '3.5em', overflow: 'hidden' } : { maxHeight: 'none' }"
+          class="max-w-[860px] rounded-2xl border border-white/[0.09] bg-[#141419] px-4 py-3 text-[14px] leading-[1.7] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
+          :class="stickyCompact ? 'shadow-sm' : 'shadow-[0_18px_42px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.025)]'"
         >
-          <template v-for="(seg, i) in renderedSegments" :key="i">
-            <div v-if="seg.type === 'text'" v-html="seg.html" />
-            <AiFileCard
-              v-else-if="seg.type === 'file'"
-              :name="seg.name"
-              :path="seg.path"
-              :size="seg.size"
-              :lines="seg.lines"
-              :content="seg.content"
-              class="my-1.5"
-            />
+          <!-- 吸顶极简态：单行省略 + 展开按钮 -->
+          <div v-if="stickyCompact" class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
+            <span class="line-clamp-2 min-w-0 whitespace-pre-wrap break-words text-[12px] leading-[1.45] text-foreground/82">{{ message.content }}</span>
+            <div class="flex shrink-0 items-center gap-1">
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
+                :title="copied ? '已复制' : '快捷复制'"
+                @click.stop="copyContent"
+              >
+                <component :is="copied ? Check : Copy" class="h-3 w-3" />
+              </button>
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
+                title="从这里创建分支会话"
+                @click.stop="emit('fork', message.id)"
+              >
+                <GitFork class="h-3 w-3" />
+              </button>
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
+                title="回退到这里继续"
+                @click.stop="emit('rewind', message.id)"
+              >
+                <History class="h-3 w-3" />
+              </button>
+              <button
+                class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
+                title="展开完整提问"
+                @click.stop="userExpanded = !userExpanded"
+              >
+                <ChevronRight class="h-3 w-3" :class="userExpanded ? 'rotate-90' : 'rotate-0'" />
+              </button>
+            </div>
+          </div>
+
+          <!-- 吸顶展开态（点击展开按钮后） -->
+          <div
+            v-if="stickyCompact && userExpanded"
+            class="mt-2 text-[13px] text-foreground/85 leading-[1.65] select-text border-t border-border/10 pt-2"
+          >
+            <template v-for="(seg, i) in userRenderedSegments" :key="i">
+              <div v-if="seg.type === 'text'" v-html="seg.html" />
+            </template>
+          </div>
+
+          <!-- 普通态 -->
+          <template v-else-if="!stickyCompact">
+            <!-- 用户消息：走 markdown 渲染（解析列表、加粗、行内代码） -->
+            <div
+              class="text-[14px] text-foreground/92 leading-[1.7] select-text transition-[max-height] duration-200"
+              :style="userNeedsCollapse && !effectiveExpanded ? { maxHeight: '3.5em', overflow: 'hidden' } : { maxHeight: 'none' }"
+            >
+              <template v-for="(seg, i) in userRenderedSegments" :key="i">
+                <div v-if="seg.type === 'text'" v-html="seg.html" />
+                <AiFileCard
+                  v-else-if="seg.type === 'file'"
+                  :name="seg.name"
+                  :path="seg.path"
+                  :size="seg.size"
+                  :lines="seg.lines"
+                  :content="seg.content"
+                  class="my-1.5"
+                />
+              </template>
+            </div>
+            <!-- 展开 / 收起按钮（右对齐，独立行，无负边距遮挡） -->
+            <div v-if="userNeedsCollapse" class="relative z-[1] flex justify-end mt-1.5">
+              <button
+                class="cursor-pointer flex items-center gap-1 text-[11px] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
+                @click.stop="userExpanded = !userExpanded"
+              >
+                <ChevronRight class="h-3 w-3 transition-transform duration-150" :class="effectiveExpanded ? '-rotate-90' : 'rotate-90'" />
+                {{ effectiveExpanded ? '收起' : `展开全部（${userLineCount} 行）` }}
+              </button>
+            </div>
           </template>
         </div>
-        <!-- 展开 / 收起按钮（右对齐，独立行，无负边距遮挡） -->
-        <div v-if="userNeedsCollapse" class="relative z-[1] flex justify-end mt-1.5">
-          <button
-            class="cursor-pointer flex items-center gap-1 text-[11px] text-muted-foreground/40 hover:text-muted-foreground/70 transition-colors"
-            @click.stop="userExpanded = !userExpanded"
-          >
-            <ChevronRight class="h-3 w-3 transition-transform duration-150" :class="userExpanded ? '-rotate-90' : 'rotate-90'" />
-            {{ userExpanded ? '收起' : `展开全部（${userLineCount} 行）` }}
-          </button>
-        </div>
-      </template>
+      </div>
     </div>
   </div>
 
   <!-- ==================== 错误消息 ==================== -->
-  <div v-else-if="isError" class="my-1">
-    <div class="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-2.5">
-      <AlertCircle class="h-4 w-4 text-destructive shrink-0 mt-0.5" />
-      <div class="flex-1 text-[13px] text-destructive leading-relaxed select-text">
-        <div>{{ message.content }}</div>
-        <!-- max_tokens 截断一键修复 -->
-        <div v-if="isMaxTokensTruncated" class="mt-2 flex items-center gap-1.5 flex-wrap">
-          <span class="text-[11px] text-destructive/70">一键调大：</span>
+  <div v-else-if="isError" class="my-3">
+    <div class="group relative flex gap-4">
+      <!-- Timeline -->
+      <div class="relative flex w-[22px] shrink-0 flex-col items-center pt-2">
+        <div class="h-[9px] w-[9px] rounded-full" :class="timelineDotClass" />
+        <div v-if="!isGroupEnd" class="mt-2 w-px flex-1" :class="timelineLineClass" />
+      </div>
+
+      <!-- Content -->
+      <div class="flex-1 min-w-0 pr-1">
+        <!-- Turn Header -->
+        <div v-if="!hideHeader" class="mb-2 flex items-center gap-2 text-[12px] text-red-300/70">
+          <strong class="text-[13px] font-semibold text-red-200">{{ turnRoleLabel }}</strong>
+          <span class="h-1 w-1 rounded-full bg-red-300/35" />
+          <span class="font-mono text-[10px] uppercase tracking-[0.12em] text-red-300/55">{{ turnMetaLabel }}</span>
+        </div>
+
+        <div class="flex items-start gap-2 rounded-xl border border-red-400/20 bg-red-500/[0.045] px-3 py-2.5">
+          <AlertCircle class="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <div class="flex-1 text-[13px] text-destructive leading-relaxed select-text">
+            <div>{{ message.content }}</div>
+            <!-- max_tokens 截断一键修复 -->
+            <div v-if="isMaxTokensTruncated" class="mt-2 flex items-center gap-1.5 flex-wrap">
+              <span class="text-[11px] text-destructive/70">一键调大：</span>
+              <button
+                v-for="v in [16384, 32768, 65536, 131072]"
+                :key="v"
+                class="rounded-md border border-destructive/25 bg-background/60 px-2 py-0.5 text-[11px] text-destructive hover:bg-destructive/10 transition-colors font-mono"
+                :title="`把当前模型 maxOutput 调到 ${v.toLocaleString()} token 并重新生成`"
+                @click="emit('bumpMaxOutput', v)"
+              >
+                {{ v >= 1024 ? (v / 1024) + 'K' : v }}
+              </button>
+            </div>
+          </div>
           <button
-            v-for="v in [16384, 32768, 65536, 131072]"
-            :key="v"
-            class="rounded-md border border-destructive/30 bg-background/60 px-2 py-0.5 text-[11px] text-destructive hover:bg-destructive/10 transition-colors font-mono"
-            :title="`把当前模型 maxOutput 调到 ${v.toLocaleString()} token 并重新生成`"
-            @click="emit('bumpMaxOutput', v)"
+            v-if="canContinue"
+            class="shrink-0 flex items-center gap-1 rounded-md border border-destructive/25 bg-background/60 px-2 py-1 text-[11px] text-destructive hover:bg-destructive/10 transition-colors"
+            title="基于上一次的用户输入重新生成"
+            @click="emit('continue')"
           >
-            {{ v >= 1024 ? (v / 1024) + 'K' : v }}
+            <RotateCw class="h-3 w-3" />
+            继续生成
           </button>
         </div>
       </div>
-      <button
-        v-if="canContinue"
-        class="shrink-0 flex items-center gap-1 rounded-md border border-destructive/30 bg-background/60 px-2 py-1 text-[11px] text-destructive hover:bg-destructive/10 transition-colors"
-        title="基于上一次的用户输入重新生成"
-        @click="emit('continue')"
-      >
-        <RotateCw class="h-3 w-3" />
-        继续生成
-      </button>
     </div>
   </div>
 
   <!-- ==================== 助手消息 ==================== -->
   <div
     v-else
-    class="group ai-prose relative"
-    :class="inGroup ? 'my-0' : 'my-1'"
-    v-memo="[message.id, message.isStreaming, message.toolCalls, message.toolResults, message.content?.length, message.notice?.text, hideHeader, isGroupEnd]"
+    class="group relative flex gap-4"
+    :class="rootSpacingClass"
+    v-memo="[message.id, message.isStreaming, toolCallRenderSignature, message.toolResults, message.content?.length, message.notice?.text, hideHeader, isGroupEnd]"
   >
-    <!-- 左侧轨道竖线（组内条目持续存在） -->
-    <div v-if="inGroup" class="timeline-track" :class="isGroupEnd ? 'timeline-track--end' : ''" />
-
-    <!-- 状态节点圆点 -->
-    <div
-      class="timeline-dot"
-      :class="message.isStreaming ? 'timeline-dot--streaming' : 'timeline-dot--done'"
-    />
-
-    <!-- 操作按钮（hover 才显，右上角） -->
-    <div class="absolute right-1 top-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-      <span v-if="message.tokens" class="text-[9px] text-muted-foreground/25 font-mono mr-1">{{ message.tokens }}t</span>
-      <span v-if="message.saveStatus === 'error'" class="text-[9px] text-destructive/60 font-mono mr-1" title="消息持久化失败">⚠</span>
-      <button
-        v-if="!message.isStreaming && message.content"
-        class="p-1 rounded hover:bg-muted text-muted-foreground/30 hover:text-muted-foreground"
-        title="导出 .md"
-        @click="exportMarkdown"
-      >
-        <Download class="h-3.5 w-3.5" />
-      </button>
-      <button
-        v-if="!message.isStreaming && message.content"
-        class="p-1 rounded hover:bg-muted text-muted-foreground/30 hover:text-muted-foreground"
-        :title="copied ? '已复制' : '复制'"
-        @click="copyContent"
-      >
-        <component :is="copied ? Check : Copy" class="h-3.5 w-3.5" />
-      </button>
+    <!-- Timeline -->
+    <div class="relative flex w-[22px] shrink-0 flex-col items-center pt-2">
+      <div class="h-[9px] w-[9px] rounded-full" :class="timelineDotClass" />
+      <div v-if="!isGroupEnd" class="mt-2 w-px flex-1" :class="timelineLineClass" />
     </div>
 
-    <!-- 内容区（固定左侧缩进 26px，与轨道线对齐） -->
-    <div class="pl-[26px] pr-1">
+    <!-- Content -->
+    <div class="flex-1 min-w-0 pr-1">
+      <div
+        v-if="message.saveStatus === 'error'"
+        class="mb-2 text-[10px] text-destructive/50"
+        title="消息持久化失败"
+      >
+        消息持久化失败
+      </div>
+
+      <!-- 操作按钮（hover 才显，右上角） -->
+      <div class="absolute right-0 top-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          v-if="!message.isStreaming && message.content"
+          class="rounded-md border border-transparent p-1 text-muted-foreground/30 transition-colors hover:border-white/[0.08] hover:bg-white/[0.04] hover:text-muted-foreground"
+          title="导出 .md"
+          @click="exportMarkdown"
+        >
+          <Download class="h-3.5 w-3.5" />
+        </button>
+        <button
+          v-if="!message.isStreaming && message.content"
+          class="rounded-md border border-transparent p-1 text-muted-foreground/30 transition-colors hover:border-white/[0.08] hover:bg-white/[0.04] hover:text-muted-foreground"
+          :title="copied ? '已复制' : '复制'"
+          @click="copyContent"
+        >
+          <component :is="copied ? Check : Copy" class="h-3.5 w-3.5" />
+        </button>
+        <button
+          v-if="!message.isStreaming && message.type !== 'divider' && message.type !== 'compact-boundary' && message.type !== 'rewind-boundary'"
+          class="rounded-md border border-transparent p-1 text-muted-foreground/30 transition-colors hover:border-white/[0.08] hover:bg-white/[0.04] hover:text-muted-foreground"
+          title="回退到这里继续"
+          @click="emit('rewind', message.id)"
+        >
+          <History class="h-3.5 w-3.5" />
+        </button>
+      </div>
+
       <!-- 思考过程（原生 <details> 无 JS 开销） -->
-      <details v-if="hasThinking" class="mb-1.5 group/thinking">
-        <summary class="flex items-center gap-1.5 text-[11px] text-muted-foreground/35 hover:text-muted-foreground/55 transition-colors cursor-pointer list-none select-none italic">
+      <details v-if="hasThinking" class="mb-2 group/thinking">
+        <summary class="flex items-center gap-1.5 text-[11px] text-muted-foreground/42 hover:text-muted-foreground/70 transition-colors cursor-pointer list-none select-none italic">
           <ChevronRight class="h-3 w-3 transition-transform duration-200 group-open/thinking:rotate-90 not-italic" />
           <span>思考过程</span>
         </summary>
-        <div class="mt-1 pl-3 border-l border-muted-foreground/10 text-[11px] text-muted-foreground/30 italic leading-relaxed whitespace-pre-wrap max-h-[180px] overflow-y-auto">
+        <div class="mt-1 pl-3 border-l border-white/[0.08] text-[11px] text-muted-foreground/42 italic leading-relaxed whitespace-pre-wrap max-h-[180px] overflow-y-auto">
           {{ sanitizedThinking }}
         </div>
       </details>
@@ -428,11 +640,34 @@ function renderBlock(text: string): string {
         <span class="text-[11px] text-muted-foreground/55 tracking-wide">思考中</span>
       </div>
 
-      <!-- 消息内容（组内非首条弱化颜色，让胶囊成为视觉焦点） -->
+      <!-- 消息内容（普通文本无大框，文档流） -->
+      <div
+        v-if="showAssistantActivity"
+        class="assistant-activity-strip"
+        aria-label="Assistant activity"
+      >
+        <div
+          v-for="step in assistantActivitySteps"
+          :key="step.key"
+          class="assistant-activity-item"
+          :class="`is-${step.state}`"
+        >
+          <i class="assistant-activity-icon" :class="`is-${step.visual}`" aria-hidden="true">
+            <template v-if="step.visual === 'bars'">
+              <i />
+              <i />
+              <i />
+            </template>
+          </i>
+          <strong>{{ step.label }}</strong>
+          <span v-if="step.detail">{{ step.detail }}</span>
+        </div>
+      </div>
+
       <div
         v-if="message.content"
-        class="text-[13px] leading-[1.65] select-text"
-        :class="hideHeader ? 'text-muted-foreground/55' : 'text-foreground/90'"
+        class="answer-flow text-[14px] leading-[1.8] select-text"
+        :class="hideHeader ? 'text-muted-foreground/62' : 'text-foreground/86'"
       >
         <template v-for="(seg, i) in renderedSegments" :key="i">
           <div v-if="seg.type === 'text'" v-html="seg.html" />
@@ -450,7 +685,7 @@ function renderBlock(text: string): string {
       </div>
 
       <!-- 工具调用块 -->
-      <div v-if="hasToolCalls" class="mt-2.5 space-y-1.5">
+      <div v-if="hasToolCalls" class="mt-3 space-y-2">
         <!-- 文件操作组（聚合 write_file 为毛玻璃卡片组） -->
         <AiFileOpsGroup
           v-if="fileOperations.length > 0"
@@ -459,7 +694,7 @@ function renderBlock(text: string): string {
         />
 
         <!-- 只读工具胶囊条（聚合连续同名调用） -->
-        <div v-if="pillGroups.length" class="flex flex-wrap gap-2 mt-0.5">
+        <div v-if="pillGroups.length" class="activity-strip mt-0.5 flex flex-wrap gap-2">
           <template v-for="group in pillGroups" :key="group.name + group.calls[0]?.id">
             <!-- 多个同名：显示"工具 ×N"的第一个胶囊 + 数量徽章 -->
             <div v-if="group.calls.length > 1" class="flex items-center gap-0.5">
@@ -479,7 +714,7 @@ function renderBlock(text: string): string {
         </div>
 
         <!-- 被点开的胶囊 → 完整卡片 -->
-        <div v-if="promotedPillCalls.length" class="space-y-1">
+        <div v-if="promotedPillCalls.length" class="space-y-1.5">
           <AiToolCallBlock
             v-for="tc in promotedPillCalls"
             :key="tc.id"
@@ -489,7 +724,7 @@ function renderBlock(text: string): string {
         </div>
 
         <!-- 其他工具调用（审批等待 / bash / todo_write 等，始终完整卡片） -->
-        <div v-if="fullToolCalls.length" class="space-y-1">
+        <div v-if="fullToolCalls.length" class="space-y-1.5">
           <AiToolCallBlock
             v-for="tc in fullToolCalls"
             :key="tc.id"
@@ -502,11 +737,11 @@ function renderBlock(text: string): string {
       <!-- 系统提示横幅（工具超限 / 流被中断等） -->
       <div
         v-if="message.notice"
-        class="mt-2 flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] leading-relaxed"
+        class="mt-3 flex items-start gap-2 rounded-xl border px-3 py-2.5 text-[12px] leading-relaxed"
         :class="{
-          'border-amber-500/30 bg-amber-500/8 text-amber-700 dark:text-amber-300': message.notice.kind === 'warn',
-          'border-destructive/30 bg-destructive/8 text-destructive': message.notice.kind === 'error',
-          'border-sky-500/30 bg-sky-500/8 text-sky-700 dark:text-sky-300': message.notice.kind === 'info',
+          'border-amber-500/25 bg-amber-500/[0.04] text-amber-700 dark:text-amber-300': message.notice.kind === 'warn',
+          'border-destructive/25 bg-destructive/[0.04] text-destructive': message.notice.kind === 'error',
+          'border-sky-500/25 bg-sky-500/[0.04] text-sky-700 dark:text-sky-300': message.notice.kind === 'info',
         }"
       >
         <component
@@ -520,7 +755,192 @@ function renderBlock(text: string): string {
 </template>
 
 <style scoped>
+.answer-flow {
+  padding: 2px 0 14px;
+  border-bottom: 1px solid rgb(244 244 245 / 0.09);
+}
+
+.answer-flow :deep(p) {
+  margin: 0 0 0.35rem;
+}
+
+.answer-flow :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.answer-flow :deep(strong) {
+  color: rgb(244 244 245 / 0.96);
+}
+
+.answer-flow :deep(code) {
+  border: 1px solid rgb(244 244 245 / 0.08);
+  background: rgb(21 21 27 / 0.9);
+  color: rgb(223 230 255 / 0.94);
+}
+
+.answer-flow :deep(a) {
+  color: #6aa8ff;
+}
+
+.activity-strip {
+  padding: 8px 0 2px;
+}
+
 /* 流式看门狗圆点跳动 */
+.assistant-activity-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 0 8px;
+  color: rgb(161 161 170 / 0.72);
+}
+
+.assistant-activity-item {
+  display: inline-flex;
+  height: 28px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 0 9px;
+  color: rgb(161 161 170 / 0.72);
+  font-size: 12px;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    color 180ms ease,
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+.assistant-activity-item strong {
+  color: rgb(212 212 216 / 0.88);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.assistant-activity-item span {
+  color: rgb(196 210 255 / 0.72);
+}
+
+.assistant-activity-item.is-active {
+  border-color: rgb(106 168 255 / 0.24);
+  background: rgb(106 168 255 / 0.06);
+  color: #cfe2ff;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03), 0 6px 18px rgb(0 0 0 / 0.12);
+}
+
+.assistant-activity-item.is-active strong {
+  color: #fff;
+}
+
+.assistant-activity-item.is-done {
+  color: rgb(85 216 153 / 0.72);
+}
+
+.assistant-activity-item.is-idle {
+  opacity: 0.76;
+}
+
+.assistant-activity-icon {
+  position: relative;
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+}
+
+.assistant-activity-icon.is-dot::before {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #6aa8ff;
+  box-shadow: 0 0 0 0 rgb(106 168 255 / 0.36);
+  animation: assistant-activity-pulse 1.45s ease-in-out infinite;
+  content: "";
+}
+
+.assistant-activity-icon.is-bars {
+  display: grid;
+  width: 14px;
+  height: 12px;
+  grid-template-columns: repeat(3, 3px);
+  gap: 2px;
+  align-items: end;
+}
+
+.assistant-activity-icon.is-bars > i {
+  display: block;
+  height: 40%;
+  border-radius: 999px;
+  background: #5bd7ff;
+  animation: assistant-activity-bars 1s ease-in-out infinite;
+}
+
+.assistant-activity-icon.is-bars > i:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.assistant-activity-icon.is-bars > i:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+.assistant-activity-icon.is-pen {
+  transform: rotate(-36deg);
+}
+
+.assistant-activity-icon.is-pen::before {
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 3px;
+  height: 11px;
+  border-radius: 999px;
+  background: #d6a84f;
+  animation: assistant-activity-write 1.35s ease-in-out infinite;
+  content: "";
+}
+
+.assistant-activity-icon.is-check {
+  border: 1px solid rgb(85 216 153 / 0.38);
+  border-radius: 50%;
+}
+
+.assistant-activity-icon.is-check::after {
+  position: absolute;
+  left: 4px;
+  top: 2px;
+  width: 4px;
+  height: 7px;
+  border-right: 2px solid #55d899;
+  border-bottom: 2px solid #55d899;
+  transform: rotate(38deg);
+  content: "";
+}
+
+.assistant-activity-icon.is-spark {
+  animation: assistant-activity-spin 2s linear infinite;
+}
+
+.assistant-activity-icon.is-spark::before,
+.assistant-activity-icon.is-spark::after {
+  position: absolute;
+  left: 6px;
+  top: 0;
+  width: 2px;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(to bottom, transparent, #f4f4f5 45%, transparent);
+  content: "";
+}
+
+.assistant-activity-icon.is-spark::after {
+  transform: rotate(90deg);
+}
+
 .thinking-dot {
   display: inline-block;
   width: 5px;
@@ -535,47 +955,57 @@ function renderBlock(text: string): string {
   40%           { transform: translateY(-4px); opacity: 1; }
 }
 
-/* 左侧隐形轨道线 */
-.timeline-track {
-  position: absolute;
-  left: calc(1rem + 2px); /* 16px + 圆点中轴对齐 */
-  top: 14px;              /* 从圆点底部开始 */
-  bottom: -4px;           /* 延伸连接下一条 */
-  width: 1px;
-  background: rgba(255, 255, 255, 0.08);
-  z-index: 1;
+@keyframes assistant-activity-pulse {
+  0%,
+  100% {
+    opacity: 0.38;
+    transform: scale(0.82);
+    box-shadow: 0 0 0 0 rgb(106 168 255 / 0.28);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+    box-shadow: 0 0 0 5px rgb(106 168 255 / 0);
+  }
 }
 
-/* 最后一条：轨道线稍短，不要穿出去 */
-.timeline-track--end {
-  bottom: 4px;
+@keyframes assistant-activity-bars {
+  0%,
+  100% {
+    height: 35%;
+    opacity: 0.45;
+  }
+  50% {
+    height: 100%;
+    opacity: 1;
+  }
 }
 
-/* 状态节点圆点 */
-.timeline-dot {
-  position: absolute;
-  left: calc(1rem - 1px); /* 圆点中心在 16px 处 */
-  top: 5px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  z-index: 2;
+@keyframes assistant-activity-write {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: translateY(-1px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(2px);
+  }
 }
 
-/* 已完成：极暗灰 */
-.timeline-dot--done {
-  background: rgba(255, 255, 255, 0.12);
+@keyframes assistant-activity-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-/* 流式中：亮绿色呼吸发光 */
-.timeline-dot--streaming {
-  background: oklch(0.696 0.17 162.48); /* emerald-500 */
-  box-shadow: 0 0 0 3px oklch(0.696 0.17 162.48 / 0.2);
-  animation: dot-pulse 1.6s ease-in-out infinite;
-}
-
-@keyframes dot-pulse {
-  0%, 100% { box-shadow: 0 0 0 2px oklch(0.696 0.17 162.48 / 0.15); }
-  50%       { box-shadow: 0 0 0 5px oklch(0.696 0.17 162.48 / 0.25); }
+@media (prefers-reduced-motion: reduce) {
+  .assistant-activity-icon.is-dot::before,
+  .assistant-activity-icon.is-bars > i,
+  .assistant-activity-icon.is-pen::before,
+  .assistant-activity-icon.is-spark,
+  .thinking-dot {
+    animation: none;
+  }
 }
 </style>

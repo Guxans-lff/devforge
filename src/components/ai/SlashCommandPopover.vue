@@ -108,6 +108,8 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+defineExpose({ onKeydown })
+
 const popoverEl = ref<HTMLElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 

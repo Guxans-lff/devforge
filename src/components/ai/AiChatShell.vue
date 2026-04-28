@@ -29,9 +29,6 @@ import {
   FolderOpen,
   History,
   Minimize2,
-  MoreHorizontal,
-  PanelRightClose,
-  PanelRightOpen,
   Plus,
   Settings,
 } from 'lucide-vue-next'
@@ -146,6 +143,8 @@ const emit = defineEmits<{
   (e: 'bumpMaxOutput', value: number): void
   (e: 'loadMoreHistory'): void
   (e: 'scrollMessages', event: Event): void
+  (e: 'forkMessage', messageId: string): void
+  (e: 'rewindMessage', messageId: string): void
   (e: 'send', value: string): void
   (e: 'abort'): void
   (e: 'clearSession'): void
@@ -161,6 +160,7 @@ const emit = defineEmits<{
   (e: 'selectSession', id: string): void
   (e: 'createSession'): void
   (e: 'deleteSession', id: string): void
+  (e: 'preloadSession', id: string): void
   (e: 'filePickerConfirm', paths: string[]): void
   (e: 'exitImmersive'): void
   (e: 'toggleSideRail'): void
@@ -171,7 +171,7 @@ const { t } = useI18n()
 const messageListRef = ref<InstanceType<typeof AiMessageListVirtual> | null>(null)
 const inputAreaRef = ref<InstanceType<typeof AiInputArea> | null>(null)
 const shellClass = computed(() => ['flex h-full min-h-0 flex-col', props.backgroundClass].filter(Boolean).join(' '))
-const showSideRail = computed(() => props.repositoryFocusLayout && props.showSideRailToggle && props.sideRailOpen)
+const showSideRail = computed(() => props.repositoryFocusLayout && props.sideRailOpen)
 
 defineExpose({
   scrollContainer: computed(() => messageListRef.value?.scrollContainer ?? null),
@@ -187,56 +187,36 @@ defineExpose({
     </template>
 
     <template v-else>
+      <!-- 顶部轻量工作区头部 -->
       <div
-        class="flex shrink-0 items-center justify-between px-4 py-2"
-        :class="toolbarBorder ? 'border-b border-border/30' : ''"
+        class="flex shrink-0 items-center justify-between px-4 py-1.5"
+        :class="toolbarBorder ? 'border-b border-border/25' : ''"
       >
         <div class="flex min-w-0 items-center gap-2">
-          <TooltipProvider :delay-duration="300">
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <button
-                  type="button"
-                  class="inline-flex h-8 items-center gap-2 rounded-full border border-border/30 bg-background/60 px-2.5 text-[11px] text-foreground/86 transition-colors hover:border-border/50 hover:bg-muted/20"
-                  @click="emit('primaryAction')"
-                >
-                  <Plus class="h-3.5 w-3.5" />
-                  <span>{{ primaryActionLabel }}</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" class="text-[11px]">{{ primaryActionLabel }}</TooltipContent>
-            </Tooltip>
+          <!-- 在线状态 + 标题 -->
+          <div class="flex items-center gap-1.5">
+            <span class="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
+            <span class="text-[11px] font-medium text-foreground/70 truncate max-w-[180px]">
+              {{ workDir ? workDirDisplay : t('ai.messages.title') }}
+            </span>
+          </div>
 
-            <Tooltip>
-              <TooltipTrigger as-child>
-                <button
-                  type="button"
-                  class="inline-flex h-8 items-center gap-2 rounded-full border border-border/30 bg-muted/15 px-2.5 text-[11px] text-muted-foreground transition-colors hover:border-border/50 hover:bg-muted/25 hover:text-foreground"
-                  @click="emit('secondaryAction')"
-                >
-                  <Bot class="h-3.5 w-3.5" />
-                  <span class="hidden md:inline">{{ secondaryActionLabel }}</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" class="text-[11px]">{{ secondaryActionLabel }}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-
+          <!-- 工作区路径 Dropdown -->
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
               <button
                 type="button"
-                class="flex min-w-0 items-center gap-1.5 rounded-full border border-border/30 bg-muted/15 px-3 py-1.5 text-[11px] transition-colors"
+                class="flex min-w-0 items-center gap-1 rounded-md border border-border/20 bg-muted/[0.04] px-2 py-0.5 text-[10px] transition-colors"
                 :class="workDir
-                  ? 'text-muted-foreground hover:border-border/50 hover:bg-muted/25 hover:text-foreground'
-                  : 'text-muted-foreground/50 hover:border-border/40 hover:bg-muted/20 hover:text-muted-foreground'"
+                  ? 'text-muted-foreground/70 hover:border-border/40 hover:bg-muted/15 hover:text-foreground'
+                  : 'text-muted-foreground/40 hover:border-border/30 hover:bg-muted/10 hover:text-muted-foreground/60'"
                 :title="workDir || t('ai.messages.workDirTitle')"
               >
-                <FolderOpen class="h-3.5 w-3.5 shrink-0" />
-                <span class="max-w-[132px] truncate">
+                <FolderOpen class="h-3 w-3 shrink-0" />
+                <span class="max-w-[100px] truncate">
                   {{ workDir ? workDirDisplay : t('ai.messages.workDirUnset') }}
                 </span>
-                <ChevronDown class="h-3 w-3 shrink-0 opacity-60" />
+                <ChevronDown class="h-3 w-3 shrink-0 opacity-50" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" class="w-64">
@@ -272,18 +252,39 @@ defineExpose({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+        </div>
 
+        <div class="flex items-center gap-1.5">
+          <!-- 新会话 -->
+          <TooltipProvider :delay-duration="300">
+            <Tooltip>
+              <TooltipTrigger as-child>
+                <button
+                  type="button"
+                  class="inline-flex h-6 items-center gap-1 rounded-md border border-border/20 bg-muted/[0.04] px-2 text-[10px] text-muted-foreground/70 transition-colors hover:border-border/40 hover:bg-muted/15 hover:text-foreground"
+                  @click="emit('primaryAction')"
+                >
+                  <Plus class="h-3 w-3" />
+                  <span class="hidden sm:inline">{{ primaryActionLabel }}</span>
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" class="text-[11px]">{{ primaryActionLabel }}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+
+          <!-- 历史 / 更多 -->
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
               <button
                 type="button"
-                class="inline-flex h-8 items-center gap-1.5 rounded-full border border-border/30 bg-muted/15 px-2.5 text-[11px] text-muted-foreground transition-colors hover:border-border/50 hover:bg-muted/25 hover:text-foreground"
+                class="inline-flex h-6 items-center gap-1 rounded-md border border-border/20 bg-muted/[0.04] px-2 text-[10px] text-muted-foreground/70 transition-colors hover:border-border/40 hover:bg-muted/15 hover:text-foreground"
               >
-                <MoreHorizontal class="h-3.5 w-3.5" />
-                <span class="hidden md:inline">更多</span>
+                <History class="h-3 w-3" />
+                <span class="hidden sm:inline">{{ t('ai.messages.history') }}</span>
+                <ChevronDown class="h-3 w-3 shrink-0 opacity-50" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" class="w-48">
+            <DropdownMenuContent align="end" class="w-48">
               <DropdownMenuItem
                 v-if="!showSessionDrawer"
                 class="text-[12px]"
@@ -302,29 +303,30 @@ defineExpose({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
-        </div>
 
-        <div class="flex items-center gap-2">
+          <!-- 后台任务开关 -->
           <TooltipProvider v-if="showSideRailToggle" :delay-duration="300">
             <Tooltip>
               <TooltipTrigger as-child>
                 <button
                   type="button"
-                  class="inline-flex items-center gap-2 rounded-full border border-border/30 bg-muted/20 px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-border/50 hover:bg-muted/35 hover:text-foreground"
+                  class="run-inspector-chip inline-flex h-[30px] items-center gap-2 overflow-hidden rounded-full border border-emerald-400/25 bg-[linear-gradient(180deg,rgba(52,211,153,0.075),rgba(52,211,153,0.035))] px-2.5 font-mono text-[12px] text-emerald-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.035)] transition-colors hover:border-emerald-300/35 hover:text-emerald-100"
                   @click="emit('toggleSideRail')"
                 >
-                  <component :is="sideRailOpen ? PanelRightClose : PanelRightOpen" class="h-3.5 w-3.5" />
-                  <span class="rounded-full bg-background/80 px-1.5 py-0.5 text-[10px] text-foreground/80">
+                  <span class="h-[7px] w-[7px] rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,0.55)]" />
+                  <span class="hidden md:inline">{{ sideRailOpen ? 'Run Inspector' : `已完成 · ctx ${contextUsagePercent}%` }}</span>
+                  <span class="rounded-full border border-emerald-300/20 bg-black/20 px-1.5 py-px font-mono text-[10px] text-emerald-100/90">
                     {{ sideRailCount }}
                   </span>
                 </button>
               </TooltipTrigger>
               <TooltipContent side="bottom" class="text-[11px]">
-                {{ sideRailOpen ? '收起后台任务' : '展开后台任务' }}
+                {{ sideRailOpen ? `收起${sideRailLabel}` : `展开${sideRailLabel}` }}
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
 
+          <!-- 用量 -->
           <AiUsageBadge
             v-if="currentModel && !repositoryFocusLayout"
             :prompt-tokens="promptTokens"
@@ -334,11 +336,12 @@ defineExpose({
             :pricing="currentModel.capabilities.pricing"
           />
 
+          <!-- 退出沉浸 -->
           <TooltipProvider v-if="showExitImmersive" :delay-duration="300">
             <Tooltip>
               <TooltipTrigger as-child>
-                <Button variant="ghost" size="icon" class="h-8 w-8" @click="emit('exitImmersive')">
-                  <Minimize2 class="h-4 w-4" />
+                <Button variant="ghost" size="icon" class="h-6 w-6" @click="emit('exitImmersive')">
+                  <Minimize2 class="h-3.5 w-3.5" />
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" class="text-[11px]">{{ t('ai.messages.exitImmersive') }}</TooltipContent>
@@ -348,10 +351,11 @@ defineExpose({
       </div>
 
       <div
-        class="grid min-h-0 flex-1 overflow-hidden"
-        :class="showSideRail ? 'xl:grid-cols-[minmax(0,1fr)_300px]' : 'grid-cols-1'"
+        class="grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-200 ease-out"
+        :class="showSideRail ? 'xl:grid-cols-[minmax(0,1fr)_348px]' : 'grid-cols-1'"
       >
-        <div class="flex min-h-0 min-w-0 flex-col overflow-hidden" :class="showSideRail ? 'xl:border-r xl:border-border/30' : ''">
+        <div class="relative flex min-h-0 min-w-0 flex-col overflow-hidden" :class="showSideRail ? 'xl:border-r xl:border-border/25' : ''">
+          <!-- 消息列表区（唯一主要滚动区域） -->
           <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
             <div
               v-if="messagesCount === 0 && !isLoading"
@@ -359,21 +363,21 @@ defineExpose({
             >
               <slot name="empty-state">
                 <div class="flex h-full flex-col items-center justify-center px-6 text-center">
-                  <div class="mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/5">
-                    <Bot class="h-10 w-10 text-primary/40" />
+                  <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/[0.04]">
+                    <Bot class="h-6 w-6 text-primary/30" />
                   </div>
-                  <h2 class="mb-2 text-xl font-semibold text-foreground/80">{{ t('ai.messages.title') }}</h2>
-                  <p class="max-w-md text-sm leading-relaxed text-muted-foreground/70">
+                  <h2 class="mb-1.5 text-base font-semibold text-foreground/70">{{ t('ai.messages.title') }}</h2>
+                  <p class="max-w-md text-sm leading-relaxed text-muted-foreground/60">
                     {{ hasProviders ? emptyDescriptionReady : emptyDescriptionMissingProvider }}
                   </p>
                   <Button
                     v-if="!hasProviders"
                     variant="outline"
                     size="sm"
-                    class="mt-6"
+                    class="mt-5"
                     @click="emit('openConfig')"
                   >
-                    <Settings class="mr-2 h-4 w-4" />
+                    <Settings class="mr-2 h-3.5 w-3.5" />
                     {{ t('ai.messages.configureProvider') }}
                   </Button>
                   <slot name="empty-state-extra" />
@@ -395,6 +399,8 @@ defineExpose({
               @bump-max-output="emit('bumpMaxOutput', $event)"
               @load-more-history="emit('loadMoreHistory')"
               @scroll="emit('scrollMessages', $event)"
+              @fork="emit('forkMessage', $event)"
+              @rewind="emit('rewindMessage', $event)"
             />
           </div>
 
@@ -402,19 +408,20 @@ defineExpose({
 
           <slot name="after-compact" />
 
-          <div v-if="error" class="mx-auto mb-2 max-w-4xl px-5">
-            <div class="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-2 text-xs text-destructive">
+          <div v-if="error" class="mx-auto mb-1.5 max-w-3xl px-4">
+            <div class="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
               {{ error }}
             </div>
           </div>
 
           <slot name="before-input" />
 
-          <div class="mx-auto w-full max-w-4xl px-5">
+          <!-- 底部输入区（固定可见） -->
+          <div class="shrink-0">
             <AiInputArea
               ref="inputAreaRef"
               :is-streaming="isStreaming"
-              :disabled="!hasProviders"
+              :disabled="!hasProviders || !currentModel"
               :loading="isLoading"
               :providers="providers"
               :selected-provider-id="selectedProviderId"
@@ -440,14 +447,17 @@ defineExpose({
           </div>
         </div>
 
-        <aside v-if="showSideRail" class="hidden min-w-0 overflow-auto bg-muted/10 xl:block">
+        <aside
+          v-if="showSideRail"
+          class="run-inspector-panel hidden min-w-0 overflow-hidden border-l border-white/[0.08] bg-[linear-gradient(180deg,#111116,#0d0d11)] shadow-[-28px_0_80px_rgba(0,0,0,0.32)] xl:block"
+        >
           <slot name="side-rail" />
         </aside>
       </div>
     </template>
 
     <AiSessionDrawer
-      v-if="showSessionDrawer || sessions.length > 0"
+      v-if="showSessionDrawer"
       :open="showSessionDrawer"
       :sessions="sessions"
       :active-session-id="activeSessionId"
@@ -455,6 +465,7 @@ defineExpose({
       @select="emit('selectSession', $event)"
       @create="emit('createSession')"
       @delete="emit('deleteSession', $event)"
+      @preload="emit('preloadSession', $event)"
     />
 
     <WorkspaceFilePicker
@@ -470,3 +481,52 @@ defineExpose({
     />
   </div>
 </template>
+
+<style scoped>
+@keyframes runInspectorBreathe {
+  0%, 100% { border-color: rgb(56 189 248 / 0.22); }
+  50% { border-color: rgb(125 211 252 / 0.42); }
+}
+
+@keyframes runInspectorDot {
+  0%, 100% { box-shadow: 0 0 12px rgb(52 211 153 / 0.32), 0 0 0 0 rgb(52 211 153 / 0.18); }
+  50% { box-shadow: 0 0 18px rgb(52 211 153 / 0.55), 0 0 0 6px rgb(52 211 153 / 0); }
+}
+
+@keyframes runInspectorSlideIn {
+  from { opacity: 0; transform: translateX(18px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes runInspectorScan {
+  0% { transform: translateX(-105%); }
+  100% { transform: translateX(105%); }
+}
+
+.run-inspector-chip {
+  position: relative;
+}
+
+.run-inspector-chip::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.08), transparent);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.run-inspector-chip > span:first-child {
+  box-shadow: 0 0 12px rgb(52 211 153 / 0.32);
+}
+
+.run-inspector-panel {
+  animation: runInspectorSlideIn 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-inspector-panel {
+    animation: none;
+  }
+}
+</style>
