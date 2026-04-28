@@ -15,6 +15,9 @@ import { useTheme } from '@/composables/useTheme'
 import { useSettingsStore } from '@/stores/settings'
 import { Loader2, ShieldAlert, WifiOff, KeyRound, Activity, RotateCcw } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('terminal.panel')
 
 const props = defineProps<{
   connectionId: string
@@ -44,6 +47,8 @@ let webglAddon: WebglAddon | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | null = null
 let paused = false // deactivated 时暂停数据处理
 let lastDetectedCwd = '' // 最近一次获取到的工作目录
+let bufferedOutput: Uint8Array[] = []
+let bufferedOutputBytes = 0
 
 // === 端到端流控写入引擎（参考 VS Code + xterm.js 官方方案）===
 //
@@ -62,18 +67,40 @@ let pendingAckBytes = 0     // 自上次 ACK 以来已处理但未通知的字�
 
 // 流控参数
 const ACK_BYTE_THRESHOLD = 128_000  // 每处理 128KB 发一次 ACK
+const MAX_BUFFERED_OUTPUT_BYTES = 2_000_000
+
+function bufferOutput(data: Uint8Array) {
+  bufferedOutput.push(data)
+  bufferedOutputBytes += data.length
+
+  while (bufferedOutputBytes > MAX_BUFFERED_OUTPUT_BYTES && bufferedOutput.length > 0) {
+    const removed = bufferedOutput.shift()
+    bufferedOutputBytes -= removed?.length ?? 0
+  }
+}
+
+function flushBufferedOutput() {
+  const chunks = bufferedOutput
+  bufferedOutput = []
+  bufferedOutputBytes = 0
+  chunks.forEach((chunk) => flowControlledWrite(chunk))
+}
 
 /** 发送 ACK 到后端，通知已处理的字节数 */
 function sendFlowAck() {
   if (!sessionId || pendingAckBytes === 0) return
   totalAcked = totalProcessed
   pendingAckBytes = 0
-  sshApi.sshFlowAck(sessionId, totalAcked).catch((e: unknown) => console.warn('[Terminal]', e))
+  sshApi.sshFlowAck(sessionId, totalAcked).catch((e: unknown) => log.warn('flow_ack_failed', undefined, e))
 }
 
 /** 将数据写入 xterm.js 并注册处理完成回调用于流控 */
 function flowControlledWrite(data: Uint8Array) {
-  if (!terminal || paused) return
+  if (!terminal) return
+  if (paused) {
+    bufferOutput(data)
+    return
+  }
 
   const chunkSize = data.length
   totalReceived += chunkSize
@@ -152,7 +179,7 @@ function createTerminal() {
       terminal.loadAddon(webglAddon)
     } catch (e) {
       webglAddon = null
-      console.warn('WebGL 渲染器加载失败，回退到 Canvas 2D:', e)
+      log.warn('webgl_load_failed', undefined, e)
     }
   }
 
@@ -160,7 +187,7 @@ function createTerminal() {
   terminal.onData((data) => {
     if (sessionId && status.value === 'connected') {
       sshApi.sshSendData(sessionId, data).catch((err) => {
-        console.warn('SSH send data failed:', err)
+        log.warn('send_data_failed', undefined, err)
       })
     }
   })
@@ -189,7 +216,7 @@ async function connect() {
             const data = Uint8Array.from(binaryStr, c => c.charCodeAt(0))
             flowControlledWrite(data)
           } catch (e) {
-            console.error('Terminal Base64 decode error:', e);
+            log.error('base64_decode_failed', undefined, e)
           }
         }
       },
@@ -229,7 +256,7 @@ function handleResize() {
     fitAddon.fit()
     if (sessionId && status.value === 'connected' && terminal) {
       sshApi.sshResize(sessionId, terminal.cols, terminal.rows).catch((err) => {
-        console.warn('SSH resize failed:', err)
+        log.warn('resize_failed', undefined, err)
       })
     }
   }, 150)
@@ -251,6 +278,8 @@ async function cleanup() {
   totalAcked = 0
   totalProcessed = 0
   pendingAckBytes = 0
+  bufferedOutput = []
+  bufferedOutputBytes = 0
 
   paused = false
   if (webglAddon) {
@@ -259,7 +288,7 @@ async function cleanup() {
   }
 
   if (sessionId) {
-    await sshApi.sshDisconnect(sessionId).catch((e: unknown) => console.warn('[Terminal]', e))
+    await sshApi.sshDisconnect(sessionId).catch((e: unknown) => log.warn('disconnect_failed', undefined, e))
     sessionId = ''
   }
 
@@ -321,6 +350,7 @@ onActivated(() => {
       resizeObserver.observe(terminalRef.value)
     }
     fitAddon?.fit()
+    flushBufferedOutput()
     terminal.focus()
   }
 })
@@ -377,7 +407,7 @@ watch(
 function sendData(data: string) {
   if (sessionId && status.value === 'connected') {
     sshApi.sshSendData(sessionId, data).catch((err) => {
-      console.warn('SSH send data failed:', err)
+      log.warn('send_data_failed', undefined, err)
     })
   }
 }

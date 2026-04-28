@@ -15,6 +15,9 @@ import {
 import { Circle, Square, History } from 'lucide-vue-next'
 import * as recorderApi from '@/api/terminal-recorder'
 import type { RecordingInfo } from '@/api/terminal-recorder'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('recording.indicator')
 
 const props = defineProps<{
   sessionId: string
@@ -60,7 +63,7 @@ async function startRecording() {
     timer = setInterval(() => { elapsed.value++ }, 1000)
     emit('recording-change', true)
   } catch (e) {
-    console.warn('开始录制失败:', e)
+    log.warn('start_recording_failed', undefined, e)
   }
 }
 
@@ -69,7 +72,7 @@ async function stopRecording() {
   try {
     await recorderApi.stopRecording(props.sessionId)
   } catch (e) {
-    console.warn('停止录制失败:', e)
+    log.warn('stop_recording_failed', undefined, e)
   }
   recording.value = false
   if (timer) {
@@ -97,7 +100,7 @@ async function loadRecordings() {
   try {
     recordings.value = await recorderApi.listRecordings()
   } catch (e) {
-    console.warn('加载录制列表失败:', e)
+    log.warn('load_recordings_failed', undefined, e)
   }
 }
 

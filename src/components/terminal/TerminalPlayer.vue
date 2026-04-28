@@ -11,6 +11,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { Play, Pause, RotateCcw, FastForward, FileVideo, Loader2, Download } from 'lucide-vue-next'
 import * as recorderApi from '@/api/terminal-recorder'
 import { save } from '@tauri-apps/plugin-dialog'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('terminal.player')
 
 const props = defineProps<{
   filePath: string
@@ -91,7 +94,7 @@ async function loadRecording() {
     eventCount.value = events.length
     totalDuration.value = events.length > 0 ? events[events.length - 1]!.time : 0
   } catch (e) {
-    console.warn('加载录制失败:', e)
+    log.warn('load_recording_failed', undefined, e)
   } finally {
     loading.value = false
   }
@@ -177,7 +180,7 @@ async function saveToLocal() {
   try {
     await recorderApi.exportRecording(props.filePath, targetPath)
   } catch (e) {
-    console.warn('导出失败:', e)
+    log.warn('export_failed', undefined, e)
   }
 }
 

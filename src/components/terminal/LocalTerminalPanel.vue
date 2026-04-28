@@ -18,6 +18,9 @@ import { useTheme } from '@/composables/useTheme'
 import { useSettingsStore } from '@/stores/settings'
 import { Loader2, AlertCircle, RotateCcw } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { createLogger } from '@/utils/logger'
+
+const log = createLogger('local.terminal')
 
 const props = defineProps<{
   sessionId: string
@@ -126,7 +129,7 @@ async function connect() {
   // 用户输入 → 发送到后端
   terminal.onData((data) => {
     if (status.value === 'connected') {
-      localShellApi.localShellWrite(props.sessionId, data).catch((e: unknown) => console.warn('[LocalTerminal]', e))
+      localShellApi.localShellWrite(props.sessionId, data).catch((e: unknown) => log.warn('shell_write_failed', undefined, e))
     }
   })
 
@@ -149,7 +152,7 @@ async function connect() {
     resizeTimer = setTimeout(() => {
       fitAddon?.fit()
       if (terminal && status.value === 'connected') {
-        localShellApi.localShellResize(props.sessionId, terminal.cols, terminal.rows).catch((e: unknown) => console.warn('[LocalTerminal]', e))
+        localShellApi.localShellResize(props.sessionId, terminal.cols, terminal.rows).catch((e: unknown) => log.warn('shell_resize_failed', undefined, e))
       }
     }, 100)
   })
@@ -241,7 +244,7 @@ onActivated(() => {
           fitAddon?.fit()
           if (terminal && status.value === 'connected') {
             localShellApi.localShellResize(props.sessionId, terminal.cols, terminal.rows)
-              .catch((e: unknown) => console.warn('[LocalTerminal]', e))
+              .catch((e: unknown) => log.warn('shell_resize_failed', undefined, e))
           }
         }, 100)
       })
