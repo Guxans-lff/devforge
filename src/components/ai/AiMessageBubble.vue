@@ -171,12 +171,6 @@ function isEditingTool(name: string): boolean {
   return /^(write|edit|delete|move|rename|create|apply|patch|bash|run|chmod|chown|mkdir|rm)/i.test(name)
 }
 
-function activityState(active: boolean, done: boolean): ActivityStepState {
-  if (active) return 'active'
-  if (done) return 'done'
-  return 'idle'
-}
-
 function formatToolName(name: string): string {
   return name.replace(/_/g, ' ')
 }
@@ -190,7 +184,6 @@ const readonlyToolCalls = computed(() =>
 const editingToolCalls = computed(() =>
   (props.message.toolCalls ?? []).filter(tc => isEditingTool(tc.name)),
 )
-const hasReadonlyDone = computed(() => readonlyToolCalls.value.some(tc => tc.status === 'success'))
 const hasEditingDone = computed(() => editingToolCalls.value.some(tc => tc.status === 'success'))
 const hasReadonlyActive = computed(() => readonlyToolCalls.value.some(tc => isToolRunning(tc.status)))
 const hasEditingActive = computed(() => editingToolCalls.value.some(tc => isToolRunning(tc.status) || tc.approvalState === 'awaiting'))
@@ -220,53 +213,62 @@ const showAssistantActivity = computed(() =>
   !isUser.value
   && !isError.value
   && !isBoundaryMessage.value
-  && (props.message.isStreaming || hasToolCalls.value || hasThinking.value),
+  && (props.message.isStreaming || runningToolCalls.value.length > 0),
 )
 
-const assistantActivitySteps = computed<AssistantActivityStep[]>(() => {
+const assistantActivityStep = computed<AssistantActivityStep | null>(() => {
   const contextDone = hasThinking.value || hasToolCalls.value || !!props.message.promptTokens
-  const processingDone = !assistantWorkActive.value && (!!props.message.content || hasToolCalls.value)
-  const celebrateActive = processingDone && !hasToolFailure.value
 
-  return [
-    {
-      key: 'read',
-      label: 'Read',
-      state: activityState(hasReadonlyActive.value, hasReadonlyDone.value || contextPills.value.length > 0),
-      visual: hasReadonlyDone.value || contextPills.value.length > 0 ? 'check' : 'bars',
-    },
-    {
-      key: 'context',
-      label: 'Context',
-      state: activityState(!!props.message.isStreaming && !contextDone, contextDone),
-      visual: contextDone ? 'check' : 'dot',
-    },
-    {
-      key: 'processing',
-      label: assistantWorkActive.value ? 'Processing...' : 'Processed',
-      detail: assistantActivityDetail.value,
-      state: activityState(assistantWorkActive.value, processingDone),
-      visual: assistantWorkActive.value ? 'dot' : 'check',
-    },
-    {
-      key: 'reading',
-      label: 'Reading',
-      state: activityState(hasReadonlyActive.value, hasReadonlyDone.value),
-      visual: hasReadonlyDone.value ? 'check' : 'bars',
-    },
-    {
+  if (hasEditingActive.value) {
+    return {
       key: 'editing',
       label: 'Editing',
-      state: activityState(hasEditingActive.value, hasEditingDone.value),
-      visual: hasEditingDone.value ? 'check' : 'pen',
-    },
-    {
+      detail: assistantActivityDetail.value,
+      state: 'active',
+      visual: 'pen',
+    }
+  }
+
+  if (hasReadonlyActive.value) {
+    return {
+      key: 'reading',
+      label: 'Reading',
+      detail: assistantActivityDetail.value,
+      state: 'active',
+      visual: 'bars',
+    }
+  }
+
+  if (props.message.isStreaming && hasEditingDone.value && !hasToolFailure.value && !!props.message.content) {
+    return {
       key: 'celebrating',
       label: 'Celebrating',
-      state: celebrateActive ? 'active' : 'idle',
+      state: 'active',
       visual: 'spark',
-    },
-  ]
+    }
+  }
+
+  if (props.message.isStreaming && !contextDone) {
+    return {
+      key: 'context',
+      label: 'Context',
+      detail: assistantActivityDetail.value,
+      state: 'active',
+      visual: 'dot',
+    }
+  }
+
+  if (assistantWorkActive.value) {
+    return {
+      key: 'processing',
+      label: 'Processing...',
+      detail: assistantActivityDetail.value,
+      state: 'active',
+      visual: 'dot',
+    }
+  }
+
+  return null
 })
 
 const expandedPillIds = ref<Set<string>>(new Set())
@@ -415,7 +417,7 @@ function renderBlock(text: string): string {
 
 <template>
   <!-- ==================== 用户消息 ==================== -->
-  <div v-if="isUser" :class="rootSpacingClass">
+  <div v-if="isUser" class="ai-turn ai-turn-user" :class="rootSpacingClass">
     <div class="group relative flex gap-4">
       <!-- Timeline -->
       <div class="relative flex w-[22px] shrink-0 flex-col items-center pt-2">
@@ -434,7 +436,7 @@ function renderBlock(text: string): string {
 
         <!-- User content card -->
         <div
-          class="max-w-[860px] rounded-2xl border border-white/[0.09] bg-[#141419] px-4 py-3 text-[14px] leading-[1.7] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
+          class="ai-user-card max-w-[860px] rounded-2xl border border-white/[0.09] bg-[#141419] px-4 py-3 text-[14px] leading-[1.7] shadow-[inset_0_1px_0_rgba(255,255,255,0.025)]"
           :class="stickyCompact ? 'shadow-sm' : 'shadow-[0_18px_42px_rgba(0,0,0,0.18),inset_0_1px_0_rgba(255,255,255,0.025)]'"
         >
           <!-- 吸顶极简态：单行省略 + 展开按钮 -->
@@ -519,7 +521,7 @@ function renderBlock(text: string): string {
   </div>
 
   <!-- ==================== 错误消息 ==================== -->
-  <div v-else-if="isError" class="my-3">
+  <div v-else-if="isError" class="ai-turn my-3">
     <div class="group relative flex gap-4">
       <!-- Timeline -->
       <div class="relative flex w-[22px] shrink-0 flex-col items-center pt-2">
@@ -571,7 +573,7 @@ function renderBlock(text: string): string {
   <!-- ==================== 助手消息 ==================== -->
   <div
     v-else
-    class="group relative flex gap-4"
+    class="ai-turn ai-turn-assistant group relative flex gap-4"
     :class="rootSpacingClass"
     v-memo="[message.id, message.isStreaming, toolCallRenderSignature, message.toolResults, message.content?.length, message.notice?.text, hideHeader, isGroupEnd]"
   >
@@ -631,7 +633,7 @@ function renderBlock(text: string): string {
       </details>
 
       <!-- 流式光标 -->
-      <div v-if="message.isStreaming && !message.content" class="flex items-center gap-2 py-1.5">
+      <div v-if="message.isStreaming && !message.content && !assistantActivityStep" class="flex items-center gap-2 py-1.5">
         <span class="flex gap-[4px] items-end">
           <span class="thinking-dot" style="animation-delay: 0ms" />
           <span class="thinking-dot" style="animation-delay: 160ms" />
@@ -642,25 +644,24 @@ function renderBlock(text: string): string {
 
       <!-- 消息内容（普通文本无大框，文档流） -->
       <div
-        v-if="showAssistantActivity"
+        v-if="showAssistantActivity && assistantActivityStep"
         class="assistant-activity-strip"
         aria-label="Assistant activity"
       >
         <div
-          v-for="step in assistantActivitySteps"
-          :key="step.key"
+          :key="assistantActivityStep.key"
           class="assistant-activity-item"
-          :class="`is-${step.state}`"
+          :class="[`is-${assistantActivityStep.state}`, `is-${assistantActivityStep.key}`]"
         >
-          <i class="assistant-activity-icon" :class="`is-${step.visual}`" aria-hidden="true">
-            <template v-if="step.visual === 'bars'">
+          <i class="assistant-activity-icon" :class="`is-${assistantActivityStep.visual}`" aria-hidden="true">
+            <template v-if="assistantActivityStep.visual === 'bars'">
               <i />
               <i />
               <i />
             </template>
           </i>
-          <strong>{{ step.label }}</strong>
-          <span v-if="step.detail">{{ step.detail }}</span>
+          <strong>{{ assistantActivityStep.label }}</strong>
+          <span v-if="assistantActivityStep.detail">{{ assistantActivityStep.detail }}</span>
         </div>
       </div>
 
@@ -755,9 +756,41 @@ function renderBlock(text: string): string {
 </template>
 
 <style scoped>
+.ai-turn {
+  position: relative;
+}
+
+.ai-turn::before {
+  position: absolute;
+  left: 4px;
+  top: 8px;
+  width: 1px;
+  height: calc(100% - 12px);
+  pointer-events: none;
+  background: linear-gradient(to bottom, rgb(255 255 255 / 0.1), transparent);
+  content: '';
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.ai-turn:hover::before {
+  opacity: 1;
+}
+
+.ai-user-card {
+  background:
+    radial-gradient(circle at 0% 0%, rgb(96 165 250 / 0.08), transparent 42%),
+    linear-gradient(180deg, #17171d, #121217);
+}
+
+.ai-turn-assistant {
+  border-radius: 18px;
+}
+
 .answer-flow {
   padding: 2px 0 14px;
   border-bottom: 1px solid rgb(244 244 245 / 0.09);
+  text-wrap: pretty;
 }
 
 .answer-flow :deep(p) {
@@ -776,6 +809,8 @@ function renderBlock(text: string): string {
   border: 1px solid rgb(244 244 245 / 0.08);
   background: rgb(21 21 27 / 0.9);
   color: rgb(223 230 255 / 0.94);
+  border-radius: 6px;
+  padding: 0.08rem 0.28rem;
 }
 
 .answer-flow :deep(a) {
@@ -797,21 +832,55 @@ function renderBlock(text: string): string {
 }
 
 .assistant-activity-item {
+  position: relative;
   display: inline-flex;
   height: 28px;
   align-items: center;
   gap: 8px;
+  overflow: hidden;
   border: 1px solid transparent;
   border-radius: 999px;
   padding: 0 9px;
   color: rgb(161 161 170 / 0.72);
   font-size: 12px;
+  isolation: isolate;
   transition:
     border-color 180ms ease,
     background 180ms ease,
     color 180ms ease,
     transform 180ms ease,
     opacity 180ms ease;
+}
+
+.assistant-activity-item::before,
+.assistant-activity-item::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  content: "";
+}
+
+.assistant-activity-item::before {
+  z-index: -1;
+  background:
+    linear-gradient(115deg, transparent 0%, rgb(255 255 255 / 0.18) 34%, transparent 58%),
+    radial-gradient(circle at 20% 50%, rgb(106 168 255 / 0.18), transparent 44%);
+  opacity: 0;
+  transform: translateX(-120%);
+}
+
+.assistant-activity-item::after {
+  z-index: -2;
+  border: 1px solid rgb(106 168 255 / 0);
+  opacity: 0;
+}
+
+.assistant-activity-item strong,
+.assistant-activity-item span,
+.assistant-activity-icon {
+  position: relative;
+  z-index: 1;
 }
 
 .assistant-activity-item strong {
@@ -826,9 +895,48 @@ function renderBlock(text: string): string {
 
 .assistant-activity-item.is-active {
   border-color: rgb(106 168 255 / 0.24);
-  background: rgb(106 168 255 / 0.06);
+  background:
+    linear-gradient(180deg, rgb(106 168 255 / 0.1), rgb(106 168 255 / 0.045)),
+    rgb(106 168 255 / 0.035);
   color: #cfe2ff;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.03), 0 6px 18px rgb(0 0 0 / 0.12);
+  animation: assistant-activity-breathe 1.9s ease-in-out infinite;
+}
+
+.assistant-activity-item.is-active::before {
+  opacity: 1;
+  animation: assistant-activity-scan 1.65s cubic-bezier(0.22, 0.78, 0.24, 1) infinite;
+}
+
+.assistant-activity-item.is-active::after {
+  opacity: 1;
+  animation: assistant-activity-ring 1.9s ease-in-out infinite;
+}
+
+.assistant-activity-item.is-context {
+  border-color: rgb(106 168 255 / 0.3);
+}
+
+.assistant-activity-item.is-reading {
+  border-color: rgb(91 215 255 / 0.28);
+}
+
+.assistant-activity-item.is-editing {
+  border-color: rgb(214 168 79 / 0.3);
+  background:
+    linear-gradient(180deg, rgb(214 168 79 / 0.1), rgb(214 168 79 / 0.035)),
+    rgb(106 168 255 / 0.02);
+}
+
+.assistant-activity-item.is-celebrating {
+  border-color: rgb(85 216 153 / 0.32);
+  background:
+    radial-gradient(circle at 18% 50%, rgb(85 216 153 / 0.18), transparent 42%),
+    rgb(85 216 153 / 0.045);
+}
+
+.assistant-activity-item.is-processing::before {
+  animation-duration: 1.25s;
 }
 
 .assistant-activity-item.is-active strong {
@@ -863,6 +971,27 @@ function renderBlock(text: string): string {
   content: "";
 }
 
+.assistant-activity-icon.is-dot::after {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgb(106 168 255 / 0.36);
+  border-radius: 999px;
+  opacity: 0.72;
+  animation: assistant-activity-orbit 1.45s linear infinite;
+  content: "";
+}
+
+.assistant-activity-item.is-processing .assistant-activity-icon.is-dot::before {
+  background: #8fb9ff;
+  animation-duration: 0.86s;
+}
+
+.assistant-activity-item.is-processing .assistant-activity-icon.is-dot::after {
+  border-top-color: rgb(255 255 255 / 0.88);
+  animation-duration: 0.86s;
+}
+
 .assistant-activity-icon.is-bars {
   display: grid;
   width: 14px;
@@ -877,7 +1006,9 @@ function renderBlock(text: string): string {
   height: 40%;
   border-radius: 999px;
   background: #5bd7ff;
-  animation: assistant-activity-bars 1s ease-in-out infinite;
+  box-shadow: 0 0 10px rgb(91 215 255 / 0.36);
+  transform-origin: bottom;
+  animation: assistant-activity-bars 0.86s ease-in-out infinite;
 }
 
 .assistant-activity-icon.is-bars > i:nth-child(2) {
@@ -904,6 +1035,20 @@ function renderBlock(text: string): string {
   content: "";
 }
 
+.assistant-activity-icon.is-pen::after {
+  position: absolute;
+  left: 4px;
+  top: 11px;
+  width: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, rgb(214 168 79 / 0.78), transparent);
+  opacity: 0.8;
+  transform: rotate(36deg) translateX(-2px);
+  animation: assistant-activity-ink 1.35s ease-in-out infinite;
+  content: "";
+}
+
 .assistant-activity-icon.is-check {
   border: 1px solid rgb(85 216 153 / 0.38);
   border-radius: 50%;
@@ -922,7 +1067,9 @@ function renderBlock(text: string): string {
 }
 
 .assistant-activity-icon.is-spark {
-  animation: assistant-activity-spin 2s linear infinite;
+  animation:
+    assistant-activity-spin 2s linear infinite,
+    assistant-activity-spark-pop 0.9s ease-in-out infinite;
 }
 
 .assistant-activity-icon.is-spark::before,
@@ -955,6 +1102,46 @@ function renderBlock(text: string): string {
   40%           { transform: translateY(-4px); opacity: 1; }
 }
 
+@keyframes assistant-activity-breathe {
+  0%,
+  100% {
+    transform: translateY(0);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.04),
+      0 6px 18px rgb(0 0 0 / 0.12),
+      0 0 0 rgb(106 168 255 / 0);
+  }
+  50% {
+    transform: translateY(-1px);
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.08),
+      0 10px 24px rgb(0 0 0 / 0.16),
+      0 0 18px rgb(106 168 255 / 0.16);
+  }
+}
+
+@keyframes assistant-activity-scan {
+  0% {
+    transform: translateX(-120%);
+  }
+  62%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes assistant-activity-ring {
+  0%,
+  100% {
+    border-color: rgb(106 168 255 / 0.08);
+    opacity: 0.52;
+  }
+  50% {
+    border-color: rgb(106 168 255 / 0.34);
+    opacity: 1;
+  }
+}
+
 @keyframes assistant-activity-pulse {
   0%,
   100% {
@@ -969,15 +1156,23 @@ function renderBlock(text: string): string {
   }
 }
 
+@keyframes assistant-activity-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @keyframes assistant-activity-bars {
   0%,
   100% {
     height: 35%;
     opacity: 0.45;
+    transform: scaleY(0.72);
   }
   50% {
     height: 100%;
     opacity: 1;
+    transform: scaleY(1);
   }
 }
 
@@ -993,16 +1188,46 @@ function renderBlock(text: string): string {
   }
 }
 
+@keyframes assistant-activity-ink {
+  0%,
+  100% {
+    opacity: 0;
+    transform: rotate(36deg) translateX(-4px) scaleX(0.4);
+  }
+  45%,
+  70% {
+    opacity: 0.9;
+    transform: rotate(36deg) translateX(1px) scaleX(1);
+  }
+}
+
 @keyframes assistant-activity-spin {
   to {
     transform: rotate(360deg);
   }
 }
 
+@keyframes assistant-activity-spark-pop {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 0 rgb(85 216 153 / 0));
+    opacity: 0.76;
+  }
+  50% {
+    filter: drop-shadow(0 0 8px rgb(85 216 153 / 0.58));
+    opacity: 1;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .assistant-activity-item,
+  .assistant-activity-item::before,
+  .assistant-activity-item::after,
   .assistant-activity-icon.is-dot::before,
+  .assistant-activity-icon.is-dot::after,
   .assistant-activity-icon.is-bars > i,
   .assistant-activity-icon.is-pen::before,
+  .assistant-activity-icon.is-pen::after,
   .assistant-activity-icon.is-spark,
   .thinking-dot {
     animation: none;

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
     workspaceFilesStore: null as any,
     memoryStore: null as any,
     settingsStore: null as any,
+    backgroundJobStore: null as any,
     fileAttachment: null as any,
     shellDraft: '',
   },
@@ -47,6 +48,17 @@ vi.mock('@/stores/settings', () => ({
   useSettingsStore: () => mocks.state.settingsStore,
 }))
 
+vi.mock('@/stores/background-job', () => ({
+  useBackgroundJobStore: () => mocks.state.backgroundJobStore,
+}))
+
+vi.mock('@/composables/useVerificationJob', () => ({
+  useVerificationJob: () => ({
+    submitVerificationJob: vi.fn().mockResolvedValue('job-test'),
+    cancelVerificationJob: vi.fn(),
+  }),
+}))
+
 vi.mock('@/composables/useFileAttachment', () => ({
   useFileAttachment: () => mocks.state.fileAttachment,
   stripMentionMarkers: (text: string) => text.replace(/@\S+/g, '').replace(/\s{2,}/g, ' ').trim(),
@@ -71,6 +83,7 @@ vi.mock('@/composables/useToolApproval', () => ({
 
 vi.mock('@/utils/file-markers', () => ({
   checkTokenLimit: () => ({ warn: false, usage: 0, limit: 0 }),
+  estimateTokens: (text: string) => Math.ceil((text?.length ?? 0) / 4),
 }))
 
 vi.mock('@/utils/ai-prompts', () => ({
@@ -369,6 +382,15 @@ function mountView(props: Record<string, unknown> = {}) {
             return () => h('div', { class: 'ai-diagnostics-panel-stub' }, 'diagnostics')
           },
         }),
+        AiContextBudgetPanel: true,
+        AiFileChangeSummaryPanel: true,
+        AiMcpStatusPanel: true,
+        AiPatchReviewPanel: true,
+        AiWorkflowRuntimePanel: true,
+        AiWorkspaceIsolationPanel: true,
+        AiPlanPanel: true,
+        AiBackgroundJobsPanel: true,
+        AiProactiveTickPanel: true,
         AiPlanGateBar: true,
         AiPhaseBar: true,
         AiSpawnedTasksPanel: AiSpawnedTasksPanelStub,
@@ -458,6 +480,12 @@ describe('AiChatView interaction', () => {
       settings: {
         devMode: true,
       },
+    }
+    mocks.state.backgroundJobStore = {
+      jobs: [],
+      hydrateJobs: vi.fn().mockResolvedValue(undefined),
+      clearCompleted: vi.fn(),
+      cancelJob: vi.fn().mockResolvedValue(undefined),
     }
     mocks.state.fileAttachment = {
       attachments: ref([]),
@@ -1498,6 +1526,21 @@ describe('AiChatView interaction', () => {
     await flushPromises()
 
     expect(wrapper.find('.ai-diagnostics-panel-stub').exists()).toBe(true)
+  })
+
+  it('renders the run inspector rail with Chinese labels', async () => {
+    mocks.state.chat.messages.value = [makeMessage('assistant-1')]
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.find('.toggle-task-rail').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('运行检查器')
+    expect(wrapper.text()).toContain('运行与验证')
+    expect(wrapper.text()).toContain('工具')
+    expect(wrapper.text()).toContain('文件')
+    expect(wrapper.text()).toContain('任务')
   })
 
   it('retries a transient failure with a more stable fallback model', async () => {

@@ -582,11 +582,11 @@ defineExpose({ focus, setDraft })
 </script>
 
 <template>
-  <div class="border-t border-white/[0.09] bg-[linear-gradient(180deg,rgba(8,8,10,0.35),#08080a)] backdrop-blur supports-[backdrop-filter]:bg-[#08080a]/86">
+  <div class="ai-composer-surface border-t border-white/[0.09] bg-[linear-gradient(180deg,rgba(8,8,10,0.35),#08080a)] backdrop-blur supports-[backdrop-filter]:bg-[#08080a]/86">
     <!-- 输入框区域 -->
     <div class="px-6 pb-4 pt-4 sm:px-10">
       <div
-        class="relative mx-auto grid max-w-[1180px] grid-rows-[1fr_auto] overflow-hidden rounded-[18px] border shadow-[0_22px_58px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.035)] transition-colors focus-within:border-white/[0.2]"
+        class="ai-composer-card relative mx-auto grid max-w-[1180px] grid-rows-[1fr_auto] overflow-hidden rounded-[18px] border shadow-[0_22px_58px_rgba(0,0,0,0.38),inset_0_1px_0_rgba(255,255,255,0.035)] transition-colors focus-within:border-white/[0.2]"
         :class="isDragOver ? 'border-primary/50 ring-1 ring-primary/20 bg-primary/[0.02]' : 'border-white/[0.13] bg-[linear-gradient(180deg,#121217,#0e0e12)]'"
         @dragover="handleDragOver"
         @dragleave="handleDragLeave"
@@ -613,7 +613,7 @@ defineExpose({ focus, setDraft })
           :placeholder="inputPlaceholder"
           :disabled="disabled"
           rows="2"
-          class="w-full resize-none bg-transparent px-[18px] pb-2 pt-[15px] text-[14px] leading-[1.55] text-foreground placeholder:text-muted-foreground/48 focus:outline-none disabled:opacity-50"
+          class="ai-composer-textarea w-full resize-none bg-transparent px-[18px] pb-2 pt-[15px] text-[14px] leading-[1.55] text-foreground placeholder:text-muted-foreground/48 focus:outline-none disabled:opacity-50"
           style="max-height: 200px; min-height: 54px"
           @keydown="handleKeyDown"
           @input="adjustHeight(); detectAtMention(); detectSlashCommand(); pushToUndoStack(inputText)"
@@ -810,6 +810,47 @@ defineExpose({ focus, setDraft })
 </template>
 
 <style scoped>
+.ai-composer-surface {
+  position: relative;
+}
+
+.ai-composer-surface::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 0%, rgb(255 255 255 / 0.06), transparent 36%),
+    linear-gradient(90deg, transparent, rgb(16 185 129 / 0.04), transparent);
+  content: '';
+}
+
+.ai-composer-card {
+  isolation: isolate;
+}
+
+.ai-composer-card::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 12% 0%, rgb(96 165 250 / 0.12), transparent 34%),
+    linear-gradient(180deg, rgb(255 255 255 / 0.035), transparent 44%);
+  content: '';
+}
+
+.ai-composer-card:focus-within {
+  box-shadow:
+    0 26px 70px rgb(0 0 0 / 0.44),
+    0 0 0 1px rgb(255 255 255 / 0.035),
+    0 0 34px rgb(16 185 129 / 0.075),
+    inset 0 1px 0 rgb(255 255 255 / 0.055);
+}
+
+.ai-composer-textarea {
+  caret-color: rgb(110 231 183);
+}
+
 .composer-chip {
   border: 1px solid rgb(244 244 245 / 0.08);
   border-radius: 999px;

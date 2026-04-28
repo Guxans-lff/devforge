@@ -172,6 +172,14 @@ const messageListRef = ref<InstanceType<typeof AiMessageListVirtual> | null>(nul
 const inputAreaRef = ref<InstanceType<typeof AiInputArea> | null>(null)
 const shellClass = computed(() => ['flex h-full min-h-0 flex-col', props.backgroundClass].filter(Boolean).join(' '))
 const showSideRail = computed(() => props.repositoryFocusLayout && props.sideRailOpen)
+const shouldShowGlobalError = computed(() => {
+  const errorText = props.error?.trim()
+  if (!errorText) return false
+  return !props.messageItems.some(item =>
+    item.message.role === 'error'
+    && item.message.content?.trim() === errorText,
+  )
+})
 
 defineExpose({
   scrollContainer: computed(() => messageListRef.value?.scrollContainer ?? null),
@@ -181,7 +189,7 @@ defineExpose({
 </script>
 
 <template>
-  <div :class="shellClass">
+  <div class="ai-chat-shell" :class="shellClass">
     <template v-if="currentView === 'provider-config'">
       <AiProviderConfig @back="emit('closeConfig')" />
     </template>
@@ -189,7 +197,7 @@ defineExpose({
     <template v-else>
       <!-- 顶部轻量工作区头部 -->
       <div
-        class="flex shrink-0 items-center justify-between px-4 py-1.5"
+        class="ai-chat-toolbar flex shrink-0 items-center justify-between px-4 py-1.5"
         :class="toolbarBorder ? 'border-b border-border/25' : ''"
       >
         <div class="flex min-w-0 items-center gap-2">
@@ -314,7 +322,7 @@ defineExpose({
                   @click="emit('toggleSideRail')"
                 >
                   <span class="h-[7px] w-[7px] rounded-full bg-emerald-400 shadow-[0_0_14px_rgba(52,211,153,0.55)]" />
-                  <span class="hidden md:inline">{{ sideRailOpen ? 'Run Inspector' : `已完成 · ctx ${contextUsagePercent}%` }}</span>
+                  <span class="hidden md:inline">{{ sideRailOpen ? '运行与验证' : `已完成 · 上下文 ${contextUsagePercent}%` }}</span>
                   <span class="rounded-full border border-emerald-300/20 bg-black/20 px-1.5 py-px font-mono text-[10px] text-emerald-100/90">
                     {{ sideRailCount }}
                   </span>
@@ -351,12 +359,12 @@ defineExpose({
       </div>
 
       <div
-        class="grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-200 ease-out"
+        class="ai-chat-body grid min-h-0 flex-1 overflow-hidden transition-[grid-template-columns] duration-200 ease-out"
         :class="showSideRail ? 'xl:grid-cols-[minmax(0,1fr)_348px]' : 'grid-cols-1'"
       >
-        <div class="relative flex min-h-0 min-w-0 flex-col overflow-hidden" :class="showSideRail ? 'xl:border-r xl:border-border/25' : ''">
+        <div class="ai-chat-main relative flex min-h-0 min-w-0 flex-col overflow-hidden" :class="showSideRail ? 'xl:border-r xl:border-border/25' : ''">
           <!-- 消息列表区（唯一主要滚动区域） -->
-          <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div class="ai-message-stage flex min-h-0 flex-1 flex-col overflow-hidden">
             <div
               v-if="messagesCount === 0 && !isLoading"
               :class="repositoryFocusLayout ? 'h-full overflow-auto' : 'flex h-full flex-col items-center justify-center px-6 text-center'"
@@ -408,7 +416,7 @@ defineExpose({
 
           <slot name="after-compact" />
 
-          <div v-if="error" class="mx-auto mb-1.5 max-w-3xl px-4">
+          <div v-if="shouldShowGlobalError" class="mx-auto mb-1.5 max-w-3xl px-4">
             <div class="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-1.5 text-xs text-destructive">
               {{ error }}
             </div>
@@ -417,7 +425,7 @@ defineExpose({
           <slot name="before-input" />
 
           <!-- 底部输入区（固定可见） -->
-          <div class="shrink-0">
+          <div class="ai-input-dock shrink-0">
             <AiInputArea
               ref="inputAreaRef"
               :is-streaming="isStreaming"
@@ -507,6 +515,14 @@ defineExpose({
   position: relative;
 }
 
+.run-inspector-chip::before {
+  content: '运行与验证';
+  display: none;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  font-size: 12px;
+  color: rgb(209 250 229 / 0.95);
+}
+
 .run-inspector-chip::after {
   content: '';
   position: absolute;
@@ -520,8 +536,62 @@ defineExpose({
   box-shadow: 0 0 12px rgb(52 211 153 / 0.32);
 }
 
+.run-inspector-chip > span:nth-child(2) {
+  display: none !important;
+}
+
 .run-inspector-panel {
   animation: runInspectorSlideIn 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ai-chat-shell {
+  position: relative;
+  background:
+    radial-gradient(circle at 22% 0%, rgb(59 130 246 / 0.075), transparent 28%),
+    radial-gradient(circle at 86% 12%, rgb(16 185 129 / 0.06), transparent 30%),
+    #09090b;
+}
+
+.ai-chat-toolbar {
+  min-height: 42px;
+  border-bottom: 1px solid rgb(255 255 255 / 0.06);
+  background: linear-gradient(180deg, rgb(15 15 19 / 0.92), rgb(10 10 13 / 0.82));
+  box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.28);
+  backdrop-filter: blur(18px);
+}
+
+.ai-chat-body {
+  position: relative;
+}
+
+.ai-chat-body::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.014) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, transparent, black 18%, black 72%, transparent);
+  content: '';
+}
+
+.ai-chat-main,
+.ai-message-stage,
+.ai-input-dock {
+  position: relative;
+  z-index: 1;
+}
+
+.ai-input-dock {
+  border-top: 1px solid rgb(255 255 255 / 0.055);
+  background: linear-gradient(180deg, transparent, rgb(9 9 11 / 0.86) 22%, rgb(9 9 11));
+}
+
+@media (min-width: 768px) {
+  .run-inspector-chip::before {
+    display: inline;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

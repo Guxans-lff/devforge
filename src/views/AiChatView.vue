@@ -15,6 +15,8 @@ import { useSettingsStore } from '@/stores/settings'
 import { useAiChat } from '@/composables/useAiChat'
 import { useAiChatViewState } from '@/composables/useAiChatViewState'
 import { useFileAttachment } from '@/composables/useFileAttachment'
+import { useVerificationJob } from '@/composables/useVerificationJob'
+import { useBackgroundJobStore } from '@/stores/background-job'
 import {
   analyzeSpawnedTasks,
   markSpawnedTaskClosed,
@@ -34,6 +36,8 @@ import { executeToolCalls as runToolCalls } from '@/composables/ai/chatToolExecu
 import { handleStreamEvent as applyStreamEvent, type AiChatStreamState } from '@/composables/ai/chatStreamEvents'
 import { useAutoCompact } from '@/composables/useAutoCompact'
 import { useAiChatObservability } from '@/composables/ai/useAiChatObservability'
+import { collectFileOperations } from '@/ai-gui/fileChangeSummary'
+import { analyzeContextBudget } from '@/composables/ai-agent/diagnostics/contextBudgetAnalyzer'
 import {
   recordProviderSuccess,
   recordProviderTransientFailure,
@@ -43,15 +47,24 @@ import { genId } from '@/composables/ai/chatHelpers'
 import { createLogger } from '@/utils/logger'
 import AiChatShell from '@/components/ai/AiChatShell.vue'
 import AiDiagnosticsPanel from '@/components/ai/AiDiagnosticsPanel.vue'
+import AiContextBudgetPanel from '@/components/ai/AiContextBudgetPanel.vue'
 import AiPlanGateBar from '@/components/ai/AiPlanGateBar.vue'
+import AiPlanPanel from '@/components/ai/AiPlanPanel.vue'
 import AiPhaseBar from '@/components/ai/AiPhaseBar.vue'
+import AiFileChangeSummaryPanel from '@/components/ai/AiFileChangeSummaryPanel.vue'
+import AiMcpStatusPanel from '@/components/ai/AiMcpStatusPanel.vue'
 import AiSpawnedTasksPanel from '@/components/ai/AiSpawnedTasksPanel.vue'
+import AiBackgroundJobsPanel from '@/components/ai/AiBackgroundJobsPanel.vue'
+import AiPatchReviewPanel from '@/components/ai/AiPatchReviewPanel.vue'
+import AiWorkflowRuntimePanel from '@/components/ai/AiWorkflowRuntimePanel.vue'
+import AiWorkspaceIsolationPanel from '@/components/ai/AiWorkspaceIsolationPanel.vue'
+import AiProactiveTickPanel from '@/components/ai/AiProactiveTickPanel.vue'
 import {
   MessageSquareText,
   Sparkles,
   Zap,
 } from 'lucide-vue-next'
-import type { ProviderConfig, ModelConfig } from '@/types/ai'
+import type { ProviderConfig, ModelConfig, FileOperation } from '@/types/ai'
 
 interface MessageGroup {
   isGroupStart: boolean
@@ -153,9 +166,11 @@ const workspace = useWorkspaceStore()
 const wsFiles = useWorkspaceFilesStore()
 const memoryStore = useAiMemoryStore()
 const settingsStore = useSettingsStore()
+const backgroundJobStore = useBackgroundJobStore()
 const fileAttachment = useFileAttachment()
 const autoCompact = useAutoCompact()
 const headlessObservability = useAiChatObservability()
+const verificationJob = useVerificationJob()
 const log = createLogger('ai.chat.view')
 
 const currentView = ref<'chat' | 'provider-config'>('chat')
@@ -164,6 +179,7 @@ const showMemoryDrawer = ref(false)
 const showFilePicker = ref(false)
 const showTaskRail = ref(false)
 const expandedTaskCardIds = ref<string[]>([])
+const fileChangeOperations = ref<FileOperation[]>([])
 
 const chatShellRef = ref<AiChatShellExposed | null>(null)
 const scrollContainer = computed(() => chatShellRef.value?.scrollContainer ?? null)
@@ -516,9 +532,7 @@ const taskRailSummary = computed(() => ({
 
 watch(taskRailSummary, (summary) => {
   if (summary.total === 0) {
-    showTaskRail.value = false
     expandedTaskCardIds.value = []
-    return
   }
 
   if (summary.running > 0 || summary.blocked > 0) {
@@ -628,7 +642,6 @@ function recordRoutingEvent(reason: RetryFallbackReason | 'provider_circuit_open
 }
 
 function toggleTaskRail(): void {
-  if (taskRailSummary.value.total === 0) return
   showTaskRail.value = !showTaskRail.value
 }
 
@@ -686,6 +699,71 @@ const {
   },
   onPersistWorkDir: persistWorkDir,
 })
+
+const contextBudgetReport = computed(() => {
+  const maxContext = currentModel.value?.capabilities.maxContext ?? 0
+  const compactSummary = chat.messages.value.find(message => message.type === 'compact-boundary')?.content
+
+  return analyzeContextBudget({
+    systemPrompt: effectiveSystemPrompt.value,
+    memories: memoryStore.memories,
+    messages: chat.messages.value,
+    attachments: fileAttachment.attachments.value,
+    maxContextTokens: maxContext,
+    compactSummary,
+  })
+})
+
+const touchedFilePaths = computed(() =>
+  [...new Set(fileChangeOperations.value.map(operation => operation.path).filter(Boolean))],
+)
+
+const currentSessionBackgroundJobs = computed(() =>
+  backgroundJobStore.jobs.filter(job => job.sessionId === currentSessionId.value),
+)
+
+const verificationRunning = computed(() =>
+  currentSessionBackgroundJobs.value.some(job =>
+    job.kind === 'verification'
+    && (job.status === 'queued' || job.status === 'running' || job.status === 'cancelling'),
+  ),
+)
+
+const runInspectorItemCount = computed(() =>
+  taskRailSummary.value.total
+  + fileChangeOperations.value.length
+  + currentSessionBackgroundJobs.value.length
+  + (contextBudgetReport.value.usagePercent > 0 ? 1 : 0),
+)
+
+const fileOperationSourceSignature = computed(() =>
+  chat.messages.value
+    .map(message => [
+      message.id,
+      message.toolCalls?.map(toolCall => `${toolCall.id}:${toolCall.name}:${toolCall.status}`).join(',') ?? '',
+    ].join(':'))
+    .join('|'),
+)
+
+watch(
+  fileOperationSourceSignature,
+  () => {
+    const existing = new Map(fileChangeOperations.value.map(operation => [operation.toolCallId, operation]))
+    fileChangeOperations.value = collectFileOperations(chat.messages.value).map(operation => ({
+      ...operation,
+      status: existing.get(operation.toolCallId)?.status ?? operation.status,
+      errorMessage: existing.get(operation.toolCallId)?.errorMessage,
+    }))
+  },
+  { immediate: true },
+)
+
+watch(currentSessionId, (sessionId) => {
+  fileChangeOperations.value = []
+  if (sessionId) {
+    void backgroundJobStore.hydrateJobs(sessionId)
+  }
+}, { immediate: true })
 
 let watchLoadTimer: ReturnType<typeof setTimeout> | null = null
 watch(currentSessionId, (sessionId, oldSessionId) => {
@@ -1610,6 +1688,22 @@ function handleSpawnSynthesize(): void {
   chatShellRef.value?.setInputDraft?.(prompt, { focus: true })
 }
 
+async function handleRunPatchVerification(commands: string[]): Promise<void> {
+  const sessionId = currentSessionId.value
+  const workDir = chat.workDir.value
+  if (!sessionId || !workDir || commands.length === 0) return
+
+  await verificationJob.submitVerificationJob(
+    sessionId,
+    workDir,
+    commands.map(command => ({ command, timeoutSeconds: 180 })),
+  )
+}
+
+function handleInsertWorkflowPrompt(prompt: string): void {
+  chatShellRef.value?.setInputDraft?.(prompt, { append: true, focus: true })
+}
+
 function handleNewAiTab(): void {
   workspace.addTab({
     id: `ai-chat-${Date.now()}`,
@@ -1636,6 +1730,14 @@ function handleModelChange(newModelId: string): void {
     content: '',
     timestamp: Date.now(),
   }]
+}
+
+function handleClearToolResults(): void {
+  chat.messages.value = chat.messages.value.map(message =>
+    message.toolResults?.length
+      ? { ...message, toolResults: [] }
+      : message,
+  )
 }
 
 async function handleCompact(): Promise<void> {
@@ -1856,7 +1958,7 @@ function handleRewindMessage(messageId: string): void {
     :empty-description-missing-provider="t('ai.messages.emptyDescriptionMissingProvider')"
     :show-exit-immersive="true"
     :repository-focus-layout="true"
-    :show-side-rail-toggle="taskRailSummary.total > 0"
+    :show-side-rail-toggle="true"
     :side-rail-open="showTaskRail"
     :side-rail-count="taskRailSummary.total"
     side-rail-label="后台任务"
@@ -2078,120 +2180,236 @@ function handleRewindMessage(messageId: string): void {
     </template>
 
     <template #side-rail>
-      <div data-ui="task-rail" class="flex h-full flex-col">
-        <div class="border-b border-border/30 px-4 py-4">
-          <p class="text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground/50">任务</p>
-          <h3 class="mt-2 text-sm font-semibold text-foreground/90">需要处理时再展开</h3>
+      <div data-ui="task-rail" class="run-inspector flex h-full flex-col bg-[linear-gradient(180deg,#111116,#0d0d11)]">
+        <div class="run-inspector-head flex h-[54px] items-center justify-between border-b border-white/[0.09] bg-[linear-gradient(180deg,rgba(244,244,245,0.04),transparent)] px-3">
+          <div class="grid gap-1">
+            <p class="font-mono text-[10px] font-bold uppercase leading-none tracking-[0.14em] text-muted-foreground/55">
+              运行检查器
+            </p>
+            <h3 class="text-[15px] font-semibold tracking-[-0.03em] text-foreground/92">运行与验证</h3>
+          </div>
+          <button
+            type="button"
+            class="grid h-7 w-7 place-items-center rounded-[9px] border border-white/[0.09] bg-[#0c0c10] text-[16px] leading-none text-muted-foreground transition-colors hover:border-white/[0.18] hover:text-foreground"
+            aria-label="关闭运行检查器"
+            @click="toggleTaskRail"
+          >
+            ×
+          </button>
         </div>
 
-        <div class="flex-1 overflow-auto p-4">
-          <div v-if="chat.spawnedTasks.value.length > 0" class="space-y-3">
-            <div class="rounded-2xl border border-border/30 bg-muted/15 px-3 py-2.5">
-              <div class="flex items-center justify-between gap-3 text-[11px] text-muted-foreground/68">
-                <span>{{ taskRailSummary.running }} 进行中</span>
-                <span>{{ taskRailSummary.done }} 已完成</span>
-                <span>{{ taskRailSummary.blocked }} 等待中</span>
-              </div>
+        <div class="flex-1 overflow-auto p-3">
+          <div class="mb-3 grid grid-cols-3 gap-2">
+            <div class="rounded-xl border border-white/[0.08] bg-white/[0.025] px-2.5 py-2">
+              <span class="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/45">工具</span>
+              <b class="block font-mono text-[15px] text-foreground/90">{{ runInspectorItemCount }}</b>
             </div>
-
-            <div class="space-y-1.5">
-              <article
-                v-for="task in chat.spawnedTasks.value.slice(0, 4)"
-                :key="task.id"
-                class="cursor-pointer rounded-2xl border px-3 py-2 transition-all"
-                :class="focusedTaskId === task.id
-                  ? 'border-orange-500/35 bg-orange-500/10 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.14)]'
-                  : task.status === 'running'
-                    ? 'border-amber-500/18 bg-amber-500/7 hover:border-amber-500/24 hover:bg-amber-500/10'
-                    : task.status === 'done'
-                      ? 'border-border/20 bg-background/45 text-muted-foreground/82 hover:border-border/30 hover:bg-muted/15'
-                      : 'border-border/30 bg-muted/15 hover:border-primary/25 hover:bg-primary/5'"
-                @click="focusTaskInRepository(task)"
-              >
-                <div class="flex items-start justify-between gap-3">
-                  <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-2">
-                      <span
-                        class="h-1.5 w-1.5 shrink-0 rounded-full"
-                        :class="task.status === 'done'
-                          ? 'bg-emerald-400'
-                          : task.status === 'running'
-                            ? 'bg-amber-400'
-                            : task.dispatchStatus === 'blocked'
-                              ? 'bg-muted-foreground/45'
-                              : 'bg-primary/70'"
-                      />
-                      <h4 class="line-clamp-1 text-sm font-medium text-foreground/85">{{ task.description }}</h4>
-                      <span
-                        v-if="focusedTaskId === task.id"
-                        class="rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-orange-300"
-                      >
-                        当前
-                      </span>
-                      <button
-                        type="button"
-                        class="ml-auto rounded-md border border-border/20 px-1.5 py-0.5 text-[10px] text-muted-foreground/62 transition-colors hover:border-border/40 hover:bg-muted/20 hover:text-foreground"
-                        @click.stop="toggleTaskCard(task.id)"
-                      >
-                        {{ isTaskCardExpanded(task.id) ? '收起' : '展开' }}
-                      </button>
-                    </div>
-                    <div class="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground/62">
-                      <span>{{ formatTaskMode(task) }}</span>
-                      <span>{{ formatTaskStatus(task) }}</span>
-                    </div>
-                    <div
-                      v-if="isTaskCardExpanded(task.id)"
-                      class="mt-2 space-y-2 rounded-xl border border-border/20 bg-background/40 px-2.5 py-2"
-                    >
-                      <p
-                        v-if="task.resultSummary || task.lastSummary"
-                        class="line-clamp-3 text-[11px] leading-5 text-muted-foreground/72"
-                      >
-                        {{ task.resultSummary || task.lastSummary }}
-                      </p>
-                      <button
-                        v-if="getTaskContextPreview(task)"
-                        type="button"
-                        class="task-context-open flex max-w-full items-center gap-1 truncate rounded-md border border-transparent px-1.5 py-0.5 text-left font-mono text-[11px] text-muted-foreground/58 transition-colors hover:border-sky-500/20 hover:bg-sky-500/8 hover:text-sky-300"
-                        :class="focusedTaskId === task.id ? 'text-orange-200/80' : ''"
-                        @click.stop="openTaskContextFile(task)"
-                      >
-                        <span class="truncate">{{ getTaskContextPreview(task) }}</span>
-                        <span v-if="getTaskContextCount(task) > 1" class="text-muted-foreground/45">
-                          +{{ getTaskContextCount(task) - 1 }}
-                        </span>
-                      </button>
-                    </div>
-                  </div>
-                  <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/55">
-                    <span>{{ formatTaskStatus(task) }}</span>
-                  </div>
-                </div>
-              </article>
+            <div class="rounded-xl border border-white/[0.08] bg-white/[0.025] px-2.5 py-2">
+              <span class="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/45">文件</span>
+              <b class="block font-mono text-[15px] text-foreground/90">{{ fileChangeOperations.length }}</b>
             </div>
-
-            <div class="rounded-2xl border border-border/25 bg-background/55 p-2">
-              <AiSpawnedTasksPanel
-                :tasks="chat.spawnedTasks.value"
-                @run="handleSpawnRun"
-                @run-batch="handleSpawnRunBatch"
-                @retry="handleSpawnRetry"
-                @retry-batch="handleSpawnRetryBatch"
-                @open="handleSpawnOpen"
-                @complete="handleSpawnComplete"
-                @cancel="handleSpawnCancel"
-                @cancel-batch="handleSpawnCancelBatch"
-                @synthesize="handleSpawnSynthesize"
-              />
+            <div class="rounded-xl border border-white/[0.08] bg-white/[0.025] px-2.5 py-2">
+              <span class="font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground/45">任务</span>
+              <b class="block font-mono text-[15px] text-foreground/90">{{ currentSessionBackgroundJobs.length }}</b>
             </div>
           </div>
 
-          <div v-else class="rounded-2xl border border-dashed border-border/30 bg-muted/10 px-4 py-5 text-center">
-            <p class="text-sm text-foreground/80">当前没有后台任务</p>
-            <p class="mt-1 text-xs leading-6 text-muted-foreground/65">
-              有任务时这里再展开看，不需要一直盯着。
-            </p>
+          <div class="space-y-3">
+            <section class="run-inspector-card">
+              <AiMcpStatusPanel
+                :model="currentModel"
+                :work-dir="chat.workDir.value"
+              />
+            </section>
+
+            <section class="run-inspector-card">
+              <AiContextBudgetPanel
+                :report="contextBudgetReport"
+                @compact="handleCompact"
+                @clear-attachments="fileAttachment.clearAttachments"
+                @clear-tool-results="handleClearToolResults"
+              />
+            </section>
+
+            <section class="run-inspector-card">
+              <AiFileChangeSummaryPanel
+                v-model:operations="fileChangeOperations"
+                :session-id="currentSessionId"
+              />
+              <div
+                v-if="fileChangeOperations.length === 0"
+                class="rounded-xl border border-dashed border-white/[0.08] bg-white/[0.02] px-3 py-4 text-center"
+              >
+                <p class="text-xs font-medium text-foreground/76">暂无文件变更</p>
+                <p class="mt-1 text-[11px] text-muted-foreground/55">AI 写入或编辑文件后会在这里汇总。</p>
+              </div>
+            </section>
+
+            <section class="run-inspector-card">
+              <AiPatchReviewPanel
+                :work-dir="chat.workDir.value"
+                :jobs="currentSessionBackgroundJobs"
+                :verifying="verificationRunning"
+                @verify="handleRunPatchVerification"
+              />
+            </section>
+
+            <section class="run-inspector-card">
+              <AiWorkflowRuntimePanel
+                :jobs="currentSessionBackgroundJobs"
+                @insert-prompt="handleInsertWorkflowPrompt"
+                @verify="handleRunPatchVerification"
+              />
+            </section>
+
+            <section class="run-inspector-card">
+              <AiWorkspaceIsolationPanel
+                :files="touchedFilePaths"
+                :session-id="currentSessionId"
+              />
+            </section>
+
+            <section class="run-inspector-card">
+              <AiPlanPanel
+                :session-id="currentSessionId"
+                @approve="handlePlanApprove"
+                @reject="handlePlanReject"
+                @replan="handlePlanReject"
+              />
+            </section>
+
+            <section class="run-inspector-card">
+              <p class="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/55">
+                Spawned Tasks
+              </p>
+              <div v-if="chat.spawnedTasks.value.length > 0" class="space-y-3">
+                <div class="rounded-xl border border-white/[0.08] bg-[#0f0f13] px-3 py-2.5">
+                  <div class="flex items-center justify-between gap-3 text-[11px] text-muted-foreground/68">
+                    <span>{{ taskRailSummary.running }} 进行中</span>
+                    <span>{{ taskRailSummary.done }} 已完成</span>
+                    <span>{{ taskRailSummary.blocked }} 等待中</span>
+                  </div>
+                </div>
+
+                <div class="space-y-1.5">
+                  <article
+                    v-for="task in chat.spawnedTasks.value.slice(0, 4)"
+                    :key="task.id"
+                    class="cursor-pointer rounded-xl border px-3 py-2 transition-all"
+                    :class="focusedTaskId === task.id
+                      ? 'border-orange-500/35 bg-orange-500/10 shadow-[inset_0_0_0_1px_rgba(249,115,22,0.14)]'
+                      : task.status === 'running'
+                        ? 'border-amber-500/18 bg-amber-500/7 hover:border-amber-500/24 hover:bg-amber-500/10'
+                        : task.status === 'done'
+                          ? 'border-border/20 bg-background/45 text-muted-foreground/82 hover:border-border/30 hover:bg-muted/15'
+                          : 'border-border/30 bg-muted/15 hover:border-primary/25 hover:bg-primary/5'"
+                    @click="focusTaskInRepository(task)"
+                  >
+                    <div class="flex items-start justify-between gap-3">
+                      <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-2">
+                          <span
+                            class="h-1.5 w-1.5 shrink-0 rounded-full"
+                            :class="task.status === 'done'
+                              ? 'bg-emerald-400'
+                              : task.status === 'running'
+                                ? 'bg-amber-400'
+                                : task.dispatchStatus === 'blocked'
+                                  ? 'bg-muted-foreground/45'
+                                  : 'bg-primary/70'"
+                          />
+                          <h4 class="line-clamp-1 text-sm font-medium text-foreground/85">{{ task.description }}</h4>
+                          <span
+                            v-if="focusedTaskId === task.id"
+                            class="rounded-full border border-orange-500/20 bg-orange-500/10 px-2 py-0.5 text-[9px] uppercase tracking-[0.16em] text-orange-300"
+                          >
+                            当前
+                          </span>
+                          <button
+                            type="button"
+                            class="ml-auto rounded-md border border-border/20 px-1.5 py-0.5 text-[10px] text-muted-foreground/62 transition-colors hover:border-border/40 hover:bg-muted/20 hover:text-foreground"
+                            @click.stop="toggleTaskCard(task.id)"
+                          >
+                            {{ isTaskCardExpanded(task.id) ? '收起' : '展开' }}
+                          </button>
+                        </div>
+                        <div class="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground/62">
+                          <span>{{ formatTaskMode(task) }}</span>
+                          <span>{{ formatTaskStatus(task) }}</span>
+                        </div>
+                        <div
+                          v-if="isTaskCardExpanded(task.id)"
+                          class="mt-2 space-y-2 rounded-xl border border-border/20 bg-background/40 px-2.5 py-2"
+                        >
+                          <p
+                            v-if="task.resultSummary || task.lastSummary"
+                            class="line-clamp-3 text-[11px] leading-5 text-muted-foreground/72"
+                          >
+                            {{ task.resultSummary || task.lastSummary }}
+                          </p>
+                          <button
+                            v-if="getTaskContextPreview(task)"
+                            type="button"
+                            class="task-context-open flex max-w-full items-center gap-1 truncate rounded-md border border-transparent px-1.5 py-0.5 text-left font-mono text-[11px] text-muted-foreground/58 transition-colors hover:border-sky-500/20 hover:bg-sky-500/8 hover:text-sky-300"
+                            :class="focusedTaskId === task.id ? 'text-orange-200/80' : ''"
+                            @click.stop="openTaskContextFile(task)"
+                          >
+                            <span class="truncate">{{ getTaskContextPreview(task) }}</span>
+                            <span v-if="getTaskContextCount(task) > 1" class="text-muted-foreground/45">
+                              +{{ getTaskContextCount(task) - 1 }}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                      <div class="flex shrink-0 items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/55">
+                        <span>{{ formatTaskStatus(task) }}</span>
+                      </div>
+                    </div>
+                  </article>
+                </div>
+
+                <div class="rounded-xl border border-white/[0.08] bg-[#0f0f13] p-2">
+                  <AiSpawnedTasksPanel
+                    :tasks="chat.spawnedTasks.value"
+                    @run="handleSpawnRun"
+                    @run-batch="handleSpawnRunBatch"
+                    @retry="handleSpawnRetry"
+                    @retry-batch="handleSpawnRetryBatch"
+                    @open="handleSpawnOpen"
+                    @complete="handleSpawnComplete"
+                    @cancel="handleSpawnCancel"
+                    @cancel-batch="handleSpawnCancelBatch"
+                    @synthesize="handleSpawnSynthesize"
+                  />
+                </div>
+              </div>
+
+              <div v-else class="rounded-xl border border-dashed border-white/[0.08] bg-white/[0.02] px-4 py-5 text-center">
+                <p class="text-sm text-foreground/80">当前没有后台任务</p>
+                <p class="mt-1 text-xs leading-6 text-muted-foreground/65">
+                  有任务时这里再展开看，不需要一直盯着。
+                </p>
+              </div>
+            </section>
+
+            <section class="run-inspector-card">
+              <p class="mb-2 font-mono text-[10px] font-bold uppercase tracking-[0.18em] text-muted-foreground/55">
+                后台任务
+              </p>
+              <AiBackgroundJobsPanel
+                :jobs="currentSessionBackgroundJobs"
+                @clear-completed="backgroundJobStore.clearCompleted"
+                @cancel="backgroundJobStore.cancelJob"
+              />
+            </section>
+
+            <section class="run-inspector-card">
+              <AiProactiveTickPanel :session-id="currentSessionId" />
+            </section>
+
+            <section v-if="settingsStore.settings.devMode" class="run-inspector-card">
+              <AiDiagnosticsPanel :metrics="chat.observability.value" />
+            </section>
           </div>
         </div>
       </div>
@@ -2220,3 +2438,94 @@ function handleRewindMessage(messageId: string): void {
     </template>
   </AiChatShell>
 </template>
+
+<style scoped>
+.run-inspector :deep(section.mx-auto) {
+  max-width: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.run-inspector :deep(*) {
+  min-width: 0;
+}
+
+.run-inspector-card {
+  border: 1px solid rgb(255 255 255 / 0.075);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 0.035), transparent),
+    rgb(10 10 13 / 0.72);
+  padding: 10px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025);
+}
+
+.run-inspector-card :deep(.rounded-xl) {
+  border-color: rgb(255 255 255 / 0.08);
+}
+
+.run-inspector-card :deep(.max-w-4xl) {
+  max-width: none;
+}
+
+.run-inspector-card :deep(section.mx-auto > .rounded-xl) {
+  padding: 12px;
+}
+
+.run-inspector-card :deep(section.mx-auto > .rounded-xl > .flex:first-child) {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 8px;
+}
+
+.run-inspector-card :deep(section.mx-auto > .rounded-xl > .flex:first-child > .flex-1) {
+  width: 100%;
+}
+
+.run-inspector-card :deep(section.mx-auto > .rounded-xl > .flex:first-child button),
+.run-inspector-card :deep(section.mx-auto > .rounded-xl > .flex:first-child select) {
+  width: 100%;
+  min-height: 30px;
+  justify-content: center;
+}
+
+.run-inspector-card :deep(section.mx-auto > .rounded-xl > .flex:first-child select) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.run-inspector-card :deep(section.mx-auto > .rounded-xl > .flex:first-child .text-xs.font-semibold) {
+  line-height: 1.25;
+}
+
+.run-inspector-card :deep(section.mx-auto > .rounded-xl > .flex:first-child .text-\[11px\]) {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.45;
+  word-break: normal;
+}
+
+.run-inspector-card :deep(.flex.items-center.gap-2.text-\[11px\]) {
+  flex-wrap: wrap;
+}
+
+.run-inspector-card :deep(.flex.items-center.gap-2.text-\[11px\] .truncate) {
+  flex-basis: 100%;
+}
+
+.run-inspector-card :deep(.line-clamp-2),
+.run-inspector-card :deep(.text-muted-foreground) {
+  word-break: normal;
+}
+
+.run-inspector-card :deep(button.flex.w-full.items-center > .min-w-0 > .flex) {
+  flex-wrap: wrap;
+}
+
+.run-inspector-card :deep(button.flex.w-full.items-center > .min-w-0 > .flex > span:first-child) {
+  flex-basis: 100%;
+}
+</style>
