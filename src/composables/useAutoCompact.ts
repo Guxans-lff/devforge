@@ -31,12 +31,24 @@ function genId(): string {
   return `compact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+export function findLastCompactBoundaryIndex(messages: AiMessage[]): number {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    if (messages[index]?.type === 'compact-boundary') return index
+  }
+  return -1
+}
+
+export function getMessagesAfterCompactBoundary(messages: AiMessage[]): AiMessage[] {
+  const boundaryIndex = findLastCompactBoundaryIndex(messages)
+  return boundaryIndex === -1 ? messages : messages.slice(boundaryIndex)
+}
+
 /**
  * 构建压缩 prompt
  */
 function buildCompactPrompt(messages: AiMessage[], rule: CompactRule): string {
   const conversation = messages
-    .filter(m => m.role !== 'error')
+    .filter(m => m.role !== 'error' && m.type !== 'compact-boundary')
     .map(m => `[${m.role}]: ${m.content.slice(0, 2000)}`)
     .join('\n\n')
 

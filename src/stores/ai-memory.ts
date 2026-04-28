@@ -7,7 +7,7 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import { aiListMemories, aiSaveMemory, aiDeleteMemory, aiSearchMemories } from '@/api/ai-memory'
-import type { AiMemory, MemoryType, CompactRule } from '@/types/ai'
+import type { AiMemory, MemoryReviewStatus, MemorySourceType, MemoryType, CompactRule } from '@/types/ai'
 
 /** 默认压缩规则 */
 const DEFAULT_COMPACT_RULE: CompactRule = {
@@ -66,10 +66,44 @@ function decayFactor(lastUsedAt: number | undefined): number {
   return 1 / (1 + days * 0.05)
 }
 
+export interface MemoryProposal {
+  id: string
+  type: MemoryType
+  title: string
+  content: string
+  tags: string
+  sourceSessionId?: string
+  sourceType?: MemorySourceType
+  sourceRef?: string
+  confidence?: number
+  proposedAt: number
+}
+
+function clamp01(value: number | undefined, fallback = 0.8): number {
+  if (typeof value !== 'number' || Number.isNaN(value)) return fallback
+  return Math.min(1, Math.max(0, value))
+}
+
+function normalizeReviewStatus(status: MemoryReviewStatus | undefined): MemoryReviewStatus {
+  return status ?? 'approved'
+}
+
+function normalizeMemory(memory: AiMemory): AiMemory {
+  return {
+    ...memory,
+    tags: memory.tags ?? '',
+    sourceType: memory.sourceType ?? (memory.sourceSessionId ? 'chat' : 'manual'),
+    confidence: clamp01(memory.confidence, 0.8),
+    reviewStatus: normalizeReviewStatus(memory.reviewStatus),
+    usageCount: Math.max(0, Math.trunc(memory.usageCount ?? 0)),
+  }
+}
+
 export const useAiMemoryStore = defineStore('ai-memory', () => {
   const memories = ref<AiMemory[]>([])
   const currentWorkspaceId = ref<string>('_global')
   const isLoading = ref(false)
+  const pendingProposals = ref<MemoryProposal[]>([])
 
   /** 按类型分组 */
   const memoriesByType = computed(() => {
@@ -77,6 +111,11 @@ export const useAiMemoryStore = defineStore('ai-memory', () => {
       knowledge: [],
       summary: [],
       preference: [],
+      project_rule: [],
+      architecture_decision: [],
+      bug_lesson: [],
+      user_preference: [],
+      domain_knowledge: [],
     }
     for (const m of memories.value) {
       const type = m.type as MemoryType
@@ -112,7 +151,7 @@ export const useAiMemoryStore = defineStore('ai-memory', () => {
   async function loadMemories(): Promise<void> {
     isLoading.value = true
     try {
-      memories.value = await aiListMemories(currentWorkspaceId.value)
+      memories.value = (await aiListMemories(currentWorkspaceId.value)).map(normalizeMemory)
     } catch (e) {
       console.error('[AI Memory] 加载记忆失败:', e)
     } finally {
@@ -122,13 +161,14 @@ export const useAiMemoryStore = defineStore('ai-memory', () => {
 
   /** 保存记忆 */
   async function saveMemory(memory: AiMemory): Promise<void> {
-    await aiSaveMemory(memory)
+    const normalized = normalizeMemory(memory)
+    await aiSaveMemory(normalized)
     // 乐观更新
-    const idx = memories.value.findIndex(m => m.id === memory.id)
+    const idx = memories.value.findIndex(m => m.id === normalized.id)
     if (idx >= 0) {
-      memories.value = memories.value.map((m, i) => i === idx ? memory : m)
+      memories.value = memories.value.map((m, i) => i === idx ? normalized : m)
     } else {
-      memories.value = [memory, ...memories.value]
+      memories.value = [normalized, ...memories.value]
     }
   }
 
@@ -170,7 +210,9 @@ export const useAiMemoryStore = defineStore('ai-memory', () => {
     if (keywords.length === 0) return ''
 
     try {
-      const results = await aiSearchMemories(currentWorkspaceId.value, keywords)
+      const results = (await aiSearchMemories(currentWorkspaceId.value, keywords))
+        .map(normalizeMemory)
+        .filter(memory => memory.reviewStatus !== 'rejected' && memory.reviewStatus !== 'archived')
       if (results.length === 0) return ''
 
       // 计算综合得分并排序
@@ -183,7 +225,7 @@ export const useAiMemoryStore = defineStore('ai-memory', () => {
           else if (m.title.toLowerCase().includes(kw) || m.content.toLowerCase().includes(kw)) matchScore += 1
         }
         const decay = decayFactor(m.lastUsedAt)
-        return { memory: m, score: m.weight * matchScore * decay }
+        return { memory: m, score: m.weight * clamp01(m.confidence, 0.8) * matchScore * decay }
       })
         .filter(s => s.score > 0)
         .sort((a, b) => b.score - a.score)
@@ -208,7 +250,11 @@ export const useAiMemoryStore = defineStore('ai-memory', () => {
         tokenCount += lineTokens
 
         // 更新 last_used_at（fire and forget）
-        aiSaveMemory({ ...m, lastUsedAt: Date.now() }).catch(() => {})
+        aiSaveMemory(normalizeMemory({
+          ...m,
+          lastUsedAt: Date.now(),
+          usageCount: (m.usageCount ?? 0) + 1,
+        })).catch(() => {})
       }
 
       return output
@@ -218,18 +264,64 @@ export const useAiMemoryStore = defineStore('ai-memory', () => {
     }
   }
 
+  function proposeMemory(proposal: Omit<MemoryProposal, 'id' | 'proposedAt'>): void {
+    const pending: MemoryProposal = {
+      ...proposal,
+      id: `proposal-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      proposedAt: Date.now(),
+    }
+    pendingProposals.value = [pending, ...pendingProposals.value]
+  }
+
+  async function approveProposal(proposalId: string): Promise<void> {
+    const proposal = pendingProposals.value.find(item => item.id === proposalId)
+    if (!proposal) return
+    const now = Date.now()
+    await saveMemory({
+      id: `mem-${now}`,
+      workspaceId: currentWorkspaceId.value,
+      type: proposal.type,
+      title: proposal.title,
+      content: proposal.content,
+      tags: proposal.tags,
+      sourceSessionId: proposal.sourceSessionId,
+      sourceType: proposal.sourceType ?? (proposal.sourceSessionId ? 'chat' : 'manual'),
+      sourceRef: proposal.sourceRef ?? proposal.sourceSessionId,
+      confidence: clamp01(proposal.confidence, 0.8),
+      reviewStatus: 'approved',
+      usageCount: 0,
+      weight: 1,
+      createdAt: now,
+      updatedAt: now,
+    })
+    pendingProposals.value = pendingProposals.value.filter(item => item.id !== proposalId)
+  }
+
+  function rejectProposal(proposalId: string): void {
+    pendingProposals.value = pendingProposals.value.filter(item => item.id !== proposalId)
+  }
+
+  function clearProposals(): void {
+    pendingProposals.value = []
+  }
+
   return {
     memories,
     memoriesByType,
     currentWorkspaceId,
     isLoading,
     compactRule,
+    pendingProposals,
     setWorkspace,
     loadMemories,
     saveMemory,
     deleteMemory,
     saveCompactRule,
     recall,
+    proposeMemory,
+    approveProposal,
+    rejectProposal,
+    clearProposals,
   }
 })
 

@@ -1,5 +1,6 @@
 import { Channel } from '@tauri-apps/api/core'
 import { invokeCommand } from '@/api/base'
+import { invokeAiCommand, AiBridgeError } from '@/api/ai/errors'
 import type {
   AiStreamEvent,
   ChatResult,
@@ -10,8 +11,11 @@ import type {
   DailyUsage,
   ToolDefinition,
   ToolExecResult,
+  McpStatusResult,
   ContentBlock,
 } from '@/types/ai'
+
+export { AiBridgeError }
 
 export interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -106,6 +110,10 @@ export function aiGetUsageStats(startDate: string, endDate: string): Promise<Dai
 
 export function aiGetTools(): Promise<ToolDefinition[]> {
   return invokeCommand('ai_get_tools', undefined, { source: 'AI' })
+}
+
+export function aiGetMcpStatus(workDir: string): Promise<McpStatusResult> {
+  return invokeAiCommand('ai_get_mcp_status', { workDir }, { source: 'AI' })
 }
 
 export function aiExecuteTool(

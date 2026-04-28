@@ -447,7 +447,18 @@ export interface AiResult {
 // ─────────────────────────────────── 记忆系统 ───────────────────────────────────
 
 /** 记忆类型 */
-export type MemoryType = 'summary' | 'knowledge' | 'preference'
+export type MemoryType =
+  | 'summary'
+  | 'knowledge'
+  | 'preference'
+  | 'project_rule'
+  | 'architecture_decision'
+  | 'bug_lesson'
+  | 'user_preference'
+  | 'domain_knowledge'
+
+export type MemorySourceType = 'manual' | 'chat' | 'tool' | 'file' | 'workflow' | 'compact'
+export type MemoryReviewStatus = 'pending' | 'approved' | 'rejected' | 'archived'
 
 /** 记忆条目 */
 export interface AiMemory {
@@ -458,8 +469,13 @@ export interface AiMemory {
   content: string
   tags: string
   sourceSessionId?: string
+  sourceType?: MemorySourceType
+  sourceRef?: string
+  confidence?: number
+  reviewStatus?: MemoryReviewStatus
   weight: number
   lastUsedAt?: number
+  usageCount?: number
   createdAt: number
   updatedAt: number
 }
