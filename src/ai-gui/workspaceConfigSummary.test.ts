@@ -14,6 +14,7 @@ describe('workspaceConfigSummary', () => {
     const summary = buildWorkspaceConfigSummary({
       preferredModel: 'gpt-5.4',
       systemPromptExtra: '项目提示词',
+      outputStyleId: 'concise',
       contextFiles: [{ path: 'AGENTS.md' }],
       skills: [{ id: 'frontend', name: 'Frontend', enabled: true }],
       planGateEnabled: true,
@@ -30,6 +31,7 @@ describe('workspaceConfigSummary', () => {
       tone: 'active',
     })
     expect(summary.find(item => item.key === 'contextFiles')?.value).toBe('1 个文件自动注入')
+    expect(summary.find(item => item.key === 'outputStyleId')?.value).toBe('concise')
     expect(summary.find(item => item.key === 'skills')?.value).toBe('1/1 个启用')
     expect(summary.find(item => item.key === 'planGateEnabled')?.tone).toBe('warning')
     expect(summary.find(item => item.key === 'dispatcherMaxParallel')?.value).toBe('6 路并发')

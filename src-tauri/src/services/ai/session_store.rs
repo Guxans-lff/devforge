@@ -17,7 +17,8 @@ pub async fn init_tables(pool: &SqlitePool) -> Result<(), AppError> {
             endpoint TEXT NOT NULL,
             models TEXT NOT NULL DEFAULT '[]',
             is_default INTEGER DEFAULT 0,
-            created_at INTEGER NOT NULL
+            created_at INTEGER NOT NULL,
+            security TEXT
         );
 
         CREATE TABLE IF NOT EXISTS ai_sessions (
@@ -80,6 +81,10 @@ pub async fn init_tables(pool: &SqlitePool) -> Result<(), AppError> {
         .execute(pool)
         .await
         .ok();
+    sqlx::query("ALTER TABLE ai_providers ADD COLUMN security TEXT")
+        .execute(pool)
+        .await
+        .ok();
 
     // 迁移：创建 ai_memories 表
     sqlx::query(
@@ -139,11 +144,17 @@ pub async fn save_provider(pool: &SqlitePool, config: &ProviderConfig) -> Result
         .map_err(|e| AppError::Other(format!("序列化 provider_type 失败: {e}")))?;
     // 去掉 JSON 字符串的引号
     let provider_type = provider_type.trim_matches('"');
+    let security_json = config
+        .security
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(|e| AppError::Other(format!("序列化 Provider 安全策略失败: {e}")))?;
 
     sqlx::query(
         r#"
-        INSERT OR REPLACE INTO ai_providers (id, name, provider_type, endpoint, models, is_default, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT OR REPLACE INTO ai_providers (id, name, provider_type, endpoint, models, is_default, created_at, security)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         "#,
     )
     .bind(&config.id)
@@ -153,6 +164,7 @@ pub async fn save_provider(pool: &SqlitePool, config: &ProviderConfig) -> Result
     .bind(&models_json)
     .bind(config.is_default as i32)
     .bind(config.created_at)
+    .bind(security_json)
     .execute(pool)
     .await
     .map_err(|e| AppError::Other(format!("保存 Provider 失败: {e}")))?;
@@ -162,18 +174,21 @@ pub async fn save_provider(pool: &SqlitePool, config: &ProviderConfig) -> Result
 
 /// 获取所有 Provider 配置
 pub async fn list_providers(pool: &SqlitePool) -> Result<Vec<ProviderConfig>, AppError> {
-    let rows: Vec<(String, String, String, String, String, i32, i64)> = sqlx::query_as(
-        "SELECT id, name, provider_type, endpoint, models, is_default, created_at FROM ai_providers ORDER BY created_at"
+    let rows: Vec<(String, String, String, String, String, i32, i64, Option<String>)> = sqlx::query_as(
+        "SELECT id, name, provider_type, endpoint, models, is_default, created_at, security FROM ai_providers ORDER BY created_at"
     )
     .fetch_all(pool)
     .await
     .map_err(|e| AppError::Other(format!("查询 Provider 失败: {e}")))?;
 
     let mut providers = Vec::new();
-    for (id, name, provider_type, endpoint, models_json, is_default, created_at) in rows {
+    for (id, name, provider_type, endpoint, models_json, is_default, created_at, security_json) in rows {
         let models = serde_json::from_str(&models_json).unwrap_or_default();
         let provider_type = serde_json::from_str(&format!("\"{}\"", provider_type))
             .unwrap_or(super::models::ProviderType::OpenaiCompat);
+        let security = security_json
+            .as_deref()
+            .and_then(|raw| serde_json::from_str(raw).ok());
 
         providers.push(ProviderConfig {
             id,
@@ -183,6 +198,7 @@ pub async fn list_providers(pool: &SqlitePool) -> Result<Vec<ProviderConfig>, Ap
             models,
             is_default: is_default != 0,
             created_at,
+            security,
         });
     }
 

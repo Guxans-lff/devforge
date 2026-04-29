@@ -95,6 +95,18 @@ pub struct ModelConfig {
     pub thinking_effort: Option<String>,
 }
 
+/// Provider 级安全策略
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSecurityConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allowlist: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_localhost: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub allow_private_ip: Option<bool>,
+}
+
 /// Provider 配置（持久化到 SQLite）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -113,6 +125,9 @@ pub struct ProviderConfig {
     pub is_default: bool,
     /// 创建时间戳（毫秒）
     pub created_at: i64,
+    /// Provider 级安全策略
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security: Option<ProviderSecurityConfig>,
 }
 
 // ─────────────────────────────────── 对话请求 ───────────────────────────────────

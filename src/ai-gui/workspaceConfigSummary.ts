@@ -52,6 +52,13 @@ export function buildWorkspaceConfigSummaryResult(config: WorkspaceConfig | null
       tone: cfg.systemPromptExtra?.trim() ? 'active' : 'muted',
     },
     {
+      key: 'outputStyleId',
+      label: '输出风格',
+      value: cfg.outputStyleId?.trim() || '使用默认输出风格',
+      source: cfg.outputStyleId?.trim() ? 'workspace' : 'default',
+      tone: cfg.outputStyleId?.trim() ? 'active' : 'muted',
+    },
+    {
       key: 'contextFiles',
       label: '上下文文件',
       value: cfg.contextFiles?.length ? `${cfg.contextFiles.length} 个文件自动注入` : '未配置自动注入文件',

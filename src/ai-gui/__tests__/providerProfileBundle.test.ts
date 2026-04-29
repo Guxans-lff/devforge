@@ -123,6 +123,7 @@ describe('providerProfileBundle', () => {
     expect(result.outputStyleId).toBe('default')
     expect(result.workspaceConfig).toMatchObject({
       preferredModel: 'gpt-5.4',
+      outputStyleId: 'default',
       dispatcherAutoRetryCount: 2,
       dispatcherMaxParallel: 5,
       planGateEnabled: true,

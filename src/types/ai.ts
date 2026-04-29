@@ -449,6 +449,8 @@ export interface WorkspaceConfig {
   preferredModel?: string
   /** 系统提示覆盖（追加到全局系统提示后） */
   systemPromptExtra?: string
+  /** 输出风格 ID（来自内置或自定义 Output Style） */
+  outputStyleId?: string
   /** 上下文注入文件路径列表（相对于工作区根目录或绝对路径） */
   contextFiles?: Array<{ path: string; reason?: string }>
   /** 是否启用 Plan Gate（默认 false） */

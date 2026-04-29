@@ -133,6 +133,7 @@ function buildWorkspaceConfig(): WorkspaceConfig {
   return {
     ...(props.currentWorkspaceConfig ?? {}),
     preferredModel: form.modelId,
+    outputStyleId: form.outputStyleId || undefined,
     systemPromptExtra: form.systemPromptExtra.trim() || undefined,
     planGateEnabled: form.planGateEnabled || undefined,
     dispatcherMaxParallel: Math.max(1, Math.trunc(form.dispatcherMaxParallel || 1)),

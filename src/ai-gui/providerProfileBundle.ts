@@ -182,6 +182,7 @@ function workspaceValue(config: WorkspaceConfig | null | undefined, key: keyof W
     case 'preferredModel':
     case 'systemPromptExtra':
     case 'dispatcherPrompt':
+    case 'outputStyleId':
       return String(config?.[key]?.trim() || '未配置')
     case 'contextFiles':
       return formatList(config?.contextFiles)
@@ -225,6 +226,7 @@ export function buildProviderProfilePreview(input: {
   const workspaceKeys: Array<{ key: keyof WorkspaceConfig; label: string }> = [
     { key: 'preferredModel', label: '首选模型' },
     { key: 'systemPromptExtra', label: '项目提示词' },
+    { key: 'outputStyleId', label: '输出风格' },
     { key: 'contextFiles', label: '上下文文件' },
     { key: 'skills', label: 'Workspace Skills' },
     { key: 'planGateEnabled', label: 'Plan Gate' },
@@ -295,6 +297,7 @@ export function applyProviderProfileBundle(input: {
     ...(input.currentWorkspaceConfig ?? {}),
     ...(input.profile.workspaceConfig ?? {}),
     preferredModel: input.profile.modelId,
+    outputStyleId: input.profile.outputStyleId,
   }
   const providerConfig = input.profile.security
     ? { ...provider, security: { ...input.profile.security } }

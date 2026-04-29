@@ -22,14 +22,16 @@ const FALLBACK_STYLE: OutputStyle = {
 }
 
 function parseFrontmatter(raw: string): { meta: Record<string, string>; content: string } {
-  const normalized = raw.replace(/\r\n/g, '\n')
-  if (!normalized.startsWith('---\n')) return { meta: {}, content: normalized.trim() }
+  const normalized = raw.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n')
+  const startMatch = normalized.match(/^\s*---\n/)
+  if (!startMatch) return { meta: {}, content: normalized.trim() }
 
-  const endIndex = normalized.indexOf('\n---', 4)
+  const headerStart = startMatch[0].length
+  const endIndex = normalized.indexOf('\n---', headerStart)
   if (endIndex < 0) return { meta: {}, content: normalized.trim() }
 
   const meta: Record<string, string> = {}
-  const header = normalized.slice(4, endIndex).trim()
+  const header = normalized.slice(headerStart, endIndex).trim()
   for (const line of header.split('\n')) {
     const separator = line.indexOf(':')
     if (separator <= 0) continue
@@ -40,7 +42,7 @@ function parseFrontmatter(raw: string): { meta: Record<string, string>; content:
 
   return {
     meta,
-    content: normalized.slice(endIndex + '\n---'.length).trim(),
+    content: normalized.slice(endIndex + '\n---'.length).replace(/^\n/, '').trim(),
   }
 }
 

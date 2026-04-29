@@ -8,6 +8,7 @@ import { buildChatMessagesWithOptions } from './chatMessageBuilder'
 import { genId } from './chatHelpers'
 import { saveNewSessionShellIfMissing } from './chatSessionPersistence'
 import { buildWorkspaceSkillsPrompt } from '@/ai-gui/workspaceSkills'
+import { useOutputStyles } from '@/composables/useOutputStyles'
 
 type AiChatStore = ReturnType<typeof useAiChatStore>
 type AiMemoryStore = ReturnType<typeof useAiMemoryStore>
@@ -171,6 +172,15 @@ export async function prepareSendContext(params: PrepareSendContextParams): Prom
   if (workspaceConfig && workDir) {
     if (workspaceConfig.systemPromptExtra) {
       enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n${workspaceConfig.systemPromptExtra}`
+    }
+
+    if (workspaceConfig.outputStyleId) {
+      const outputStyle = useOutputStyles().getStyle(workspaceConfig.outputStyleId)
+      if (outputStyle?.content?.trim()) {
+        enrichedSystemPrompt = `${enrichedSystemPrompt ?? ''}\n\n<output-style name="${outputStyle.name}">\n${outputStyle.content.trim()}\n</output-style>`
+      } else {
+        log.warn('output_style_missing', { outputStyleId: workspaceConfig.outputStyleId, sessionId })
+      }
     }
 
     const skillsPrompt = buildWorkspaceSkillsPrompt(workspaceConfig.skills)

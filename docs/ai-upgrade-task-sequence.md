@@ -42,10 +42,12 @@
 - ✅ Gateway 已具备 fallback、rate limit、usage record、endpoint security、token estimate 等基础治理能力。
 - ✅ Bridge API 模块化、`AiBridgeError`、Provider Capability / Permission Mapper 等治理基础已存在。
 - ✅ Provider Profile Bundle 前端闭环已落地：支持 Provider / Model / Output Style / Workspace Prompt / Dispatcher / SSRF 安全策略打包、预览、应用、备份、回滚。
+- ✅ Output Style 已从 Profile Bundle 进入主对话链路，会在 `chatSendPreparation` 中注入系统提示，不再只是配置字段。
+- ✅ Provider 级 `security` 已接入后端 Provider 持久化，SSRF allowlist / localhost / private IP 策略可随 Provider 保存并被 Gateway preflight 读取。
 
 当前边界：
-- ⚠️ Provider Profile Bundle 当前使用前端 localStorage 持久化，不是后端 SQLite / workspace 文件级配置；跨设备、团队共享、迁移回填尚未完成。
-- ⚠️ SSRF allowlist、fallback keys、Provider Profile 级安全策略仍需要进一步配置化。
+- ⚠️ Provider Profile Bundle 当前使用前端 localStorage 持久化；Provider security 已后端化，但 Profile 本身仍不是 SQLite / workspace 文件级配置，跨设备、团队共享、迁移回填尚未完成。
+- ⚠️ SSRF allowlist 已能随 Provider 保存；fallback keys 和更细的 Profile 级策略仍需要进一步产品化。
 - ⚠️ Gateway 诊断信息已有记录能力，但 UI 对“实际落到哪个 provider/model”的显性展示仍可继续增强。
 
 ### 14.4 阶段四：AI 产品化能力
@@ -62,7 +64,7 @@
 当前边界：
 - ⚠️ Workflow Runtime 仍偏前端轻量 runtime，不是完整可暂停/恢复/验证/长期运行的后端 runtime。
 - ⚠️ Team Memory 仍是基础 review，尚未形成团队级检索、冲突治理和审计体系。
-- ⚠️ Prompt / Skill / Output Style 已有 Bundle 绑定基础，但 Skill 当前主要通过 Workspace Config 间接打包，仍缺独立 Skill 选择器和团队级治理。
+- ⚠️ Prompt / Output Style 已能随 Bundle 生效；Skill 当前主要通过 Workspace Config 间接打包，仍缺独立 Skill 选择器和团队级治理。
 
 ### 14.5 阶段五：高级智能与协作能力
 
@@ -85,9 +87,10 @@
 
 1. ✅ 先提交本轮小修：`AiChatShell` 残留 preload 清理、`ContextBudget` i18n key 补齐和真实中文测试。
 2. ✅ Provider Profile Bundle 前端 MVP 已完成：配置切换、预览、备份、回滚，并把 Provider / Model / Output Style / Workspace Prompt / Dispatcher / SSRF 安全策略纳入同一 Profile。
-3. 🟡 下一步优先做 Provider Profile 后端化：SQLite / workspace 文件持久化、导入导出、迁移回填、团队共享和冲突处理。
-4. 🟡 然后做 Gateway 诊断 UI：展示实际 provider/model、fallback 链、成本、rate limit、SSRF 拦截原因。
-5. 🔵 最后再推进真实 LSP / Verification Agent / Ultraplan / Multi-Agent，避免在基础治理未完全产品化前扩大风险面。
+3. ✅ Output Style 主链路注入与 Provider security 后端持久化已完成，Profile 配置开始真正影响 chat/Gateway。
+4. 🟡 下一步优先做 Provider Profile 后端化：SQLite / workspace 文件持久化、导入导出、迁移回填、团队共享和冲突处理。
+5. 🟡 然后做 Gateway 诊断 UI：展示实际 provider/model、fallback 链、成本、rate limit、SSRF 拦截原因。
+6. 🔵 最后再推进真实 LSP / Verification Agent / Ultraplan / Multi-Agent，避免在基础治理未完全产品化前扩大风险面。
 
 ### 14.7 逐项验收矩阵（按当前代码）
 
@@ -101,9 +104,9 @@
 | 阶段二 | 对话区体验稳定 | ✅ 主体完成 | `AiChatShell.vue`、`AiMessageListVirtual.vue`、`AiInputArea.vue`、`AiChatView.interaction.test.ts` | 重点守住大会话性能，不再恢复预加载会话类逻辑。 |
 | 阶段三 | Gateway 统一入口 | ✅ MVP 完成 | `AiGateway.ts`、`types.ts`、`router.ts`、`rateLimiter.ts`、`usageTracker.ts` | 仍需产品化配置管理和诊断展示。 |
 | 阶段三 | Chat / Compact / Prompt Optimize 覆盖 | ✅ 已覆盖 | `chatSessionRunner.ts`、`chatToolLoop.ts`、`useAutoCompact.ts`、`promptOptimizer.ts`、`gatewayCoverage.test.ts` | 后续新增模型调用必须继续统一走 Gateway。 |
-| 阶段三 | fallback key / rate limit / SSRF | 🟡 基础完成 | `fallbackKeys.ts`、`rateLimiter.ts`、`security.ts`、`AiGateway.test.ts` | SSRF allowlist、fallback keys 还未纳入 Provider Profile 级产品配置。 |
-| 阶段三 | Provider Profile Bundle | 🟡 前端 MVP 完成 | `providerProfileBundle.ts`、`provider-profile-bundle.ts`、`AiProviderProfileBundlePanel.vue` | 已有 CRUD、预览、应用、备份、回滚；缺后端持久化、导入导出、迁移回填、团队共享和冲突处理。 |
-| 阶段四 | Workspace Prompt / Skill / Output Style | 🟡 MVP 完成 | `workspaceSkills.ts`、`useOutputStyles.ts`、`AiProviderProfileBundlePanel.vue` | 已纳入 Profile Bundle 的配置包基础；Skill 仍缺独立选择器、团队治理和审计。 |
+| 阶段三 | fallback key / rate limit / SSRF | 🟡 基础完成 | `fallbackKeys.ts`、`rateLimiter.ts`、`security.ts`、`AiGateway.test.ts`、`session_store.rs` | SSRF allowlist 已可随 Provider 保存；fallback keys 和更细粒度 Profile 策略还未产品化。 |
+| 阶段三 | Provider Profile Bundle | 🟡 前端 MVP 完成 | `providerProfileBundle.ts`、`provider-profile-bundle.ts`、`AiProviderProfileBundlePanel.vue` | 已有 CRUD、预览、应用、备份、回滚，且 Output Style / Provider security 已影响主链路；缺 Profile 本体后端持久化、导入导出、迁移回填、团队共享和冲突处理。 |
+| 阶段四 | Workspace Prompt / Skill / Output Style | 🟡 MVP 完成 | `workspaceSkills.ts`、`useOutputStyles.ts`、`chatSendPreparation.ts`、`AiProviderProfileBundlePanel.vue` | Prompt / Output Style 已能随 Profile Bundle 生效；Skill 仍缺独立选择器、团队治理和审计。 |
 | 阶段四 | Team Memory | 🟡 基础完成 | `ai-memory.ts`、`AiMemoryDrawer.vue`、`Team Memory Review` 相关入口 | 缺团队级检索、冲突处理、审计和权限策略。 |
 | 阶段四 | Plan / Transcript / Workflow | 🟡 MVP 完成 | `planStore.ts`、`transcriptStore.ts`、`workflowRuntime.ts`、`workflowPersistence.ts`、`AiWorkflowRuntimePanel.vue` | Workflow 仍是前端轻量 runtime，不是后端长期任务编排。 |
 | 阶段五 | Patch Review / Verification Center | ✅ 基础闭环完成 | `patchReview.ts`、`verificationReport.ts`、`verificationPresets.ts`、`verificationArchive.ts`、`AiPatchReviewPanel.vue` | Verification 仍是 job/panel，不是独立 Agent。 |

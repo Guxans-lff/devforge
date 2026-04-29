@@ -88,6 +88,7 @@ describe('provider-profile-bundle store', () => {
     expect(preview.workspaceChanges.find(item => item.key === 'planGateEnabled')?.changed).toBe(true)
     expect(applied.workspaceConfig).toMatchObject({
       preferredModel: 'gpt-5.4',
+      outputStyleId: undefined,
       planGateEnabled: true,
     })
     expect(store.activeProfileId).toBe(profile.id)

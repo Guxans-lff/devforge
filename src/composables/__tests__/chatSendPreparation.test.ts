@@ -47,6 +47,7 @@ function createParams() {
       sessions: [],
       currentWorkspaceConfig: {
         systemPromptExtra: 'workspace prompt',
+        outputStyleId: 'default',
         skills: [
           { id: 'frontend', name: 'Frontend Design', description: 'UI work', path: '.agents/skills/frontend-design/SKILL.md', enabled: true },
           { id: 'disabled', name: 'Disabled Skill', enabled: false },
@@ -111,6 +112,8 @@ describe('chatSendPreparation', () => {
     expect(prepared.enrichedSystemPrompt).toContain('base prompt')
     expect(prepared.enrichedSystemPrompt).toContain('memory recall')
     expect(prepared.enrichedSystemPrompt).toContain('workspace prompt')
+    expect(prepared.enrichedSystemPrompt).toContain('<output-style name="默认">')
+    expect(prepared.enrichedSystemPrompt).toContain('DevForge 的 AI 助手')
     expect(prepared.enrichedSystemPrompt).toContain('<workspace-skills>')
     expect(prepared.enrichedSystemPrompt).toContain('Frontend Design')
     expect(prepared.enrichedSystemPrompt).toContain('.agents/skills/frontend-design/SKILL.md')
@@ -139,6 +142,21 @@ describe('chatSendPreparation', () => {
       'memory_recall_failed',
       { sessionId: 'session-1' },
       expect.any(Error),
+    )
+  })
+
+  it('warns and continues when workspace output style is missing', async () => {
+    const params = createParams()
+    params.aiStore.currentWorkspaceConfig.outputStyleId = 'missing-style'
+    params.aiStore.currentWorkspaceConfig.contextFiles = []
+
+    const prepared = await prepareSendContext(params)
+
+    expect(prepared.enrichedSystemPrompt).toContain('workspace prompt')
+    expect(prepared.enrichedSystemPrompt).not.toContain('<output-style')
+    expect(params.log.warn).toHaveBeenCalledWith(
+      'output_style_missing',
+      { outputStyleId: 'missing-style', sessionId: 'session-1' },
     )
   })
 })
