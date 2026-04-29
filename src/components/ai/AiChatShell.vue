@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { AiMessage, AiSession, FileAttachment, ModelConfig, ProviderConfig } from '@/types/ai'
+import type { AiMessage, AiSession, FileAttachment, ModelConfig, ProviderConfig, WorkspaceConfig } from '@/types/ai'
 import type { ChatMode } from '@/components/ai/AiInputArea.vue'
 import AiMessageListVirtual from '@/components/ai/AiMessageListVirtual.vue'
 import AiInputArea from '@/components/ai/AiInputArea.vue'
@@ -160,10 +160,16 @@ const emit = defineEmits<{
   (e: 'selectSession', id: string): void
   (e: 'createSession'): void
   (e: 'deleteSession', id: string): void
-  (e: 'preloadSession', id: string): void
   (e: 'filePickerConfirm', paths: string[]): void
   (e: 'exitImmersive'): void
   (e: 'toggleSideRail'): void
+  (e: 'applyProviderProfile', payload: {
+    workspaceConfig: WorkspaceConfig
+    providerConfig?: ProviderConfig
+    selectedProviderId: string
+    selectedModelId: string
+    outputStyleId?: string
+  }): void
 }>()
 
 const { t } = useI18n()
@@ -191,7 +197,12 @@ defineExpose({
 <template>
   <div class="ai-chat-shell" :class="shellClass">
     <template v-if="currentView === 'provider-config'">
-      <AiProviderConfig @back="emit('closeConfig')" />
+      <AiProviderConfig
+        :current-provider-id="selectedProviderId"
+        :current-model-id="selectedModelId"
+        @back="emit('closeConfig')"
+        @apply-profile="emit('applyProviderProfile', $event)"
+      />
     </template>
 
     <template v-else>
@@ -281,7 +292,7 @@ defineExpose({
           </TooltipProvider>
 
           <!-- 历史 / 更多 -->
-          <DropdownMenu>
+          <DropdownMenu v-if="!showSessionDrawer">
             <DropdownMenuTrigger as-child>
               <button
                 type="button"
@@ -473,7 +484,6 @@ defineExpose({
       @select="emit('selectSession', $event)"
       @create="emit('createSession')"
       @delete="emit('deleteSession', $event)"
-      @preload="emit('preloadSession', $event)"
     />
 
     <WorkspaceFilePicker

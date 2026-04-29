@@ -2,6 +2,117 @@
 
 ---
 
+## 14. 当前阶段差异复核与最新状态（2026-04-29）
+
+状态：✅ 已按当前代码重新核对阶段一至阶段五。文档中早期“待实现/部分完成”的条目，有一部分已经在后续迭代中落地；剩余差异主要集中在后端化、Profile 化、真实 LSP 与多 Agent 协作深度上。
+
+### 14.1 阶段一：Agent 主链路
+
+当前状态：✅ 主体完成，进入维护与回归阶段。
+
+已核对落地：
+- ✅ `useAiChat.ts`、`chatToolLoop.ts`、`chatToolExecution.ts`、`AiTurnRuntime.ts` 已支撑主对话、工具循环、审批、失败恢复与运行态管理。
+- ✅ `ProviderAdapter.ts` 已存在并可作为 Provider 能力抽象基础。
+- ✅ Compact / Auto Compact / Abort / Error Recovery / Rewind / Fork 等主链路能力已有实现基础。
+
+当前边界：
+- ⚠️ 主链路稳定性需要继续守住大会话加载、虚拟列表、历史恢复这几条高风险链路；后续 UI 合并不得直接恢复旧 stash 中 `useAiChat.ts` / `AiMessageListVirtual.vue` 的大范围改动。
+
+### 14.2 阶段二：工程治理与体验稳定
+
+当前状态：✅ P0/P1 主体完成。
+
+已核对落地：
+- ✅ Background Job Runtime、任务恢复/取消/中断、观测指标、MCP 状态、路径安全、权限审批、风险摘要均有代码入口。
+- ✅ AI 对话区已完成 v2 视觉重构，运行态组件迁入右侧“运行与验证”面板，主对话流不再承载大量诊断面板。
+- ✅ 大会话卡死问题已通过清理历史加载策略和避免预加载/重复渲染类风险项缓解；当前仍需持续回归。
+- ✅ `AiContextBudgetPanel` 的真实中文 key 覆盖已补强，避免再次出现 `ai.contextBudget.*` 泄漏到 UI。
+
+当前边界：
+- ⚠️ Background Job 仍是“前端执行器 + 后端状态持久化”，不是完整后端 daemon/supervisor。
+- ⚠️ 工程治理能力已有闭环，但仍应补充更多跨窗口、刷新后恢复和异常进程退出场景的压力测试。
+
+### 14.3 阶段三：Provider Gateway 与模型治理
+
+当前状态：✅ Gateway MVP 已接入主链路；Provider Profile Bundle 已完成前端产品闭环 MVP，后端化与迁移回填仍待做。
+
+已核对落地：
+- ✅ `src/ai-gateway/AiGateway.ts`、`router.ts`、`rateLimiter.ts`、`usageTracker.ts`、`security.ts`、`types.ts` 已存在。
+- ✅ Chat / Compact / Prompt Optimize / Tool Loop 均可看到 Gateway 接入证据，不再只是“类型设计”阶段。
+- ✅ Gateway 已具备 fallback、rate limit、usage record、endpoint security、token estimate 等基础治理能力。
+- ✅ Bridge API 模块化、`AiBridgeError`、Provider Capability / Permission Mapper 等治理基础已存在。
+- ✅ Provider Profile Bundle 前端闭环已落地：支持 Provider / Model / Output Style / Workspace Prompt / Dispatcher / SSRF 安全策略打包、预览、应用、备份、回滚。
+
+当前边界：
+- ⚠️ Provider Profile Bundle 当前使用前端 localStorage 持久化，不是后端 SQLite / workspace 文件级配置；跨设备、团队共享、迁移回填尚未完成。
+- ⚠️ SSRF allowlist、fallback keys、Provider Profile 级安全策略仍需要进一步配置化。
+- ⚠️ Gateway 诊断信息已有记录能力，但 UI 对“实际落到哪个 provider/model”的显性展示仍可继续增强。
+
+### 14.4 阶段四：AI 产品化能力
+
+当前状态：🟡 产品化 MVP 大部分完成，深度 runtime 与团队治理仍待完善。
+
+已核对落地：
+- ✅ Workspace Prompt / Workspace Skill / Output Style / Workflow Scripts / Slash 命令已有入口。
+- ✅ Team Memory Review 基础能力存在。
+- ✅ Plan Store 已具备变更历史、localStorage 持久化、jobRefs、压缩后证据注入。
+- ✅ Workflow Runtime 已支持轻量运行、恢复、暂停/取消、Verification 挂接等能力。
+- ✅ Transcript Store 已具备轻量持久化与时间线面板。
+
+当前边界：
+- ⚠️ Workflow Runtime 仍偏前端轻量 runtime，不是完整可暂停/恢复/验证/长期运行的后端 runtime。
+- ⚠️ Team Memory 仍是基础 review，尚未形成团队级检索、冲突治理和审计体系。
+- ⚠️ Prompt / Skill / Output Style 已有 Bundle 绑定基础，但 Skill 当前主要通过 Workspace Config 间接打包，仍缺独立 Skill 选择器和团队级治理。
+
+### 14.5 阶段五：高级智能与协作能力
+
+当前状态：🟡 安全集合和基础能力已完成较多，高级协作仍未全面启动。
+
+已核对落地：
+- ✅ Patch Review / Verification Center / Verification Presets / Verification Archive 已有实现。
+- ✅ Code Intelligence MVP 已有启发式 symbols/imports/exports/diagnostics 分析。
+- ✅ Workspace Isolation 已具备 warn / smart / deny 策略、自动登记、TTL、二次确认 UI 和写入前 guard。
+- ✅ Plan 与 Background Job / Verification Job 的证据链已经建立。
+- ✅ Proactive Tick 有基础 store 和面板入口，但仍是 MVP。
+
+当前边界：
+- ⏳ Ultraplan MVP 尚未完成。
+- ⏳ Verification Agent 尚未从“验证任务/面板”升级为独立 Agent。
+- ⏳ LSP Code Intelligence 当前仍是启发式轻量分析，不是真实 LSP。
+- ⏳ Multi-Agent / Remote Bridge / Workspace Isolation 强隔离仍未全面产品化。
+
+### 14.6 当前建议优先级
+
+1. ✅ 先提交本轮小修：`AiChatShell` 残留 preload 清理、`ContextBudget` i18n key 补齐和真实中文测试。
+2. ✅ Provider Profile Bundle 前端 MVP 已完成：配置切换、预览、备份、回滚，并把 Provider / Model / Output Style / Workspace Prompt / Dispatcher / SSRF 安全策略纳入同一 Profile。
+3. 🟡 下一步优先做 Provider Profile 后端化：SQLite / workspace 文件持久化、导入导出、迁移回填、团队共享和冲突处理。
+4. 🟡 然后做 Gateway 诊断 UI：展示实际 provider/model、fallback 链、成本、rate limit、SSRF 拦截原因。
+5. 🔵 最后再推进真实 LSP / Verification Agent / Ultraplan / Multi-Agent，避免在基础治理未完全产品化前扩大风险面。
+
+### 14.7 逐项验收矩阵（按当前代码）
+
+| 阶段 | 目标项 | 当前结论 | 核对证据 | 剩余差异 |
+| --- | --- | --- | --- | --- |
+| 阶段一 | Agent 主对话链路 | ✅ 已完成主体 | `useAiChat.ts`、`chatSessionRunner.ts`、`chatToolLoop.ts`、`chatToolExecution.ts`、`AiTurnRuntime.ts` | 继续回归大会话加载、滚动和历史恢复，禁止直接回灌旧高风险 diff。 |
+| 阶段一 | Compact / Auto Compact | ✅ 已接入 | `useAutoCompact.ts`、`chatSendRecovery.ts`、`chatMessageBuilder.ts`、`background-job.ts` | 仍需持续验证极大会话下的 UI 不阻塞。 |
+| 阶段一 | Rewind / Fork / Abort / Recovery | ✅ 已有实现基础 | `AiChatView.vue`、`useAiChat.ts`、`chatAbort.ts`、`chatSendRecovery.ts` | 属维护项，后续以回归测试为主。 |
+| 阶段二 | Background Job Runtime | 🟡 MVP 完成 | `background-job.ts`、`useJobWorker.ts`、`AiBackgroundJobsPanel.vue` | 不是完整后端 daemon/supervisor，跨进程长期运行能力不足。 |
+| 阶段二 | 权限、路径安全、风险摘要 | ✅ 主体完成 | `approvalRisk.ts`、`pathSafety.ts`、`workspaceIsolation.ts`、各风险工具测试 | 仍需更多异常进程、跨窗口、刷新恢复压力测试。 |
+| 阶段二 | 对话区体验稳定 | ✅ 主体完成 | `AiChatShell.vue`、`AiMessageListVirtual.vue`、`AiInputArea.vue`、`AiChatView.interaction.test.ts` | 重点守住大会话性能，不再恢复预加载会话类逻辑。 |
+| 阶段三 | Gateway 统一入口 | ✅ MVP 完成 | `AiGateway.ts`、`types.ts`、`router.ts`、`rateLimiter.ts`、`usageTracker.ts` | 仍需产品化配置管理和诊断展示。 |
+| 阶段三 | Chat / Compact / Prompt Optimize 覆盖 | ✅ 已覆盖 | `chatSessionRunner.ts`、`chatToolLoop.ts`、`useAutoCompact.ts`、`promptOptimizer.ts`、`gatewayCoverage.test.ts` | 后续新增模型调用必须继续统一走 Gateway。 |
+| 阶段三 | fallback key / rate limit / SSRF | 🟡 基础完成 | `fallbackKeys.ts`、`rateLimiter.ts`、`security.ts`、`AiGateway.test.ts` | SSRF allowlist、fallback keys 还未纳入 Provider Profile 级产品配置。 |
+| 阶段三 | Provider Profile Bundle | 🟡 前端 MVP 完成 | `providerProfileBundle.ts`、`provider-profile-bundle.ts`、`AiProviderProfileBundlePanel.vue` | 已有 CRUD、预览、应用、备份、回滚；缺后端持久化、导入导出、迁移回填、团队共享和冲突处理。 |
+| 阶段四 | Workspace Prompt / Skill / Output Style | 🟡 MVP 完成 | `workspaceSkills.ts`、`useOutputStyles.ts`、`AiProviderProfileBundlePanel.vue` | 已纳入 Profile Bundle 的配置包基础；Skill 仍缺独立选择器、团队治理和审计。 |
+| 阶段四 | Team Memory | 🟡 基础完成 | `ai-memory.ts`、`AiMemoryDrawer.vue`、`Team Memory Review` 相关入口 | 缺团队级检索、冲突处理、审计和权限策略。 |
+| 阶段四 | Plan / Transcript / Workflow | 🟡 MVP 完成 | `planStore.ts`、`transcriptStore.ts`、`workflowRuntime.ts`、`workflowPersistence.ts`、`AiWorkflowRuntimePanel.vue` | Workflow 仍是前端轻量 runtime，不是后端长期任务编排。 |
+| 阶段五 | Patch Review / Verification Center | ✅ 基础闭环完成 | `patchReview.ts`、`verificationReport.ts`、`verificationPresets.ts`、`verificationArchive.ts`、`AiPatchReviewPanel.vue` | Verification 仍是 job/panel，不是独立 Agent。 |
+| 阶段五 | Code Intelligence | 🟡 MVP 完成 | `codeIntelligence.ts`、`codeIntelligence.test.ts` | 当前是启发式解析，不是真实 LSP。 |
+| 阶段五 | Workspace Isolation | 🟡 安全子集完成 | `workspaceIsolation.ts`、`AiWorkspaceIsolationPanel.vue`、`chatToolExecution.ts` | 强隔离、远程执行隔离和多 Agent 并发隔离未产品化。 |
+| 阶段五 | Ultraplan / Multi-Agent / Remote Bridge | ⏳ 未完成 | 仅有计划文档和部分基础依赖 | 需要在 Gateway/Profile/权限闭环稳定后再启动。 |
+
+---
+
 ## 11. 第二阶段完成复核（2026-04-25）
 
 状态：✅ 第二阶段“工程治理与体验稳定”P0/P1 已补齐并完成针对性验证。

@@ -10,6 +10,7 @@ import { useI18n } from 'vue-i18n'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { saveCredential } from '@/api/connection'
 import type { ProviderConfig, ModelConfig, ProviderType, ThinkingEffort, WorkspaceConfig } from '@/types/ai'
+import AiProviderProfileBundlePanel from '@/components/ai/AiProviderProfileBundlePanel.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -50,8 +51,23 @@ import {
   Shield,
 } from 'lucide-vue-next'
 
+const props = withDefaults(defineProps<{
+  currentProviderId?: string | null
+  currentModelId?: string | null
+}>(), {
+  currentProviderId: null,
+  currentModelId: null,
+})
+
 const emit = defineEmits<{
   back: []
+  applyProfile: [payload: {
+    workspaceConfig: WorkspaceConfig
+    providerConfig?: ProviderConfig
+    selectedProviderId: string
+    selectedModelId: string
+    outputStyleId?: string
+  }]
 }>()
 
 const store = useAiChatStore()
@@ -436,6 +452,22 @@ async function handleSaveWorkspaceDispatcher(): Promise<void> {
   }
 }
 
+async function handleApplyProfile(payload: {
+  workspaceConfig: WorkspaceConfig
+  providerConfig?: ProviderConfig
+  selectedProviderId: string
+  selectedModelId: string
+  outputStyleId?: string
+}): Promise<void> {
+  if (payload.providerConfig) {
+    await store.saveProvider(payload.providerConfig)
+  }
+  if (currentWorkDir.value) {
+    await store.saveWorkspaceConfig(currentWorkDir.value, payload.workspaceConfig)
+  }
+  emit('applyProfile', payload)
+}
+
 /** 设为默认 */
 async function setDefault(provider: ProviderConfig) {
   for (const p of store.providers) {
@@ -737,6 +769,14 @@ const canSave = computed(() =>
             </button>
           </div>
         </section>
+
+        <AiProviderProfileBundlePanel
+          :providers="store.providers"
+          :current-workspace-config="store.currentWorkspaceConfig"
+          :current-provider-id="props.currentProviderId ?? store.defaultProvider?.id"
+          :current-model-id="props.currentModelId ?? store.currentWorkspaceConfig?.preferredModel"
+          @apply="handleApplyProfile"
+        />
 
         <section class="space-y-4 rounded-xl border border-border/40 bg-card/40 p-5">
           <div class="flex items-start justify-between gap-4">

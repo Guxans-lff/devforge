@@ -64,7 +64,7 @@ import {
   Sparkles,
   Zap,
 } from 'lucide-vue-next'
-import type { ProviderConfig, ModelConfig, FileOperation } from '@/types/ai'
+import type { ProviderConfig, ModelConfig, FileOperation, WorkspaceConfig } from '@/types/ai'
 
 interface MessageGroup {
   isGroupStart: boolean
@@ -1808,6 +1808,19 @@ function openProviderConfig(): void {
   currentView.value = 'provider-config'
 }
 
+function handleApplyProviderProfile(payload: {
+  workspaceConfig: WorkspaceConfig
+  providerConfig?: ProviderConfig
+  selectedProviderId: string
+  selectedModelId: string
+  outputStyleId?: string
+}): void {
+  selectedProviderId.value = payload.selectedProviderId
+  selectedModelId.value = payload.selectedModelId
+  chat.planGateEnabled.value = payload.workspaceConfig.planGateEnabled === true
+  currentView.value = 'chat'
+}
+
 function exitImmersive(): void {
   workspace.exitImmersive()
 }
@@ -1969,6 +1982,7 @@ function handleRewindMessage(messageId: string): void {
     @secondary-action="handleNewAiWindow"
     @open-config="openProviderConfig"
     @close-config="currentView = 'chat'"
+    @apply-provider-profile="handleApplyProviderProfile"
     @select-work-dir="handleSelectWorkDir"
     @set-work-dir="setWorkDir($event)"
     @continue="handleContinue"

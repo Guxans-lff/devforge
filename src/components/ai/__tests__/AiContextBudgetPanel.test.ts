@@ -1,7 +1,31 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import AiContextBudgetPanel from '@/components/ai/AiContextBudgetPanel.vue'
 import type { ContextBudgetReport } from '@/composables/ai-agent/diagnostics/contextBudgetAnalyzer'
+
+
+vi.mock('vue-i18n', async () => {
+  const messages = (await import('@/locales/zh-CN')).default as Record<string, any>
+  const resolveMessage = (key: string, params?: Record<string, unknown>) => {
+    const value = key.split('.').reduce<unknown>(
+      (current, part) => current && typeof current === 'object'
+        ? (current as Record<string, unknown>)[part]
+        : undefined,
+      messages,
+    )
+    if (typeof value !== 'string') return key
+    return Object.entries(params ?? {}).reduce(
+      (text, [name, param]) => text.replaceAll(`{${name}}`, String(param)),
+      value,
+    )
+  }
+  return {
+    useI18n: () => ({
+      t: resolveMessage,
+      locale: { value: 'zh-CN' },
+    }),
+  }
+})
 
 function makeReport(overrides: Partial<ContextBudgetReport> = {}): ContextBudgetReport {
   return {
@@ -31,9 +55,8 @@ describe('AiContextBudgetPanel', () => {
       props: { report },
     })
 
-    // vue-i18n is mocked to return the key string
-    expect(wrapper.text()).toContain('ai.contextBudget.title')
-    expect(wrapper.text()).toContain('ai.contextBudget.usage')
+    expect(wrapper.text()).toContain('上下文预算')
+    expect(wrapper.text()).toContain('已用 23%')
     expect(wrapper.text()).toContain('900 / 4,000 tokens')
     expect(wrapper.find('[class*="rotate-90"]').exists()).toBe(false)
   })
@@ -46,9 +69,13 @@ describe('AiContextBudgetPanel', () => {
 
     await wrapper.find('button').trigger('click')
     expect(wrapper.find('[class*="rotate-90"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('ai.contextBudget.total')
-    expect(wrapper.text()).toContain('ai.contextBudget.systemPrompt')
-    expect(wrapper.text()).toContain('ai.contextBudget.messages')
+    expect(wrapper.text()).toContain('总量')
+    expect(wrapper.text()).toContain('系统提示')
+    expect(wrapper.text()).toContain('项目记忆')
+    expect(wrapper.text()).toContain('消息')
+    expect(wrapper.text()).toContain('压缩摘要')
+    expect(wrapper.text()).toContain('安全上下文')
+    expect(wrapper.text()).not.toContain('ai.contextBudget.')
   })
 
   it('shows danger tone when usage >= 90%', () => {
@@ -90,7 +117,7 @@ describe('AiContextBudgetPanel', () => {
     })
 
     await wrapper.find('button').trigger('click')
-    expect(wrapper.text()).toContain('ai.contextBudget.recommendations')
+    expect(wrapper.text()).toContain('建议')
     expect(wrapper.text()).toContain('建议压缩历史消息')
   })
 
@@ -101,7 +128,7 @@ describe('AiContextBudgetPanel', () => {
     })
 
     await wrapper.find('button').trigger('click')
-    expect(wrapper.text()).toContain('ai.contextBudget.noRecommendations')
+    expect(wrapper.text()).toContain('当前上下文占用正常。')
   })
 
   it('emits compact event', async () => {
@@ -111,7 +138,7 @@ describe('AiContextBudgetPanel', () => {
     })
 
     await wrapper.find('button').trigger('click')
-    const compactBtn = wrapper.findAll('button').find(b => b.text().includes('ai.contextBudget.compactHistory'))
+    const compactBtn = wrapper.findAll('button').find(b => b.text().includes('压缩历史'))
     expect(compactBtn).toBeDefined()
     await compactBtn!.trigger('click')
     expect(wrapper.emitted('compact')).toHaveLength(1)
@@ -134,7 +161,7 @@ describe('AiContextBudgetPanel', () => {
     })
 
     await wrapper.find('button').trigger('click')
-    const btn = wrapper.findAll('button').find(b => b.text().includes('ai.contextBudget.clearAttachments'))
+    const btn = wrapper.findAll('button').find(b => b.text().includes('清空附件'))
     expect(btn).toBeDefined()
     await btn!.trigger('click')
     expect(wrapper.emitted('clearAttachments')).toHaveLength(1)
@@ -166,7 +193,7 @@ describe('AiContextBudgetPanel', () => {
     await wrapper.find('button').trigger('click')
     expect(wrapper.text()).not.toContain('Rule 1')
 
-    const detailBtn = wrapper.findAll('button').find(b => b.text().includes('ai.contextBudget.showDetails'))
+    const detailBtn = wrapper.findAll('button').find(b => b.text().includes('详情'))
     expect(detailBtn).toBeDefined()
     await detailBtn!.trigger('click')
     expect(wrapper.text()).toContain('Rule 1')

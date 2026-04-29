@@ -17,7 +17,7 @@ import { useAiChat } from '@/composables/useAiChat'
 import { useAiChatViewState } from '@/composables/useAiChatViewState'
 import { useFileAttachment } from '@/composables/useFileAttachment'
 import { setActiveSessionId } from '@/composables/useToolApproval'
-import type { AiSession } from '@/types/ai'
+import type { AiSession, ProviderConfig, WorkspaceConfig } from '@/types/ai'
 import type { ChatMode } from '@/components/ai/AiInputArea.vue'
 import AiChatShell from '@/components/ai/AiChatShell.vue'
 import AiDiagnosticsPanel from '@/components/ai/AiDiagnosticsPanel.vue'
@@ -256,6 +256,19 @@ function openProviderConfig(): void {
   currentView.value = 'provider-config'
 }
 
+function handleApplyProviderProfile(payload: {
+  workspaceConfig: WorkspaceConfig
+  providerConfig?: ProviderConfig
+  selectedProviderId: string
+  selectedModelId: string
+  outputStyleId?: string
+}): void {
+  selectedProviderId.value = payload.selectedProviderId
+  selectedModelId.value = payload.selectedModelId
+  chat.planGateEnabled.value = payload.workspaceConfig.planGateEnabled === true
+  currentView.value = 'chat'
+}
+
 async function switchSession(
   sessionId: string,
   options?: { loadHistory?: boolean; updateUserPicked?: boolean; resetView?: boolean },
@@ -336,6 +349,7 @@ async function switchSession(
     @secondary-action="handleNewWindow"
     @open-config="openProviderConfig"
     @close-config="currentView = 'chat'"
+    @apply-provider-profile="handleApplyProviderProfile"
     @select-work-dir="handleSelectWorkDir"
     @set-work-dir="setWorkDir($event)"
     @continue="handleContinue"

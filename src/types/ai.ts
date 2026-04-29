@@ -88,6 +88,55 @@ export interface ProviderConfig {
   }
 }
 
+export interface AiProviderProfileBundle {
+  id: string
+  name: string
+  description?: string
+  providerId: string
+  modelId: string
+  outputStyleId?: string
+  workspaceConfig?: WorkspaceConfig
+  security?: ProviderConfig['security']
+  tags?: string[]
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AiProviderProfileBackup {
+  id: string
+  profileId: string
+  snapshot: AiProviderProfileBundle
+  reason: 'manual' | 'before-update' | 'before-apply' | 'rollback'
+  createdAt: number
+}
+
+export interface AiProviderProfilePreview {
+  profileId: string
+  profileName: string
+  providerName: string
+  modelName: string
+  outputStyleName?: string
+  workspaceChanges: Array<{
+    key: keyof WorkspaceConfig
+    label: string
+    before: string
+    after: string
+    changed: boolean
+  }>
+  securityChanges: Array<{
+    key: 'allowlist' | 'allowLocalhost' | 'allowPrivateIP'
+    label: string
+    before: string
+    after: string
+    changed: boolean
+  }>
+  warnings: Array<{
+    key: string
+    level: 'info' | 'warning' | 'danger'
+    message: string
+  }>
+}
+
 export interface AiProviderHealth {
   status: 'unknown' | 'healthy' | 'degraded' | 'unhealthy'
   checkedAt: number | null
