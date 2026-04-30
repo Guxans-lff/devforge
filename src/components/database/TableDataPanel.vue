@@ -76,6 +76,12 @@ async function loadData(overrides: Partial<NonNullable<QueryTabContext['tableBro
     currentPage: 1,
   }
 
+  if (nextBrowse.orderBy?.trim()) {
+    nextBrowse.seekOrderBy = undefined
+    nextBrowse.seekColumn = undefined
+    nextBrowse.seekValue = undefined
+  }
+
   loading.value = true
   try {
     const { effectiveOrderBy, nextSeekColumn } = await resolveSeekState(nextBrowse, nextBrowse.orderBy)

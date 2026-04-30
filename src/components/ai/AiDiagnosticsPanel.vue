@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiChatMetricsSnapshot } from '@/composables/ai/useAiChatObservability'
 import { useSettingsStore } from '@/stores/settings'
-import { Activity, ChevronRight, Clock3, Copy, History, ShieldAlert, TrendingUp, Wrench } from 'lucide-vue-next'
+import { useAiChatStore } from '@/stores/ai-chat'
+import { buildGatewayDashboardSnapshot, type GatewayDashboardSnapshot } from '@/ai-gateway/gatewayDashboard'
+import { Activity, ChevronRight, Clock3, Copy, History, Route, ShieldAlert, TrendingUp, Wrench } from 'lucide-vue-next'
 
 type Tone = 'ok' | 'warn' | 'danger'
 
@@ -13,9 +15,20 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
+const aiChatStore = useAiChatStore()
 const expanded = ref(false)
 const copied = ref(false)
+const gatewayTick = ref(0)
+let gatewayTimer: ReturnType<typeof setInterval> | null = null
 const thresholds = computed(() => settingsStore.settings.aiDiagnosticsThresholds)
+
+const gatewaySnapshot = computed<GatewayDashboardSnapshot>(() => {
+  gatewayTick.value
+  return buildGatewayDashboardSnapshot({
+    sessionId: aiChatStore.activeSessionId,
+    providers: aiChatStore.providers,
+  })
+})
 
 const metricCards = computed(() => [
   {
@@ -123,6 +136,31 @@ const toolSummary = computed(() => [
   { label: t('ai.diagnostics.max'), value: formatMs(props.metrics.lastToolRun.maxDurationMs) },
 ])
 
+const gatewaySummary = computed(() => {
+  const snapshot = gatewaySnapshot.value
+  return [
+    { label: t('ai.diagnostics.gatewayRequests'), value: snapshot.summary.requestCount },
+    { label: t('ai.diagnostics.gatewaySuccessRate'), value: formatPercent(snapshot.summary.successRate) },
+    { label: t('ai.diagnostics.gatewayCost'), value: formatCost(snapshot.summary.totalCost, snapshot.summary.currency) },
+    { label: t('ai.diagnostics.gatewayTokens'), value: formatNumber(snapshot.summary.totalTokens) },
+    { label: t('ai.diagnostics.gatewayErrors'), value: snapshot.summary.errorCount },
+    { label: t('ai.diagnostics.gatewayCancelled'), value: snapshot.summary.cancelledCount },
+  ]
+})
+
+const gatewayHealthTone = computed<Tone>(() => {
+  const snapshot = gatewaySnapshot.value
+  if (
+    snapshot.securityBlocks.length > 0
+    || snapshot.circuitBreakers.some(item => item.open)
+    || snapshot.rateLimits.some(item => item.throttledCount > 0)
+  ) {
+    return 'danger'
+  }
+  if (snapshot.summary.errorCount > 0 || snapshot.recentFallbacks.length > 0) return 'warn'
+  return 'ok'
+})
+
 const sessionHistorySummary = computed(() =>
   props.metrics.sessionHistory
     .slice()
@@ -192,7 +230,21 @@ const exportPayload = computed(() => JSON.stringify({
   trend: props.metrics.trend,
   sessionHistory: props.metrics.sessionHistory,
   errorBreakdown: props.metrics.errorBreakdown,
+  gateway: gatewaySnapshot.value,
 }, null, 2))
+
+onMounted(() => {
+  gatewayTimer = setInterval(() => {
+    gatewayTick.value += 1
+  }, 1500)
+})
+
+onBeforeUnmount(() => {
+  if (gatewayTimer) {
+    clearInterval(gatewayTimer)
+    gatewayTimer = null
+  }
+})
 
 async function copySnapshot(): Promise<void> {
   await navigator.clipboard.writeText(exportPayload.value)
@@ -238,6 +290,24 @@ function formatMs(value: number | null): string {
   if (value === null || Number.isNaN(value)) return '--'
   if (value < 1000) return `${Math.round(value)} ms`
   return `${(value / 1000).toFixed(2)} s`
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat().format(value)
+}
+
+function formatPercent(value: number): string {
+  return `${Math.round(value * 100)}%`
+}
+
+function formatCost(value: number, currency: string): string {
+  if (value <= 0) return `0 ${currency}`
+  return `${value.toFixed(value < 0.01 ? 4 : 2)} ${currency}`
+}
+
+function formatDateTime(value: number | null): string {
+  if (!value) return '--'
+  return new Date(value).toLocaleTimeString()
 }
 
 function formatDelta(value: number | null): string {
@@ -370,6 +440,162 @@ function formatDelta(value: number | null): string {
             </div>
             <div v-if="metrics.errorBreakdown.length === 0" class="text-[11px] text-muted-foreground/55">
               {{ t('ai.diagnostics.noErrors') }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rounded-lg border px-3 py-3" :class="toneClass(gatewayHealthTone)">
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 text-muted-foreground/70">
+            <Route class="h-3.5 w-3.5" />
+            <span class="text-[10px] uppercase tracking-[0.16em]">{{ t('ai.diagnostics.gatewayDashboard') }}</span>
+          </div>
+          <span class="rounded-full bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground">
+            {{ toneLabel(gatewayHealthTone) }}
+          </span>
+        </div>
+
+        <div class="grid gap-x-4 gap-y-2 md:grid-cols-6">
+          <div
+            v-for="item in gatewaySummary"
+            :key="item.label"
+            class="flex items-center justify-between gap-2 text-[11px]"
+          >
+            <span class="text-muted-foreground/65">{{ item.label }}</span>
+            <span class="font-mono text-foreground/85">{{ item.value }}</span>
+          </div>
+        </div>
+
+        <div class="mt-3 grid gap-3 md:grid-cols-2">
+          <div class="rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+            <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
+              {{ t('ai.diagnostics.gatewayActualRoute') }}
+            </div>
+            <div v-if="gatewaySnapshot.currentRoute" class="space-y-1 text-[11px]">
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-muted-foreground/65">{{ t('ai.diagnostics.provider') }}</span>
+                <span class="font-mono text-foreground/85">{{ gatewaySnapshot.currentRoute.providerName }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-muted-foreground/65">{{ t('ai.diagnostics.model') }}</span>
+                <span class="font-mono text-foreground/85">{{ gatewaySnapshot.currentRoute.model }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-muted-foreground/65">{{ t('ai.diagnostics.source') }}</span>
+                <span class="font-mono text-foreground/85">{{ gatewaySnapshot.currentRoute.source }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-muted-foreground/65">{{ t('ai.diagnostics.status') }}</span>
+                <span class="font-mono text-foreground/85">{{ gatewaySnapshot.currentRoute.status }}</span>
+              </div>
+            </div>
+            <div v-else class="text-[11px] text-muted-foreground/55">
+              {{ t('ai.diagnostics.gatewayNoRoute') }}
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+            <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
+              {{ t('ai.diagnostics.gatewayProviderSummary') }}
+            </div>
+            <div class="space-y-2">
+              <div
+                v-for="item in gatewaySnapshot.providerSummaries.slice(0, 4)"
+                :key="item.providerId"
+                class="flex items-center justify-between gap-2 text-[11px]"
+              >
+                <span class="truncate text-muted-foreground/65">{{ item.providerName }}</span>
+                <span class="font-mono text-foreground/85">
+                  {{ item.requestCount }} / {{ formatCost(item.totalCost, item.currency) }}
+                </span>
+              </div>
+              <div v-if="gatewaySnapshot.providerSummaries.length === 0" class="text-[11px] text-muted-foreground/55">
+                {{ t('ai.diagnostics.gatewayNoProviderSummary') }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 grid gap-3 md:grid-cols-2">
+          <div class="rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+            <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
+              {{ t('ai.diagnostics.gatewayFallbacks') }}
+            </div>
+            <div class="space-y-2">
+              <div
+                v-for="item in gatewaySnapshot.recentFallbacks"
+                :key="`${item.requestId}-${item.retryIndex}`"
+                class="rounded-md border border-border/20 bg-background/60 px-2 py-1.5 text-[11px]"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-muted-foreground/65">
+                    {{ item.primaryProviderId }} / {{ item.primaryModel }}
+                  </span>
+                  <span class="font-mono text-foreground/85">{{ item.providerName }} / {{ item.model }}</span>
+                </div>
+                <div class="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/55">
+                  <span>{{ item.reason }}</span>
+                  <span>{{ formatDateTime(item.finishedAt) }}</span>
+                </div>
+              </div>
+              <div v-if="gatewaySnapshot.recentFallbacks.length === 0" class="text-[11px] text-muted-foreground/55">
+                {{ t('ai.diagnostics.gatewayNoFallbacks') }}
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+            <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
+              {{ t('ai.diagnostics.gatewayRateLimitAndCircuit') }}
+            </div>
+            <div class="space-y-2">
+              <div
+                v-for="item in gatewaySnapshot.rateLimits"
+                :key="`rate-${item.providerId}`"
+                class="flex items-center justify-between gap-2 text-[11px]"
+              >
+                <span class="truncate text-muted-foreground/65">{{ item.providerName }}</span>
+                <span class="font-mono text-foreground/85">
+                  {{ item.currentCount }}/{{ item.maxRequests }} · {{ t('ai.diagnostics.gatewayThrottled') }} {{ item.throttledCount }}
+                </span>
+              </div>
+              <div
+                v-for="item in gatewaySnapshot.circuitBreakers"
+                :key="`circuit-${item.providerId}`"
+                class="flex items-center justify-between gap-2 text-[11px]"
+              >
+                <span class="truncate text-muted-foreground/65">{{ item.providerName }}</span>
+                <span class="font-mono" :class="item.open ? 'text-rose-400' : 'text-foreground/85'">
+                  {{ item.open ? t('ai.diagnostics.gatewayCircuitOpen') : t('ai.diagnostics.gatewayCircuitClosed') }}
+                  · {{ item.failureCount }}
+                </span>
+              </div>
+              <div
+                v-if="gatewaySnapshot.rateLimits.length === 0 && gatewaySnapshot.circuitBreakers.length === 0"
+                class="text-[11px] text-muted-foreground/55"
+              >
+                {{ t('ai.diagnostics.gatewayNoRateLimit') }}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          v-if="gatewaySnapshot.securityBlocks.length > 0"
+          class="mt-3 rounded-lg border border-rose-500/25 bg-rose-500/10 px-3 py-2"
+        >
+          <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-rose-300/85">
+            {{ t('ai.diagnostics.gatewaySecurityBlocks') }}
+          </div>
+          <div class="space-y-2">
+            <div
+              v-for="item in gatewaySnapshot.securityBlocks"
+              :key="item.requestId"
+              class="flex items-center justify-between gap-2 text-[11px]"
+            >
+              <span class="truncate text-muted-foreground/70">{{ item.providerName }} / {{ item.model }}</span>
+              <span class="font-mono text-rose-200">{{ item.reason }}</span>
             </div>
           </div>
         </div>

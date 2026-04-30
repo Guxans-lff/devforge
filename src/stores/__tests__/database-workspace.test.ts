@@ -20,14 +20,26 @@ import { setupTestPinia } from '@/__tests__/helpers'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import type { InnerTab, QueryTabContext } from '@/types/database-workspace'
 
+const persistenceMocks = vi.hoisted(() => ({
+  loadMock: vi.fn().mockResolvedValue(false),
+  autoSaveMock: vi.fn(),
+  savedOptions: null as {
+    serialize: () => unknown
+    deserialize: (data: any) => void
+  } | null,
+}))
+
 // ===== Mock 外部依赖 =====
 
 // mock 持久化插件，避免触发 SQLite 操作
 vi.mock('@/plugins/persistence', () => ({
-  usePersistence: () => ({
-    load: vi.fn().mockResolvedValue(false),
-    autoSave: vi.fn(),
-  }),
+  usePersistence: (options: { serialize: () => unknown, deserialize: (data: any) => void }) => {
+    persistenceMocks.savedOptions = options
+    return {
+      load: persistenceMocks.loadMock,
+      autoSave: persistenceMocks.autoSaveMock,
+    }
+  },
 }))
 
 // mock 数据库 API，避免 closeInnerTab 中的动态 import 实际发出请求
@@ -76,6 +88,9 @@ describe('useDatabaseWorkspaceStore', () => {
   beforeEach(() => {
     // 每个测试重新初始化独立 Pinia，保证状态隔离
     setupTestPinia()
+    persistenceMocks.savedOptions = null
+    persistenceMocks.loadMock.mockResolvedValue(false)
+    persistenceMocks.autoSaveMock.mockReset()
   })
 
   afterEach(async () => {
@@ -528,6 +543,77 @@ describe('useDatabaseWorkspaceStore', () => {
   // ─────────────────────────────────────────────
   // reopenLastClosedTab / getClosedTabCount
   // ─────────────────────────────────────────────
+  describe('持久化恢复', () => {
+    it('序列化时保留 tableBrowse，避免刷新后丢失表浏览单一真相', () => {
+      const store = useDatabaseWorkspaceStore()
+      const ws = store.getOrCreate(CONN)
+      const tabId = ws.tabs[0]!.id
+
+      store.updateTabContext(CONN, tabId, {
+        sql: 'SELECT * FROM `demo`.`users`;',
+        currentDatabase: 'demo',
+        tableBrowse: {
+          database: 'demo',
+          table: 'users',
+          currentPage: 2,
+          pageSize: 200,
+          whereClause: '`name` LIKE \'%Ada%\'',
+          orderBy: '`id` DESC',
+          showFilters: true,
+        },
+      })
+
+      const serialized = persistenceMocks.savedOptions?.serialize() as any
+      expect(serialized.workspaces[CONN].tabs[0].tableBrowse).toEqual({
+        database: 'demo',
+        table: 'users',
+        currentPage: 2,
+        pageSize: 200,
+        whereClause: '`name` LIKE \'%Ada%\'',
+        orderBy: '`id` DESC',
+        showFilters: true,
+      })
+    })
+
+    it('反序列化旧快照缺少 currentDatabase 时，用 tableBrowse.database 回填一致上下文', () => {
+      const store = useDatabaseWorkspaceStore()
+
+      persistenceMocks.savedOptions?.deserialize({
+        workspaces: {
+          [CONN]: {
+            activeTabId: 'conn-1-query-3',
+            tabs: [
+              {
+                id: 'conn-1-query-3',
+                type: 'query',
+                title: 'Query 3',
+                closable: true,
+                sql: 'SELECT * FROM `demo`.`users`;',
+                tableBrowse: {
+                  database: 'demo',
+                  table: 'users',
+                  currentPage: 1,
+                  pageSize: 200,
+                  orderBy: '`id` DESC',
+                },
+              },
+            ],
+          },
+        },
+      })
+
+      const ctx = store.getWorkspace(CONN)!.tabs[0]!.context as QueryTabContext
+      expect(ctx.currentDatabase).toBe('demo')
+      expect(ctx.tableBrowse).toEqual({
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        orderBy: '`id` DESC',
+      })
+    })
+  })
+
   describe('reopenLastClosedTab', () => {
     it('恢复最近关闭的 tab，closedTabs 数量减 1', () => {
       const store = useDatabaseWorkspaceStore()

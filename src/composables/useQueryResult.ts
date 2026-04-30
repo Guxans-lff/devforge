@@ -47,6 +47,12 @@ export interface UseQueryResultOptions {
     filterOperators?: Record<string, string>
     showFilters?: boolean
     showChart?: boolean
+    selectedRowIndex?: number
+    rowDetailOpen?: boolean
+    pinnedColumns?: {
+      left?: string[]
+      right?: string[]
+    }
   }>) => void
   tableBrowse?: Ref<{
     database: string
@@ -58,6 +64,12 @@ export interface UseQueryResultOptions {
     filterOperators?: Record<string, string>
     showFilters?: boolean
     showChart?: boolean
+    selectedRowIndex?: number
+    rowDetailOpen?: boolean
+    pinnedColumns?: {
+      left?: string[]
+      right?: string[]
+    }
     seekOrderBy?: string
     seekColumn?: string
     seekValue?: number
@@ -163,6 +175,12 @@ export function useQueryResult(options: UseQueryResultOptions) {
     filterOperators?: Record<string, string>
     showFilters?: boolean
     showChart?: boolean
+    selectedRowIndex?: number
+    rowDetailOpen?: boolean
+    pinnedColumns?: {
+      left?: string[]
+      right?: string[]
+    }
   }> = {}) => {
     if (!isTableBrowse.value) return
     onSyncTableBrowse?.(extra)
@@ -229,6 +247,12 @@ export function useQueryResult(options: UseQueryResultOptions) {
       filterOperators.value = { ...browse.filterOperators ?? buildFilterOperatorsFromWhereClause(browse.whereClause) }
       showFilters.value = browse.showFilters ?? Boolean(browse.whereClause?.trim())
       showChart.value = browse.showChart ?? false
+      selectedRowIndex.value = typeof browse.selectedRowIndex === 'number' ? browse.selectedRowIndex : null
+      rowDetailOpen.value = browse.rowDetailOpen ?? false
+      columnPinning.value = {
+        left: [...(browse.pinnedColumns?.left ?? [])],
+        right: [...(browse.pinnedColumns?.right ?? [])],
+      }
 
       const orderBy = browse.orderBy?.trim() ?? ''
       if (!orderBy) {
@@ -364,6 +388,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
   function openRowDetail(displayIndex: number) {
     selectedRowIndex.value = displayIndex
     rowDetailOpen.value = true
+    syncTableBrowseUiState({ selectedRowIndex: displayIndex, rowDetailOpen: true })
   }
 
   function copyCellValue(value: unknown) {
@@ -378,6 +403,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     selectedRowIndex.value = direction === 'prev'
       ? Math.max(0, selectedRowIndex.value - 1)
       : Math.min(totalRows.value - 1, selectedRowIndex.value + 1)
+    syncTableBrowseUiState({ selectedRowIndex: selectedRowIndex.value, rowDetailOpen: rowDetailOpen.value })
   }
 
   const selectedRowData = computed(() => {
@@ -608,6 +634,12 @@ export function useQueryResult(options: UseQueryResultOptions) {
     const left = [...(columnPinning.value.left ?? [])]
     if (!left.includes(columnId)) left.push(columnId)
     columnPinning.value = { ...columnPinning.value, left }
+    syncTableBrowseUiState({
+      pinnedColumns: {
+        left,
+        right: [...(columnPinning.value.right ?? [])],
+      },
+    })
   }
 
   /** 取消列固定 */
@@ -615,6 +647,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     const left = (columnPinning.value.left ?? []).filter(id => id !== columnId)
     const right = (columnPinning.value.right ?? []).filter(id => id !== columnId)
     columnPinning.value = { left, right }
+    syncTableBrowseUiState({ pinnedColumns: { left, right } })
   }
 
   /** 判断列是否已固定 */

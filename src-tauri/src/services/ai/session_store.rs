@@ -2,7 +2,7 @@
 //!
 //! 基于 SQLite 的会话和消息 CRUD 操作。
 
-use super::models::{AiMessageRecord, AiSession, DailyUsage, ProviderConfig};
+use super::models::{AiMessageRecord, AiSession, AiTranscriptEventRecord, DailyUsage, ProviderConfig};
 use crate::utils::error::AppError;
 use sqlx::SqlitePool;
 
@@ -62,6 +62,21 @@ pub async fn init_tables(pool: &SqlitePool) -> Result<(), AppError> {
             estimated_cost REAL DEFAULT 0,
             PRIMARY KEY (date, provider_id, model)
         );
+
+        CREATE TABLE IF NOT EXISTS ai_transcript_events (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            turn_id TEXT,
+            event_type TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            payload_json TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ai_transcript_session_time
+            ON ai_transcript_events(session_id, timestamp, id);
+
+        CREATE INDEX IF NOT EXISTS idx_ai_transcript_session_type
+            ON ai_transcript_events(session_id, event_type, timestamp);
         "#,
     )
     .execute(pool)
@@ -85,6 +100,33 @@ pub async fn init_tables(pool: &SqlitePool) -> Result<(), AppError> {
         .execute(pool)
         .await
         .ok();
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS ai_transcript_events (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            turn_id TEXT,
+            event_type TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            payload_json TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("创建 ai_transcript_events 表失败: {e}")))?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_ai_transcript_session_time ON ai_transcript_events(session_id, timestamp, id)",
+    )
+    .execute(pool)
+    .await
+    .ok();
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_ai_transcript_session_type ON ai_transcript_events(session_id, event_type, timestamp)",
+    )
+    .execute(pool)
+    .await
+    .ok();
 
     // 迁移：创建 ai_memories 表
     sqlx::query(
@@ -320,6 +362,12 @@ pub async fn get_session(pool: &SqlitePool, id: &str) -> Result<Option<AiSession
 
 /// 删除会话（级联删除消息）
 pub async fn delete_session(pool: &SqlitePool, id: &str) -> Result<(), AppError> {
+    sqlx::query("DELETE FROM ai_transcript_events WHERE session_id = ?")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map_err(|e| AppError::Other(format!("删除会话 Transcript 失败: {e}")))?;
+
     // 先删除消息（SQLite 外键 CASCADE 可能未启用）
     sqlx::query("DELETE FROM ai_messages WHERE session_id = ?")
         .bind(id)
@@ -334,6 +382,94 @@ pub async fn delete_session(pool: &SqlitePool, id: &str) -> Result<(), AppError>
         .map_err(|e| AppError::Other(format!("删除会话失败: {e}")))?;
 
     Ok(())
+}
+
+// ─────────────────────────────────── Transcript Event Store ───────────────────────────────────
+
+/// 追加 Transcript 事件
+pub async fn append_transcript_event(
+    pool: &SqlitePool,
+    event: &AiTranscriptEventRecord,
+) -> Result<(), AppError> {
+    sqlx::query(
+        r#"
+        INSERT OR IGNORE INTO ai_transcript_events
+        (id, session_id, turn_id, event_type, timestamp, payload_json)
+        VALUES (?, ?, ?, ?, ?, ?)
+        "#,
+    )
+    .bind(&event.id)
+    .bind(&event.session_id)
+    .bind(&event.turn_id)
+    .bind(&event.event_type)
+    .bind(event.timestamp)
+    .bind(&event.payload_json)
+    .execute(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("追加 Transcript 事件失败: {e}")))?;
+
+    Ok(())
+}
+
+/// 查询最近 Transcript 事件
+pub async fn list_transcript_events(
+    pool: &SqlitePool,
+    session_id: &str,
+    limit: u32,
+) -> Result<Vec<AiTranscriptEventRecord>, AppError> {
+    let limit = limit.clamp(1, 2000) as i64;
+    let rows: Vec<(String, String, Option<String>, String, i64, String)> = sqlx::query_as(
+        r#"
+        SELECT id, session_id, turn_id, event_type, timestamp, payload_json
+        FROM ai_transcript_events
+        WHERE session_id = ?
+        ORDER BY timestamp DESC, id DESC
+        LIMIT ?
+        "#,
+    )
+    .bind(session_id)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("查询 Transcript 事件失败: {e}")))?;
+
+    let mut events: Vec<AiTranscriptEventRecord> = rows
+        .into_iter()
+        .map(|(id, session_id, turn_id, event_type, timestamp, payload_json)| {
+            AiTranscriptEventRecord {
+                id,
+                session_id,
+                turn_id,
+                event_type,
+                timestamp,
+                payload_json,
+            }
+        })
+        .collect();
+
+    events.sort_by(|left, right| {
+        left.timestamp
+            .cmp(&right.timestamp)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    Ok(events)
+}
+
+/// 统计 Transcript 事件数量
+pub async fn count_transcript_events(
+    pool: &SqlitePool,
+    session_id: &str,
+) -> Result<u32, AppError> {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(1) FROM ai_transcript_events WHERE session_id = ?",
+    )
+    .bind(session_id)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("统计 Transcript 事件失败: {e}")))?;
+
+    Ok(count.max(0) as u32)
 }
 
 // ─────────────────────────────────── Message CRUD ───────────────────────────────────

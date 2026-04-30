@@ -217,6 +217,27 @@ export function aiSaveMessage(message: AiMessageRecord): Promise<void> {
   return invokeCommand('ai_save_message', { message }, { source: 'AI' })
 }
 
+export interface AiTranscriptEventRecord {
+  id: string
+  sessionId: string
+  turnId?: string | null
+  eventType: string
+  timestamp: number
+  payloadJson: string
+}
+
+export function aiAppendTranscriptEvent(event: AiTranscriptEventRecord): Promise<void> {
+  return invokeCommand('ai_append_transcript_event', { event }, { source: 'AI', silent: true })
+}
+
+export function aiListTranscriptEvents(sessionId: string, limit?: number): Promise<AiTranscriptEventRecord[]> {
+  return invokeCommand('ai_list_transcript_events', { sessionId, limit: limit ?? null }, { source: 'AI', silent: true })
+}
+
+export function aiCountTranscriptEvents(sessionId: string): Promise<number> {
+  return invokeCommand('ai_count_transcript_events', { sessionId }, { source: 'AI', silent: true })
+}
+
 export function aiGetUsageStats(startDate: string, endDate: string): Promise<DailyUsage[]> {
   return invokeCommand('ai_get_usage_stats', { startDate, endDate }, { source: 'AI' })
 }

@@ -12,6 +12,11 @@ export interface UseResultTabsOptions {
   tabContext: ComputedRef<QueryTabContext | undefined>
 }
 
+function resolveActiveResultTab(resultTabs: ResultTab[], activeResultTabId: string | null | undefined): ResultTab | null {
+  if (!activeResultTabId) return null
+  return resultTabs.find(t => t.id === activeResultTabId) ?? null
+}
+
 /**
  * 结果标签页管理 composable
  * 负责：结果标签页的增删改查、固定、右键菜单、多语句子结果切换
@@ -24,10 +29,27 @@ export function useResultTabs(options: UseResultTabsOptions) {
   const resultTabs = computed(() => tabContext.value?.resultTabs ?? [])
   const activeResultTabId = computed(() => tabContext.value?.activeResultTabId ?? null)
 
-  const activeResultTab = computed(() => {
-    if (!activeResultTabId.value) return null
-    return resultTabs.value.find(t => t.id === activeResultTabId.value) ?? null
-  })
+  const activeResultTab = computed(() => resolveActiveResultTab(resultTabs.value, activeResultTabId.value))
+
+  watch(
+    () => [resultTabs.value, activeResultTabId.value] as const,
+    ([tabs, activeId]) => {
+      if (tabs.length === 0) {
+        if (activeId !== null && activeId !== undefined) {
+          store.updateTabContext(connectionId.value, tabId.value, {
+            activeResultTabId: undefined,
+          })
+        }
+        return
+      }
+
+      if (resolveActiveResultTab(tabs, activeId)) return
+      store.updateTabContext(connectionId.value, tabId.value, {
+        activeResultTabId: tabs[tabs.length - 1]!.id,
+      })
+    },
+    { immediate: true },
+  )
 
   // ===== 多语句子结果切换 =====
   const activeSubResultIndex = ref(-1)

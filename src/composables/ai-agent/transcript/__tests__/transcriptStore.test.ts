@@ -193,6 +193,46 @@ describe('transcriptStore', () => {
     expect(storage.getItem(TRANSCRIPT_STORE_STORAGE_KEY)).toBeNull()
   })
 
+  it('syncs appended events to backend without blocking memory writes', async () => {
+    const appendCalls: unknown[] = []
+    const errors: unknown[] = []
+    const backendStore = createTranscriptStore({
+      backend: {
+        appendEvent: async (event) => {
+          appendCalls.push(event)
+          throw new Error('backend down')
+        },
+        onError: error => errors.push(error),
+      },
+    })
+
+    const event = backendStore.appendEvent(makeEvent({ sessionId: 's1' }))
+    await Promise.resolve()
+
+    expect(backendStore.getEventCount('s1')).toBe(1)
+    expect(appendCalls).toHaveLength(1)
+    expect((appendCalls[0] as { id: string }).id).toBe(event.id)
+    expect(errors).toHaveLength(1)
+  })
+
+  it('hydrates events from backend without duplicating ids', async () => {
+    const remoteEvent = {
+      ...makeEvent({ sessionId: 's1', timestamp: 3000 }),
+      id: 'remote-1',
+    }
+    const backendStore = createTranscriptStore({
+      backend: {
+        listEvents: async () => [remoteEvent, remoteEvent],
+      },
+    })
+
+    const loaded = await backendStore.loadBackend?.('s1', 500)
+
+    expect(loaded).toBe(true)
+    expect(backendStore.getEventCount('s1')).toBe(1)
+    expect(backendStore.getLatestEvent('s1')?.id).toBe('remote-1')
+  })
+
   it('ignores invalid persisted transcript data', () => {
     const storage = createMemoryStorage()
     storage.setItem(TRANSCRIPT_STORE_STORAGE_KEY, JSON.stringify({

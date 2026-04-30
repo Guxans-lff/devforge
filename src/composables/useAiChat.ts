@@ -9,6 +9,10 @@ import {
   loadChatHistoryWindow,
 } from '@/composables/ai/chatHistoryLoad'
 import { runAiChatSessionTurn, type AiChatSessionRunnerResult } from '@/composables/ai/chatSessionRunner'
+import { createAgentRuntime } from '@/composables/ai/AgentRuntime'
+import { createAgentRuntimeTranscriptBridge } from '@/composables/ai-agent/transcript/agentRuntimeTranscriptBridge'
+import { createTranscriptStore } from '@/composables/ai-agent/transcript/transcriptStore'
+import { aiAppendTranscriptEvent, aiListTranscriptEvents } from '@/api/ai/transcript'
 import { useAiChatObservability } from '@/composables/ai/useAiChatObservability'
 import {
   parseAndWriteJournalSections as writeJournalSectionsFromText,
@@ -22,8 +26,10 @@ import {
 } from '@/composables/ai/chatStreamEvents'
 import { executeToolCalls as runToolCalls } from '@/composables/ai/chatToolExecution'
 import { resolveStreamWatchdogConfig } from '@/composables/ai/chatHelpers'
+import { buildPermissionRuleSet, type PermissionRuleConfig } from '@/ai-gui/permissionRules'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiMemoryStore } from '@/stores/ai-memory'
+import { useSettingsStore } from '@/stores/settings'
 import { useWorkspaceFilesStore } from '@/stores/workspace-files'
 import type {
   AiMessage,
@@ -37,7 +43,7 @@ import { createLogger } from '@/utils/logger'
 
 const log = createLogger('ai.chat')
 
-const MAX_TOOL_LOOPS = 10
+const MAX_TOOL_LOOPS = 30
 const HISTORY_LOAD_TIMEOUT_MS = 8_000
 
 export interface UseAiChatOptions {
@@ -56,9 +62,38 @@ export function useAiChat(options: UseAiChatOptions) {
   const sessionIdRef = toRef(options.sessionId)
   const aiStore = useAiChatStore()
   const memoryStore = useAiMemoryStore()
+  const settingsStore = useSettingsStore()
   const autoCompact = useAutoCompact()
   const observability = useAiChatObservability()
   const filesStore = useWorkspaceFilesStore()
+  const transcriptEventsVersion = ref(0)
+  const transcriptStore = createTranscriptStore({
+    persist: true,
+    autoLoad: true,
+    backend: {
+      appendEvent: aiAppendTranscriptEvent,
+      listEvents: aiListTranscriptEvents,
+      onError: (err, context) => {
+        log.warn('transcript_backend_sync_failed', {
+          operation: context.operation,
+          sessionId: context.sessionId,
+          error: ensureErrorString(err),
+        })
+      },
+    },
+  })
+  const transcriptBridge = createAgentRuntimeTranscriptBridge({
+    sessionId: () => sessionIdRef.value,
+    transcriptStore,
+    log,
+  })
+  const agentRuntime = createAgentRuntime({
+    log,
+    onTransition: transition => {
+      transcriptBridge.appendTransition(transition)
+      transcriptEventsVersion.value += 1
+    },
+  })
 
   const messages = shallowRef<AiMessage[]>([])
   const isStreaming = ref(false)
@@ -102,10 +137,34 @@ export function useAiChat(options: UseAiChatOptions) {
   let streamingMessageIndex = -1
 
   const toolFailureCounter = new Map<string, number>()
+  const sessionPermissionRules = ref<PermissionRuleConfig[]>([])
+
+  function addSessionPermissionRule(rule: PermissionRuleConfig): void {
+    sessionPermissionRules.value = [...sessionPermissionRules.value, rule]
+  }
+
+  function removeSessionPermissionRule(index: number): void {
+    if (index < 0 || index >= sessionPermissionRules.value.length) return
+    sessionPermissionRules.value = sessionPermissionRules.value.filter((_, itemIndex) => itemIndex !== index)
+  }
+
+  function clearSessionPermissionRules(): void {
+    sessionPermissionRules.value = []
+  }
 
   const availableWorkDirs = computed(() =>
     filesStore.roots.map(root => ({ label: root.name, value: root.path })),
   )
+  const transcriptEvents = computed(() => {
+    void transcriptEventsVersion.value
+    const sid = sessionIdRef.value
+    return sid ? transcriptStore.getRecentEvents(sid, 200) : []
+  })
+  const transcriptEventCount = computed(() => {
+    void transcriptEventsVersion.value
+    const sid = sessionIdRef.value
+    return sid ? transcriptStore.getEventCount(sid) : 0
+  })
 
   const totalTokens = computed(() => {
     for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -141,6 +200,13 @@ export function useAiChat(options: UseAiChatOptions) {
       totalTokens: 0,
     }
   })
+
+  watch(sessionIdRef, (sessionId) => {
+    if (!sessionId) return
+    void transcriptStore.loadBackend?.(sessionId, 500).then(loaded => {
+      if (loaded) transcriptEventsVersion.value += 1
+    })
+  }, { immediate: true })
 
   const canSend = computed(() => !isStreaming.value && !isLoading.value)
   const canLoadMoreHistory = computed(() =>
@@ -321,6 +387,40 @@ export function useAiChat(options: UseAiChatOptions) {
     if (event.type === 'TextDelta' || event.type === 'ThinkingDelta') {
       observability.markFirstToken()
     }
+    if (event.type === 'Usage') {
+      transcriptStore.appendEvent({
+        sessionId: sessionIdRef.value,
+        turnId: agentRuntime.state.value.turnId || undefined,
+        type: 'usage',
+        timestamp: Date.now(),
+        payload: {
+          type: 'usage',
+          data: {
+            promptTokens: event.prompt_tokens,
+            completionTokens: event.completion_tokens,
+            cacheReadTokens: event.cache_read_tokens,
+            totalTokens: event.prompt_tokens + event.completion_tokens,
+          },
+        },
+      })
+      transcriptEventsVersion.value += 1
+    }
+    if (event.type === 'Error') {
+      transcriptStore.appendEvent({
+        sessionId: sessionIdRef.value,
+        turnId: agentRuntime.state.value.turnId || undefined,
+        type: 'stream_error',
+        timestamp: Date.now(),
+        payload: {
+          type: 'stream_error',
+          data: {
+            error: event.message.length > 500 ? `${event.message.slice(0, 500).trimEnd()}...` : event.message,
+            retryable: event.retryable,
+          },
+        },
+      })
+      transcriptEventsVersion.value += 1
+    }
     if (event.type === 'ToolCall') {
       observability.updatePendingToolQueueLength(streamState.pendingToolCalls.length + 1)
     }
@@ -346,7 +446,13 @@ export function useAiChat(options: UseAiChatOptions) {
     }
   }
 
-  async function executeToolCalls(toolCalls: ToolCallInfo[], sessionId: string, signal?: AbortSignal) {
+  async function executeToolCalls(
+    toolCalls: ToolCallInfo[],
+    sessionId: string,
+    provider: ProviderConfig,
+    model: ModelConfig,
+    signal?: AbortSignal,
+  ) {
     observability.updatePendingToolQueueLength(toolCalls.length)
     const results = await runToolCalls({
       sessionId,
@@ -361,8 +467,20 @@ export function useAiChat(options: UseAiChatOptions) {
       updateStreamingMessage,
       refreshWorkspaceDirectoryForToolPath,
       signal,
+      turnId: agentRuntime.state.value.turnId || undefined,
+      transcriptStore,
+      permissionContext: {
+        provider,
+        model,
+        permissionRules: buildPermissionRuleSet({
+          user: settingsStore.settings.aiPermissionRules,
+          project: aiStore.currentWorkspaceConfig?.permissionRules,
+          session: sessionPermissionRules.value,
+        }),
+      },
     })
     observability.recordToolRun(toolCalls, results)
+    transcriptEventsVersion.value += results.length
     observability.updatePendingToolQueueLength(0)
     return results
   }
@@ -489,10 +607,27 @@ export function useAiChat(options: UseAiChatOptions) {
     invalidateChatHistoryCache(sid)
     observability.markSendStart()
     userScrolled.value = false
+    transcriptStore.appendEvent({
+      sessionId: sid,
+      turnId: agentRuntime.state.value.turnId || undefined,
+      type: 'user_message',
+      timestamp: Date.now(),
+      payload: {
+        type: 'user_message',
+        data: {
+          contentPreview: content.length > 200 ? `${content.slice(0, 200).trimEnd()}...` : content,
+          attachmentCount: attachments?.length ?? 0,
+          attachmentNames: attachments && attachments.length > 0
+            ? attachments.map(attachment => attachment.name)
+            : undefined,
+        },
+      },
+    })
+    transcriptEventsVersion.value += 1
 
     configureStreamWatchdog(model)
     try {
-      return await runAiChatSessionTurn({
+      const result = await runAiChatSessionTurn({
         sessionId: sid,
         content,
         provider,
@@ -519,7 +654,7 @@ export function useAiChat(options: UseAiChatOptions) {
         resetWatchdog,
         flushPendingDelta,
         updateStreamingMessage,
-        executeToolCalls: (toolCalls, sessionId, signal) => executeToolCalls(toolCalls, sessionId, signal),
+        executeToolCalls: (toolCalls, sessionId, signal) => executeToolCalls(toolCalls, sessionId, provider, model, signal),
         parseAndWriteJournalSections,
         parseSpawnedTasks,
         onStreamEvent: handleIncomingStreamEvent,
@@ -528,7 +663,29 @@ export function useAiChat(options: UseAiChatOptions) {
         onRecovery: () => observability.markRecovery(),
         onResponseComplete: () => observability.markResponseComplete(),
         onCompactTriggered: () => observability.markCompactTriggered(),
+        agentRuntime,
       })
+      const latestAssistant = [...messages.value].reverse().find(message => message.role === 'assistant' && message.content.trim())
+      if (latestAssistant) {
+        transcriptStore.appendEvent({
+          sessionId: sid,
+          turnId: agentRuntime.state.value.turnId || undefined,
+          type: 'assistant_message',
+          timestamp: Date.now(),
+          payload: {
+            type: 'assistant_message',
+            data: {
+              contentPreview: latestAssistant.content.length > 200
+                ? `${latestAssistant.content.slice(0, 200).trimEnd()}...`
+                : latestAssistant.content,
+              tokens: latestAssistant.totalTokens ?? latestAssistant.tokens,
+              finishReason: streamState.lastFinishReason || undefined,
+            },
+          },
+        })
+        transcriptEventsVersion.value += 1
+      }
+      return result
     } finally {
       configureStreamWatchdog()
     }
@@ -611,6 +768,7 @@ export function useAiChat(options: UseAiChatOptions) {
     autoCompact.resetCircuitBreaker()
     observability.reset()
     resetSessionEphemeralState()
+    clearSessionPermissionRules()
   }
 
   async function loadMoreHistory(): Promise<void> {
@@ -712,6 +870,14 @@ export function useAiChat(options: UseAiChatOptions) {
     rejectPlan,
     currentPhase,
     spawnedTasks,
+    agentRuntime,
+    turnState: agentRuntime.state,
+    transcriptEvents,
+    transcriptEventCount,
+    sessionPermissionRules,
+    addSessionPermissionRule,
+    removeSessionPermissionRule,
+    clearSessionPermissionRules,
     loadHistory,
     loadMoreHistory,
     preloadHistory,

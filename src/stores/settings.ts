@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { usePersistence } from '@/plugins/persistence'
 import { getSuggestedDataPath } from '@/api/system'
+import type { AiPermissionRuleConfig } from '@/types/ai'
 
 /** localStorage 遗留 key（仅用于一次性迁移） */
 const LEGACY_STORAGE_KEY = 'devforge-settings'
@@ -71,6 +72,8 @@ export interface AppSettings {
   /** AI 对话密度：comfortable=舒适（默认），compact=紧凑 */
   aiDensity: 'comfortable' | 'compact'
   aiDiagnosticsThresholds: AiDiagnosticsThresholds
+  /** User 级 AI 工具权限规则 */
+  aiPermissionRules: AiPermissionRuleConfig[]
 }
 
 const defaultShortcuts: ShortcutBinding[] = [
@@ -160,6 +163,7 @@ const defaults: AppSettings = {
   scheduleDark: '19:00',
   aiDensity: 'comfortable',
   aiDiagnosticsThresholds: { ...DEFAULT_AI_DIAGNOSTICS_THRESHOLDS },
+  aiPermissionRules: [],
 }
 
 /** 合并快捷键：保留用户自定义的绑定，同时补充新增的默认快捷键 */
@@ -178,6 +182,7 @@ function mergeSettings(saved?: Partial<AppSettings>): AppSettings {
       ...DEFAULT_AI_DIAGNOSTICS_THRESHOLDS,
       ...(saved?.aiDiagnosticsThresholds ?? {}),
     },
+    aiPermissionRules: Array.isArray(saved?.aiPermissionRules) ? saved.aiPermissionRules : [],
   }
 }
 

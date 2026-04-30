@@ -176,8 +176,9 @@ vi.mock('@/components/database/ExportDialog.vue', () => ({
 vi.mock('@/components/database/RowDetailSheet.vue', () => ({
   default: defineComponent({
     name: 'RowDetailSheet',
-    setup() {
-      return () => h('div')
+    emits: ['update:open', 'navigate'],
+    setup(_props, { slots }) {
+      return () => h('div', slots.default?.())
     },
   }),
 }))
@@ -337,6 +338,12 @@ function mountQueryResult(
       filterOperators?: Record<string, string>
       showFilters?: boolean
       showChart?: boolean
+      selectedRowIndex?: number
+      rowDetailOpen?: boolean
+      pinnedColumns?: {
+        left?: string[]
+        right?: string[]
+      }
     }
     result?: ReturnType<typeof makeResult>
   },
@@ -451,6 +458,91 @@ describe('QueryResult 表浏览状态回填', () => {
     expect((filterInputs[0]!.element as HTMLInputElement).disabled).toBe(true)
     expect((filterInputs[0]!.element as HTMLInputElement).value).toBe('')
     expect((filterInputs[1]!.element as HTMLInputElement).value).toBe('Ada, Linus')
+
+    wrapper.unmount()
+  })
+
+  it('表浏览结果区固定列时同步 pinnedColumns，避免切 tab 后丢失列布局偏好', async () => {
+    const wrapper = mountQueryResult({
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        pinnedColumns: {
+          left: ['id'],
+          right: [],
+        },
+      },
+    })
+
+    await flushPromises()
+
+    const pinButtons = wrapper.findAll('button').filter(btn => btn.text().includes('固定到左侧'))
+    expect(pinButtons.length).toBeGreaterThan(0)
+
+    await pinButtons[0]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('syncTableBrowse')?.[0]).toEqual([{ pinnedColumns: { left: ['id', 'name'], right: [] } }])
+
+    await wrapper.setProps({
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        pinnedColumns: {
+          left: ['id', 'name'],
+          right: [],
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('取消固定')
+
+    const unpinButtons = wrapper.findAll('button').filter(btn => btn.text().includes('取消固定'))
+    expect(unpinButtons.length).toBeGreaterThan(0)
+
+    await unpinButtons[0]!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('syncTableBrowse')?.[1]).toEqual([{ pinnedColumns: { left: ['name'], right: [] } }])
+
+    wrapper.unmount()
+  })
+
+  it('表浏览结果区打开详情后按导航同步行状态，避免重建后丢失定位', async () => {
+    const wrapper = mountQueryResult({
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        selectedRowIndex: 1,
+        rowDetailOpen: true,
+      },
+    })
+
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'RowDetailSheet' }).vm.$emit('update:open', false)
+    await flushPromises()
+    expect(wrapper.emitted('syncTableBrowse')?.[0]).toEqual([{ selectedRowIndex: 1, rowDetailOpen: false }])
+
+    await wrapper.setProps({
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        selectedRowIndex: 1,
+        rowDetailOpen: true,
+      },
+    })
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'RowDetailSheet' }).vm.$emit('navigate', 'next')
+    await flushPromises()
+    expect(wrapper.emitted('syncTableBrowse')?.[1]).toEqual([{ selectedRowIndex: 1, rowDetailOpen: true }])
 
     wrapper.unmount()
   })

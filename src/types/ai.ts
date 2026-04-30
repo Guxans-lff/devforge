@@ -60,6 +60,15 @@ export interface ModelCapabilities {
 
 export type ThinkingEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
+export type AiPermissionBehavior = 'allow' | 'ask' | 'deny'
+
+export interface AiPermissionRuleConfig {
+  behavior: AiPermissionBehavior
+  toolName: string
+  pattern?: string
+  reason?: string
+}
+
 /** 单个模型配置 */
 export interface ModelConfig {
   /** 模型 ID（API 调用使用） */
@@ -502,6 +511,8 @@ export interface WorkspaceConfig {
   dispatcherAutoRetryCount?: number
   /** Dispatcher 默认执行形态，默认 headless */
   dispatcherDefaultMode?: 'headless' | 'tab'
+  /** Project 级工具权限规则 */
+  permissionRules?: AiPermissionRuleConfig[]
   features?: Record<string, boolean>
   skills?: WorkspaceSkillConfig[]
 }

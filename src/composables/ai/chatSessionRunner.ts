@@ -6,6 +6,7 @@ import { buildFallbackChain, type FallbackCandidate } from '@/ai-gateway/router'
 import { collectFallbackApiKeys } from '@/ai-gateway/fallbackKeys'
 import { ensureErrorString, readStructuredRetryable } from '@/types/error'
 import type { Logger } from '@/utils/logger'
+import type { AgentRuntime } from './AgentRuntime'
 import { finalizeSend } from './chatSendFinalize'
 import { prepareSendContext } from './chatSendPreparation'
 import { handleSendFailure } from './chatSendRecovery'
@@ -81,8 +82,9 @@ export interface AiChatSessionRunnerParams {
   onResponseComplete?: () => void
   onCompactTriggered?: () => void
   onPrepareComplete?: () => void
-  onRequestStart?: () => void
+  onRequestStart?: (messageId?: string) => void
   onRecovery?: () => void
+  agentRuntime?: AgentRuntime
   signal?: AbortSignal
   summaryMode?: 'brief' | 'normal'
   fallbackChain?: FallbackCandidate[]
@@ -119,6 +121,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
   const sid = params.sessionId
   let abortListener: (() => void) | undefined
   const onStreamEvent = (event: AiStreamEvent) => {
+    params.agentRuntime?.handleStreamEvent(event)
     if (event.type === 'TextDelta' || event.type === 'ThinkingDelta') {
       params.onFirstToken?.()
     }
@@ -129,6 +132,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
   }
 
   if (params.signal?.aborted) {
+    params.agentRuntime?.transitionToAborted()
     return {
       status: 'cancelled',
       error: 'Task cancelled',
@@ -151,6 +155,11 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
   let gatewayApiKeysByProvider: Record<string, string | undefined> | undefined
 
   try {
+    params.agentRuntime?.startTurn({
+      sessionId: sid,
+      model: params.model.id,
+      provider: params.provider.id,
+    })
     params.error.value = null
     prepared = await prepareSendContext({
       content: params.content,
@@ -166,6 +175,10 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
       aiStore: params.aiStore,
       memoryStore: params.memoryStore,
       log: params.log,
+    })
+    params.agentRuntime?.markPrepareComplete({
+      enableTools: prepared.enableTools,
+      messageCount: prepared.chatMessages.length,
     })
     params.onPrepareComplete?.()
 
@@ -206,7 +219,15 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
       flushPendingDelta: params.flushPendingDelta,
       updateStreamingMessage: params.updateStreamingMessage,
       onStreamEvent,
-      onRequestStart: params.onRequestStart,
+      onRequestStart: (messageId) => {
+        params.agentRuntime?.transitionToStreaming(messageId ?? '')
+        params.onRequestStart?.(messageId)
+      },
+      onToolExecutionStart: toolCalls => params.agentRuntime?.transitionToToolExecuting(toolCalls),
+      onToolExecutionDone: toolResults => params.agentRuntime?.markToolDone({
+        resultCount: toolResults.length,
+        successCount: toolResults.filter(result => result.success).length,
+      }),
       signal: params.signal,
       executeToolCalls: (toolCalls, toolSessionId) =>
         params.executeToolCalls(toolCalls, toolSessionId, params.signal),
@@ -232,6 +253,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
 
     if (params.signal?.aborted) {
       params.error.value = 'Task cancelled'
+      params.agentRuntime?.transitionToAborted()
     } else if (prepared) {
       await handleSendFailure({
         error,
@@ -247,7 +269,10 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
         streamState: params.streamState,
         log: params.log,
         updateStreamingMessage: params.updateStreamingMessage,
-        onRecovery: params.onRecovery,
+        onRecovery: () => {
+          params.agentRuntime?.transitionToRecovering(ensureErrorString(error), 1)
+          params.onRecovery?.()
+        },
         forceCompact: params.forceCompact,
         streamWithToolLoop: (
           retrySessionId,
@@ -278,7 +303,15 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
           flushPendingDelta: params.flushPendingDelta,
           updateStreamingMessage: params.updateStreamingMessage,
           onStreamEvent,
-          onRequestStart: params.onRequestStart,
+          onRequestStart: (messageId) => {
+            params.agentRuntime?.transitionToStreaming(messageId ?? '')
+            params.onRequestStart?.(messageId)
+          },
+          onToolExecutionStart: toolCalls => params.agentRuntime?.transitionToToolExecuting(toolCalls),
+          onToolExecutionDone: toolResults => params.agentRuntime?.markToolDone({
+            resultCount: toolResults.length,
+            successCount: toolResults.filter(result => result.success).length,
+          }),
           signal: params.signal,
           executeToolCalls: (toolCalls, toolSessionId) =>
             params.executeToolCalls(toolCalls, toolSessionId, params.signal),
@@ -297,7 +330,17 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
     const latestError = [...params.messages.value].reverse().find(message => message.role === 'error')
     const completed = !params.signal?.aborted && !params.error.value && !latestError
     if (completed) {
+      const summary = summarizeMessages(params.messages.value, params.summaryMode)
+      params.agentRuntime?.transitionToCompleted(summary)
       params.onResponseComplete?.()
+    } else if (params.signal?.aborted) {
+      params.agentRuntime?.transitionToAborted()
+    } else if (params.error.value || latestError) {
+      const errorText = params.error.value ?? latestError?.content ?? 'Unknown error'
+      const retryable = params.streamState.lastErrorRetryable
+        ?? readStructuredRetryable(errorText)
+        ?? isRetryableRunnerError(errorText)
+      params.agentRuntime?.transitionToFailed(errorText, retryable)
     }
     finalizeSend({
       sessionId: sid,

@@ -739,6 +739,37 @@ pub async fn ai_save_message(
     session_store::save_message(&pool, &message).await
 }
 
+/// 追加 Transcript 事件
+#[tauri::command]
+pub async fn ai_append_transcript_event(
+    event: AiTranscriptEventRecord,
+    storage: State<'_, Arc<Storage>>,
+) -> Result<(), AppError> {
+    let pool = storage.get_pool().await;
+    session_store::append_transcript_event(&pool, &event).await
+}
+
+/// 查询最近 Transcript 事件
+#[tauri::command]
+pub async fn ai_list_transcript_events(
+    session_id: String,
+    limit: Option<u32>,
+    storage: State<'_, Arc<Storage>>,
+) -> Result<Vec<AiTranscriptEventRecord>, AppError> {
+    let pool = storage.get_pool().await;
+    session_store::list_transcript_events(&pool, &session_id, limit.unwrap_or(500)).await
+}
+
+/// 统计 Transcript 事件数量
+#[tauri::command]
+pub async fn ai_count_transcript_events(
+    session_id: String,
+    storage: State<'_, Arc<Storage>>,
+) -> Result<u32, AppError> {
+    let pool = storage.get_pool().await;
+    session_store::count_transcript_events(&pool, &session_id).await
+}
+
 // ─────────────────────────────────── 用量统计 ───────────────────────────────────
 
 /// 获取用量统计

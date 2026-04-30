@@ -130,8 +130,13 @@ describe('chatToolLoop', () => {
     aiSaveMessageMock.mockResolvedValue(undefined)
   })
 
-  it('stops with a warning instead of looping forever when tool loop limit is exceeded', async () => {
+  it('switches to silent synthesis instead of warning when tool loop limit is exceeded', async () => {
     aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      if (aiChatStreamMock.mock.calls.length >= 3) {
+        onEvent({ type: 'TextDelta', delta: '已经基于已有结果完成总结。' })
+        onEvent({ type: 'Done', finish_reason: 'stop' })
+        return
+      }
       onEvent({ type: 'ToolCall', id: `tool-${aiChatStreamMock.mock.calls.length}`, name: 'read_file', arguments: '{"path":"a.ts"}' })
       onEvent({ type: 'Done', finish_reason: 'tool_calls' })
     })
@@ -140,11 +145,12 @@ describe('chatToolLoop', () => {
 
     await streamWithToolLoop(params)
 
-    expect(aiChatStreamMock).toHaveBeenCalledTimes(2)
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(3)
     expect(params.executeToolCalls).toHaveBeenCalledTimes(1)
-    expect(params.updateStreamingMessage).toHaveBeenCalledWith(expect.any(Function))
-    expect(params.messages.value.at(-1)?.notice?.kind).toBe('warn')
-    expect(params.messages.value.at(-1)?.isStreaming).toBe(false)
+    expect(aiChatStreamMock.mock.calls[2]?.[0]).toMatchObject({ enableTools: false })
+    expect(params.messages.value.some(message => message.notice?.code === 'tool_loop_limit')).toBe(false)
+    expect(params.messages.value.at(-2)?.content).toBe('正在基于已获取的信息整理当前结论。')
+    expect(params.messages.value.at(-1)?.content).toContain('完成总结')
   })
 
   it('does not execute tools after stream cancellation stops the loop', async () => {
@@ -225,8 +231,9 @@ describe('chatToolLoop', () => {
 
     await streamWithToolLoop(params)
 
-    expect(aiChatStreamMock).toHaveBeenCalledTimes(2)
-    expect(onRequestStart).toHaveBeenCalledTimes(2)
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(3)
+    expect(onRequestStart).toHaveBeenCalledTimes(3)
+    expect(aiChatStreamMock.mock.calls[2]?.[0]).toMatchObject({ enableTools: false })
   })
 
   it('converts empty assistant responses into an error without parsing side effects', async () => {
@@ -412,7 +419,7 @@ describe('chatToolLoop', () => {
     expect(params.messages.value.at(-1)?.content).toContain('工具循环疑似卡住')
   })
 
-  it('switches to synthesis when the model keeps exploring without assistant text', async () => {
+  it('switches to silent synthesis when the model keeps exploring without assistant text', async () => {
     aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
       const callIndex = aiChatStreamMock.mock.calls.length
       if (callIndex >= 6) {
@@ -447,8 +454,49 @@ describe('chatToolLoop', () => {
     expect(aiChatStreamMock.mock.calls[5]?.[0]).toMatchObject({ enableTools: false })
     expect(aiChatStreamMock.mock.calls[5]?.[0].messages.at(-1)?.content).toContain('[已有工具结果摘要]')
     expect(aiChatStreamMock.mock.calls[5]?.[0].messages.at(-1)?.content).toContain('unique-result:tool-4')
-    expect(params.messages.value.at(-2)?.notice?.title).toBe('已自动停止继续探索')
+    expect(params.messages.value.at(-2)?.notice).toBeUndefined()
+    expect(params.messages.value.at(-2)?.content).toBe('正在基于已读取的信息整理结论。')
     expect(params.messages.value.at(-1)?.role).toBe('assistant')
+    expect(params.messages.value.at(-1)?.content).toContain('当前结论')
+  })
+
+  it('uses silent synthesis instead of exposing the hard tool loop limit to users', async () => {
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      const callIndex = aiChatStreamMock.mock.calls.length
+      if (callIndex >= 4) {
+        onEvent({ type: 'TextDelta', delta: '已经整理出当前结论。' })
+        onEvent({ type: 'Done', finish_reason: 'stop' })
+        return
+      }
+      onEvent({
+        type: 'ToolCall',
+        id: `tool-${callIndex}`,
+        name: 'search_files',
+        arguments: `{"query":"case-${callIndex}"}`,
+      })
+      onEvent({ type: 'Done', finish_reason: 'tool_calls' })
+    })
+
+    const params = makeParams({
+      maxToolLoops: 2,
+      executeToolCalls: vi.fn(async (toolCalls: ToolCallInfo[]): Promise<ToolResultInfo[]> =>
+        toolCalls.map(tool => ({
+          toolCallId: tool.id,
+          toolName: tool.name,
+          success: true,
+          content: `loop-limit-result:${tool.id}`,
+        })),
+      ),
+    })
+
+    await streamWithToolLoop(params)
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(4)
+    expect(params.executeToolCalls).toHaveBeenCalledTimes(2)
+    expect(aiChatStreamMock.mock.calls[3]?.[0]).toMatchObject({ enableTools: false })
+    expect(aiChatStreamMock.mock.calls[3]?.[0].messages.at(-1)?.content).toContain('[已有工具结果摘要]')
+    expect(params.messages.value.some(message => message.notice?.code === 'tool_loop_limit')).toBe(false)
+    expect(params.messages.value.at(-2)?.content).toBe('正在基于已获取的信息整理当前结论。')
     expect(params.messages.value.at(-1)?.content).toContain('当前结论')
   })
 })

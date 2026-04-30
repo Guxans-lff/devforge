@@ -205,6 +205,38 @@ describe('TableDataPanel', () => {
     expect(dbGetTableDataMock).toHaveBeenNthCalledWith(3, 'conn-1', 'demo', 'users', 2, 100, null, 'name DESC', undefined, undefined)
   })
 
+  it('切换服务端排序时清空旧 seek 状态，避免 offset 与游标分页语义串线', async () => {
+    dbGetTableDataMock
+      .mockResolvedValueOnce(makeResult([[1, 'Ada'], [2, 'Linus']], 'INT', 4))
+      .mockResolvedValueOnce(makeResult([[10, 'Ada']], 'INT', 4))
+
+    const { store, tabId, wrapper } = mountPanel()
+    await flushPromises()
+
+    store.updateTabContext('conn-1', tabId, {
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 2,
+        pageSize: 100,
+        seekOrderBy: 'id ASC',
+        seekColumn: 'id',
+        seekValue: 2,
+      },
+    })
+
+    await wrapper.findComponent({ name: 'QueryResultComponent' }).vm.$emit('server-sort', 'name DESC')
+    await flushPromises()
+
+    const ctx = store.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+    expect(dbGetTableDataMock).toHaveBeenNthCalledWith(2, 'conn-1', 'demo', 'users', 1, 100, null, 'name DESC')
+    expect(ctx.tableBrowse.currentPage).toBe(1)
+    expect(ctx.tableBrowse.orderBy).toBe('name DESC')
+    expect(ctx.tableBrowse.seekOrderBy).toBeUndefined()
+    expect(ctx.tableBrowse.seekColumn).toBeUndefined()
+    expect(ctx.tableBrowse.seekValue).toBeUndefined()
+  })
+
   it('applies server filter then rewrites tableBrowse paging and filter state', async () => {
     dbGetTableDataMock
       .mockResolvedValueOnce(makeResult([[1, 'Ada'], [2, 'Linus']], 'INT', 4))

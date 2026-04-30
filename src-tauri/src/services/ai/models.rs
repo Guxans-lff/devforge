@@ -402,6 +402,18 @@ pub struct DailyUsage {
     pub estimated_cost: f64,
 }
 
+/// AI Transcript 事件（追加型 event store）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTranscriptEventRecord {
+    pub id: String,
+    pub session_id: String,
+    pub turn_id: Option<String>,
+    pub event_type: String,
+    pub timestamp: i64,
+    pub payload_json: String,
+}
+
 // ─────────────────────────────────── OpenAI 兼容 API 响应 ───────────────────────────────────
 
 /// OpenAI Chat Completions 流式 chunk 响应

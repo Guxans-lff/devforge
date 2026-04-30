@@ -33,6 +33,9 @@ export interface TranscriptStore {
   /** Append a new event to the session */
   appendEvent<T extends AiTranscriptEventType>(event: Omit<AiTranscriptEventOf<T>, 'id'>): AiTranscriptEventOf<T>
 
+  /** Merge an existing persisted event into memory without generating a new id */
+  hydrateEvent(event: AiTranscriptEvent): void
+
   /** Get events for a session with optional filtering */
   getEvents(
     sessionId: string,
@@ -71,12 +74,22 @@ export interface TranscriptStore {
 
   /** Restore transcript snapshot */
   load(storage?: Storage): boolean
+
+  /** Restore transcript events from backend event store */
+  loadBackend?(sessionId: string, limit?: number): Promise<boolean>
 }
 
 export interface TranscriptStoreOptions {
   persist?: boolean
   storage?: Storage
   autoLoad?: boolean
+  backend?: TranscriptStoreBackend
+}
+
+export interface TranscriptStoreBackend {
+  appendEvent?: (event: AiTranscriptEvent) => Promise<void>
+  listEvents?: (sessionId: string, limit: number) => Promise<AiTranscriptEvent[]>
+  onError?: (error: unknown, context: { operation: 'append' | 'load'; sessionId: string }) => void
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -156,6 +169,7 @@ export function createTranscriptStore(options: TranscriptStoreOptions = {}): Tra
   const eventsBySession = new Map<string, AiTranscriptEvent[]>()
   const persistEnabled = options.persist ?? false
   const defaultStorage = options.storage
+  const backend = options.backend
 
   function resolveStorage(storage?: Storage): Storage | undefined {
     if (storage) return storage
@@ -175,21 +189,43 @@ export function createTranscriptStore(options: TranscriptStoreOptions = {}): Tra
     events.splice(0, discardCount)
   }
 
+  function insertEvent(event: AiTranscriptEvent, options?: { sort?: boolean }): void {
+    let list = eventsBySession.get(event.sessionId)
+    if (!list) {
+      list = []
+      eventsBySession.set(event.sessionId, list)
+    }
+
+    if (list.some(item => item.id === event.id)) return
+    list.push(event)
+    if (options?.sort) {
+      list.sort((left, right) => left.timestamp - right.timestamp || left.id.localeCompare(right.id))
+    }
+    pruneIfNeeded(event.sessionId)
+  }
+
+  function persistBackend(event: AiTranscriptEvent): void {
+    if (!backend?.appendEvent) return
+    void backend.appendEvent(event).catch(error => {
+      backend.onError?.(error, { operation: 'append', sessionId: event.sessionId })
+    })
+  }
+
   function appendEvent<T extends AiTranscriptEventType>(event: Omit<AiTranscriptEventOf<T>, 'id'>): AiTranscriptEventOf<T> {
     const fullEvent = {
       ...event,
       id: generateEventId(),
     } as AiTranscriptEventOf<T>
 
-    let list = eventsBySession.get(event.sessionId)
-    if (!list) {
-      list = []
-      eventsBySession.set(event.sessionId, list)
-    }
-    list.push(fullEvent as AiTranscriptEvent)
-    pruneIfNeeded(event.sessionId)
+    insertEvent(fullEvent as AiTranscriptEvent)
     if (persistEnabled) save()
+    persistBackend(fullEvent as AiTranscriptEvent)
     return fullEvent
+  }
+
+  function hydrateEvent(event: AiTranscriptEvent): void {
+    insertEvent(event)
+    if (persistEnabled) save()
   }
 
   function getEvents(
@@ -317,12 +353,28 @@ export function createTranscriptStore(options: TranscriptStoreOptions = {}): Tra
     }
   }
 
+  async function loadBackend(sessionId: string, limit = MAX_PERSISTED_EVENTS_PER_SESSION): Promise<boolean> {
+    if (!backend?.listEvents) return false
+    try {
+      const events = await backend.listEvents(sessionId, limit)
+      for (const event of events) {
+        insertEvent(event, { sort: true })
+      }
+      if (events.length > 0 && persistEnabled) save()
+      return events.length > 0
+    } catch (error) {
+      backend.onError?.(error, { operation: 'load', sessionId })
+      return false
+    }
+  }
+
   if (options.autoLoad) {
     load()
   }
 
   return {
     appendEvent,
+    hydrateEvent,
     getEvents,
     getEventsByTurn,
     getEventsByType,
@@ -333,5 +385,6 @@ export function createTranscriptStore(options: TranscriptStoreOptions = {}): Tra
     getSessionIds,
     save,
     load,
+    loadBackend,
   }
 }

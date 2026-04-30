@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { executeToolCalls } from '@/composables/ai/chatToolExecution'
+import { createTranscriptStore } from '@/composables/ai-agent/transcript/transcriptStore'
 import { clearApprovalStateForTests, setActiveSessionId, setApprovalMode } from '@/composables/useToolApproval'
 import type { AiMessage, ToolCallInfo } from '@/types/ai'
 
@@ -208,6 +209,29 @@ describe('chatToolExecution', () => {
     expect(toolCalls[0]?.status).toBe('error')
   })
 
+  it('records permission and tool result events into transcript store', async () => {
+    const toolCalls = [
+      makeToolCall('read-1', 'read_file', { path: 'src/a.ts' }),
+    ]
+    const transcriptStore = createTranscriptStore()
+    aiExecuteToolMock.mockResolvedValue({
+      success: true,
+      content: 'file content',
+    })
+
+    const params = makeParams(toolCalls)
+    params.transcriptStore = transcriptStore
+    params.turnId = 'turn-1'
+
+    const results = await executeToolCalls(params)
+
+    expect(results[0]?.success).toBe(true)
+    const events = transcriptStore.getEvents('session-1')
+    expect(events.map(event => event.type)).toEqual(['permission', 'tool_result'])
+    expect(transcriptStore.getLatestEvent('session-1', 'permission')?.payload.data.decision).toBe('allowed')
+    expect(transcriptStore.getLatestEvent('session-1', 'tool_result')?.payload.data.contentPreview).toBe('file content')
+  })
+
   it('routes read tools through approval when strict provider permission is enabled', async () => {
     setApprovalMode('deny', 'session-1')
     const toolCalls = [
@@ -237,6 +261,71 @@ describe('chatToolExecution', () => {
     expect(toolCalls[0]?.approvalState).toBe('denied')
     expect(results[0]?.success).toBe(false)
     expect(results[0]?.content).toContain('[user_rejected]')
+  })
+
+  it('denies tool calls by matching rule against parsed command', async () => {
+    const toolCalls = [
+      makeToolCall('bash-deny', 'bash', { command: 'git push origin main' }),
+    ]
+
+    const params = makeParams(toolCalls)
+    params.permissionContext = {
+      permissionRules: [
+        { source: 'project', behavior: 'deny', toolName: 'bash', pattern: 'git push*', reason: '禁止直接推送' },
+      ],
+    }
+
+    const results = await executeToolCalls(params)
+
+    expect(aiExecuteToolMock).not.toHaveBeenCalled()
+    expect(results[0]?.success).toBe(false)
+    expect(results[0]?.content).toContain('[permission_denied]')
+    expect(toolCalls[0]?.status).toBe('error')
+  })
+
+  it('keeps explicit ask rules effective for safe bash commands', async () => {
+    setApprovalMode('deny', 'session-1')
+    const toolCalls = [
+      makeToolCall('bash-ask', 'bash', { command: 'git status' }),
+    ]
+
+    const params = makeParams(toolCalls)
+    params.permissionContext = {
+      permissionRules: [
+        { source: 'session', behavior: 'ask', toolName: 'bash', pattern: 'git status' },
+      ],
+    }
+
+    const results = await executeToolCalls(params)
+
+    expect(aiExecuteToolMock).not.toHaveBeenCalled()
+    expect(toolCalls[0]?.approvalState).toBe('denied')
+    expect(results[0]?.content).toContain('[user_rejected]')
+  })
+
+  it('allows mutating tool calls by matching rule against parsed path', async () => {
+    setApprovalMode('ask', 'session-1')
+    const toolCalls = [
+      makeToolCall('write-allow', 'write_file', { path: 'src/generated/client.ts', content: 'x' }),
+    ]
+
+    aiExecuteToolMock.mockResolvedValue({
+      success: true,
+      content: 'written',
+    })
+
+    const params = makeParams(toolCalls)
+    params.permissionContext = {
+      permissionRules: [
+        { source: 'session', behavior: 'allow', toolName: 'write_file', pattern: 'src/generated/**' },
+      ],
+    }
+
+    const results = await executeToolCalls(params)
+
+    expect(aiExecuteToolMock).toHaveBeenCalledTimes(1)
+    expect(toolCalls[0]?.approvalState).toBeUndefined()
+    expect(results[0]?.success).toBe(true)
   })
 
   it('denies conflicting writes when workspace isolation policy is deny', async () => {

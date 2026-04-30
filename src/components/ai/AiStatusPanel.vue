@@ -17,6 +17,7 @@ const props = defineProps<{
 const phaseLabelMap: Record<AiTurnState['phase'], string> = {
   idle: '空闲',
   preparing: '准备上下文',
+  routing: '选择模型与策略',
   streaming: '生成回复',
   tool_executing: '执行工具',
   compacting: '压缩上下文',

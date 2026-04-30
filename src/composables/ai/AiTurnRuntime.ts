@@ -15,6 +15,7 @@ import { tryParseJson } from './chatHelpers'
 export type AiTurnPhase =
   | 'idle'
   | 'preparing'
+  | 'routing'
   | 'streaming'
   | 'tool_executing'
   | 'compacting'
@@ -198,6 +199,12 @@ export function createAiTurnRuntime(options: AiTurnRuntimeOptions) {
     resetStreamWatchdog()
   }
 
+  function transitionToRouting(): void {
+    if (state.phase === 'aborted') return
+    clearAllWatchdogs()
+    state.phase = 'routing'
+  }
+
   function transitionToToolExecuting(toolCallIds: string[]): void {
     if (state.phase === 'aborted') return
     clearStreamWatchdog()
@@ -353,6 +360,7 @@ export function createAiTurnRuntime(options: AiTurnRuntimeOptions) {
     // 状态转换
     startTurn,
     transitionToStreaming,
+    transitionToRouting,
     transitionToToolExecuting,
     transitionToCompacting,
     transitionToRecovering,

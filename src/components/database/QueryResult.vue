@@ -87,6 +87,12 @@ const emit = defineEmits<{
     filterOperators?: Record<string, string>
     showFilters?: boolean
     showChart?: boolean
+    selectedRowIndex?: number
+    rowDetailOpen?: boolean
+    pinnedColumns?: {
+      left?: string[]
+      right?: string[]
+    }
   }]
   analyzeSqlError: []
   applyFixedSql: [sql: string]
@@ -427,7 +433,7 @@ function isDateTimeColumn(colId: string): boolean {
               class="cursor-pointer absolute left-0 right-0 group/row"
               :style="{ ...qr.rowBaseStyle.value, transform: `translateY(${vRow.start}px)` }"
               :class="qr.selectedRowIndex.value === vRow.index ? 'selected-row bg-primary/5' : ''"
-              @click="qr.selectedRowIndex.value = vRow.index"
+              @click="qr.selectedRowIndex.value = vRow.index; isTableBrowse && emit('syncTableBrowse', { selectedRowIndex: vRow.index })"
               @contextmenu="handleRowContextMenu($event, vRow.index)"
             >
               <div
@@ -758,6 +764,7 @@ function isDateTimeColumn(colId: string): boolean {
       :row-index="qr.selectedRowIndex.value ?? 0"
       :total-rows="qr.totalRows.value"
       :driver="driver"
+      @update:open="isTableBrowse && emit('syncTableBrowse', { selectedRowIndex: qr.selectedRowIndex.value ?? undefined, rowDetailOpen: $event })"
       @navigate="qr.handleRowDetailNavigate"
     />
   </div>

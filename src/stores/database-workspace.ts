@@ -24,6 +24,8 @@ interface PersistedTab {
   sql?: string
   /** 查询类型标签页的当前数据库 */
   currentDatabase?: string
+  /** 查询类型标签页的表浏览状态 */
+  tableBrowse?: QueryTabContext['tableBrowse']
   /** 查询类型标签页的 AI Provider 选择 */
   aiProviderId?: string
   /** 查询类型标签页的 AI Model 选择 */
@@ -425,6 +427,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
               closable: t.closable,
               sql: ctx?.sql ?? '',
               currentDatabase: ctx?.currentDatabase,
+              tableBrowse: ctx?.tableBrowse,
               aiProviderId: ctx?.aiProviderId,
               aiModelId: ctx?.aiModelId,
               aiHasApiKey: ctx?.aiHasApiKey,
@@ -452,7 +455,8 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
             sql: pt.sql ?? '',
             result: null,
             isExecuting: false,
-            currentDatabase: pt.currentDatabase,
+            currentDatabase: pt.currentDatabase ?? pt.tableBrowse?.database,
+            tableBrowse: pt.tableBrowse,
             aiProviderId: pt.aiProviderId,
             aiModelId: pt.aiModelId,
             aiHasApiKey: pt.aiHasApiKey,

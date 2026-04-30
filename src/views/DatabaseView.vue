@@ -186,7 +186,6 @@ defineExpose({
 
 // QueryPanel refs（用于外部触发执行）
 const queryPanelRef = ref<InstanceType<typeof QueryPanel>>()
-const pendingBrowseTarget = ref<{ database: string, table: string } | null>(null)
 
 // Schema 缓存更新事件处理（由 ObjectTree 触发）
 function handleSchemaUpdated() {
@@ -272,48 +271,6 @@ watch(
     hydrateActiveQueryAiState().catch(error => console.warn('[DatabaseView] hydrate AI state failed:', error))
   },
   { immediate: true },
-)
-
-watch(
-  () => queryPanelRef.value,
-  (panel) => {
-    const target = pendingBrowseTarget.value
-    if (!panel || !target) return
-    const ctx = activeQueryTabContext.value
-    if (
-      activeTab.value?.type !== 'query'
-      || !ctx?.tableBrowse
-      || ctx.tableBrowse.database !== target.database
-      || ctx.tableBrowse.table !== target.table
-      || ctx.result !== null
-      || ctx.isExecuting
-    ) {
-      return
-    }
-
-    panel.browseTable(target.database, target.table)
-    pendingBrowseTarget.value = null
-  },
-)
-
-watch(
-  () => [pendingBrowseTarget.value?.database, pendingBrowseTarget.value?.table, activeTab.value?.id, activeTab.value?.type] as const,
-  ([database, table, activeTabId, activeTabType]) => {
-    if (!database || !table || !activeTabId || activeTabType !== 'query' || !queryPanelRef.value) return
-    const ctx = activeQueryTabContext.value
-    if (
-      !ctx?.tableBrowse
-      || ctx.tableBrowse.database !== database
-      || ctx.tableBrowse.table !== table
-      || ctx.result !== null
-      || ctx.isExecuting
-    ) {
-      return
-    }
-
-    queryPanelRef.value.browseTable(database, table)
-    pendingBrowseTarget.value = null
-  },
 )
 
 async function openAiConfig(): Promise<void> {
@@ -510,7 +467,6 @@ function handleSelectTable(database: string, table: string) {
     queryTab = dbWorkspaceStore.addQueryTab(props.connectionId)
   }
 
-  pendingBrowseTarget.value = { database, table }
   dbWorkspaceStore.setActiveInnerTab(props.connectionId, queryTab.id)
   dbWorkspaceStore.updateTabContext(props.connectionId, queryTab.id, {
     sql,

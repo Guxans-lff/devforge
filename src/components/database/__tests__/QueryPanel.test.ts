@@ -356,18 +356,47 @@ describe('QueryPanel checkPendingBrowse', () => {
     wrapper.unmount()
   })
 
-  it('没有 tableBrowse 时不会误触发 browseTable', async () => {
+  it('currentDatabase 与 tableBrowse.database 不一致时不会按旧浏览态自动恢复', async () => {
     seedQueryTab({
-      sql: 'SELECT 1;',
+      sql: 'SELECT * FROM `demo`.`users`;',
       result: null,
       isExecuting: false,
-      tableBrowse: undefined,
+      currentDatabase: 'analytics',
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+      },
     })
 
     const wrapper = mountPanel()
     await flushPromises()
 
     expect(mocks.browseTableMock).not.toHaveBeenCalled()
+
+    wrapper.unmount()
+  })
+
+  it('currentDatabase 为空时允许按 tableBrowse 恢复明确的浏览态', async () => {
+    seedQueryTab({
+      sql: 'SELECT * FROM `demo`.`users`;',
+      result: null,
+      isExecuting: false,
+      currentDatabase: '',
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+      },
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(mocks.browseTableMock).toHaveBeenCalledTimes(1)
+    expect(mocks.browseTableMock).toHaveBeenCalledWith('demo', 'users', undefined, undefined)
 
     wrapper.unmount()
   })

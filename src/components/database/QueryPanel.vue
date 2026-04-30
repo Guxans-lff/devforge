@@ -256,6 +256,7 @@ onActivated(() => {
 
 function hasPendingBrowse(ctx?: QueryTabContext): ctx is QueryTabContext & { tableBrowse: NonNullable<QueryTabContext['tableBrowse']> } {
   if (!ctx?.tableBrowse || ctx.result || ctx.isExecuting) return false
+  if (ctx.currentDatabase && ctx.currentDatabase !== ctx.tableBrowse.database) return false
 
   const browseSql = `SELECT * FROM \`${ctx.tableBrowse.database}\`.\`${ctx.tableBrowse.table}\`;`
   return ctx.sql.trim() === browseSql

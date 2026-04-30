@@ -10,7 +10,7 @@ import type {
 import { ensureErrorString } from '@/types/error'
 import type { Logger } from '@/utils/logger'
 import { checkWritePathSafety } from '@/ai-gui/pathSafety'
-import { shouldApproveTool, type ProviderPermissionContext } from '@/ai-gui/providerPermissionMapper'
+import { mapProviderToolPermission, shouldDenyTool, type ProviderPermissionContext } from '@/ai-gui/providerPermissionMapper'
 import {
   checkWorkspaceWriteGuard,
   decideWorkspaceIsolationPolicy,
@@ -23,6 +23,7 @@ import { hashArgs, pickApprovalTool } from './chatHelpers'
 import { requestApprovalForTool } from './chatToolApproval'
 import { classifyBashCommand } from './bashCommandClassifier'
 import type { AiHookContext } from './AiHookManager'
+import type { TranscriptStore } from '@/composables/ai-agent/transcript/transcriptStore'
 
 const MAX_SAME_TOOL_FAILURE = 3
 const WEB_TOOL_CONCURRENCY = 2
@@ -71,6 +72,52 @@ export interface ExecuteToolCallsParams {
   hookManager?: { emit: (ctx: Extract<AiHookContext, { event: 'pre_tool_use' | 'post_tool_use' }>) => Promise<void> }
   turnId?: string
   permissionContext?: ProviderPermissionContext
+  transcriptStore?: TranscriptStore
+}
+
+function appendPermissionEvent(
+  params: ExecuteToolCallsParams,
+  toolCall: ToolCallInfo,
+  decision: 'allowed' | 'denied',
+  reason?: string,
+): void {
+  if (!params.transcriptStore) return
+  params.transcriptStore.appendEvent({
+    sessionId: params.sessionId,
+    turnId: params.turnId,
+    type: 'permission',
+    timestamp: Date.now(),
+    payload: {
+      type: 'permission',
+      data: {
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        decision,
+        reason,
+      },
+    },
+  })
+}
+
+function appendToolResultEvent(params: ExecuteToolCallsParams, result: ToolResultInfo): void {
+  if (!params.transcriptStore) return
+  params.transcriptStore.appendEvent({
+    sessionId: params.sessionId,
+    turnId: params.turnId,
+    type: 'tool_result',
+    timestamp: Date.now(),
+    payload: {
+      type: 'tool_result',
+      data: {
+        toolCallId: result.toolCallId,
+        toolName: result.toolName,
+        success: result.success,
+        contentPreview: result.content.length > 300 ? `${result.content.slice(0, 300).trimEnd()}...` : result.content,
+        durationMs: result.metadata?.durationMs,
+        errorKind: result.metadata?.errorKind,
+      },
+    },
+  })
 }
 
 function updateToolCalls(
@@ -100,7 +147,10 @@ function shouldRequestApprovalForToolCall(
   toolCall: ToolCallInfo,
   context?: ProviderPermissionContext,
 ): boolean {
-  if (!shouldApproveTool(toolCall.name, context)) return false
+  const permissionContext = buildToolPermissionContext(toolCall, context)
+  const permission = mapProviderToolPermission(toolCall.name, permissionContext)
+  if (permission.denied || !permission.requiresApproval) return false
+  if (permission.ruleDecision?.matched && permission.ruleDecision.behavior === 'ask') return true
 
   if (toolCall.name === 'bash') {
     const command = typeof toolCall.parsedArgs?.command === 'string'
@@ -110,6 +160,35 @@ function shouldRequestApprovalForToolCall(
   }
 
   return true
+}
+
+function firstStringArg(args: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!args) return undefined
+  for (const key of keys) {
+    const value = args[key]
+    if (typeof value === 'string' && value.trim()) return value
+  }
+  return undefined
+}
+
+function buildToolPermissionContext(
+  toolCall: ToolCallInfo,
+  context?: ProviderPermissionContext,
+): ProviderPermissionContext | undefined {
+  const args = toolCall.parsedArgs
+  const path = firstStringArg(args, ['path', 'filePath', 'targetPath', 'cwd'])
+  const command = firstStringArg(args, ['command', 'cmd', 'script'])
+  const url = firstStringArg(args, ['url', 'href'])
+
+  return {
+    ...context,
+    permissionInput: {
+      ...context?.permissionInput,
+      args,
+      path: context?.permissionInput?.path ?? path ?? url,
+      command: context?.permissionInput?.command ?? command,
+    },
+  }
 }
 
 function queueForKind(kind: ToolExecutionClass): ToolQueue {
@@ -357,6 +436,38 @@ async function executeIndexedTool(
   let isolationWarning: string | undefined
   let isolationRequiresDoubleConfirm = false
 
+  const permissionContext = buildToolPermissionContext(toolCall, params.permissionContext)
+
+  if (shouldDenyTool(toolCall.name, permissionContext)) {
+    const permission = mapProviderToolPermission(toolCall.name, permissionContext)
+    const content = `[permission_denied] 权限规则拒绝执行 ${toolCall.name}。`
+    if (toolCall.execution) {
+      toolCall.execution.errorKind = 'permission_denied'
+      toolCall.execution.finishedAt = Date.now()
+    }
+    markToolCallState(toolCall, {
+      status: 'error',
+      error: content,
+      result: content,
+    })
+    params.log.warn('tool_permission_rule_denied', {
+      sessionId: params.sessionId,
+      tool: toolCall.name,
+      source: permission.ruleDecision?.source,
+      reason: permission.reason,
+    })
+    appendPermissionEvent(params, toolCall, 'denied', permission.reason)
+    return {
+      result: {
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        success: false,
+        content,
+        metadata: toolCall.execution ? copyResultMetadata(toolCall.execution) : undefined,
+      },
+    }
+  }
+
   if (previousFailures >= MAX_SAME_TOOL_FAILURE) {
     const argsBrief = toolCall.arguments.length > 80
       ? `${toolCall.arguments.slice(0, 80)}...`
@@ -406,6 +517,7 @@ async function executeIndexedTool(
         normalizedPath: safety.normalizedPath,
         reason: safety.reason,
       })
+      appendPermissionEvent(params, toolCall, 'denied', safety.reason ?? 'path_safety_blocked')
       return {
         result: {
           toolCallId: toolCall.id,
@@ -445,6 +557,7 @@ async function executeIndexedTool(
             error: content,
             result: content,
           })
+          appendPermissionEvent(params, toolCall, 'denied', policyDecision.reason ?? guard.reason ?? 'workspace_isolation_denied')
           return {
             result: {
               toolCallId: toolCall.id,
@@ -459,7 +572,7 @@ async function executeIndexedTool(
     }
   }
 
-  const approvalTool = isolationWarning || shouldRequestApprovalForToolCall(toolCall, params.permissionContext)
+  const approvalTool = isolationWarning || shouldRequestApprovalForToolCall(toolCall, permissionContext)
     ? pickApprovalTool(toolCall.name)
     : null
   if (approvalTool) {
@@ -479,6 +592,7 @@ async function executeIndexedTool(
         error: content,
       })
       params.toolFailureCounter.delete(failureKey)
+      appendPermissionEvent(params, toolCall, 'denied', 'user_rejected')
       return {
         result: {
           toolCallId: toolCall.id,
@@ -490,8 +604,11 @@ async function executeIndexedTool(
       }
     }
 
+    appendPermissionEvent(params, toolCall, 'allowed', isolationWarning ? 'workspace_isolation_confirmed' : 'user_approved')
     markToolCallState(toolCall, { status: 'running' })
     updateToolCalls(params.toolCalls, params.updateStreamingMessage)
+  } else {
+    appendPermissionEvent(params, toolCall, 'allowed', 'auto')
   }
 
   const maxAttempts = toolCall.execution?.maxAttempts ?? 1
@@ -604,6 +721,7 @@ export async function executeToolCalls({
   hookManager,
   turnId,
   permissionContext,
+  transcriptStore,
 }: ExecuteToolCallsParams): Promise<ToolResultInfo[]> {
   setInToolExec(true)
   clearWatchdog()
@@ -649,7 +767,7 @@ export async function executeToolCalls({
         })
       }
 
-      const executed = await executeIndexedTool(indexed, {
+      const executionContext: ExecuteToolCallsParams = {
         sessionId,
         workDir,
         toolCalls,
@@ -665,9 +783,12 @@ export async function executeToolCalls({
         hookManager,
         turnId,
         permissionContext,
-      })
+        transcriptStore,
+      }
+      const executed = await executeIndexedTool(indexed, executionContext)
 
       results[indexed.index] = executed.result
+      appendToolResultEvent(executionContext, executed.result)
 
       if (hookManager) {
         await hookManager.emit({

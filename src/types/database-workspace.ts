@@ -82,6 +82,12 @@ export interface QueryTabContext {
     filterOperators?: Record<string, string>
     showFilters?: boolean
     showChart?: boolean
+    selectedRowIndex?: number
+    rowDetailOpen?: boolean
+    pinnedColumns?: {
+      left?: string[]
+      right?: string[]
+    }
     seekOrderBy?: string
     seekColumn?: string
     seekValue?: number

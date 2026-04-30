@@ -27,7 +27,9 @@ export interface StreamWithToolLoopParams {
   flushPendingDelta: () => void
   updateStreamingMessage: (updater: (msg: AiMessage) => AiMessage) => void
   onStreamEvent: (event: AiStreamEvent) => void
-  onRequestStart?: () => void
+  onRequestStart?: (messageId?: string) => void
+  onToolExecutionStart?: (toolCalls: ToolCallInfo[]) => void
+  onToolExecutionDone?: (toolResults: ToolResultInfo[]) => void
   signal?: AbortSignal
   executeToolCalls: (toolCalls: ToolCallInfo[], sessionId: string) => Promise<ToolResultInfo[]>
   parseAndWriteJournalSections: (text: string, workDirPath: string) => void
@@ -50,7 +52,7 @@ const EXPLORATORY_TOOL_NAMES = new Set([
 const EXPLORATORY_TOOL_SYNTHESIS_PROMPT = [
   '[系统收敛指令]',
   '你已经连续多轮只调用读取/搜索工具但没有输出正文。',
-  '现在不要再调用任何工具，也不要继续探索文件。',
+  '现在请暂停继续调用读取/搜索工具，先整理已有上下文。',
   '请只基于上面已经返回的工具结果，直接用中文回答用户：',
   '1. 已确认的信息；',
   '2. 当前结论；',
@@ -82,6 +84,8 @@ export async function streamWithToolLoop({
   updateStreamingMessage,
   onStreamEvent,
   onRequestStart,
+  onToolExecutionStart,
+  onToolExecutionDone,
   signal,
   executeToolCalls,
   parseAndWriteJournalSections,
@@ -120,7 +124,7 @@ export async function streamWithToolLoop({
     messages.value = [...messages.value, assistantMessage]
 
     resetWatchdog()
-    onRequestStart?.()
+    onRequestStart?.(streamState.streamingMessageId)
     await executeGatewayRequest(
       {
         sessionId: sid,
@@ -321,16 +325,24 @@ export async function streamWithToolLoop({
       log.warn('tool_loop_exceeded', { sessionId: sid, max: maxToolLoops })
       updateStreamingMessage(message => ({
         ...message,
-        notice: {
-          kind: 'warn',
-          code: 'tool_loop_limit',
-          title: 'AI 已暂停继续探索',
-          text: `本轮已经连续执行 ${maxToolLoops} 轮工具操作。为避免模型反复搜索或修改同一批内容，系统已先暂停。`,
-          actionHint: '如果结果已经够用，可以让 AI 总结当前结论；如果还需要继续，直接发送“继续”即可基于当前结果接着执行。',
-        },
+        content: '正在基于已获取的信息整理当前结论。',
         isStreaming: false,
+        toolCalls: [],
       }))
-      break
+      chatMessages.push({
+        role: 'user',
+        content: buildExploratoryToolSynthesisPrompt(exploratoryToolResultBuffer),
+      })
+      streamState.pendingToolCalls = []
+      streamState.streamingMessageId = ''
+      consecutiveExploratoryToolOnlyTurns = 0
+      repeatedExecutionStreak = 0
+      lastExecutedToolSignature = ''
+      lastExecutedResultSignature = ''
+      forceSynthesisWithoutTools = true
+      loopCount = 0
+      log.info('tool_loop_limit_synthesis_next', { sessionId: sid, newMsgCount: chatMessages.length })
+      continue
     }
 
     if (!isStreaming.value) break
@@ -338,7 +350,9 @@ export async function streamWithToolLoop({
     updateStreamingMessage(message => ({ ...message, isStreaming: false }))
 
     log.info('tool_exec_start', { sessionId: sid, tools: validToolCalls.map(tool => tool.name) })
+    onToolExecutionStart?.(validToolCalls)
     const toolResults = await executeToolCalls(validToolCalls, sid)
+    onToolExecutionDone?.(toolResults)
     const currentResultSignature = buildToolResultSignature(toolResults)
     log.info('tool_exec_done', {
       sessionId: sid,
@@ -431,14 +445,7 @@ export async function streamWithToolLoop({
       const synthesisPrompt = buildExploratoryToolSynthesisPrompt(exploratoryToolResultBuffer)
       updateStreamingMessage(message => ({
         ...message,
-        content: '已读取到足够上下文，正在基于已有工具结果整理结论。',
-        notice: {
-          kind: 'info',
-          code: 'runtime_warning',
-          title: '已自动停止继续探索',
-          text: `模型连续 ${consecutiveExploratoryToolOnlyTurns} 轮只读取/搜索但没有输出正文。系统已切换为总结模式，避免继续空转。`,
-          actionHint: '下一条回复会基于已有工具结果直接总结，不再继续调用读取/搜索工具。',
-        },
+        content: '正在基于已读取的信息整理结论。',
         isStreaming: false,
       }))
       chatMessages.push({

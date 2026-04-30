@@ -487,7 +487,7 @@ describe('DatabaseView 表浏览入口统一', () => {
     wrapper.unmount()
   })
 
-  it('复用 query tab 切表时只触发一次 browseTable，避免 handleSelectTable 与 pending browse 重复执行', async () => {
+  it('复用 query tab 切表时不直接调用 QueryPanel.browseTable，改由统一 tableBrowse 上下文驱动', async () => {
     const workspaceStore = useDatabaseWorkspaceStore()
     const queryTab = workspaceStore.getOrCreate('conn-1').tabs[0]
     workspaceStore.updateTabContext('conn-1', queryTab.id, {
@@ -524,6 +524,7 @@ describe('DatabaseView 表浏览入口统一', () => {
     const ctx = workspaceStore.getWorkspace('conn-1')?.tabs.find(tab => tab.id === activeTabId)?.context as any
 
     expect(activeBrowseMock).toBeTruthy()
+    expect(activeBrowseMock).not.toHaveBeenCalled()
     expect(ctx.sql).toBe('SELECT * FROM `demo`.`users`;')
     expect(ctx.currentDatabase).toBe('demo')
     expect(ctx.tableBrowse).toEqual({
