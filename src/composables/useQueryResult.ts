@@ -46,6 +46,7 @@ export interface UseQueryResultOptions {
     orderBy?: string
     filterOperators?: Record<string, string>
     showFilters?: boolean
+    showChart?: boolean
   }>) => void
   tableBrowse?: Ref<{
     database: string
@@ -56,6 +57,7 @@ export interface UseQueryResultOptions {
     orderBy?: string
     filterOperators?: Record<string, string>
     showFilters?: boolean
+    showChart?: boolean
     seekOrderBy?: string
     seekColumn?: string
     seekValue?: number
@@ -160,6 +162,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     orderBy?: string
     filterOperators?: Record<string, string>
     showFilters?: boolean
+    showChart?: boolean
   }> = {}) => {
     if (!isTableBrowse.value) return
     onSyncTableBrowse?.(extra)
@@ -225,6 +228,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
       serverColumnFilters.value = parseServerWhereClause(browse.whereClause)
       filterOperators.value = { ...browse.filterOperators ?? buildFilterOperatorsFromWhereClause(browse.whereClause) }
       showFilters.value = browse.showFilters ?? Boolean(browse.whereClause?.trim())
+      showChart.value = browse.showChart ?? false
 
       const orderBy = browse.orderBy?.trim() ?? ''
       if (!orderBy) {
