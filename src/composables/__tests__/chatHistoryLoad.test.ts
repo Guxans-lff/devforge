@@ -225,7 +225,28 @@ describe('chatHistoryLoad cache', () => {
 
     expect(message?.toolCalls).toBeUndefined()
     expect(message?.toolResults).toBeUndefined()
-    expect(message?.content).toContain('历史工具调用已折叠')
-    expect(message?.content).toContain('完整工具参数与结果仍保留在本地历史中')
+    expect(message?.content).toBe('')
+    expect(message?.historyToolSummary).toEqual({
+      callCount: 1,
+      resultCount: 1,
+      successCount: 1,
+      errorCount: 0,
+      pendingCount: 0,
+      toolNames: ['read_file'],
+      buckets: [
+        {
+          category: 'read',
+          label: '读取',
+          count: 1,
+          successCount: 1,
+          errorCount: 0,
+          pendingCount: 0,
+          toolNames: ['read_file'],
+        },
+      ],
+      hasWrite: false,
+      hasCommand: false,
+      hasFailure: false,
+    })
   })
 })

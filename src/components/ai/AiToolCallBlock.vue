@@ -15,6 +15,8 @@ import { inferLanguageFromPath } from '@/utils/file-markers'
 import { openPath } from '@tauri-apps/plugin-opener'
 import { aiReadToolResultFile } from '@/api/ai'
 import { createLogger } from '@/utils/logger'
+import { buildToolResultPreview, formatToolPreviewNotice } from '@/composables/ai/toolResultPreview'
+import { toToolDisplayName } from '@/composables/ai/toolActivitySummary'
 import {
   Dialog,
   DialogContent,
@@ -36,6 +38,13 @@ const expanded = ref(
   props.toolCall.approvalState === 'awaiting',
 )
 
+function translateToolOutput(content: string): string {
+  return content
+    .replace(/^\[user_rejected\]\s*User rejected\s+(.+?)\.$/i, '【用户已拒绝】用户拒绝执行 $1。')
+    .replace(/^\[user_rejected\]\s*用户拒绝执行\s+(.+?)。?$/i, '【用户已拒绝】用户拒绝执行 $1。')
+    .replace(/^\[cancelled\]\s*Tool execution was cancelled before it started\.$/i, '【已取消】工具执行在开始前已取消。')
+}
+
 /** write_file 成功时自动展开；read_file 保持收起（用户点开或直接点"打开文件"） */
 watch(
   () => props.toolCall.status,
@@ -53,17 +62,17 @@ watch(
 /** 动作动词（语义化） */
 const actionLabel = computed(() => {
   const map: Record<string, string> = {
-    read_file: 'Read',
-    write_file: 'Write',
-    edit_file: 'Edit',
-    bash: 'Bash',
-    search_files: 'Search',
-    list_directory: 'List',
-    web_search: 'Search',
-    web_fetch: 'Fetch',
-    todo_write: 'Todo',
+    read_file: '读取',
+    write_file: '写入',
+    edit_file: '修改',
+    bash: '命令',
+    search_files: '搜索',
+    list_directory: '目录',
+    web_search: '联网搜索',
+    web_fetch: '读取网页',
+    todo_write: '任务',
   }
-  return map[props.toolCall.name] ?? props.toolCall.name
+  return map[props.toolCall.name] ?? toToolDisplayName(props.toolCall.name)
 })
 
 /** 动作语义色 */
@@ -142,15 +151,12 @@ const statusClass = computed(() => {
   }
 })
 
-/** 结果预览（截断到前 20 行） */
+/** 结果预览：默认只生成小摘要，避免大工具结果进入初始 DOM */
 const resultPreview = computed(() => {
-  const content = props.toolCall.result ?? props.toolCall.error ?? ''
-  const lines = content.split('\n')
-  if (lines.length > 20) {
-    return lines.slice(0, 20).join('\n') + `\n... (共 ${lines.length} 行)`
-  }
-  return content
+  const content = translateToolOutput(props.toolCall.result ?? props.toolCall.error ?? '')
+  return buildToolResultPreview(content)
 })
+const resultPreviewNotice = computed(() => formatToolPreviewNotice(resultPreview.value))
 
 /** 是否为已落盘的大型结果（含 <persisted-output> 包装标签） */
 const isPersisted = computed(() => {
@@ -176,11 +182,37 @@ const fullContent = ref('')
 const fullError = ref('')
 const copiedFull = ref(false)
 const fullSearchQuery = ref('')
+const fullRenderAll = ref(false)
+
+const fullPreview = computed(() =>
+  buildToolResultPreview(fullContent.value, { maxChars: 12_000, maxLines: 240 }),
+)
+const fullPreviewNotice = computed(() => formatToolPreviewNotice(fullPreview.value))
+const filteredFullPreview = computed(() => {
+  const query = fullSearchQuery.value.trim().toLowerCase()
+  const source = fullRenderAll.value ? fullContent.value : fullPreview.value.text
+  if (!query) return source
+  return source
+    .split('\n')
+    .filter(line => line.toLowerCase().includes(query))
+    .join('\n')
+})
+const filteredFullMatchCount = computed(() => {
+  const query = fullSearchQuery.value.trim().toLowerCase()
+  if (!query) return 0
+  const source = fullRenderAll.value ? fullContent.value : fullPreview.value.text
+  return source
+    .split('\n')
+    .filter(line => line.toLowerCase().includes(query))
+    .length
+})
 
 async function openFullResult() {
+  fullSearchQuery.value = ''
+  fullRenderAll.value = false
   // 非落盘结果：直接把 result 放进 Dialog
   if (!isPersisted.value) {
-    fullContent.value = props.toolCall.result ?? props.toolCall.error ?? ''
+    fullContent.value = translateToolOutput(props.toolCall.result ?? props.toolCall.error ?? '')
     fullError.value = ''
     showFullDialog.value = true
     return
@@ -194,6 +226,7 @@ async function openFullResult() {
   fullLoading.value = true
   fullError.value = ''
   fullContent.value = ''
+  fullRenderAll.value = false
   try {
     fullContent.value = await aiReadToolResultFile(props.sessionId, props.toolCall.id)
   } catch (e: unknown) {
@@ -335,6 +368,7 @@ async function handleOpenFile() {
 
 /** 是否处于审批等待中（用于内嵌渲染 AiApprovalDialog） */
 const isAwaitingApproval = computed(() => props.toolCall.approvalState === 'awaiting')
+const displayToolName = computed(() => toToolDisplayName(props.toolCall.name))
 /** 审批已决策的留痕徽章 */
 const approvalBadge = computed(() => {
   switch (props.toolCall.approvalState) {
@@ -511,9 +545,15 @@ watch(isAwaitingApproval, (v) => { if (v) expanded.value = true }, { immediate: 
             </button>
           </div>
           <pre
-            class="text-[11px] font-mono whitespace-pre-wrap overflow-x-auto max-h-[200px] overflow-y-auto"
+            class="text-[11px] font-mono whitespace-pre-wrap break-words overflow-x-auto max-h-[160px] overflow-y-auto"
             :class="toolCall.error ? 'text-destructive/70' : 'text-foreground/60'"
-          >{{ resultPreview }}</pre>
+          >{{ resultPreview.text }}</pre>
+          <div
+            v-if="resultPreviewNotice"
+            class="mt-1 rounded border border-white/[0.06] bg-white/[0.025] px-2 py-1 text-[10px] text-muted-foreground/60"
+          >
+            {{ resultPreviewNotice }}
+          </div>
         </div>
         <!-- streaming/running 且无结果：只显一行小提示 -->
         <div v-else class="px-3 py-2 text-[11px] text-muted-foreground/50">
@@ -529,7 +569,7 @@ watch(isAwaitingApproval, (v) => { if (v) expanded.value = true }, { immediate: 
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2 text-base">
           🔍 完整工具结果
-          <span class="text-xs font-mono font-normal text-muted-foreground">{{ toolCall.name }} · {{ toolCall.id }}</span>
+          <span class="text-xs font-mono font-normal text-muted-foreground">{{ displayToolName }} · {{ toolCall.id }}</span>
         </DialogTitle>
         <DialogDescription class="text-xs">
           <span v-if="persistedInfo.totalChars">落盘内容（{{ persistedInfo.totalChars.toLocaleString() }} 字符）</span>
@@ -553,11 +593,25 @@ watch(isAwaitingApproval, (v) => { if (v) expanded.value = true }, { immediate: 
         <pre
           v-else
           class="max-h-[60vh] overflow-auto rounded border border-border bg-muted/30 p-3 text-[11px] font-mono whitespace-pre-wrap"
-        >{{ fullSearchQuery ? fullContent.split('\n').filter(l => l.toLowerCase().includes(fullSearchQuery.toLowerCase())).join('\n') : fullContent }}</pre>
+        >{{ filteredFullPreview }}</pre>
+        <div
+          v-if="!fullLoading && !fullError && fullPreviewNotice"
+          class="mt-2 flex items-center justify-between gap-3 rounded-md border border-amber-500/15 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-300"
+        >
+          <span>{{ fullRenderAll ? '当前已渲染完整内容，内容过大时滚动可能变慢。' : fullPreviewNotice }}</span>
+          <Button
+            v-if="!fullRenderAll"
+            variant="outline"
+            size="sm"
+            @click="fullRenderAll = true"
+          >
+            渲染完整内容
+          </Button>
+        </div>
       </div>
       <div class="flex items-center justify-between">
         <span v-if="fullSearchQuery" class="text-[10px] text-muted-foreground/60 font-mono">
-          {{ fullContent.split('\n').filter(l => l.toLowerCase().includes(fullSearchQuery.toLowerCase())).length }} 行匹配
+          {{ filteredFullMatchCount }} 行匹配{{ fullRenderAll ? '' : '（预览内）' }}
         </span>
         <div class="flex gap-2 ml-auto">
           <Button variant="outline" size="sm" :disabled="!fullContent || fullLoading" @click="copyFull">

@@ -266,11 +266,50 @@ export interface AiMessage {
   /** 系统提示横幅（如工具调用超限、流被中断等），独立于 content 渲染 */
   notice?: {
     kind: 'warn' | 'error' | 'info'
+    code?: 'tool_loop_limit' | 'stream_interrupted' | 'runtime_warning' | 'runtime_error'
+    title?: string
     text: string
+    actionHint?: string
   }
+  /** 历史恢复时的工具操作摘要。只用于 UI 展示，不进入模型上下文 */
+  historyToolSummary?: ToolActivitySummary
 }
 
 // ─────────────────────────────────── Tool Use ───────────────────────────────────
+
+export type ToolActivityCategory =
+  | 'read'
+  | 'search'
+  | 'write'
+  | 'command'
+  | 'web'
+  | 'database'
+  | 'todo'
+  | 'agent'
+  | 'other'
+
+export interface ToolActivityBucket {
+  category: ToolActivityCategory
+  label: string
+  count: number
+  successCount: number
+  errorCount: number
+  pendingCount: number
+  toolNames: string[]
+}
+
+export interface ToolActivitySummary {
+  callCount: number
+  resultCount: number
+  successCount: number
+  errorCount: number
+  pendingCount: number
+  toolNames: string[]
+  buckets: ToolActivityBucket[]
+  hasWrite: boolean
+  hasCommand: boolean
+  hasFailure: boolean
+}
 
 /** 工具调用信息（前端运行时） */
 export interface ToolCallInfo {

@@ -7,7 +7,7 @@
  * - 助手消息：文档式平铺，紧凑排版
  * - 错误消息：红色警告条
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { AiMessage, FileOperation } from '@/types/ai'
 import { parseFileMarkers } from '@/utils/file-markers'
 import { ChevronRight, Copy, Check, AlertCircle, AlertTriangle, Info, Download, RotateCw, GitFork, History } from 'lucide-vue-next'
@@ -18,10 +18,27 @@ import AiCodeBlock from './AiCodeBlock.vue'
 import AiFileCard from './AiFileCard.vue'
 import AiToolCallBlock from './AiToolCallBlock.vue'
 import AiFileOpsGroup from './AiFileOpsGroup.vue'
+import AiToolActivitySummaryCard from './AiToolActivitySummaryCard.vue'
+import AiTodoPanel from './AiTodoPanel.vue'
 import { createLogger } from '@/utils/logger'
 import AiContextPill from './AiContextPill.vue'
+import {
+  classifyToolActivity,
+  summarizeToolActivity,
+  toToolDisplayName,
+} from '@/composables/ai/toolActivitySummary'
 
 const log = createLogger('ai.message.bubble')
+const LONG_MARKDOWN_CHAR_LIMIT = 16_000
+const LONG_MARKDOWN_PREVIEW_CHARS = 8_000
+const STREAMING_TEXT_WINDOW_CHARS = 8_000
+const STREAMING_TEXT_HEAD_CHARS = 1_200
+const STREAMING_TEXT_TAIL_CHARS = 6_800
+const RENDER_TEXT_SEGMENT_LIMIT = 10
+const VISIBLE_FULL_TOOL_CALL_LIMIT = 6
+const VISIBLE_PROMOTED_TOOL_CALL_LIMIT = 6
+const VISIBLE_FILE_OPERATION_LIMIT = 8
+const TOOL_DETAIL_BATCH_SIZE = 6
 
 const props = defineProps<{
   message: AiMessage
@@ -50,6 +67,60 @@ const isMaxTokensTruncated = computed(() => {
 })
 
 const copied = ref(false)
+const contentExpanded = ref(false)
+const fullToolCallLimit = ref(VISIBLE_FULL_TOOL_CALL_LIMIT)
+const promotedPillCallLimit = ref(VISIBLE_PROMOTED_TOOL_CALL_LIMIT)
+const fileOperationLimit = ref(VISIBLE_FILE_OPERATION_LIMIT)
+
+const INTERNAL_MESSAGE_TRANSLATIONS: Array<[RegExp, string]> = [
+  [
+    /^\[The user approved the execution plan\. Continue with the approved steps and use tools when needed\.\]$/i,
+    '【用户已确认执行计划】请继续按已批准的步骤执行，必要时可以调用工具。',
+  ],
+  [
+    /^\[user_rejected\]\s*User rejected\s+(.+?)\.$/i,
+    '【用户已拒绝】用户拒绝执行 $1。',
+  ],
+  [
+    /^\[Post-compact context restoration\]/i,
+    '【压缩后上下文恢复】',
+  ],
+  [
+    /^Pending plan awaiting approval:/i,
+    '待确认的执行计划：',
+  ],
+  [
+    /^Plan was approved and is being executed\.$/i,
+    '执行计划已批准，正在执行。',
+  ],
+]
+
+function translateInternalMessageContent(content: string): string {
+  return INTERNAL_MESSAGE_TRANSLATIONS.reduce(
+    (next, [pattern, replacement]) => next.replace(pattern, replacement),
+    content,
+  )
+}
+
+const displayContent = computed(() => translateInternalMessageContent(props.message.content ?? ''))
+
+const hasHistoryToolSummary = computed(() => !!props.message.historyToolSummary)
+
+function confirmFork() {
+  const ok = window.confirm(
+    '确定从这条消息创建分支会话吗？\n\n会基于当前消息之前的上下文创建一个新会话，当前会话不会被修改。',
+  )
+  if (!ok) return
+  emit('fork', props.message.id)
+}
+
+function confirmRewind() {
+  const ok = window.confirm(
+    '确定回退到这条消息继续吗？\n\n这会在当前会话中隐藏该消息之后的后续内容，并从这里继续。',
+  )
+  if (!ok) return
+  emit('rewind', props.message.id)
+}
 
 function stripProtocolArtifacts(text: string | undefined): string {
   if (!text) return ''
@@ -73,6 +144,32 @@ const hasThinking = computed(() => !!sanitizedThinking.value)
 const isUser = computed(() => props.message.role === 'user')
 const isError = computed(() => props.message.role === 'error')
 const hasToolCalls = computed(() => (props.message.toolCalls?.length ?? 0) > 0)
+const messageContentLength = computed(() => displayContent.value.length)
+const isLongMarkdown = computed(() =>
+  !isUser.value
+  && messageContentLength.value > LONG_MARKDOWN_CHAR_LIMIT,
+)
+const shouldRenderFullContent = computed(() => !isLongMarkdown.value || contentExpanded.value)
+const displayedContent = computed(() => {
+  const content = displayContent.value
+  if (shouldRenderFullContent.value || content.length <= LONG_MARKDOWN_PREVIEW_CHARS) return content
+  return `${content.slice(0, LONG_MARKDOWN_PREVIEW_CHARS)}\n\n……内容过长，已先展示预览，点击下方按钮渲染完整内容。`
+})
+const shouldRenderStreamingTextWindow = computed(() =>
+  !isUser.value
+  && !isError.value
+  && props.message.isStreaming
+  && messageContentLength.value > STREAMING_TEXT_WINDOW_CHARS,
+)
+const streamingTextWindow = computed(() => {
+  const content = displayContent.value
+  if (content.length <= STREAMING_TEXT_WINDOW_CHARS) return content
+  return [
+    content.slice(0, STREAMING_TEXT_HEAD_CHARS),
+    '……流式回复较长，中间内容已临时省略，完成后会恢复为可交互预览……',
+    content.slice(-STREAMING_TEXT_TAIL_CHARS),
+  ].join('\n\n')
+})
 const rootSpacingClass = computed(() => props.stickyCompact ? 'my-0' : props.inGroup ? 'my-0' : 'my-3')
 const timelineDotClass = computed(() => {
   if (isError.value) return 'bg-red-400 shadow-[0_0_0_5px_#09090b,0_0_18px_rgba(248,113,113,0.2)]'
@@ -82,31 +179,32 @@ const timelineDotClass = computed(() => {
 })
 const timelineLineClass = computed(() => props.inGroup ? 'bg-white/[0.055]' : 'bg-white/[0.11]')
 const turnRoleLabel = computed(() => {
-  if (isUser.value) return 'You'
-  if (isError.value) return 'Error'
+  if (isUser.value) return '你'
+  if (isError.value) return '错误'
   return 'DevForge AI'
 })
 const turnMetaLabel = computed(() => {
-  if (isError.value) return 'Action required'
-  if (isUser.value) return props.message.isStreaming ? 'Sending' : 'Prompt'
-  if (props.message.isStreaming) return 'Streaming'
+  if (isError.value) return '需要处理'
+  if (isUser.value) return props.message.isStreaming ? '发送中' : '提问'
+  if (hasHistoryToolSummary.value) return '历史'
+  if (props.message.isStreaming) return '生成中'
   if (props.message.tokens) return `${props.message.tokens} tokens`
-  if (hasToolCalls.value) return 'Tool activity'
-  return 'Answer'
+  if (hasToolCalls.value) return '工具活动'
+  return '回答'
 })
 
 /** 用户消息折叠：超过 3 行时默认收起（展示 2 行） */
 const USER_COLLAPSE_LINES = 3
 const userExpanded = ref(false)
-const userLineCount = computed(() => (props.message.content ?? '').split('\n').length)
+const userLineCount = computed(() => displayContent.value.split('\n').length)
 const userNeedsCollapse = computed(() => isUser.value && userLineCount.value > USER_COLLAPSE_LINES)
 const effectiveExpanded = computed(() => userExpanded.value)
 
 /** 可恢复的错误消息（流式超时/中断/未完成） */
 const canContinue = computed(() => {
   if (!isError.value) return false
-  const c = props.message.content ?? ''
-  return /\[超时中断\]|\[已中断\]|上一轮回复未完成或已中断/.test(c)
+  const c = displayContent.value
+  return /\[超时中断\]|\[已中断\]|\[模型 thinking 后 stop 空回\]|\[模型未生成回答\]|上一轮回复未完成或已中断/.test(c)
 })
 
 /** 提取 write_file 成功态工具调用，转为 FileOperation 列表供 AiFileOpsGroup 渲染 */
@@ -127,6 +225,12 @@ const fileOperations = computed<FileOperation[]>(() => {
       }
     })
 })
+const visibleFileOperations = computed(() =>
+  fileOperations.value.slice(0, fileOperationLimit.value),
+)
+const hiddenFileOperationCount = computed(() =>
+  Math.max(0, fileOperations.value.length - visibleFileOperations.value.length),
+)
 
 /** 非文件写入的其他工具调用（含 awaiting 态的 write_file，让审批条可见） */
 const otherToolCalls = computed(() =>
@@ -135,14 +239,37 @@ const otherToolCalls = computed(() =>
   )
 )
 
+const todoToolCalls = computed(() =>
+  otherToolCalls.value.filter(tc => tc.name === 'todo_write' && Array.isArray(tc.parsedArgs?.todos)),
+)
+const latestTodoToolCall = computed(() => todoToolCalls.value[todoToolCalls.value.length - 1])
+const latestTodos = computed(() =>
+  (latestTodoToolCall.value?.parsedArgs?.todos ?? []) as Array<{
+    id: string
+    content: string
+    activeForm: string
+    status: 'pending' | 'in_progress' | 'completed'
+  }>,
+)
+const hasTodoSummary = computed(() => latestTodos.value.length > 0)
+
 /** 只读 / 信息类工具：以 Context Pill 形式紧凑展示 */
 const READONLY_TOOLS = new Set(['read_file', 'list_directory', 'search_files', 'web_fetch', 'web_search'])
 const contextPills = computed(() =>
   otherToolCalls.value.filter(tc => READONLY_TOOLS.has(tc.name) && tc.approvalState !== 'awaiting'),
 )
-/** 其余工具（含审批等待的 write_file / bash / todo_write 等）走完整卡片 */
+/** 其余工具（含审批等待的 write_file / bash 等）走完整卡片；todo_write 已提升为任务摘要 */
 const fullToolCalls = computed(() =>
-  otherToolCalls.value.filter(tc => !READONLY_TOOLS.has(tc.name) || tc.approvalState === 'awaiting'),
+  otherToolCalls.value.filter(tc =>
+    tc.name !== 'todo_write'
+    && (!READONLY_TOOLS.has(tc.name) || tc.approvalState === 'awaiting'),
+  ),
+)
+const visibleFullToolCalls = computed(() =>
+  fullToolCalls.value.slice(0, fullToolCallLimit.value),
+)
+const hiddenFullToolCallCount = computed(() =>
+  Math.max(0, fullToolCalls.value.length - visibleFullToolCalls.value.length),
 )
 
 /** Pill 点击 → 展开为完整卡片：把对应 toolCall id 加到强制展开集合 */
@@ -168,12 +295,23 @@ function isToolRunning(status: string | undefined): boolean {
 }
 
 function isEditingTool(name: string): boolean {
-  return /^(write|edit|delete|move|rename|create|apply|patch|bash|run|chmod|chown|mkdir|rm)/i.test(name)
+  const category = classifyToolActivity(name)
+  return category === 'write' || category === 'command'
 }
 
 function formatToolName(name: string): string {
-  return name.replace(/_/g, ' ')
+  return toToolDisplayName(name)
 }
+
+const runtimeToolSummary = computed(() =>
+  summarizeToolActivity({
+    toolCalls: props.message.toolCalls,
+    toolResults: props.message.toolResults,
+  }),
+)
+const shouldShowRuntimeToolSummary = computed(() =>
+  hasToolCalls.value && (runtimeToolSummary.value.callCount >= 2 || runtimeToolSummary.value.hasWrite || runtimeToolSummary.value.hasCommand || runtimeToolSummary.value.hasFailure),
+)
 
 const runningToolCalls = computed(() =>
   (props.message.toolCalls ?? []).filter(tc => isToolRunning(tc.status) || tc.approvalState === 'awaiting'),
@@ -198,14 +336,14 @@ const isBoundaryMessage = computed(() =>
 
 const assistantActivityDetail = computed(() => {
   const activeTool = activeToolCall.value
-  if (activeTool?.approvalState === 'awaiting') return 'awaiting approval'
+  if (activeTool?.approvalState === 'awaiting') return '等待确认'
   if (activeTool) return formatToolName(activeTool.name)
-  if (hasEditingDone.value) return 'patch density'
+  if (hasEditingDone.value) return '已完成修改'
   if (hasToolCalls.value) {
     const done = (props.message.toolCalls ?? []).filter(tc => tc.status === 'success').length
-    return `${done}/${props.message.toolCalls?.length ?? 0} tools`
+    return `${done}/${props.message.toolCalls?.length ?? 0} 个工具`
   }
-  if (props.message.isStreaming) return 'streaming answer'
+  if (props.message.isStreaming) return '正在生成回答'
   return undefined
 })
 
@@ -222,7 +360,7 @@ const assistantActivityStep = computed<AssistantActivityStep | null>(() => {
   if (hasEditingActive.value) {
     return {
       key: 'editing',
-      label: 'Editing',
+      label: '正在修改',
       detail: assistantActivityDetail.value,
       state: 'active',
       visual: 'pen',
@@ -232,7 +370,7 @@ const assistantActivityStep = computed<AssistantActivityStep | null>(() => {
   if (hasReadonlyActive.value) {
     return {
       key: 'reading',
-      label: 'Reading',
+      label: '正在读取',
       detail: assistantActivityDetail.value,
       state: 'active',
       visual: 'bars',
@@ -242,7 +380,7 @@ const assistantActivityStep = computed<AssistantActivityStep | null>(() => {
   if (props.message.isStreaming && hasEditingDone.value && !hasToolFailure.value && !!props.message.content) {
     return {
       key: 'celebrating',
-      label: 'Celebrating',
+      label: '正在整理',
       state: 'active',
       visual: 'spark',
     }
@@ -251,7 +389,7 @@ const assistantActivityStep = computed<AssistantActivityStep | null>(() => {
   if (props.message.isStreaming && !contextDone) {
     return {
       key: 'context',
-      label: 'Context',
+      label: '准备上下文',
       detail: assistantActivityDetail.value,
       state: 'active',
       visual: 'dot',
@@ -261,7 +399,7 @@ const assistantActivityStep = computed<AssistantActivityStep | null>(() => {
   if (assistantWorkActive.value) {
     return {
       key: 'processing',
-      label: 'Processing...',
+      label: '处理中...',
       detail: assistantActivityDetail.value,
       state: 'active',
       visual: 'dot',
@@ -277,11 +415,46 @@ function expandPill(id: string) {
   next.add(id)
   expandedPillIds.value = next
 }
+function expandPillGroup(ids: string[]) {
+  const next = new Set(expandedPillIds.value)
+  ids
+    .filter(id => !next.has(id))
+    .slice(0, TOOL_DETAIL_BATCH_SIZE)
+    .forEach(id => next.add(id))
+  expandedPillIds.value = next
+}
 const remainingPills = computed(() =>
   contextPills.value.filter(tc => !expandedPillIds.value.has(tc.id)),
 )
 const promotedPillCalls = computed(() =>
   contextPills.value.filter(tc => expandedPillIds.value.has(tc.id)),
+)
+const visiblePromotedPillCalls = computed(() =>
+  promotedPillCalls.value.slice(0, promotedPillCallLimit.value),
+)
+const hiddenPromotedPillCallCount = computed(() =>
+  Math.max(0, promotedPillCalls.value.length - visiblePromotedPillCalls.value.length),
+)
+const hiddenToolCallCount = computed(() =>
+  hiddenFileOperationCount.value + hiddenPromotedPillCallCount.value + hiddenFullToolCallCount.value,
+)
+const shouldShowToolExpandButton = computed(() => hiddenToolCallCount.value > 0)
+
+function revealMoreToolDetails() {
+  fileOperationLimit.value += TOOL_DETAIL_BATCH_SIZE
+  promotedPillCallLimit.value += TOOL_DETAIL_BATCH_SIZE
+  fullToolCallLimit.value += TOOL_DETAIL_BATCH_SIZE
+}
+
+watch(
+  () => props.message.id,
+  () => {
+    contentExpanded.value = false
+    fileOperationLimit.value = VISIBLE_FILE_OPERATION_LIMIT
+    promotedPillCallLimit.value = VISIBLE_PROMOTED_TOOL_CALL_LIMIT
+    fullToolCallLimit.value = VISIBLE_FULL_TOOL_CALL_LIMIT
+    expandedPillIds.value = new Set()
+  },
 )
 
 /** 将连续同名工具调用聚合为 group，减少垂直空间 */
@@ -301,7 +474,7 @@ const pillGroups = computed<PillGroup[]>(() => {
 
 async function copyContent() {
   try {
-    await navigator.clipboard.writeText(props.message.content)
+    await navigator.clipboard.writeText(displayContent.value)
     copied.value = true
     setTimeout(() => { copied.value = false }, 2000)
   } catch { /* 静默失败 */ }
@@ -315,7 +488,7 @@ async function exportMarkdown() {
   })
   if (!filePath) return
   try {
-    await writeTextFile(filePath, props.message.content)
+    await writeTextFile(filePath, displayContent.value)
   } catch (e) {
     log.error('export_markdown_failed', undefined, e)
   }
@@ -323,7 +496,7 @@ async function exportMarkdown() {
 
 /** 解析消息文本为段落列表（文本 / 代码块 / 文件卡片） */
 const contentSegments = computed(() => {
-  const text = props.message.content
+  const text = displayedContent.value
   if (!text) return []
   return parseFileMarkers(text)
 })
@@ -338,9 +511,14 @@ const userRenderedSegments = computed(() =>
 
 /** 缓存 Markdown 渲染结果，避免每帧重算 */
 const renderedSegments = computed(() =>
-  contentSegments.value.map(seg => ({
+  contentSegments.value.map((seg, index) => ({
     ...seg,
-    html: seg.type === 'text' ? renderBlock(seg.content) : '',
+    html: seg.type === 'text'
+      ? renderBlockSegment(seg.content, {
+        sanitize: index < RENDER_TEXT_SEGMENT_LIMIT || shouldRenderFullContent.value,
+        preview: index >= RENDER_TEXT_SEGMENT_LIMIT && !shouldRenderFullContent.value,
+      })
+      : '',
   }))
 )
 
@@ -413,6 +591,17 @@ function renderBlock(text: string): string {
 
   return DOMPurify.sanitize(out.join(''), { ADD_ATTR: ['target'] })
 }
+
+function renderBlockSegment(
+  text: string,
+  options: { sanitize: boolean; preview: boolean },
+): string {
+  if (options.preview) {
+    return `<p class="my-0.5 leading-relaxed text-muted-foreground/70">${esc(text.slice(0, 800))}……</p>`
+  }
+  if (options.sanitize) return renderBlock(text)
+  return esc(text)
+}
 </script>
 
 <template>
@@ -441,7 +630,7 @@ function renderBlock(text: string): string {
         >
           <!-- 吸顶极简态：单行省略 + 展开按钮 -->
           <div v-if="stickyCompact" class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3">
-            <span class="line-clamp-2 min-w-0 whitespace-pre-wrap break-words text-[12px] leading-[1.45] text-foreground/82">{{ message.content }}</span>
+            <span class="line-clamp-2 min-w-0 whitespace-pre-wrap break-words text-[12px] leading-[1.45] text-foreground/82">{{ displayContent }}</span>
             <div class="flex shrink-0 items-center gap-1">
               <button
                 class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
@@ -453,14 +642,14 @@ function renderBlock(text: string): string {
               <button
                 class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
                 title="从这里创建分支会话"
-                @click.stop="emit('fork', message.id)"
+                @click.stop="confirmFork"
               >
                 <GitFork class="h-3 w-3" />
               </button>
               <button
                 class="flex h-6 w-6 items-center justify-center rounded-md border border-border/30 bg-background/70 text-muted-foreground/45 transition-colors hover:bg-muted/60 hover:text-foreground/80"
                 title="回退到这里继续"
-                @click.stop="emit('rewind', message.id)"
+                @click.stop="confirmRewind"
               >
                 <History class="h-3 w-3" />
               </button>
@@ -541,7 +730,7 @@ function renderBlock(text: string): string {
         <div class="flex items-start gap-2 rounded-xl border border-red-400/20 bg-red-500/[0.045] px-3 py-2.5">
           <AlertCircle class="h-4 w-4 text-destructive shrink-0 mt-0.5" />
           <div class="flex-1 text-[13px] text-destructive leading-relaxed select-text">
-            <div>{{ message.content }}</div>
+            <div>{{ displayContent }}</div>
             <!-- max_tokens 截断一键修复 -->
             <div v-if="isMaxTokensTruncated" class="mt-2 flex items-center gap-1.5 flex-wrap">
               <span class="text-[11px] text-destructive/70">一键调大：</span>
@@ -575,7 +764,7 @@ function renderBlock(text: string): string {
     v-else
     class="ai-turn ai-turn-assistant group relative flex gap-4"
     :class="rootSpacingClass"
-    v-memo="[message.id, message.isStreaming, toolCallRenderSignature, message.toolResults, message.content?.length, message.notice?.text, hideHeader, isGroupEnd]"
+    v-memo="[message.id, message.isStreaming, toolCallRenderSignature, message.toolResults, message.content?.length, message.notice?.text, message.historyToolSummary?.callCount, hideHeader, isGroupEnd, contentExpanded, fileOperationLimit, promotedPillCallLimit, fullToolCallLimit]"
   >
     <!-- Timeline -->
     <div class="relative flex w-[22px] shrink-0 flex-col items-center pt-2">
@@ -615,11 +804,19 @@ function renderBlock(text: string): string {
           v-if="!message.isStreaming && message.type !== 'divider' && message.type !== 'compact-boundary' && message.type !== 'rewind-boundary'"
           class="rounded-md border border-transparent p-1 text-muted-foreground/30 transition-colors hover:border-white/[0.08] hover:bg-white/[0.04] hover:text-muted-foreground"
           title="回退到这里继续"
-          @click="emit('rewind', message.id)"
+          @click="confirmRewind"
         >
           <History class="h-3.5 w-3.5" />
         </button>
       </div>
+
+      <!-- 历史工具摘要：结构化展示，不把工具协议渲染成正文 -->
+      <AiToolActivitySummaryCard
+        v-if="hasHistoryToolSummary && message.historyToolSummary"
+        class="mb-2"
+        variant="history"
+        :summary="message.historyToolSummary"
+      />
 
       <!-- 思考过程（原生 <details> 无 JS 开销） -->
       <details v-if="hasThinking" class="mb-2 group/thinking">
@@ -666,31 +863,62 @@ function renderBlock(text: string): string {
       </div>
 
       <div
-        v-if="message.content"
+        v-if="displayContent"
         class="answer-flow text-[14px] leading-[1.8] select-text"
         :class="hideHeader ? 'text-muted-foreground/62' : 'text-foreground/86'"
       >
-        <template v-for="(seg, i) in renderedSegments" :key="i">
-          <div v-if="seg.type === 'text'" v-html="seg.html" />
-          <AiCodeBlock v-else-if="seg.type === 'code'" :language="seg.language" :code="seg.content" :is-streaming="message.isStreaming" class="my-1.5" />
-          <AiFileCard
-            v-else-if="seg.type === 'file'"
-            :name="seg.name"
-            :path="seg.path"
-            :size="seg.size"
-            :lines="seg.lines"
-            :content="seg.content"
-            class="my-1.5"
-          />
+        <div v-if="shouldRenderStreamingTextWindow" class="streaming-text-window whitespace-pre-wrap break-words">
+          {{ streamingTextWindow }}
+        </div>
+        <template v-else>
+          <template v-for="(seg, i) in renderedSegments" :key="i">
+            <div v-if="seg.type === 'text'" v-html="seg.html" />
+            <AiCodeBlock v-else-if="seg.type === 'code'" :language="seg.language" :code="seg.content" :is-streaming="message.isStreaming" class="my-1.5" />
+            <AiFileCard
+              v-else-if="seg.type === 'file'"
+              :name="seg.name"
+              :path="seg.path"
+              :size="seg.size"
+              :lines="seg.lines"
+              :content="seg.content"
+              class="my-1.5"
+            />
+          </template>
         </template>
+        <div
+          v-if="isLongMarkdown"
+          class="mt-2 flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-[12px] text-muted-foreground/75"
+        >
+          <span>
+            {{ contentExpanded ? '已渲染完整长回复' : `长回复已预览 ${Math.round(LONG_MARKDOWN_PREVIEW_CHARS / 1000)}K / ${Math.round(messageContentLength / 1000)}K 字符，避免页面卡顿。` }}
+          </span>
+          <button
+            class="shrink-0 rounded-lg border border-white/[0.1] bg-background/60 px-2.5 py-1 text-[11px] text-foreground/80 transition-colors hover:bg-muted/40"
+            @click="contentExpanded = !contentExpanded"
+          >
+            {{ contentExpanded ? '收起预览' : '渲染完整内容' }}
+          </button>
+        </div>
       </div>
 
       <!-- 工具调用块 -->
       <div v-if="hasToolCalls" class="mt-3 space-y-2">
+        <AiToolActivitySummaryCard
+          v-if="shouldShowRuntimeToolSummary"
+          :summary="runtimeToolSummary"
+          variant="runtime"
+        />
+
+        <!-- 任务计划提升展示：todo_write 不再作为普通工具卡占用对话空间 -->
+        <AiTodoPanel
+          v-if="hasTodoSummary"
+          :todos="latestTodos"
+        />
+
         <!-- 文件操作组（聚合 write_file 为毛玻璃卡片组） -->
         <AiFileOpsGroup
-          v-if="fileOperations.length > 0"
-          :operations="fileOperations"
+          v-if="visibleFileOperations.length > 0"
+          :operations="visibleFileOperations"
           :session-id="sessionId"
         />
 
@@ -702,7 +930,7 @@ function renderBlock(text: string): string {
               <AiContextPill
                 :tool-call="group.calls[0]!"
                 :count="group.calls.length"
-                @open="group.calls.forEach(c => expandPill(c.id))"
+                @open="expandPillGroup(group.calls.map(c => c.id))"
               />
             </div>
             <!-- 单个正常渲染 -->
@@ -715,23 +943,36 @@ function renderBlock(text: string): string {
         </div>
 
         <!-- 被点开的胶囊 → 完整卡片 -->
-        <div v-if="promotedPillCalls.length" class="space-y-1.5">
+        <div v-if="visiblePromotedPillCalls.length" class="space-y-1.5">
           <AiToolCallBlock
-            v-for="tc in promotedPillCalls"
+            v-for="tc in visiblePromotedPillCalls"
             :key="tc.id"
             :tool-call="tc"
             :session-id="sessionId"
           />
         </div>
 
-        <!-- 其他工具调用（审批等待 / bash / todo_write 等，始终完整卡片） -->
-        <div v-if="fullToolCalls.length" class="space-y-1.5">
+        <!-- 其他工具调用（审批等待 / bash 等，始终完整卡片） -->
+        <div v-if="visibleFullToolCalls.length" class="space-y-1.5">
           <AiToolCallBlock
-            v-for="tc in fullToolCalls"
+            v-for="tc in visibleFullToolCalls"
             :key="tc.id"
             :tool-call="tc"
             :session-id="sessionId"
           />
+        </div>
+
+        <div
+          v-if="shouldShowToolExpandButton"
+          class="flex items-center justify-between gap-3 rounded-xl border border-white/[0.08] bg-white/[0.03] px-3 py-2 text-[12px] text-muted-foreground/75"
+        >
+          <span>还有 {{ hiddenToolCallCount }} 个工具详情未挂载，已先折叠以降低大会话渲染压力。</span>
+          <button
+            class="shrink-0 rounded-lg border border-white/[0.1] bg-background/60 px-2.5 py-1 text-[11px] text-foreground/80 transition-colors hover:bg-muted/40"
+            @click="revealMoreToolDetails"
+          >
+            继续加载详情
+          </button>
         </div>
       </div>
 
@@ -749,7 +990,14 @@ function renderBlock(text: string): string {
           :is="message.notice.kind === 'warn' ? AlertTriangle : message.notice.kind === 'error' ? AlertCircle : Info"
           class="h-3.5 w-3.5 shrink-0 mt-0.5"
         />
-        <span class="select-text">{{ message.notice.text }}</span>
+        <span class="min-w-0 flex-1 select-text">
+          <strong v-if="message.notice.title" class="block text-[12px] font-semibold">{{ message.notice.title }}</strong>
+          <span class="block">{{ message.notice.text }}</span>
+          <span
+            v-if="message.notice.actionHint"
+            class="block pt-1 text-[11px] opacity-80"
+          >{{ message.notice.actionHint }}</span>
+        </span>
       </div>
     </div>
   </div>
@@ -819,6 +1067,13 @@ function renderBlock(text: string): string {
 
 .activity-strip {
   padding: 8px 0 2px;
+}
+
+.streaming-text-window {
+  contain: content;
+  border-left: 1px solid rgb(85 216 153 / 0.18);
+  padding-left: 12px;
+  color: rgb(244 244 245 / 0.78);
 }
 
 /* 流式看门狗圆点跳动 */

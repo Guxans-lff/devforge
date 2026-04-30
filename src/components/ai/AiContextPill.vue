@@ -17,6 +17,12 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
+import {
+  buildToolResultPreview,
+  formatToolPreviewNotice,
+  stripReadFileResultHeader,
+} from '@/composables/ai/toolResultPreview'
+import { toToolDisplayName } from '@/composables/ai/toolActivitySummary'
 
 const props = defineProps<{
   toolCall: ToolCallInfo
@@ -82,30 +88,34 @@ const pillStateClass = computed(() => {
   }
 })
 
-/** Hover 预览：取结果前 12 行，仅在 hover 时生成 */
+/** Hover 预览：仅在 hover 时生成，并统一限制渲染体量 */
 const previewText = ref('')
+const previewNotice = ref('')
 
-function generatePreview(): string {
+function generatePreview() {
   const raw = props.toolCall.result ?? props.toolCall.error ?? ''
-  if (!raw) return ''
-  let body = raw
-  if (props.toolCall.name === 'read_file' && raw.startsWith('[文件:')) {
-    const nl = raw.indexOf('\n')
-    if (nl > 0) body = raw.slice(nl + 1)
+  if (!raw) return { text: '', notice: '' }
+  const body = props.toolCall.name === 'read_file' ? stripReadFileResultHeader(raw) : raw
+  const preview = buildToolResultPreview(body, { maxChars: 2_400, maxLines: 12 })
+  return {
+    text: preview.text,
+    notice: formatToolPreviewNotice(preview),
   }
-  const lines = body.split('\n')
-  const head = lines.slice(0, 12).join('\n')
-  return lines.length > 12 ? `${head}\n…（共 ${lines.length} 行）` : head
 }
 
 const hasPreview = computed(() => !!(props.toolCall.result || props.toolCall.error))
+const displayToolName = computed(() => toToolDisplayName(props.toolCall.name))
 
 const open = ref(false)
 let closeTimer: number | undefined
 function onEnter() {
   if (closeTimer) { window.clearTimeout(closeTimer); closeTimer = undefined }
   if (hasPreview.value) {
-    if (!previewText.value) previewText.value = generatePreview()
+    if (!previewText.value) {
+      const preview = generatePreview()
+      previewText.value = preview.text
+      previewNotice.value = preview.notice
+    }
     open.value = true
   }
 }
@@ -147,11 +157,14 @@ function onLeave() {
     >
       <div class="text-[10px] font-medium text-muted-foreground mb-1 flex items-center gap-1">
         <component :is="ToolIcon" class="h-3 w-3" />
-        <span>{{ toolCall.name }} · {{ primaryLabel }}</span>
+        <span>{{ displayToolName }} · {{ primaryLabel }}</span>
       </div>
       <pre
         class="max-h-[220px] overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 text-[11px] font-mono text-foreground/80"
       >{{ previewText }}</pre>
+      <div v-if="previewNotice" class="mt-1 rounded bg-muted/30 px-2 py-1 text-[10px] text-muted-foreground/65">
+        {{ previewNotice }}
+      </div>
       <div class="mt-1 text-[10px] text-muted-foreground/60">点击胶囊查看完整结果</div>
     </PopoverContent>
   </Popover>

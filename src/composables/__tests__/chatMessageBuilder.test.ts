@@ -201,6 +201,43 @@ describe('chatMessageBuilder', () => {
     ])
   })
 
+  it('does not convert history tool summary messages into interrupted errors', () => {
+    const restored = sanitizeLoadedMessages([
+      {
+        id: 'assistant-history-tools',
+        role: 'assistant',
+        content: '',
+        timestamp: 1,
+        historyToolSummary: {
+          callCount: 3,
+          resultCount: 2,
+          successCount: 2,
+          errorCount: 0,
+          pendingCount: 0,
+          toolNames: ['read_file'],
+          buckets: [
+            {
+              category: 'read',
+              label: '读取',
+              count: 3,
+              successCount: 2,
+              errorCount: 0,
+              pendingCount: 0,
+              toolNames: ['read_file'],
+            },
+          ],
+          hasWrite: false,
+          hasCommand: false,
+          hasFailure: false,
+        },
+      },
+    ])
+
+    expect(restored[0]?.role).toBe('assistant')
+    expect(restored[0]?.content).toBe('')
+    expect(restored[0]?.historyToolSummary?.callCount).toBe(3)
+  })
+
   it('includes summary message after compact-boundary in model context', () => {
     const messages = buildChatMessagesWithOptions([
       {

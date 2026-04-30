@@ -1,6 +1,7 @@
 import { aiGetSession } from '@/api/ai'
 import type { AiMessage, AiMessageRecord, AiSession, ToolCallInfo, ToolResultInfo } from '@/types/ai'
 import { sanitizeLoadedMessages } from './chatMessageBuilder'
+import { summarizeToolActivity } from './toolActivitySummary'
 
 export const HISTORY_RECENT_RECORD_LIMIT = 50
 export const HISTORY_LOAD_STEP = 50
@@ -342,18 +343,13 @@ function collapseHistoryTools(message: AiMessage): AiMessage {
   const toolResultCount = message.toolResults?.length ?? 0
   if (toolCallCount === 0 && toolResultCount === 0) return message
 
-  const names = Array.from(new Set((message.toolCalls ?? []).map(tool => tool.name))).slice(0, 4)
-  const summary = [
-    `[历史工具调用已折叠：${toolCallCount} 个调用，${toolResultCount} 个结果]`,
-    names.length ? `工具：${names.join('、')}` : '',
-    '完整工具参数与结果仍保留在本地历史中。',
-  ].filter(Boolean).join('\n')
-
   return {
     ...message,
-    content: message.content?.trim()
-      ? `${message.content}\n\n${summary}`
-      : summary,
+    content: message.content?.trim() ?? '',
+    historyToolSummary: summarizeToolActivity({
+      toolCalls: message.toolCalls,
+      toolResults: message.toolResults,
+    }),
     toolCalls: undefined,
     toolResults: undefined,
   }
@@ -519,27 +515,33 @@ function restoreMessagesLightweight(records: AiMessageRecord[]): AiMessage[] {
     tokens?: number
     toolCallCount: number
     toolResultCount: number
-    toolNames: Set<string>
+    toolNames: string[]
+    toolResults: Array<Pick<ToolResultInfo, 'toolName' | 'success'>>
   }
 
   let pendingGroup: PendingToolGroup | null = null
 
   function flushGroup(): void {
     if (!pendingGroup) return
-    const { messageId, timestamp, tokens, toolCallCount, toolResultCount, toolNames } = pendingGroup
-    const names = Array.from(toolNames).slice(0, 4)
-    const summary = [
-      `[历史工具调用已折叠：${toolCallCount} 个调用，${toolResultCount} 个结果]`,
-      names.length ? `工具：${names.join('、')}` : '',
-      '完整工具参数与结果仍保留在本地历史中。',
-    ].filter(Boolean).join('\n')
+    const { messageId, timestamp, tokens, toolCallCount, toolResultCount, toolNames, toolResults } = pendingGroup
+    const names = toolNames.length
+      ? toolNames
+      : Array.from({ length: Math.max(1, toolCallCount) }, () => 'unknown_tool')
     messages.push({
       id: messageId,
       role: 'assistant',
-      content: summary,
+      content: '',
       timestamp,
       tokens,
       totalTokens: tokens,
+      historyToolSummary: {
+        ...summarizeToolActivity({
+          fallbackToolNames: names,
+          toolResults,
+        }),
+        callCount: toolCallCount,
+        resultCount: toolResultCount,
+      },
     })
     pendingGroup = null
   }
@@ -547,17 +549,18 @@ function restoreMessagesLightweight(records: AiMessageRecord[]): AiMessage[] {
   for (const record of records) {
     if (record.role === 'assistant' && record.contentType === 'tool_calls') {
       flushGroup()
-      const toolNames = new Set<string>()
+      const toolNames: string[] = []
       const nameMatches = record.content.matchAll(/"name"\s*:\s*"([^"]+)"/g)
-      for (const m of nameMatches) toolNames.add(m[1]!)
+      for (const m of nameMatches) toolNames.push(m[1]!)
       const countMatches = record.content.match(/\{[^{}]*"id"\s*:/g)
       pendingGroup = {
         messageId: record.id,
         timestamp: record.createdAt,
         tokens: record.tokens,
-        toolCallCount: countMatches?.length ?? (toolNames.size || 1),
+        toolCallCount: countMatches?.length ?? (toolNames.length || 1),
         toolResultCount: 0,
         toolNames,
+        toolResults: [],
       }
       continue
     }
@@ -565,7 +568,13 @@ function restoreMessagesLightweight(records: AiMessageRecord[]): AiMessage[] {
     if (record.role === 'tool' && record.contentType === 'tool_result') {
       if (pendingGroup) {
         pendingGroup.toolResultCount += 1
-        if (record.toolName) pendingGroup.toolNames.add(record.toolName)
+        if (record.toolName && pendingGroup.toolNames.length === 0) {
+          pendingGroup.toolNames.push(record.toolName)
+        }
+        pendingGroup.toolResults.push({
+          toolName: record.toolName ?? 'unknown_tool',
+          success: record.success !== false,
+        })
       }
       continue
     }

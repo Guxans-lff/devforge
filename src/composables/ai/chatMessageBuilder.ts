@@ -15,7 +15,8 @@ export function sanitizeLoadedMessages(msgs: AiMessage[]): AiMessage[] {
     if (m.role === 'assistant') {
       const noContent = !m.content || m.content.trim() === ''
       const noToolCalls = !m.toolCalls || m.toolCalls.length === 0
-      if (noContent && noToolCalls) {
+      const hasHistoryToolSummary = !!m.historyToolSummary
+      if (noContent && noToolCalls && !hasHistoryToolSummary) {
         out[i] = {
           ...m,
           role: 'error',
