@@ -677,45 +677,71 @@ describe('useDatabaseWorkspaceStore', () => {
   })
 
   // ─────────────────────────────────────────────
-  // openTableData
+  // query tab + tableBrowse
   // ─────────────────────────────────────────────
-  describe('openTableData', () => {
-    it('创建 table-data tab，context 包含正确的分页默认值', () => {
+  describe('query tab tableBrowse', () => {
+    it('query tab 的 tableBrowse 包含正确的分页默认值', () => {
       const store = useDatabaseWorkspaceStore()
-      store.getOrCreate(CONN)
+      const tab = store.addQueryTab(CONN)
 
-      store.openTableData(CONN, 'mydb', 'products')
+      store.updateTabContext(CONN, tab.id, {
+        tableBrowse: {
+          database: 'mydb',
+          table: 'products',
+          currentPage: 1,
+          pageSize: 100,
+        },
+      })
 
       const ws = store.getWorkspace(CONN)!
-      const dataTab = ws.tabs.find(t => t.type === 'table-data')
-      expect(dataTab).toBeDefined()
-
-      const ctx = dataTab!.context as { type: string; page: number; pageSize: number }
-      expect(ctx.page).toBe(1)
-      expect(ctx.pageSize).toBe(100)
+      const queryTab = ws.tabs.find(t => t.id === tab.id)!
+      const ctx = queryTab.context as { tableBrowse: { currentPage: number; pageSize: number } }
+      expect(ctx.tableBrowse.currentPage).toBe(1)
+      expect(ctx.tableBrowse.pageSize).toBe(100)
     })
 
-    it('table-data tab 的 context 包含正确的 database 和 table', () => {
+    it('query tab 的 tableBrowse 包含正确的 database 和 table', () => {
       const store = useDatabaseWorkspaceStore()
-      store.getOrCreate(CONN)
+      const tab = store.addQueryTab(CONN)
 
-      store.openTableData(CONN, 'shop', 'orders')
+      store.updateTabContext(CONN, tab.id, {
+        tableBrowse: {
+          database: 'shop',
+          table: 'orders',
+          currentPage: 1,
+          pageSize: 100,
+        },
+      })
 
       const ws = store.getWorkspace(CONN)!
-      const dataTab = ws.tabs.find(t => t.type === 'table-data')!
-      const ctx = dataTab.context as { database: string; table: string }
-      expect(ctx.database).toBe('shop')
-      expect(ctx.table).toBe('orders')
+      const queryTab = ws.tabs.find(t => t.id === tab.id)!
+      const ctx = queryTab.context as { tableBrowse: { database: string; table: string } }
+      expect(ctx.tableBrowse.database).toBe('shop')
+      expect(ctx.tableBrowse.table).toBe('orders')
     })
 
-    it('重复打开同一张表数据：只激活，不重复添加', () => {
+    it('重复写入同一张表浏览状态时不新增 tab', () => {
       const store = useDatabaseWorkspaceStore()
-      store.getOrCreate(CONN)
+      const tab = store.addQueryTab(CONN)
 
-      store.openTableData(CONN, 'mydb', 'users')
+      store.updateTabContext(CONN, tab.id, {
+        tableBrowse: {
+          database: 'mydb',
+          table: 'users',
+          currentPage: 1,
+          pageSize: 100,
+        },
+      })
       const countAfterFirst = store.getWorkspace(CONN)!.tabs.length
 
-      store.openTableData(CONN, 'mydb', 'users')
+      store.updateTabContext(CONN, tab.id, {
+        tableBrowse: {
+          database: 'mydb',
+          table: 'users',
+          currentPage: 1,
+          pageSize: 100,
+        },
+      })
       expect(store.getWorkspace(CONN)!.tabs.length).toBe(countAfterFirst)
     })
   })

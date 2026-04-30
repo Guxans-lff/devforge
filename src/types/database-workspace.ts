@@ -1,6 +1,17 @@
-import type { QueryResult } from './database'
+import type { QueryResult, BatchDatabaseExecutionResult, BatchExecutionSummary } from './database'
 
-export type InnerTabType = 'query' | 'table-editor' | 'import' | 'table-data' | 'schema-compare' | 'performance' | 'user-management' | 'er-diagram' | 'data-sync' | 'scheduler' | 'sql-builder'
+export interface SqlErrorAnalysis {
+  loading: boolean
+  streamingText: string
+  summary: string
+  fixSql: string
+  error: string | null
+  sourceSql: string
+  sourceError: string
+  updatedAt: number | null
+}
+
+export type InnerTabType = 'query' | 'table-editor' | 'import' | 'schema-compare' | 'performance' | 'user-management' | 'er-diagram' | 'data-sync' | 'scheduler' | 'sql-builder'
 
 /** 查询结果标签页 */
 export interface ResultTab {
@@ -17,6 +28,10 @@ export interface ResultTab {
   createdAt: number
   /** 多语句执行的子结果列表（仅多语句模式） */
   subResults?: SubStatementResult[]
+  /** 多数据库批量执行结果（仅批量执行模式） */
+  batchDatabaseResults?: BatchDatabaseExecutionResult[]
+  /** 多数据库批量执行汇总 */
+  batchExecutionSummary?: BatchExecutionSummary
 }
 
 /** 多语句执行中每条语句的结果 */
@@ -33,7 +48,7 @@ export interface InnerTab {
   title: string
   closable: boolean
   dirty?: boolean
-  context: QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext | UserManagementTabContext | ErDiagramTabContext | DataSyncTabContext | SchedulerTabContext | SqlBuilderTabContext
+  context: QueryTabContext | TableEditorTabContext | ImportTabContext | SchemaCompareTabContext | PerformanceTabContext | UserManagementTabContext | ErDiagramTabContext | DataSyncTabContext | SchedulerTabContext | SqlBuilderTabContext
 }
 
 export interface QueryTabContext {
@@ -44,10 +59,18 @@ export interface QueryTabContext {
   isInTransaction?: boolean    // 事务状态
   queryTimeout?: number        // 查询超时（秒）
   currentDatabase?: string
+  /** 数据库页当前选中的 AI Provider ID */
+  aiProviderId?: string
+  /** 数据库页当前选中的 AI Model ID */
+  aiModelId?: string
+  /** 当前 AI Provider 是否已配置 API Key */
+  aiHasApiKey?: boolean
   /** 结果标签页列表 */
   resultTabs?: ResultTab[]
   /** 当前激活的结果标签页 ID */
   activeResultTabId?: string
+  /** SQL 报错 AI 分析状态 */
+  sqlErrorAnalysis?: SqlErrorAnalysis
   // 表浏览模式（点击表名触发）
   tableBrowse?: {
     database: string
@@ -56,6 +79,8 @@ export interface QueryTabContext {
     pageSize: number
     whereClause?: string
     orderBy?: string
+    filterOperators?: Record<string, string>
+    showFilters?: boolean
     seekOrderBy?: string
     seekColumn?: string
     seekValue?: number
@@ -73,19 +98,6 @@ export interface ImportTabContext {
   database: string
   table?: string
   columns: string[]
-}
-
-export interface TableDataTabContext {
-  type: 'table-data'
-  database: string
-  table: string
-  page: number
-  pageSize: number
-  whereClause?: string
-  orderBy?: string
-  seekOrderBy?: string
-  seekColumn?: string
-  seekValue?: number
 }
 
 export interface SchemaCompareTabContext {

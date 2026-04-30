@@ -32,7 +32,33 @@ export interface StreamWithToolLoopParams {
   executeToolCalls: (toolCalls: ToolCallInfo[], sessionId: string) => Promise<ToolResultInfo[]>
   parseAndWriteJournalSections: (text: string, workDirPath: string) => void
   parseSpawnedTasks: (text: string) => void
+  requestOptions?: {
+    responseFormat?: 'json_object'
+    prefixCompletion?: boolean
+    prefixContent?: string
+  }
 }
+
+const MAX_CONSECUTIVE_EXPLORATORY_TOOL_ONLY_TURNS = 5
+const EXPLORATORY_TOOL_NAMES = new Set([
+  'read_file',
+  'read_tool_result',
+  'list_files',
+  'list_directory',
+  'search_files',
+])
+const EXPLORATORY_TOOL_SYNTHESIS_PROMPT = [
+  '[系统收敛指令]',
+  '你已经连续多轮只调用读取/搜索工具但没有输出正文。',
+  '现在不要再调用任何工具，也不要继续探索文件。',
+  '请只基于上面已经返回的工具结果，直接用中文回答用户：',
+  '1. 已确认的信息；',
+  '2. 当前结论；',
+  '3. 还缺什么信息或需要用户确认什么；',
+  '4. 如果任务可以继续，给出下一步执行建议。',
+].join('\n')
+const SYNTHESIS_TOOL_RESULT_MAX_CHARS = 12_000
+const SYNTHESIS_TOOL_RESULT_ITEM_CHARS = 2_000
 
 export async function streamWithToolLoop({
   sid,
@@ -60,16 +86,21 @@ export async function streamWithToolLoop({
   executeToolCalls,
   parseAndWriteJournalSections,
   parseSpawnedTasks,
+  requestOptions,
 }: StreamWithToolLoopParams): Promise<void> {
   let loopCount = 0
   let lastExecutedToolSignature = ''
   let lastExecutedResultSignature = ''
   let repeatedExecutionStreak = 0
+  let consecutiveExploratoryToolOnlyTurns = 0
+  let forceSynthesisWithoutTools = false
+  let exploratoryToolResultBuffer: ToolResultInfo[] = []
   log.info('stream_start', { sessionId: sid, model: model.id, enableTools, msgCount: chatMessages.length })
 
-  const disableAnthropicThinkingForToolLoop = provider.providerType === 'anthropic' && enableTools
-
   while (loopCount <= maxToolLoops) {
+    const currentEnableTools = enableTools && !forceSynthesisWithoutTools
+    const disableAnthropicThinkingForToolLoop = provider.providerType === 'anthropic' && currentEnableTools
+
     streamState.streamingMessageId = genId()
     streamState.pendingToolCalls = []
     streamState.lastFinishReason = ''
@@ -99,15 +130,18 @@ export async function streamWithToolLoop({
         apiKey,
         apiKeysByProvider,
         fallbackChain,
-        maxTokens: resolveRequestMaxTokens(model, { enableTools }),
+        maxTokens: resolveRequestMaxTokens(model, { enableTools: currentEnableTools }),
         systemPrompt,
-        enableTools,
+        enableTools: currentEnableTools,
         source: 'chat',
         kind: 'chat_completions',
         signal,
         thinkingBudget: model.capabilities.thinking && !disableAnthropicThinkingForToolLoop
           ? thinkingEffortToBudget(model.thinkingEffort)
           : undefined,
+        responseFormat: requestOptions?.responseFormat,
+        prefixCompletion: requestOptions?.prefixCompletion,
+        prefixContent: requestOptions?.prefixContent,
       },
       onStreamEvent,
     )
@@ -147,9 +181,9 @@ export async function streamWithToolLoop({
         if (streamState.lastFinishReason === 'length') {
           errMsg = `[输出被 max_tokens 截断] 模型 thinking 耗尽了输出预算（${model.capabilities.maxOutput} token）还没开始写正文。请在 Provider 设置里调大该模型的“最大输出”（建议 >= 16384），或换非 reasoning 模型。`
         } else if (hasThinking) {
-          errMsg = `[模型 thinking 后 stop 空回] finish_reason=${streamState.lastFinishReason}。MiMo / DeepSeek-R 系在 tool 循环第 2 轮常见此问题，尝试：1) 换模型测试 2) 在 Provider 里关闭该模型的 thinking 能力标志 3) 调大 max_tokens。`
+          errMsg = `[模型 thinking 后 stop 空回] finish_reason=${streamState.lastFinishReason}。本轮未产出正文，已安全停止。可点击“继续生成”恢复，或切换非 thinking 模型 / 调大 max_tokens 后重试。`
         } else {
-          errMsg = `[模型未生成回答] finish_reason=${streamState.lastFinishReason}。可能因异常中断或服务端问题。`
+          errMsg = `[模型未生成回答] finish_reason=${streamState.lastFinishReason}。可能因异常中断或服务端问题。本轮已安全停止，可点击“继续生成”恢复。`
         }
 
         log.warn('empty_assistant_converted_to_error', {
@@ -172,6 +206,57 @@ export async function streamWithToolLoop({
       finalMessage?.role === 'assistant'
       && streamState.lastFinishReason === 'tool_calls'
       && validToolCalls.length > 0
+    let shouldTrackExploratoryToolResults = false
+    let shouldSynthesizeAfterToolResults = false
+
+    if (forceSynthesisWithoutTools && canContinueToolLoop) {
+      log.warn('tool_loop_synthesis_ignored_no_tools', {
+        sessionId: sid,
+        tools: validToolCalls.map(toolCall => toolCall.name),
+      })
+      updateStreamingMessage(message => ({
+        ...message,
+        role: 'assistant',
+        content: '已停止继续调用工具。模型在总结模式下仍尝试调用工具，本轮已安全结束；请直接追问我基于已有结果总结。',
+        notice: {
+          kind: 'warn',
+          code: 'runtime_warning',
+          title: '模型未按总结模式输出',
+          text: '系统已禁用工具并要求直接总结，但模型仍尝试继续调用工具。为避免再次空转，本轮已停止。',
+          actionHint: '可以发送“直接总结已有结果”，系统会基于当前上下文继续。',
+        },
+        isStreaming: false,
+        toolCalls: [],
+      }))
+      streamState.pendingToolCalls = []
+      break
+    }
+
+    if (canContinueToolLoop) {
+      const hasAssistantText = !!finalMessage.content?.trim()
+      const isExploratoryOnly = validToolCalls.every(toolCall => EXPLORATORY_TOOL_NAMES.has(toolCall.name))
+
+      if (!hasAssistantText && isExploratoryOnly) {
+        consecutiveExploratoryToolOnlyTurns += 1
+        shouldTrackExploratoryToolResults = true
+      } else {
+        consecutiveExploratoryToolOnlyTurns = 0
+        exploratoryToolResultBuffer = []
+      }
+
+      if (consecutiveExploratoryToolOnlyTurns >= MAX_CONSECUTIVE_EXPLORATORY_TOOL_ONLY_TURNS) {
+        shouldSynthesizeAfterToolResults = true
+        log.warn('tool_loop_exploratory_tool_only_synthesis', {
+          sessionId: sid,
+          count: consecutiveExploratoryToolOnlyTurns,
+          tools: validToolCalls.map(toolCall => toolCall.name),
+        })
+      }
+    } else {
+      consecutiveExploratoryToolOnlyTurns = 0
+      forceSynthesisWithoutTools = false
+      exploratoryToolResultBuffer = []
+    }
 
     if (finalMessage && finalMessage.role === 'assistant') {
       const hasToolCalls = hasCompleteToolCalls
@@ -236,7 +321,13 @@ export async function streamWithToolLoop({
       log.warn('tool_loop_exceeded', { sessionId: sid, max: maxToolLoops })
       updateStreamingMessage(message => ({
         ...message,
-        notice: { kind: 'warn', text: `已达到工具调用上限 ${maxToolLoops} 次，本轮停止。可继续发消息让 AI 接着干。` },
+        notice: {
+          kind: 'warn',
+          code: 'tool_loop_limit',
+          title: 'AI 已暂停继续探索',
+          text: `本轮已经连续执行 ${maxToolLoops} 轮工具操作。为避免模型反复搜索或修改同一批内容，系统已先暂停。`,
+          actionHint: '如果结果已经够用，可以让 AI 总结当前结论；如果还需要继续，直接发送“继续”即可基于当前结果接着执行。',
+        },
         isStreaming: false,
       }))
       break
@@ -282,6 +373,9 @@ export async function streamWithToolLoop({
       toolCalls: validToolCalls,
       toolResults,
     }))
+    if (shouldTrackExploratoryToolResults) {
+      exploratoryToolResultBuffer = [...exploratoryToolResultBuffer, ...toolResults].slice(-12)
+    }
 
     if (
       currentToolSignature
@@ -333,9 +427,74 @@ export async function streamWithToolLoop({
       aiSaveMessage(toolRecord).catch(error => log.warn('save_tool_msg_failed', { sessionId: sid }, error))
     }
 
+    if (shouldSynthesizeAfterToolResults) {
+      const synthesisPrompt = buildExploratoryToolSynthesisPrompt(exploratoryToolResultBuffer)
+      updateStreamingMessage(message => ({
+        ...message,
+        content: '已读取到足够上下文，正在基于已有工具结果整理结论。',
+        notice: {
+          kind: 'info',
+          code: 'runtime_warning',
+          title: '已自动停止继续探索',
+          text: `模型连续 ${consecutiveExploratoryToolOnlyTurns} 轮只读取/搜索但没有输出正文。系统已切换为总结模式，避免继续空转。`,
+          actionHint: '下一条回复会基于已有工具结果直接总结，不再继续调用读取/搜索工具。',
+        },
+        isStreaming: false,
+      }))
+      chatMessages.push({
+        role: 'user',
+        content: synthesisPrompt,
+      })
+      streamState.pendingToolCalls = []
+      streamState.streamingMessageId = ''
+      consecutiveExploratoryToolOnlyTurns = 0
+      repeatedExecutionStreak = 0
+      lastExecutedToolSignature = ''
+      lastExecutedResultSignature = ''
+      forceSynthesisWithoutTools = true
+      log.info('tool_loop_synthesis_next', { sessionId: sid, newMsgCount: chatMessages.length })
+      continue
+    }
+
     streamState.streamingMessageId = ''
     log.info('tool_loop_next', { sessionId: sid, loopCount, newMsgCount: chatMessages.length })
   }
+}
+
+function buildExploratoryToolSynthesisPrompt(toolResults: ToolResultInfo[]): string {
+  let remainingChars = SYNTHESIS_TOOL_RESULT_MAX_CHARS
+  const sections: string[] = []
+
+  for (const [index, result] of toolResults.entries()) {
+    if (remainingChars <= 0) break
+    const rawContent = result.content.trim()
+    const content = rawContent.length > SYNTHESIS_TOOL_RESULT_ITEM_CHARS
+      ? `${rawContent.slice(0, SYNTHESIS_TOOL_RESULT_ITEM_CHARS)}\n……该工具结果已截断……`
+      : rawContent
+    const section = [
+      `### 工具结果 ${index + 1}: ${result.toolName}（${result.success ? '成功' : '失败'}）`,
+      content || '（空结果）',
+    ].join('\n')
+    if (section.length > remainingChars) {
+      sections.push(section.slice(0, remainingChars))
+      break
+    }
+    sections.push(section)
+    remainingChars -= section.length
+  }
+
+  const resultSummary = sections.length
+    ? sections.join('\n\n')
+    : '没有可用工具结果。'
+
+  return [
+    EXPLORATORY_TOOL_SYNTHESIS_PROMPT,
+    '',
+    '[已有工具结果摘要]',
+    resultSummary,
+    '',
+    '请直接输出面向用户的正文，不要提到“系统收敛指令”或内部工具循环。'
+  ].join('\n')
 }
 
 function buildToolCallSignature(toolCalls: ToolCallInfo[]): string {

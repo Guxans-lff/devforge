@@ -115,6 +115,9 @@ arboard = { version = "3", features = ["image-data"] }
 # SHA-256 校验（更新包完整性）
 sha2 = "0.10"
 
+# 系统监控（CPU/内存/磁盘/进程）
+sysinfo = "0.32"
+
 # 文件监听（去抖 + rename 配对）
 notify-debouncer-full = "0.4"
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -9,8 +9,8 @@ import {
 import QueryResultComponent from '@/components/database/QueryResult.vue'
 import ExplainPanel from '@/components/database/ExplainPanel.vue'
 import { useGridSearch } from '@/composables/useGridSearch'
-import type { QueryResult } from '@/types/database'
-import type { ResultTab, SubStatementResult } from '@/types/database-workspace'
+import type { QueryResult, BatchDatabaseExecutionResult } from '@/types/database'
+import type { ResultTab, SubStatementResult, SqlErrorAnalysis } from '@/types/database-workspace'
 
 const props = defineProps<{
   /** 当前显示的结果 */
@@ -39,6 +39,19 @@ const props = defineProps<{
   isTableBrowse: boolean
   /** 当前 SQL 编辑器选中的数据库（用于 SQL 查询模式下的编辑回写） */
   currentDatabase?: string
+  /** 当前表浏览上下文 */
+  tableBrowse?: {
+    database: string
+    table: string
+    currentPage: number
+    pageSize: number
+    whereClause?: string
+    orderBy?: string
+    filterOperators?: Record<string, string>
+    seekOrderBy?: string
+    seekColumn?: string
+    seekValue?: number
+  }
   /** 多语句子结果列表 */
   subResults: SubStatementResult[]
   /** 是否为多语句结果 */
@@ -52,6 +65,11 @@ const props = defineProps<{
   isExplaining: boolean
   /** 右键菜单状态 */
   contextMenu: { x: number; y: number; tabId: string } | null
+  /** SQL 报错 AI 分析 */
+  sqlErrorAnalysis?: SqlErrorAnalysis
+  aiConfigured?: boolean
+  aiProviderName?: string
+  aiModelName?: string
 }>()
 
 const emit = defineEmits<{
@@ -69,6 +87,9 @@ const emit = defineEmits<{
   closeContextMenu: []
   setActiveSubResult: [index: number]
   closeExplain: []
+  analyzeSqlError: []
+  applyFixedSql: [sql: string]
+  openAiConfig: []
 }>()
 
 const { t: _t } = useI18n()
@@ -79,6 +100,23 @@ const gridSearch = useGridSearch()
 /** 跳转到指定行对话框 */
 const showGoToLineDialog = ref(false)
 const goToLineInput = ref('')
+
+const activeBatchResults = ref<BatchDatabaseExecutionResult[]>([])
+
+const activeBatchTab = computed(() => props.resultTabs.find(tab => tab.id === props.activeResultTabId))
+const batchSummary = computed(() => activeBatchTab.value?.batchExecutionSummary)
+const skippedDatabases = computed(() => batchSummary.value?.skippedDatabases ?? [])
+
+function getBatchResults() {
+  const batchResults = activeBatchTab.value?.batchDatabaseResults ?? []
+  if (batchResults.length > 0 && activeBatchResults.value.length === 0) {
+    activeBatchResults.value = [batchResults[0]!]
+  }
+  if (batchResults.length === 0 && activeBatchResults.value.length > 0) {
+    activeBatchResults.value = []
+  }
+  return batchResults
+}
 
 /** 快捷键处理 */
 function handleKeydown(e: KeyboardEvent) {
@@ -267,6 +305,39 @@ defineExpose({ gridSearch })
       </button>
     </div>
 
+    <div v-if="getBatchResults().length > 0 && !showExplain" class="border-b border-border bg-muted/10 px-3 py-2">
+      <div class="mb-2 flex items-center gap-3 text-[11px] text-muted-foreground">
+        <span>目标 {{ batchSummary?.targetDatabases.length ?? getBatchResults().length }} 个库</span>
+        <span>已执行 {{ getBatchResults().length }}</span>
+        <span class="text-df-success">成功 {{ getBatchResults().filter(item => item.success).length }}</span>
+        <span class="text-destructive">失败 {{ getBatchResults().filter(item => !item.success).length }}</span>
+      </div>
+      <div
+        v-if="skippedDatabases.length > 0"
+        class="mb-2 rounded border border-df-warning/30 bg-df-warning/10 px-2 py-1.5 text-[11px] text-df-warning"
+      >
+        <div class="font-medium">已按错误策略停止，以下 {{ skippedDatabases.length }} 个库未执行：</div>
+        <div class="mt-1 break-all text-[10px] leading-5">
+          {{ skippedDatabases.join('、') }}
+        </div>
+      </div>
+      <div class="max-h-40 space-y-1 overflow-y-auto pr-1">
+        <button
+          v-for="item in getBatchResults()"
+          :key="item.database"
+          class="flex w-full items-center gap-2 rounded border px-2 py-1.5 text-left text-[11px] transition-colors"
+          :class="activeBatchResults[0]?.database === item.database ? 'border-primary bg-primary/5' : 'border-border/40 hover:bg-muted/40'"
+          @click="activeBatchResults = [item]"
+        >
+          <CheckCircle2 v-if="item.success" class="h-3 w-3 text-df-success" />
+          <XCircle v-else class="h-3 w-3 text-destructive" />
+          <span class="min-w-0 flex-1 truncate font-medium">{{ item.database }}</span>
+          <span class="text-[10px] text-muted-foreground">{{ item.executionTimeMs }}ms</span>
+          <span v-if="item.stoppedByStrategy" class="text-[10px] text-df-warning">停止点</span>
+        </button>
+      </div>
+    </div>
+
     <!-- 主结果面板 -->
     <ExplainPanel
       v-if="showExplain"
@@ -280,23 +351,31 @@ defineExpose({ gridSearch })
     />
     <QueryResultComponent
       v-else
-      :key="`qr-${currentBrowseDb}-${currentBrowseTable}-${activeResultTabId}`"
-      :result="displayResult"
+      :key="`qr-${currentBrowseDb}-${currentBrowseTable}-${activeResultTabId}-${activeBatchResults[0]?.database ?? 'default'}`"
+      :result="activeBatchResults[0]?.result ?? displayResult"
       :loading="isExecuting"
       :loading-more="isLoadingMore"
       :has-more-server-rows="hasMoreServerRows"
       :show-reconnect="!isConnected"
       :connection-id="connectionId"
-      :database="currentBrowseDb || currentDatabase"
-      :table-name="currentBrowseTable || displayResult?.tableName"
+      :database="activeBatchResults[0]?.database || currentBrowseDb || currentDatabase"
+      :table-name="currentBrowseTable || activeBatchResults[0]?.result?.tableName || displayResult?.tableName"
       :driver="driver"
       :is-table-browse="isTableBrowse"
+      :table-browse="tableBrowse"
+      :sql-error-analysis="sqlErrorAnalysis"
+      :ai-configured="aiConfigured"
+      :ai-provider-name="aiProviderName"
+      :ai-model-name="aiModelName"
       class="flex-1 min-h-0"
       @reconnect="emit('reconnect')"
       @load-more="emit('loadMore')"
       @refresh="emit('refresh')"
       @server-filter="emit('serverFilter', $event)"
       @server-sort="emit('serverSort', $event)"
+      @analyze-sql-error="emit('analyzeSqlError')"
+      @apply-fixed-sql="emit('applyFixedSql', $event)"
+      @open-ai-config="emit('openAiConfig')"
     />
   </div>
 </template>

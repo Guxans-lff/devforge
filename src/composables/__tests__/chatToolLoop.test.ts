@@ -187,6 +187,30 @@ describe('chatToolLoop', () => {
     })
   })
 
+  it('passes JSON mode and prefix completion options to gateway request', async () => {
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      onEvent({ type: 'TextDelta', delta: '{"ok":true}' })
+      onEvent({ type: 'Done', finish_reason: 'stop' })
+    })
+
+    const params = makeParams({
+      requestOptions: {
+        responseFormat: 'json_object',
+        prefixCompletion: true,
+        prefixContent: '{"ok":',
+      },
+    })
+
+    await streamWithToolLoop(params)
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(1)
+    expect(aiChatStreamMock.mock.calls[0]?.[0]).toMatchObject({
+      responseFormat: 'json_object',
+      prefixCompletion: true,
+      prefixContent: '{"ok":',
+    })
+  })
+
   it('emits request start for each upstream stream attempt', async () => {
     aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
       onEvent({ type: 'ToolCall', id: `tool-${aiChatStreamMock.mock.calls.length}`, name: 'read_file', arguments: '{"path":"a.ts"}' })
@@ -218,6 +242,21 @@ describe('chatToolLoop', () => {
     expect(params.messages.value[0]?.role).toBe('error')
     expect(params.parseAndWriteJournalSections).not.toHaveBeenCalled()
     expect(params.parseSpawnedTasks).not.toHaveBeenCalled()
+  })
+
+  it('marks empty thinking stop as recoverable guidance instead of provider-only failure', async () => {
+    const params = makeParams()
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      const message = params.messages.value.find(item => item.id === params.streamState.streamingMessageId)
+      if (message) message.thinking = '已经分析完工具结果'
+      onEvent({ type: 'Done', finish_reason: 'stop' })
+    })
+
+    await streamWithToolLoop(params)
+
+    expect(params.messages.value[0]?.role).toBe('error')
+    expect(params.messages.value[0]?.content).toContain('可点击“继续生成”恢复')
+    expect(params.messages.value[0]?.content).not.toContain('关闭该模型的 thinking 能力标志')
   })
 
   it('does not execute incomplete streamed tool calls with invalid JSON arguments', async () => {
@@ -371,6 +410,46 @@ describe('chatToolLoop', () => {
     expect(params.executeToolCalls).toHaveBeenCalledTimes(2)
     expect(params.messages.value.at(-1)?.role).toBe('error')
     expect(params.messages.value.at(-1)?.content).toContain('工具循环疑似卡住')
+  })
+
+  it('switches to synthesis when the model keeps exploring without assistant text', async () => {
+    aiChatStreamMock.mockImplementation(async (_request, onEvent: (event: AiStreamEvent) => void) => {
+      const callIndex = aiChatStreamMock.mock.calls.length
+      if (callIndex >= 6) {
+        onEvent({ type: 'TextDelta', delta: '基于已有结果，当前结论是可以开始拆分实现。' })
+        onEvent({ type: 'Done', finish_reason: 'stop' })
+        return
+      }
+      const toolName = callIndex % 2 === 0 ? 'search_files' : 'read_file'
+      const args = toolName === 'search_files'
+        ? `{"query":"case-${callIndex}"}`
+        : `{"path":"src/case-${callIndex}.ts"}`
+      onEvent({ type: 'ToolCall', id: `tool-${callIndex}`, name: toolName, arguments: args })
+      onEvent({ type: 'Done', finish_reason: 'tool_calls' })
+    })
+
+    const params = makeParams({
+      maxToolLoops: 10,
+      executeToolCalls: vi.fn(async (toolCalls: ToolCallInfo[]): Promise<ToolResultInfo[]> =>
+        toolCalls.map(tool => ({
+          toolCallId: tool.id,
+          toolName: tool.name,
+          success: true,
+          content: `unique-result:${tool.id}`,
+        })),
+      ),
+    })
+
+    await streamWithToolLoop(params)
+
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(6)
+    expect(params.executeToolCalls).toHaveBeenCalledTimes(5)
+    expect(aiChatStreamMock.mock.calls[5]?.[0]).toMatchObject({ enableTools: false })
+    expect(aiChatStreamMock.mock.calls[5]?.[0].messages.at(-1)?.content).toContain('[已有工具结果摘要]')
+    expect(aiChatStreamMock.mock.calls[5]?.[0].messages.at(-1)?.content).toContain('unique-result:tool-4')
+    expect(params.messages.value.at(-2)?.notice?.title).toBe('已自动停止继续探索')
+    expect(params.messages.value.at(-1)?.role).toBe('assistant')
+    expect(params.messages.value.at(-1)?.content).toContain('当前结论')
   })
 })
 

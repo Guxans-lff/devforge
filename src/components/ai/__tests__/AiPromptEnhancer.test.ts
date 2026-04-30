@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 import AiPromptEnhancer from '@/components/ai/AiPromptEnhancer.vue'
 
 const { optimizePromptMock, iteratePromptMock, getCredentialMock } = vi.hoisted(() => ({
@@ -119,8 +120,21 @@ function mountEnhancer(props?: Partial<InstanceType<typeof AiPromptEnhancer>['$p
   })
 }
 
+function findButtonByText(wrapper: ReturnType<typeof mountEnhancer>, text: string) {
+  const button = wrapper.findAll('button').find(candidate => candidate.text().includes(text))
+  expect(button, `button text: ${text}`).toBeTruthy()
+  return button!
+}
+
+async function flushPromptEnhancer() {
+  await Promise.resolve()
+  await Promise.resolve()
+  await nextTick()
+}
+
 describe('AiPromptEnhancer', () => {
   beforeEach(() => {
+    setActivePinia(createPinia())
     vi.clearAllMocks()
     localePrefix.value = ''
     getCredentialMock.mockResolvedValue('secret')
@@ -148,8 +162,7 @@ describe('AiPromptEnhancer', () => {
     const wrapper = mountEnhancer()
 
     await wrapper.setProps({ open: true })
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromptEnhancer()
 
     expect(getCredentialMock).toHaveBeenCalledWith('ai-provider-provider-1')
     expect(optimizePromptMock).toHaveBeenCalledTimes(1)
@@ -170,8 +183,7 @@ describe('AiPromptEnhancer', () => {
     const wrapper = mountEnhancer()
 
     await wrapper.setProps({ open: true })
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromptEnhancer()
 
     const select = wrapper.find('select')
     expect(select.text()).toContain('ai.promptEnhancer.templateGeneral')
@@ -189,8 +201,7 @@ describe('AiPromptEnhancer', () => {
     const wrapper = mountEnhancer()
 
     await wrapper.setProps({ open: true })
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromptEnhancer()
 
     const select = wrapper.find('select')
     expect(select.exists()).toBe(true)
@@ -204,16 +215,12 @@ describe('AiPromptEnhancer', () => {
     const wrapper = mountEnhancer()
 
     await wrapper.setProps({ open: true })
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromptEnhancer()
 
     const select = wrapper.find('select')
     expect(select.exists()).toBe(true)
     await select.setValue('code-optimize')
-    const buttons = wrapper.findAll('button')
-    await buttons[0]!.trigger('click')
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromptEnhancer()
 
     expect(optimizePromptMock).toHaveBeenLastCalledWith(expect.objectContaining({
       templateId: 'code-optimize',
@@ -302,10 +309,8 @@ describe('AiPromptEnhancer', () => {
     const wrapper = mountEnhancer()
 
     await wrapper.setProps({ open: true })
-    await Promise.resolve()
-    await Promise.resolve()
-    const buttons = wrapper.findAll('button')
-    await buttons[buttons.length - 1]!.trigger('click')
+    await flushPromptEnhancer()
+    await findButtonByText(wrapper, 'ai.promptEnhancer.useEnhanced').trigger('click')
 
     expect(wrapper.emitted('accept')?.[0]).toEqual(['optimized prompt'])
     expect(wrapper.emitted('update:open')?.at(-1)).toEqual([false])
@@ -316,16 +321,14 @@ describe('AiPromptEnhancer', () => {
     const wrapper = mountEnhancer()
 
     await wrapper.setProps({ open: true })
-    await Promise.resolve()
-    await Promise.resolve()
+    await flushPromptEnhancer()
     await wrapper.find('textarea').setValue('make it shorter')
-    const buttons = wrapper.findAll('button')
-    await buttons[buttons.length - 2]!.trigger('click')
-    await Promise.resolve()
-    await Promise.resolve()
+    await findButtonByText(wrapper, 'ai.promptEnhancer.iterate').trigger('click')
+    await flushPromptEnhancer()
     await nextTick()
 
     expect(wrapper.text()).toContain('optimized prompt')
     expect(wrapper.text()).toContain('iterate failed')
   })
 })
+

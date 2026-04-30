@@ -15,7 +15,7 @@ export function useFileTree(scrollContainerRef: Ref<HTMLElement | null>) {
   const { overscan, attach } = useAdaptiveOverscan(scrollContainerRef, {
     baseOverscan: 20,
     maxOverscan: 60,
-    rowHeight: 28,
+    rowHeight: 36,
     velocityThreshold: 15,
     decayDelay: 300,
   })
@@ -23,7 +23,7 @@ export function useFileTree(scrollContainerRef: Ref<HTMLElement | null>) {
   const virtualizer = useVirtualizer(computed(() => ({
     count: store.flatNodes.length,
     getScrollElement: () => scrollContainerRef.value,
-    estimateSize: (index: number) => store.flatNodes[index]?.isRootHeader ? 32 : 28,
+    estimateSize: (index: number) => store.flatNodes[index]?.isRootHeader ? 40 : 36,
     overscan: overscan.value,
   })))
 

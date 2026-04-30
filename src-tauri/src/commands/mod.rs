@@ -21,6 +21,7 @@ pub mod sftp;
 pub mod sql_snippet;
 pub mod ssh;
 pub mod sync;
+pub mod system_monitor;
 pub mod table_editor;
 pub mod terminal_recorder;
 pub mod transfer;

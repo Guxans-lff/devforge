@@ -222,5 +222,6 @@ describe('AiMessageListVirtual', () => {
     await new Promise(resolve => requestAnimationFrame(resolve))
 
     expect(scrollToIndexMock).toHaveBeenCalledWith(0, { align: 'end' })
+    expect(scrollToIndexMock).toHaveBeenCalledTimes(2)
   })
 })

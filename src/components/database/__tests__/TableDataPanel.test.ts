@@ -50,8 +50,9 @@ vi.mock('@/components/database/QueryResult.vue', () => ({
       'database',
       'tableName',
       'driver',
+      'tableBrowse',
     ],
-    emits: ['load-more', 'server-filter', 'server-sort'],
+    emits: ['load-more', 'server-filter', 'server-sort', 'sync-table-browse'],
     setup(props, { emit }) {
       return () => h('div', {
         'data-testid': 'query-result',
@@ -94,14 +95,23 @@ function makeResult(rows: unknown[][], dataType = 'INT', totalCount: number | nu
 
 function mountPanel() {
   const store = useDatabaseWorkspaceStore()
-  store.openTableData('conn-1', 'demo', 'users')
+  const tab = store.addQueryTab('conn-1')
+  store.updateTabContext('conn-1', tab.id, {
+    tableBrowse: {
+      database: 'demo',
+      table: 'users',
+      currentPage: 1,
+      pageSize: 100,
+    },
+  })
 
   return {
     store,
+    tabId: tab.id,
     wrapper: mount(TableDataPanel, {
       props: {
         connectionId: 'conn-1',
-        tabId: 'conn-1-table-data-demo-users',
+        tabId: tab.id,
         isConnected: true,
         driver: 'mysql',
       },
@@ -163,19 +173,19 @@ describe('TableDataPanel', () => {
       .mockResolvedValueOnce(makeResult([[1, 'Ada'], [2, 'Linus']], 'INT', 3))
       .mockResolvedValueOnce(makeResult([[3, 'Grace']], 'INT', 4))
 
-    const { store, wrapper } = mountPanel()
+    const { store, tabId, wrapper } = mountPanel()
     await flushPromises()
 
     await wrapper.findComponent({ name: 'QueryResultComponent' }).vm.$emit('load-more')
     await flushPromises()
 
-    const ctx = store.getWorkspace('conn-1')?.tabs.find(tab => tab.id === 'conn-1-table-data-demo-users')?.context as any
+    const ctx = store.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
     expect(dbGetTableDataMock).toHaveBeenNthCalledWith(1, 'conn-1', 'demo', 'users', 1, 100, null, 'id ASC')
     expect(dbGetTableDataMock).toHaveBeenNthCalledWith(2, 'conn-1', 'demo', 'users', 2, 100, null, 'id ASC', 'id', 2)
-    expect(ctx.page).toBe(2)
-    expect(ctx.seekOrderBy).toBe('id ASC')
-    expect(ctx.seekColumn).toBe('id')
-    expect(ctx.seekValue).toBe(3)
+    expect(ctx.tableBrowse.currentPage).toBe(2)
+    expect(ctx.tableBrowse.seekOrderBy).toBe('id ASC')
+    expect(ctx.tableBrowse.seekColumn).toBe('id')
+    expect(ctx.tableBrowse.seekValue).toBe(3)
   })
 
   it('falls back to offset pagination when a server-side sort is active', async () => {
@@ -193,5 +203,91 @@ describe('TableDataPanel', () => {
 
     expect(dbGetTableDataMock).toHaveBeenNthCalledWith(2, 'conn-1', 'demo', 'users', 1, 100, null, 'name DESC')
     expect(dbGetTableDataMock).toHaveBeenNthCalledWith(3, 'conn-1', 'demo', 'users', 2, 100, null, 'name DESC', undefined, undefined)
+  })
+
+  it('applies server filter then rewrites tableBrowse paging and filter state', async () => {
+    dbGetTableDataMock
+      .mockResolvedValueOnce(makeResult([[1, 'Ada'], [2, 'Linus']], 'INT', 4))
+      .mockResolvedValueOnce(makeResult([[10, 'Ada']], 'INT', 1))
+
+    const { store, tabId, wrapper } = mountPanel()
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'QueryResultComponent' }).vm.$emit('server-filter', "`name` LIKE '%Ada%'")
+    await flushPromises()
+
+    const ctx = store.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+    expect(dbGetTableDataMock).toHaveBeenNthCalledWith(2, 'conn-1', 'demo', 'users', 1, 100, "`name` LIKE '%Ada%'", 'id ASC')
+    expect(ctx.tableBrowse.currentPage).toBe(1)
+    expect(ctx.tableBrowse.whereClause).toBe("`name` LIKE '%Ada%'")
+    expect(ctx.tableBrowse.orderBy).toBeUndefined()
+    expect(ctx.tableBrowse.seekOrderBy).toBe('id ASC')
+    expect(ctx.tableBrowse.seekColumn).toBe('id')
+    expect(ctx.tableBrowse.seekValue).toBe(10)
+  })
+
+  it('changes page size then resets to first page and syncs new size to tableBrowse', async () => {
+    dbGetTableDataMock
+      .mockResolvedValueOnce(makeResult([[1, 'Ada']], 'INT', 3))
+      .mockResolvedValueOnce(makeResult([[1, 'Ada'], [2, 'Linus']], 'INT', 3))
+
+    const { store, tabId, wrapper } = mountPanel()
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'Select' }).vm.$emit('update:modelValue', '200')
+    await flushPromises()
+
+    const ctx = store.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+    expect(dbGetTableDataMock).toHaveBeenNthCalledWith(2, 'conn-1', 'demo', 'users', 1, 200, null, 'id ASC')
+    expect(ctx.tableBrowse.currentPage).toBe(1)
+    expect(ctx.tableBrowse.pageSize).toBe(200)
+  })
+
+  it('结果区切换筛选显示态时回写 tableBrowse，避免重建后丢失显示状态', async () => {
+    dbGetTableDataMock.mockResolvedValueOnce(makeResult([[1, 'Ada']], 'INT', 3))
+
+    const { store, tabId, wrapper } = mountPanel()
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'QueryResultComponent' }).vm.$emit('sync-table-browse', { showFilters: true })
+    await flushPromises()
+
+    let ctx = store.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+    expect(ctx.tableBrowse.showFilters).toBe(true)
+
+    await wrapper.findComponent({ name: 'QueryResultComponent' }).vm.$emit('sync-table-browse', { showFilters: false })
+    await flushPromises()
+
+    ctx = store.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+    expect(ctx.tableBrowse.showFilters).toBe(false)
+  })
+
+  it('将最新 tableBrowse 直接透传给 QueryResult，避免结果区维护第二份筛选排序状态', async () => {
+    dbGetTableDataMock
+      .mockResolvedValueOnce(makeResult([[1, 'Ada']], 'INT', 3))
+      .mockResolvedValueOnce(makeResult([[10, 'Ada']], 'INT', 1))
+      .mockResolvedValueOnce(makeResult([[10, 'Ada']], 'INT', 1))
+
+    const { wrapper } = mountPanel()
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'QueryResultComponent' }).vm.$emit('server-filter', "`name` LIKE '%Ada%'")
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'QueryResultComponent' }).vm.$emit('server-sort', '`name` ASC')
+    await flushPromises()
+
+    const queryResult = wrapper.findComponent({ name: 'QueryResultComponent' })
+    expect(queryResult.props('tableBrowse')).toEqual({
+      database: 'demo',
+      table: 'users',
+      currentPage: 1,
+      pageSize: 100,
+      whereClause: "`name` LIKE '%Ada%'",
+      orderBy: '`name` ASC',
+      seekOrderBy: undefined,
+      seekColumn: undefined,
+      seekValue: undefined,
+    })
   })
 })

@@ -214,43 +214,43 @@ if (selectedProfile.value) loadProfileToForm(selectedProfile.value)
 </script>
 
 <template>
-  <section class="space-y-4 rounded-xl border border-border/40 bg-card/40 p-5">
-    <div class="flex items-start justify-between gap-4">
-      <div class="space-y-1">
+  <section class="space-y-5 rounded-2xl border border-border/40 bg-card/45 p-5 shadow-[0_18px_60px_rgba(0,0,0,0.14)]">
+    <div class="flex items-start justify-between gap-4 rounded-xl border border-border/25 bg-gradient-to-br from-violet-500/[0.08] via-transparent to-cyan-500/[0.05] px-4 py-3.5">
+      <div class="min-w-0 space-y-1">
         <div class="flex items-center gap-2">
           <div class="h-1 w-1 rounded-full bg-violet-500" />
           <h3 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             Provider Profile Bundle
           </h3>
         </div>
-        <p class="text-xs text-muted-foreground">
+        <p class="max-w-3xl text-xs leading-relaxed text-muted-foreground">
           把 Provider / Model / Output Style / Workspace Prompt / 安全策略打成可预览、可备份、可回滚的配置包。
         </p>
       </div>
-      <Button variant="outline" size="sm" class="h-8 text-xs" @click="createNewProfile">
+      <Button variant="outline" size="sm" class="h-8 shrink-0 text-xs" @click="createNewProfile">
         新建
       </Button>
     </div>
 
-    <div class="grid gap-4 lg:grid-cols-[220px_1fr]">
-      <div class="space-y-2">
+    <div class="space-y-5">
+      <div class="flex gap-2 overflow-x-auto pb-1">
         <button
           v-for="profile in store.profiles"
           :key="profile.id"
-          class="w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors"
-          :class="selectedProfileId === profile.id ? 'border-primary/40 bg-primary/5 text-foreground' : 'border-border/30 bg-muted/20 text-muted-foreground hover:bg-muted/40'"
+          class="min-w-[220px] max-w-[280px] rounded-xl border px-3.5 py-2.5 text-left text-xs transition-colors"
+          :class="selectedProfileId === profile.id ? 'border-primary/45 bg-primary/7 text-foreground shadow-sm' : 'border-border/30 bg-muted/18 text-muted-foreground hover:bg-muted/35'"
           @click="selectProfile(profile.id)"
         >
-          <div class="font-medium">{{ profile.name }}</div>
+          <div class="truncate font-medium">{{ profile.name }}</div>
           <div class="mt-1 truncate text-[10px] opacity-70">{{ profile.providerId }} / {{ profile.modelId }}</div>
         </button>
-        <div v-if="store.profiles.length === 0" class="rounded-lg border border-dashed border-border/40 p-4 text-xs text-muted-foreground">
+        <div v-if="store.profiles.length === 0" class="min-w-[260px] rounded-xl border border-dashed border-border/40 bg-muted/10 p-4 text-xs text-muted-foreground">
           暂无 Profile，先从当前选择创建一个。
         </div>
       </div>
 
-      <div class="space-y-4">
-        <div class="grid gap-3 sm:grid-cols-2">
+      <div class="space-y-5">
+        <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <div class="space-y-1.5">
             <Label class="text-xs">名称</Label>
             <Input v-model="form.name" class="h-9 text-sm" placeholder="例如：主力编码配置" />
@@ -307,22 +307,22 @@ if (selectedProfile.value) loadProfileToForm(selectedProfile.value)
           </div>
         </div>
 
-        <div class="grid gap-3 sm:grid-cols-3">
-          <label class="flex items-center gap-2 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-xs">
+        <div class="grid gap-3 md:grid-cols-3">
+          <label class="flex min-h-10 items-center gap-2 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-xs">
             <input v-model="form.planGateEnabled" type="checkbox" class="h-3.5 w-3.5">
             Plan Gate
           </label>
-          <label class="flex items-center gap-2 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-xs">
+          <label class="flex min-h-10 items-center gap-2 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-xs">
             <input v-model="form.allowLocalhost" type="checkbox" class="h-3.5 w-3.5">
             允许 localhost
           </label>
-          <label class="flex items-center gap-2 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-xs">
+          <label class="flex min-h-10 items-center gap-2 rounded-lg border border-border/30 bg-muted/20 px-3 py-2 text-xs">
             <input v-model="form.allowPrivateIP" type="checkbox" class="h-3.5 w-3.5">
             允许私网地址
           </label>
         </div>
 
-        <div class="grid gap-3 sm:grid-cols-3">
+        <div class="grid gap-3 md:grid-cols-3">
           <div class="space-y-1.5">
             <Label class="text-xs">Dispatcher 并发</Label>
             <Input v-model.number="form.dispatcherMaxParallel" type="number" min="1" class="h-9 text-sm" />

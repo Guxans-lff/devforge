@@ -404,15 +404,6 @@ fn parse_disks(section: &str) -> Vec<crate::models::ssh::DiskInfo> {
         }
 
         let filesystem = parts[0].to_string();
-        // 跳过伪文件系统
-        if filesystem.starts_with("tmpfs")
-            || filesystem.starts_with("devtmpfs")
-            || filesystem == "none"
-            || filesystem == "udev"
-        {
-            continue;
-        }
-
         let (mount_point, total_mb, used_mb, available_mb, use_percent) = if is_output_format {
             // --output=source,target,size,used,avail,pcent
             // [0]=source [1]=target [2]=size [3]=used [4]=avail [5]=pcent
@@ -435,6 +426,10 @@ fn parse_disks(section: &str) -> Vec<crate::models::ssh::DiskInfo> {
             (mount, total, used, avail, pct)
         };
 
+        if should_skip_disk(&filesystem, &mount_point) {
+            continue;
+        }
+
         disks.push(crate::models::ssh::DiskInfo {
             filesystem,
             mount_point,
@@ -446,6 +441,58 @@ fn parse_disks(section: &str) -> Vec<crate::models::ssh::DiskInfo> {
     }
 
     disks
+}
+
+fn should_skip_disk(filesystem: &str, mount_point: &str) -> bool {
+    let fs = filesystem.to_ascii_lowercase();
+    let mount = mount_point.to_ascii_lowercase();
+
+    let skipped_filesystems = [
+        "tmpfs",
+        "devtmpfs",
+        "udev",
+        "none",
+        "overlay",
+        "squashfs",
+        "aufs",
+        "nsfs",
+        "ramfs",
+        "proc",
+        "sysfs",
+        "cgroup",
+        "cgroup2",
+        "debugfs",
+        "mqueue",
+        "fusectl",
+        "tracefs",
+        "configfs",
+        "securityfs",
+        "pstore",
+        "autofs",
+        "binfmt_misc",
+    ];
+
+    if skipped_filesystems.iter().any(|prefix| fs == *prefix || fs.starts_with(&format!("{}:", prefix))) {
+        return true;
+    }
+
+    if fs.starts_with("/dev/loop") {
+        return true;
+    }
+
+    let skipped_mount_prefixes = [
+        "/snap/",
+        "/proc",
+        "/sys",
+        "/run",
+        "/dev",
+        "/var/lib/docker/overlay2",
+        "/var/lib/containers/storage/overlay",
+    ];
+
+    skipped_mount_prefixes
+        .iter()
+        .any(|prefix| mount == *prefix || mount.starts_with(prefix))
 }
 
 /// 从 /proc/net/dev 解析网络接口信息

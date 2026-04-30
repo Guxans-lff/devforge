@@ -130,6 +130,24 @@ pub struct ProviderConfig {
     pub security: Option<ProviderSecurityConfig>,
 }
 
+/// Provider 模型列表接口返回的单个模型
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRemoteModel {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owned_by: Option<String>,
+}
+
+/// Provider 模型列表接口返回
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderModelsResponse {
+    pub models: Vec<ProviderRemoteModel>,
+}
+
 // ─────────────────────────────────── 对话请求 ───────────────────────────────────
 
 /// 对话消息角色
@@ -164,6 +182,9 @@ pub struct ChatMessage {
     /// Reasoning 模型工作记忆回传（MiMo / DeepSeek-R 系，assistant 角色携带）
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_content: Option<String>,
+    /// DeepSeek chat prefix completion：assistant 最后一条消息可携带 prefix=true
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prefix: Option<bool>,
 }
 
 /// 工具调用记录（完整）
@@ -220,6 +241,15 @@ pub struct ChatConfig {
     /// - 仅支持 thinking 能力的模型生效
     #[serde(default)]
     pub thinking_budget: Option<u32>,
+    /// OpenAI compatible JSON Mode：response_format={ type: "json_object" }
+    #[serde(default)]
+    pub response_format: Option<String>,
+    /// DeepSeek chat prefix completion 开关
+    #[serde(default)]
+    pub prefix_completion: Option<bool>,
+    /// DeepSeek chat prefix completion 的 assistant 前缀文本
+    #[serde(default)]
+    pub prefix_content: Option<String>,
 }
 
 impl Default for ChatConfig {
@@ -232,8 +262,21 @@ impl Default for ChatConfig {
             tools: None,
             tool_choice: None,
             thinking_budget: None,
+            response_format: None,
+            prefix_completion: None,
+            prefix_content: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CompletionResult {
+    pub content: String,
+    pub model: String,
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub finish_reason: String,
 }
 
 // ─────────────────────────────────── 流式事件 ───────────────────────────────────

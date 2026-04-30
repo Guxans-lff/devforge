@@ -199,6 +199,7 @@ describe('useAiChatViewState', () => {
       'api-key',
       expect.stringContaining('Working directory: `D:/workspace`.'),
       [attachment],
+      undefined,
     )
     expect(onSent).toHaveBeenCalledWith('please check')
   })
@@ -258,6 +259,32 @@ describe('useAiChatViewState', () => {
       'api-key',
       expect.anything(),
       [],
+      undefined,
+    )
+  })
+
+  it('passes DeepSeek request options through to chat send', async () => {
+    const { state, chat } = makeHarness()
+
+    state.syncDefaultProviderSelection()
+    await state.sendMessageNow('return json', [], undefined, {
+      responseFormat: 'json_object',
+      prefixCompletion: true,
+      prefixContent: '{"ok":',
+    })
+
+    expect(chat.send).toHaveBeenCalledWith(
+      'return json',
+      provider,
+      model,
+      'api-key',
+      expect.anything(),
+      [],
+      {
+        responseFormat: 'json_object',
+        prefixCompletion: true,
+        prefixContent: '{"ok":',
+      },
     )
   })
 })

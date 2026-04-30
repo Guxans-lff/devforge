@@ -8,7 +8,6 @@ import type {
   QueryTabContext,
   TableEditorTabContext,
   ImportTabContext,
-  TableDataTabContext,
   SchemaCompareTabContext,
   PerformanceTabContext,
   DataSyncTabContext,
@@ -25,6 +24,12 @@ interface PersistedTab {
   sql?: string
   /** 查询类型标签页的当前数据库 */
   currentDatabase?: string
+  /** 查询类型标签页的 AI Provider 选择 */
+  aiProviderId?: string
+  /** 查询类型标签页的 AI Model 选择 */
+  aiModelId?: string
+  /** 查询类型标签页的 AI Key 配置状态 */
+  aiHasApiKey?: boolean
 }
 
 /** 持久化快照中的工作区 */
@@ -54,7 +59,9 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
 
   function getOrCreate(connectionId: string): ConnectionWorkspace {
     const existing = workspaces.value.get(connectionId)
-    if (existing) return existing
+    if (existing) {
+      return ensureWorkspaceActiveTab(connectionId, existing)
+    }
 
     const counter = nextQueryCounter(connectionId)
     const defaultTab: InnerTab = {
@@ -80,8 +87,24 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     return workspace
   }
 
+  function ensureWorkspaceActiveTab(connectionId: string, workspace: ConnectionWorkspace): ConnectionWorkspace {
+    const hasActiveTab = workspace.tabs.some(tab => tab.id === workspace.activeTabId)
+    if (hasActiveTab) return workspace
+
+    const fallbackTab = workspace.tabs.find(tab => tab.type === 'query') ?? workspace.tabs[0]
+    const nextWorkspace: ConnectionWorkspace = {
+      ...workspace,
+      activeTabId: fallbackTab?.id ?? '',
+    }
+    workspaces.value.set(connectionId, nextWorkspace)
+    triggerRef(workspaces)
+    return nextWorkspace
+  }
+
   function getWorkspace(connectionId: string): ConnectionWorkspace | undefined {
-    return workspaces.value.get(connectionId)
+    const workspace = workspaces.value.get(connectionId)
+    if (!workspace) return undefined
+    return ensureWorkspaceActiveTab(connectionId, workspace)
   }
 
   function addQueryTab(connectionId: string): InnerTab {
@@ -191,7 +214,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
 
   function setActiveInnerTab(connectionId: string, tabId: string): void {
     const ws = workspaces.value.get(connectionId)
-    if (!ws) return
+    if (!ws || !ws.tabs.some(tab => tab.id === tabId)) return
 
     const updated: ConnectionWorkspace = { ...ws, activeTabId: tabId }
     workspaces.value.set(connectionId, updated)
@@ -201,7 +224,7 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
   function updateTabContext(
     connectionId: string,
     tabId: string,
-    context: Partial<QueryTabContext | TableEditorTabContext | ImportTabContext | TableDataTabContext | SchemaCompareTabContext | PerformanceTabContext | DataSyncTabContext | SchedulerTabContext>,
+    context: Partial<QueryTabContext | TableEditorTabContext | ImportTabContext | SchemaCompareTabContext | PerformanceTabContext | DataSyncTabContext | SchedulerTabContext>,
   ): void {
     const ws = workspaces.value.get(connectionId)
     if (!ws) return
@@ -261,18 +284,6 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
       title: `${t('dataImport.title')}: ${table}`,
       closable: true,
       context: { type: 'import', database, table, columns },
-    }
-    addInnerTab(connectionId, tab)
-  }
-
-  function openTableData(connectionId: string, database: string, table: string): void {
-    const tabId = `${connectionId}-table-data-${database}-${table}`
-    const tab: InnerTab = {
-      id: tabId,
-      type: 'table-data',
-      title: table,
-      closable: true,
-      context: { type: 'table-data', database, table, page: 1, pageSize: 100 },
     }
     addInnerTab(connectionId, tab)
   }
@@ -414,6 +425,9 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
               closable: t.closable,
               sql: ctx?.sql ?? '',
               currentDatabase: ctx?.currentDatabase,
+              aiProviderId: ctx?.aiProviderId,
+              aiModelId: ctx?.aiModelId,
+              aiHasApiKey: ctx?.aiHasApiKey,
             }
           })
         if (persistedTabs.length > 0) {
@@ -439,13 +453,17 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
             result: null,
             isExecuting: false,
             currentDatabase: pt.currentDatabase,
+            aiProviderId: pt.aiProviderId,
+            aiModelId: pt.aiModelId,
+            aiHasApiKey: pt.aiHasApiKey,
           },
         }))
         if (tabs.length > 0) {
-          newMap.set(connId, {
+          const restoredWorkspace: ConnectionWorkspace = {
             tabs,
             activeTabId: ws.activeTabId,
-          })
+          }
+          newMap.set(connId, ensureWorkspaceActiveTab(connId, restoredWorkspace))
           // 恢复 queryCounter 以避免 ID 冲突
           const maxIdx = tabs.reduce((max, t) => {
             const match = t.id.match(/-query-(\d+)$/)
@@ -494,7 +512,6 @@ export const useDatabaseWorkspaceStore = defineStore('database-workspace', () =>
     cleanup,
     openTableEditor,
     openImport,
-    openTableData,
     openSchemaCompare,
     openPerformance,
     openUserManagement,

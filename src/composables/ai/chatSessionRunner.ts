@@ -25,6 +25,12 @@ export interface AiChatSessionRunnerResult {
   retryable: boolean
 }
 
+export interface AiChatRequestOptions {
+  responseFormat?: 'json_object'
+  prefixCompletion?: boolean
+  prefixContent?: string
+}
+
 export interface AiChatSessionRunnerParams {
   sessionId: string
   content: string
@@ -33,6 +39,7 @@ export interface AiChatSessionRunnerParams {
   apiKey: string
   systemPrompt?: string
   attachments?: FileAttachment[]
+  requestOptions?: AiChatRequestOptions
   workDir: { value: string }
   aiStore: AiChatStore
   memoryStore: AiMemoryStore
@@ -205,6 +212,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
         params.executeToolCalls(toolCalls, toolSessionId, params.signal),
       parseAndWriteJournalSections: params.parseAndWriteJournalSections,
       parseSpawnedTasks: params.parseSpawnedTasks,
+      requestOptions: params.requestOptions,
     })
 
     await streamWithToolLoop(
@@ -276,6 +284,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
             params.executeToolCalls(toolCalls, toolSessionId, params.signal),
           parseAndWriteJournalSections: params.parseAndWriteJournalSections,
           parseSpawnedTasks: params.parseSpawnedTasks,
+          requestOptions: params.requestOptions,
         }),
       })
     } else {

@@ -35,6 +35,7 @@ interface ChatLike {
     apiKey: string,
     systemPrompt?: string,
     attachments?: FileAttachment[],
+    requestOptions?: AiChatRequestOptions,
   ) => Promise<AiChatSessionRunnerResult | undefined>
   regenerate: (
     provider: ProviderConfig,
@@ -43,6 +44,20 @@ interface ChatLike {
     systemPrompt?: string,
   ) => Promise<AiChatSessionRunnerResult | undefined>
   removeLastError: () => void
+}
+
+function normalizeRequestOptions(
+  requestOptions?: AiChatRequestOptions,
+): AiChatRequestOptions | undefined {
+  if (!requestOptions) return undefined
+  if (
+    !requestOptions.responseFormat
+    && !requestOptions.prefixCompletion
+    && !requestOptions.prefixContent
+  ) {
+    return undefined
+  }
+  return requestOptions
 }
 
 export interface ChatResolvedRoute {
@@ -96,6 +111,12 @@ export interface UseAiChatViewStateOptions {
   mapApprovalMode?: (mode: ChatMode) => ApprovalMode
   onModeChanged?: (mode: ChatMode) => void
   onPersistWorkDir?: (dir: string) => Promise<void>
+}
+
+export interface AiChatRequestOptions {
+  responseFormat?: 'json_object'
+  prefixCompletion?: boolean
+  prefixContent?: string
 }
 
 const DEFAULT_MODE_SUFFIXES: Record<ChatMode, string> = {
@@ -226,6 +247,7 @@ export function useAiChatViewState({
     content: string,
     attachments: FileAttachment[],
     onSent?: (cleanContent: string) => void | Promise<void>,
+    requestOptions?: AiChatRequestOptions,
   ): Promise<SendMessageNowResult | null> {
     if (!currentProvider.value || !currentModel.value) return null
 
@@ -250,14 +272,25 @@ export function useAiChatViewState({
       }
     }
 
-    const result = await chat.send(
-      cleanContent,
-      route.provider,
-      route.model,
-      apiKey,
-      effectiveSystemPrompt.value,
-      attachments,
-    )
+    const normalizedRequestOptions = normalizeRequestOptions(requestOptions)
+    const result = normalizedRequestOptions
+      ? await chat.send(
+        cleanContent,
+        route.provider,
+        route.model,
+        apiKey,
+        effectiveSystemPrompt.value,
+        attachments,
+        normalizedRequestOptions,
+      )
+      : await chat.send(
+        cleanContent,
+        route.provider,
+        route.model,
+        apiKey,
+        effectiveSystemPrompt.value,
+        attachments,
+      )
 
     await onSent?.(cleanContent)
     return { route, result }

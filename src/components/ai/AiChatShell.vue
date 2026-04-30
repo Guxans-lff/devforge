@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiMessage, AiSession, FileAttachment, ModelConfig, ProviderConfig, WorkspaceConfig } from '@/types/ai'
-import type { ChatMode } from '@/components/ai/AiInputArea.vue'
+import type { AiInputAdvancedOptions, ChatMode } from '@/components/ai/AiInputArea.vue'
 import AiMessageListVirtual from '@/components/ai/AiMessageListVirtual.vue'
 import AiInputArea from '@/components/ai/AiInputArea.vue'
 import AiUsageBadge from '@/components/ai/AiUsageBadge.vue'
@@ -145,7 +145,7 @@ const emit = defineEmits<{
   (e: 'scrollMessages', event: Event): void
   (e: 'forkMessage', messageId: string): void
   (e: 'rewindMessage', messageId: string): void
-  (e: 'send', value: string): void
+  (e: 'send', value: string, options: AiInputAdvancedOptions): void
   (e: 'abort'): void
   (e: 'clearSession'): void
   (e: 'update:selectedProviderId', value: string): void
@@ -189,6 +189,7 @@ const shouldShowGlobalError = computed(() => {
 
 defineExpose({
   scrollContainer: computed(() => messageListRef.value?.scrollContainer ?? null),
+  scrollToBottom: () => messageListRef.value?.scrollToBottom(),
   focusInput: () => inputAreaRef.value?.focus(),
   setInputDraft: (value: string, options?: { append?: boolean; focus?: boolean }) => inputAreaRef.value?.setDraft(value, options),
 })
@@ -213,10 +214,10 @@ defineExpose({
       >
         <div class="flex min-w-0 items-center gap-2">
           <!-- 在线状态 + 标题 -->
-          <div class="flex items-center gap-1.5">
+          <div v-if="!workDir" class="flex items-center gap-1.5">
             <span class="h-1.5 w-1.5 rounded-full bg-emerald-500/80" />
             <span class="text-[11px] font-medium text-foreground/70 truncate max-w-[180px]">
-              {{ workDir ? workDirDisplay : t('ai.messages.title') }}
+              {{ t('ai.messages.title') }}
             </span>
           </div>
 
@@ -449,7 +450,7 @@ defineExpose({
               :attachments="attachments"
               :context-usage-percent="contextUsagePercent"
               :placeholder="placeholder"
-              @send="emit('send', $event)"
+              @send="(content, options) => emit('send', content, options)"
               @abort="emit('abort')"
               @clear-session="emit('clearSession')"
               @update:selected-provider-id="emit('update:selectedProviderId', $event)"

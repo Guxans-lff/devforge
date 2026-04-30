@@ -217,7 +217,7 @@ impl DbEngine {
                     use sqlx::Executor as _;
                     let use_sql = format!("USE `{}`", database.replace('`', "``"));
                     (&mut **conn).execute(sqlx::raw_sql(&use_sql)).await.map_err(|e| {
-                        AppError::Other(format!("鍒囨崲鏁版嵁搴撳け璐? {}", e))
+                        AppError::Other(format!("切换数据库失败: {}", e))
                     })?;
                 }
                 self.register_mysql_session_query(&conn_mutex, &query_key, &connection_id).await;
@@ -285,7 +285,7 @@ impl DbEngine {
                     use sqlx::Executor as _;
                     let use_sql = format!("USE `{}`", database.replace('`', "``"));
                     (&mut **conn).execute(sqlx::raw_sql(&use_sql)).await.map_err(|e| {
-                        AppError::Other(format!("鍒囨崲鏁版嵁搴撳け璐? {}", e))
+                        AppError::Other(format!("切换数据库失败: {}", e))
                     })?;
                 }
                 self.register_mysql_session_query(&conn_mutex, &query_key, &connection_id).await;

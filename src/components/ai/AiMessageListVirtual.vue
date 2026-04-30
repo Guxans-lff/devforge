@@ -45,6 +45,7 @@ const scrollContainer = ref<HTMLElement | null>(null)
 const virtualItemEls = shallowRef<HTMLElement[]>([])
 const { t } = useI18n()
 const pendingMeasureIndexes = new Set<number>()
+const measuredSignatures = new Map<number, string>()
 let measureRafId: number | null = null
 
 function estimateItemHeight(item: MessageListItem): number {
@@ -61,14 +62,20 @@ const virtualizer = useVirtualizer(computed(() => ({
   getScrollElement: () => scrollContainer.value,
   estimateSize: (index: number) => estimateItemHeight(props.items[index]!),
   overscan: 6,
-  measureElement: (el: Element) => el.getBoundingClientRect().height,
+  measureElement: (el: Element) => el.scrollHeight,
 })))
 
 const virtualItems = computed(() => virtualizer.value.getVirtualItems())
 const totalSize = computed(() => virtualizer.value.getTotalSize())
 
 let prevItemCount = 0
+let scrollBottomRafId: number | null = null
 watch(() => props.items.length, (count) => {
+  if (count < measuredSignatures.size) {
+    for (const index of Array.from(measuredSignatures.keys())) {
+      if (index >= count) measuredSignatures.delete(index)
+    }
+  }
   if (count > 0 && prevItemCount === 0 && scrollContainer.value?.clientHeight) {
     nextTick(() => {
       virtualizer.value.scrollToIndex(count - 1, { align: 'end' })
@@ -101,6 +108,19 @@ function measureAllVisible(): void {
 }
 
 function scheduleMeasure(index: number): void {
+  const item = props.items[index]
+  if (!item) return
+
+  const signature = [
+    item.key,
+    item.message.content?.length ?? 0,
+    item.message.thinking?.length ?? 0,
+    item.message.toolCalls?.length ?? 0,
+    item.message.isStreaming ? 'streaming' : 'done',
+  ].join(':')
+  if (measuredSignatures.get(index) === signature) return
+  measuredSignatures.set(index, signature)
+
   pendingMeasureIndexes.add(index)
   if (measureRafId !== null) return
 
@@ -123,9 +143,18 @@ function setVirtualItemRef(index: number, el: Element | ComponentPublicInstance 
 }
 
 function scrollToBottom(): void {
-  if (props.items.length > 0) {
-    virtualizer.value.scrollToIndex(props.items.length - 1, { align: 'end' })
+  if (props.items.length === 0) return
+
+  const lastIndex = props.items.length - 1
+  virtualizer.value.scrollToIndex(lastIndex, { align: 'end' })
+
+  if (scrollBottomRafId !== null) {
+    cancelAnimationFrame(scrollBottomRafId)
   }
+  scrollBottomRafId = requestAnimationFrame(() => {
+    scrollBottomRafId = null
+    virtualizer.value.scrollToIndex(lastIndex, { align: 'end' })
+  })
 }
 
 function getDividerText(message: AiMessage): string {
@@ -155,7 +184,12 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(measureRafId)
     measureRafId = null
   }
+  if (scrollBottomRafId !== null) {
+    cancelAnimationFrame(scrollBottomRafId)
+    scrollBottomRafId = null
+  }
   pendingMeasureIndexes.clear()
+  measuredSignatures.clear()
 })
 </script>
 

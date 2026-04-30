@@ -15,10 +15,14 @@ import { useExplainAnalysis } from '@/composables/useExplainAnalysis'
 import { useTransactionControl } from '@/composables/useTransactionControl'
 import * as dbApi from '@/api/database'
 import * as historyApi from '@/api/query-history'
+import * as aiApi from '@/api/ai'
+import { getCredential } from '@/api/connection'
+import { useAiChatStore } from '@/stores/ai-chat'
 import type { QueryResult, QueryChunk, ErrorStrategy } from '@/types/database'
-import type { QueryTabContext, SubStatementResult } from '@/types/database-workspace'
+import type { QueryTabContext, SubStatementResult, SqlErrorAnalysis } from '@/types/database-workspace'
 import { isMultiStatement, extractTableName } from '@/utils/sqlParser'
 import type { EnvironmentType } from '@/types/environment'
+import type { AiStreamEvent, ProviderConfig, ModelConfig } from '@/types/ai'
 import { parseBackendError, ensureErrorString } from '@/types/error'
 import { createLogger } from '@/utils/logger'
 
@@ -42,6 +46,17 @@ export interface UseQueryExecutionOptions {
 const MAX_RESULT_TABS = 10
 const STREAM_RESULT_UPDATE_INTERVAL_MS = 32
 
+const EMPTY_SQL_ERROR_ANALYSIS: SqlErrorAnalysis = {
+  loading: false,
+  streamingText: '',
+  summary: '',
+  fixSql: '',
+  error: null,
+  sourceSql: '',
+  sourceError: '',
+  updatedAt: null,
+}
+
 /**
  * 查询执行 composable
  * 负责：SQL 执行（流式/非流式/多语句）、表浏览、事务管理、EXPLAIN、危险操作确认
@@ -58,6 +73,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
   const { t } = useI18n()
   const connectionStore = useConnectionStore()
   const store = useDatabaseWorkspaceStore()
+  const aiStore = useAiChatStore()
   const notification = useNotification()
   const executionTimer = useExecutionTimer()
 
@@ -240,6 +256,165 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     }
   }
 
+  function getSqlErrorAnalysis(): SqlErrorAnalysis {
+    return {
+      ...EMPTY_SQL_ERROR_ANALYSIS,
+      ...(tabContext.value?.sqlErrorAnalysis ?? {}),
+    }
+  }
+
+  function updateSqlErrorAnalysis(patch: Partial<SqlErrorAnalysis>) {
+    store.updateTabContext(connectionId.value, tabId.value, {
+      sqlErrorAnalysis: {
+        ...getSqlErrorAnalysis(),
+        ...patch,
+      },
+    })
+  }
+
+  function clearSqlErrorAnalysis() {
+    store.updateTabContext(connectionId.value, tabId.value, {
+      sqlErrorAnalysis: { ...EMPTY_SQL_ERROR_ANALYSIS },
+    })
+  }
+
+  function parseAnalysisJson(text: string): { summary: string, fixSql: string, explanation: string } | null {
+    const trimmed = text.trim()
+    if (!trimmed) return null
+
+    const candidates = [trimmed]
+    const firstBrace = trimmed.indexOf('{')
+    const lastBrace = trimmed.lastIndexOf('}')
+    if (firstBrace >= 0 && lastBrace > firstBrace) {
+      candidates.push(trimmed.slice(firstBrace, lastBrace + 1))
+    }
+
+    for (const candidate of candidates) {
+      try {
+        const parsed = JSON.parse(candidate) as Record<string, unknown>
+        return {
+          summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
+          fixSql: typeof parsed.fixSql === 'string' ? parsed.fixSql.trim() : '',
+          explanation: typeof parsed.explanation === 'string' ? parsed.explanation.trim() : '',
+        }
+      } catch {
+        continue
+      }
+    }
+
+    return null
+  }
+
+  function getConfiguredAiSummary() {
+    const providerId = tabContext.value?.aiProviderId?.trim()
+    const modelId = tabContext.value?.aiModelId?.trim()
+    const hasApiKey = Boolean(tabContext.value?.aiHasApiKey)
+    return { providerId, modelId, hasApiKey }
+  }
+
+  async function resolveAiProvider(): Promise<{ provider: ProviderConfig, model: ModelConfig }> {
+    await aiStore.init()
+
+    const { providerId, modelId, hasApiKey } = getConfiguredAiSummary()
+    if (!providerId) {
+      throw new Error('当前数据库页未配置 AI Provider，请先打开 AI 设置')
+    }
+    if (!modelId) {
+      throw new Error('当前数据库页未配置 AI 模型，请先打开 AI 设置')
+    }
+    if (!hasApiKey) {
+      throw new Error('当前 AI Provider 未配置 API Key，请先打开 AI 设置补充密钥')
+    }
+
+    const provider = aiStore.providers.find(p => p.id === providerId)
+    if (!provider) {
+      throw new Error('当前数据库页选择的 AI Provider 已不存在，请重新配置')
+    }
+
+    const model = provider.models.find(item => item.id === modelId)
+    if (!model) {
+      throw new Error('当前数据库页选择的 AI 模型已不存在，请重新配置')
+    }
+
+    return { provider, model }
+  }
+
+  async function analyzeSqlError(params?: { sql?: string, error?: string, mode?: 'single' | 'multi' | 'batch' }) {
+    const sql = (params?.sql ?? tabContext.value?.sql ?? '').trim()
+    const error = (params?.error ?? tabContext.value?.result?.error ?? '').trim()
+    if (!sql || !error) return
+
+    updateSqlErrorAnalysis({
+      loading: true,
+      streamingText: '',
+      summary: '',
+      fixSql: '',
+      error: null,
+      sourceSql: sql,
+      sourceError: error,
+      updatedAt: Date.now(),
+    })
+
+    try {
+      const { provider, model } = await resolveAiProvider()
+      const apiKey = await getCredential(`ai-provider-${provider.id}`) ?? ''
+      if (!apiKey) {
+        throw new Error('当前 AI Provider 未配置 API Key，请先打开 AI 设置补充密钥')
+      }
+
+      let streamed = ''
+      const onEvent = (event: AiStreamEvent) => {
+        if (event.type === 'TextDelta') {
+          streamed += event.delta
+          updateSqlErrorAnalysis({ streamingText: streamed })
+          return
+        }
+        if (event.type === 'Error') {
+          updateSqlErrorAnalysis({ loading: false, error: event.message, updatedAt: Date.now() })
+        }
+      }
+
+      const connection = connectionStore.connections.get(connectionId.value)
+      const result = await aiApi.analyzeDatabaseSqlError({
+        providerType: provider.providerType,
+        model: model.id,
+        apiKey,
+        endpoint: provider.endpoint,
+        sql,
+        error,
+        database: tabContext.value?.currentDatabase,
+        driver: connection?.record.type,
+        executionMode: params?.mode ?? 'single',
+      }, onEvent)
+
+      const rawText = streamed || result.content || ''
+      const parsed = parseAnalysisJson(rawText)
+      if (!parsed) {
+        throw new Error('AI 返回结果解析失败，请重试')
+      }
+
+      updateSqlErrorAnalysis({
+        loading: false,
+        streamingText: rawText,
+        summary: parsed.summary,
+        fixSql: parsed.fixSql,
+        error: null,
+        updatedAt: Date.now(),
+      })
+    } catch (e: unknown) {
+      updateSqlErrorAnalysis({
+        loading: false,
+        error: parseBackendError(e).message,
+        updatedAt: Date.now(),
+      })
+    }
+  }
+
+  function applyFixedSql(sql: string) {
+    if (!sql.trim()) return
+    store.updateTabContext(connectionId.value, tabId.value, { sql })
+  }
+
   function updateStreamResult(result: QueryResult, execVersion: number) {
     if (execVersion !== executeVersion) return
     store.updateTabContext(connectionId.value, tabId.value, { result })
@@ -348,6 +523,126 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     }
 
     return null
+  }
+
+  async function handleBatchExecute(sql: string, databases: string[], hasRetried = false): Promise<{ success: boolean }> {
+    const targetDatabases = [...new Set(databases.filter(Boolean))]
+    if (!sql.trim() || isExecuting.value || targetDatabases.length <= 1) {
+      return { success: false }
+    }
+
+    if (!(await ensureExecutionConnection())) return { success: false }
+
+    const check = dangerConfirm.checkExecution(sql)
+    if (check === 'readonly') {
+      notification.error(
+        t('environment.readOnlyBlocked'),
+        t('environment.readOnlyBlockedDesc'),
+      )
+      return { success: false }
+    }
+    if (check === 'danger') {
+      return { success: false }
+    }
+
+    const currentExecVersion = ++executeVersion
+    explainAnalysis.showExplain.value = false
+    startExecutionTimer()
+    store.updateTabContext(connectionId.value, tabId.value, {
+      isExecuting: true, result: null, tableBrowse: undefined, activeResultTabId: undefined,
+    })
+
+    const startTime = Date.now()
+
+    try {
+      const timeoutSecs = queryTimeout.value > 0 ? queryTimeout.value : undefined
+      const results = await dbApi.dbExecuteQueryInDatabases(
+        connectionId.value,
+        targetDatabases,
+        sql,
+        errorStrategy.value,
+        timeoutSecs,
+      )
+
+      if (currentExecVersion !== executeVersion) return { success: false }
+
+      const disconnectFailure = results.find(item => item.result.isError && item.result.error && connectionStore.isDisconnectError(item.result.error))
+      if (disconnectFailure && !hasRetried && await tryAutoReconnect(disconnectFailure.result.error ?? '')) {
+        return handleBatchExecute(sql, targetDatabases, true)
+      }
+
+      const successCount = results.filter(item => item.success).length
+      const failCount = results.length - successCount
+      const totalTime = Date.now() - startTime
+      const stopped = results.some(item => item.stoppedByStrategy)
+      const executedDatabases = results.map(item => item.database)
+      const skippedDatabases = stopped
+        ? targetDatabases.filter(database => !executedDatabases.includes(database))
+        : []
+      const lastResult = results.find(item => item.result.columns.length > 0)?.result ?? results[results.length - 1]?.result ?? buildEmptyResult()
+      const summaryResult: QueryResult = {
+        ...lastResult,
+        executionTimeMs: totalTime,
+        multiStatementSummary: { total: results.length, success: successCount, fail: failCount },
+      }
+
+      const tabs = [...(tabContext.value?.resultTabs ?? [])]
+      while (tabs.length >= MAX_RESULT_TABS) {
+        const unpinnedIdx = tabs.findIndex(tab => !tab.isPinned)
+        if (unpinnedIdx === -1) break
+        tabs.splice(unpinnedIdx, 1)
+      }
+
+      const newTab = {
+        id: crypto.randomUUID(),
+        title: `批量库执行 (${successCount}/${results.length})`,
+        result: summaryResult,
+        sql: sql.trim(),
+        isPinned: false,
+        createdAt: Date.now(),
+        batchDatabaseResults: results,
+        batchExecutionSummary: {
+          targetDatabases,
+          skippedDatabases,
+          stoppedByStrategy: stopped,
+        },
+      }
+      tabs.push(newTab)
+
+      stopExecutionTimer()
+      store.updateTabContext(connectionId.value, tabId.value, {
+        result: summaryResult,
+        resultTabs: tabs,
+        activeResultTabId: newTab.id,
+        isExecuting: false,
+      })
+
+      const summaryMsg = `目标 ${targetDatabases.length} 个库，已执行 ${results.length}，成功 ${successCount}，失败 ${failCount}${stopped ? `，已停止，剩余 ${skippedDatabases.length} 个未执行` : ''}`
+      if (failCount > 0) {
+        notification.warning('批量执行完成', summaryMsg, 0)
+      } else {
+        notification.success('批量执行完成', summaryMsg, 3000)
+      }
+
+      saveHistory(sql, summaryResult)
+      return { success: true }
+    } catch (e: unknown) {
+      const errorStr = parseBackendError(e).message
+      if (!hasRetried && await tryAutoReconnect(errorStr)) {
+        return handleBatchExecute(sql, targetDatabases, true)
+      }
+      const errorResult: QueryResult = {
+        columns: [], rows: [], affectedRows: 0,
+        executionTimeMs: Date.now() - startTime,
+        isError: true, error: errorStr, totalCount: null, truncated: false,
+      }
+      stopExecutionTimer()
+      if (currentExecVersion !== executeVersion) return { success: false }
+      store.updateTabContext(connectionId.value, tabId.value, { result: errorResult, isExecuting: false })
+      notification.error('批量执行失败', errorStr, true)
+      saveHistory(sql, errorResult)
+      return { success: false }
+    }
   }
 
   async function handleExecute(sql: string): Promise<{ success: boolean }> {
@@ -819,6 +1114,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
 
     // 执行相关
     handleExecute,
+    handleBatchExecute,
     doExecute,
     handleCancel,
 
@@ -839,6 +1135,9 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     handleServerSort: tableBrowse.handleServerSort,
     handleDatabaseSelect,
     toggleErrorStrategy,
+    analyzeSqlError,
+    clearSqlErrorAnalysis,
+    applyFixedSql,
 
     // 事务
     handleBeginTransaction: transactionControl.handleBeginTransaction,

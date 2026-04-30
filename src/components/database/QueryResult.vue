@@ -14,8 +14,10 @@ import {
   BarChart3,
   Settings2,
   Pin, PinOff,
+  Sparkles, Wand2, Copy,
 } from 'lucide-vue-next'
 import type { QueryResult as QueryResultType } from '@/types/database'
+import type { SqlErrorAnalysis } from '@/types/database-workspace'
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSeparator, DropdownMenuTrigger,
@@ -55,6 +57,22 @@ const props = defineProps<{
   tableName?: string
   driver?: string
   isTableBrowse?: boolean
+  tableBrowse?: {
+    database: string
+    table: string
+    currentPage: number
+    pageSize: number
+    whereClause?: string
+    orderBy?: string
+    filterOperators?: Record<string, string>
+    seekOrderBy?: string
+    seekColumn?: string
+    seekValue?: number
+  }
+  sqlErrorAnalysis?: SqlErrorAnalysis
+  aiConfigured?: boolean
+  aiProviderName?: string
+  aiModelName?: string
 }>()
 
 const emit = defineEmits<{
@@ -63,6 +81,15 @@ const emit = defineEmits<{
   refresh: []
   serverFilter: [whereClause: string]
   serverSort: [orderBy: string]
+  syncTableBrowse: [patch: {
+    whereClause?: string
+    orderBy?: string
+    filterOperators?: Record<string, string>
+    showFilters?: boolean
+  }]
+  analyzeSqlError: []
+  applyFixedSql: [sql: string]
+  openAiConfig: []
 }>()
 
 const { t } = useI18n()
@@ -95,12 +122,14 @@ const qr = useQueryResult({
   tableName: toRef(props, 'tableName'),
   driver: toRef(props, 'driver'),
   isTableBrowse: computed(() => props.isTableBrowse ?? false),
+  tableBrowse: toRef(props, 'tableBrowse'),
   tableScrollRef,
   onReconnect: () => emit('reconnect'),
   onLoadMore: () => emit('loadMore'),
   onRefresh: () => emit('refresh'),
   onServerFilter: (where: string) => emit('serverFilter', where),
   onServerSort: (orderBy: string) => emit('serverSort', orderBy),
+  onSyncTableBrowse: (patch) => emit('syncTableBrowse', patch),
 })
 
 /** 控制图表侧边配置面板开关 */
@@ -114,6 +143,27 @@ const displayedRowCountText = computed(() => {
 })
 
 const chartConfigOpen = ref(false)
+
+const analysisText = computed(() => props.sqlErrorAnalysis?.streamingText?.trim() ?? '')
+const hasAnalysisResult = computed(() => Boolean(props.sqlErrorAnalysis?.summary || props.sqlErrorAnalysis?.fixSql))
+const isAnalysisPending = computed(() => Boolean(props.sqlErrorAnalysis?.loading && !hasAnalysisResult.value))
+const analysisDescription = computed(() => {
+  const summary = props.sqlErrorAnalysis?.summary?.trim()
+  if (summary) return summary
+  return '正在分析 SQL 错误原因并生成修复建议…'
+})
+const aiAnalysisHint = computed(() => {
+  if (!props.aiConfigured || !props.aiProviderName || !props.aiModelName) {
+    return '先配置 AI 后可分析 SQL 错误。'
+  }
+  return `当前使用 ${props.aiProviderName} / ${props.aiModelName} 分析。`
+})
+
+async function copyFixedSql() {
+  const sql = props.sqlErrorAnalysis?.fixSql?.trim()
+  if (!sql) return
+  await navigator.clipboard.writeText(sql)
+}
 
 /** 数字类型关键字集合 */
 const NUMERIC_TYPES = /^(tiny|small|medium|big)?int|integer|float|double|decimal|numeric|real|number|money|serial/i
@@ -343,7 +393,7 @@ function isDateTimeColumn(colId: string): boolean {
                   <option value="IS NOT NULL">!NULL</option>
                 </select>
                 <input
-                  :value="qr.columnFilters.value[header.column.id] ?? ''"
+                  :value="qr.activeColumnFilters.value[header.column.id] ?? ''"
                   :placeholder="t('database.filterPlaceholder')"
                   :aria-label="`${header.column.id} ${t('database.filterPlaceholder')}`"
                   :disabled="(qr.filterOperators.value[header.column.id] === 'IS NULL' || qr.filterOperators.value[header.column.id] === 'IS NOT NULL')"
@@ -353,11 +403,11 @@ function isDateTimeColumn(colId: string): boolean {
               </div>
               <input
                 v-else
-                :value="qr.columnFilters.value[header.column.id] ?? ''"
+                :value="qr.activeColumnFilters.value[header.column.id] ?? ''"
                 :placeholder="t('database.filterPlaceholder')"
                 :aria-label="`${header.column.id} ${t('database.filterPlaceholder')}`"
                 class="h-5 w-full rounded-sm border border-border bg-background px-1.5 text-[10px] outline-none focus:border-primary focus-visible:ring-[2px] focus-visible:ring-ring/50"
-                @input="qr.columnFilters.value = { ...qr.columnFilters.value, [header.column.id]: ($event.target as HTMLInputElement).value }"
+                @input="qr.handleFilterChange(header.column.id, ($event.target as HTMLInputElement).value)"
               />
             </div>
             <div v-if="qr.editable.value" class="border-b border-r border-border px-1 py-0.5" />
@@ -401,7 +451,7 @@ function isDateTimeColumn(colId: string): boolean {
                   'text-muted-foreground/70': cell.getValue() !== null && cell.getValue() !== undefined && isDateTimeColumn(cell.column.id),
                 }"
                 :style="qr.isColumnPinned(cell.column.id) ? { left: qr.pinnedColumnOffsets.value[cell.column.id] + 'px' } : undefined"
-                @click.stop="qr.handleCellClick(cell.getValue())"
+                @click.stop="qr.handleCellClick()"
                 @dblclick="qr.editable.value ? qr.startEdit(vRow.index, cell.column.id, cell.getValue()) : undefined"
               >
                 <template v-if="qr.editingCell.value && qr.editingCell.value.rowIndex === vRow.index && qr.editingCell.value.colName === cell.column.id">
@@ -461,6 +511,92 @@ function isDateTimeColumn(colId: string): boolean {
         </div>
         <div class="flex-1 px-4 py-3 overflow-auto">
           <pre class="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground/80 select-text">{{ typeof result.error === 'string' ? result.error : JSON.stringify(result.error, null, 2) }}</pre>
+
+          <div class="mt-4 rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-3">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2 text-xs font-semibold text-primary">
+                <Sparkles class="h-3.5 w-3.5" />
+                AI 错误分析
+              </div>
+              <div class="flex items-center gap-1.5">
+                <Button
+                  v-if="!props.aiConfigured"
+                  variant="outline"
+                  size="sm"
+                  class="h-6 gap-1 text-[10px]"
+                  @click="emit('openAiConfig')"
+                >
+                  <KeyRound class="h-3 w-3" />
+                  配置 AI
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="h-6 gap-1 text-[10px]"
+                  :disabled="sqlErrorAnalysis?.loading"
+                  @click="emit('analyzeSqlError')"
+                >
+                  <Loader2 v-if="sqlErrorAnalysis?.loading" class="h-3 w-3 animate-spin" />
+                  <Wand2 v-else class="h-3 w-3" />
+                  {{ hasAnalysisResult ? '重新分析' : 'AI 分析错误' }}
+                </Button>
+                <Button
+                  v-if="sqlErrorAnalysis?.fixSql"
+                  variant="outline"
+                  size="sm"
+                  class="h-6 gap-1 text-[10px]"
+                  @click="emit('applyFixedSql', sqlErrorAnalysis!.fixSql)"
+                >
+                  回填 SQL
+                </Button>
+              </div>
+            </div>
+
+            <p class="text-[10px] text-muted-foreground">AI 仅提供修复建议，不会自动执行。</p>
+            <p class="text-[10px]" :class="props.aiConfigured ? 'text-primary/80' : 'text-muted-foreground'">{{ aiAnalysisHint }}</p>
+
+            <div v-if="isAnalysisPending" class="rounded border border-primary/20 bg-background/80 p-3">
+              <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1">
+                  <span class="h-2 w-2 rounded-full bg-primary animate-bounce [animation-delay:-0.2s]" />
+                  <span class="h-2 w-2 rounded-full bg-primary/80 animate-bounce [animation-delay:-0.1s]" />
+                  <span class="h-2 w-2 rounded-full bg-primary/60 animate-bounce" />
+                </div>
+                <div class="min-w-0">
+                  <p class="text-[11px] font-medium text-foreground">AI 正在分析</p>
+                  <p class="text-[10px] text-muted-foreground">{{ analysisDescription }}</p>
+                </div>
+              </div>
+            </div>
+
+            <div v-else-if="sqlErrorAnalysis?.error" class="rounded border border-destructive/20 bg-destructive/5 p-2 text-[11px] text-destructive">
+              {{ sqlErrorAnalysis.error }}
+            </div>
+
+            <div v-else-if="hasAnalysisResult" class="space-y-3">
+              <div v-if="sqlErrorAnalysis?.summary" class="rounded border border-border/60 bg-background/80 p-2">
+                <p class="mb-1 text-[10px] font-medium text-muted-foreground">原因分析</p>
+                <p class="text-[11px] leading-relaxed text-foreground/85">{{ sqlErrorAnalysis.summary }}</p>
+              </div>
+
+              <div v-if="sqlErrorAnalysis?.fixSql" class="rounded border border-border/60 bg-background/80 p-2">
+                <div class="mb-1 flex items-center justify-between gap-2">
+                  <p class="text-[10px] font-medium text-muted-foreground">建议 SQL</p>
+                  <Button variant="ghost" size="sm" class="h-5 gap-1 px-1.5 text-[10px]" @click="copyFixedSql()">
+                    <Copy class="h-3 w-3" />
+                    复制
+                  </Button>
+                </div>
+                <pre class="whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground/85">{{ sqlErrorAnalysis.fixSql }}</pre>
+              </div>
+
+              <div v-if="analysisText && !sqlErrorAnalysis?.fixSql" class="rounded border border-border/60 bg-muted/20 p-2">
+                <p class="mb-1 text-[10px] font-medium text-muted-foreground">补充说明</p>
+                <p class="text-[11px] leading-relaxed text-foreground/80 line-clamp-5">{{ analysisText }}</p>
+              </div>
+            </div>
+          </div>
+
           <div class="mt-4 space-y-1.5">
             <p class="text-[10px] font-semibold text-muted-foreground/60 uppercase tracking-wider mb-2">排查建议</p>
             <template v-if="qr.isConnectionError.value">

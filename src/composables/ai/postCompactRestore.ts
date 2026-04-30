@@ -71,9 +71,9 @@ export function buildPostCompactRestoreMessage(
 
   // Plan 状态
   if (context.pendingPlan && !context.planApproved) {
-    parts.push(`Pending plan awaiting approval:\n${context.pendingPlan.slice(0, 500)}`)
+    parts.push(`待确认的执行计划：\n${context.pendingPlan.slice(0, 500)}`)
   } else if (context.planApproved) {
-    parts.push('Plan was approved and is being executed.')
+    parts.push('执行计划已批准，正在执行。')
   }
 
   // 最近工具结果摘要
@@ -84,7 +84,7 @@ export function buildPostCompactRestoreMessage(
 
   if (parts.length === 0) return null
 
-  const content = `[Post-compact context restoration]\n\n${parts.join('\n\n')}`
+  const content = `【压缩后上下文恢复】\n\n${parts.join('\n\n')}`
   log.info('post_compact_restore', { parts: parts.length, chars: content.length })
 
   return {

@@ -8,7 +8,7 @@ import QueryResultComponent from '@/components/database/QueryResult.vue'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import * as dbApi from '@/api/database'
 import type { QueryResult } from '@/types/database'
-import type { TableDataTabContext } from '@/types/database-workspace'
+import type { QueryTabContext } from '@/types/database-workspace'
 import {
   extractNumericCursorValue,
   resolveInitialTableSeek,
@@ -28,79 +28,76 @@ const store = useDatabaseWorkspaceStore()
 const tabContext = computed(() => {
   const ws = store.getWorkspace(props.connectionId)
   const tab = ws?.tabs.find((t) => t.id === props.tabId)
-  return tab?.context as TableDataTabContext | undefined
+  return tab?.context as QueryTabContext | undefined
 })
+
+const browseContext = computed(() => tabContext.value?.tableBrowse)
+const currentTableBrowse = computed(() => browseContext.value ?? null)
 
 const result = ref<QueryResult | null>(null)
 const loading = ref(false)
 const loadingMore = ref(false)
 
 const PAGE_SIZES = ['50', '100', '200', '500'] as const
-const pageSize = ref(String(tabContext.value?.pageSize ?? 100))
-const currentPage = ref(tabContext.value?.page ?? 1)
-const whereClause = ref(tabContext.value?.whereClause ?? '')
-const orderBy = ref(tabContext.value?.orderBy ?? '')
-const seekOrderBy = ref(tabContext.value?.seekOrderBy)
-const seekColumn = ref(tabContext.value?.seekColumn)
-const seekValue = ref(tabContext.value?.seekValue)
 
+const pageSize = computed(() => String(currentTableBrowse.value?.pageSize ?? 100))
 const hasMoreServerRows = computed(() => {
   if (!result.value || result.value.totalCount === null) return false
   return result.value.rows.length < result.value.totalCount
 })
 
-async function resolveSeekState(ctx: TableDataTabContext): Promise<{ effectiveOrderBy?: string; nextSeekColumn?: string }> {
-  seekOrderBy.value = undefined
-  seekColumn.value = undefined
-  seekValue.value = undefined
+function syncTableBrowse(extra: Partial<NonNullable<QueryTabContext['tableBrowse']>> = {}) {
+  const ctx = currentTableBrowse.value
+  if (!ctx) return
 
-  const initialSeek = await resolveInitialTableSeek(props.connectionId, ctx.database, ctx.table, orderBy.value)
-  seekOrderBy.value = initialSeek.seekOrderBy
-  seekColumn.value = initialSeek.seekColumn
+  store.updateTabContext(props.connectionId, props.tabId, {
+    tableBrowse: {
+      ...ctx,
+      ...extra,
+    },
+  })
+}
+
+async function resolveSeekState(ctx: NonNullable<QueryTabContext['tableBrowse']>, requestedOrderBy?: string): Promise<{ effectiveOrderBy?: string; nextSeekColumn?: string }> {
+  const initialSeek = await resolveInitialTableSeek(props.connectionId, ctx.database, ctx.table, requestedOrderBy)
   return {
     effectiveOrderBy: initialSeek.effectiveOrderBy,
     nextSeekColumn: initialSeek.seekColumn,
   }
 }
 
-function syncTabContext(extra: Partial<TableDataTabContext> = {}) {
-  store.updateTabContext(props.connectionId, props.tabId, {
-    page: currentPage.value,
-    pageSize: Number(pageSize.value),
-    whereClause: whereClause.value,
-    orderBy: orderBy.value,
-    seekOrderBy: seekOrderBy.value,
-    seekColumn: seekColumn.value,
-    seekValue: seekValue.value,
-    ...extra,
-  })
-}
-
-async function loadData() {
-  const ctx = tabContext.value
+async function loadData(overrides: Partial<NonNullable<QueryTabContext['tableBrowse']>> = {}) {
+  const ctx = currentTableBrowse.value
   if (!ctx || !props.isConnected) return
 
+  const nextBrowse = {
+    ...ctx,
+    ...overrides,
+    currentPage: 1,
+  }
+
   loading.value = true
-  currentPage.value = 1
   try {
-    const { effectiveOrderBy, nextSeekColumn } = await resolveSeekState(ctx)
+    const { effectiveOrderBy, nextSeekColumn } = await resolveSeekState(nextBrowse, nextBrowse.orderBy)
     const firstPage = await dbApi.dbGetTableData(
       props.connectionId,
-      ctx.database,
-      ctx.table,
+      nextBrowse.database,
+      nextBrowse.table,
       1,
-      Number(pageSize.value),
-      whereClause.value || null,
+      nextBrowse.pageSize,
+      nextBrowse.whereClause || null,
       effectiveOrderBy,
     )
 
     const resolvedSeek = resolveTableSeekAfterFirstPage(firstPage, nextSeekColumn)
-    seekOrderBy.value = resolvedSeek.seekOrderBy
-    seekColumn.value = resolvedSeek.seekColumn
-    seekValue.value = resolvedSeek.seekValue
-
     result.value = firstPage
-    syncTabContext({ page: 1 })
+    syncTableBrowse({
+      ...nextBrowse,
+      currentPage: 1,
+      seekOrderBy: resolvedSeek.seekOrderBy,
+      seekColumn: resolvedSeek.seekColumn,
+      seekValue: resolvedSeek.seekValue,
+    })
   } catch (e) {
     result.value = {
       columns: [],
@@ -118,12 +115,12 @@ async function loadData() {
 }
 
 async function loadMoreRows() {
-  const ctx = tabContext.value
+  const ctx = currentTableBrowse.value
   if (!ctx || !props.isConnected || !result.value || loadingMore.value) return
 
-  const nextPage = currentPage.value + 1
-  const userOrderBy = orderBy.value.trim()
-  const effectiveOrderBy = userOrderBy || seekOrderBy.value || null
+  const nextPage = ctx.currentPage + 1
+  const userOrderBy = ctx.orderBy?.trim() ?? ''
+  const effectiveOrderBy = userOrderBy || ctx.seekOrderBy || null
   loadingMore.value = true
   try {
     const more = await dbApi.dbGetTableData(
@@ -131,11 +128,11 @@ async function loadMoreRows() {
       ctx.database,
       ctx.table,
       nextPage,
-      Number(pageSize.value),
-      whereClause.value || null,
+      ctx.pageSize,
+      ctx.whereClause || null,
       effectiveOrderBy,
-      seekColumn.value,
-      typeof seekValue.value === 'number' ? seekValue.value : undefined,
+      ctx.seekColumn,
+      typeof ctx.seekValue === 'number' ? ctx.seekValue : undefined,
     )
     if (more.rows.length > 0) {
       result.value = {
@@ -143,9 +140,10 @@ async function loadMoreRows() {
         rows: [...result.value.rows, ...more.rows],
         totalCount: more.totalCount,
       }
-      currentPage.value = nextPage
-      seekValue.value = extractNumericCursorValue(more.rows, more.columns, seekColumn.value) ?? seekValue.value
-      syncTabContext()
+      syncTableBrowse({
+        currentPage: nextPage,
+        seekValue: extractNumericCursorValue(more.rows, more.columns, ctx.seekColumn) ?? ctx.seekValue,
+      })
     }
   } catch (_e) {
     // Silent failure keeps the existing page usable when incremental loading fails.
@@ -155,18 +153,15 @@ async function loadMoreRows() {
 }
 
 function handlePageSizeChange(val: string) {
-  pageSize.value = val
-  loadData()
+  loadData({ pageSize: Number(val) })
 }
 
 function handleServerFilter(clause: string) {
-  whereClause.value = clause
-  loadData()
+  loadData({ whereClause: clause, currentPage: 1 })
 }
 
 function handleServerSort(ob: string) {
-  orderBy.value = ob
-  loadData()
+  loadData({ orderBy: ob, currentPage: 1 })
 }
 
 watch(() => props.isConnected, (connected) => {
@@ -179,8 +174,8 @@ defineExpose({ refresh: loadData })
 <template>
   <div class="flex h-full flex-col">
     <div class="flex items-center gap-2 border-b border-border px-3 py-1.5 shrink-0">
-      <span class="text-xs font-medium">{{ tabContext?.table }}</span>
-      <span class="text-[10px] text-muted-foreground">{{ tabContext?.database }}</span>
+      <span class="text-xs font-medium">{{ browseContext?.table }}</span>
+      <span class="text-[10px] text-muted-foreground">{{ browseContext?.database }}</span>
       <div class="flex-1" />
       <div class="flex items-center gap-1.5">
         <span class="text-[10px] text-muted-foreground">{{ t('database.rowsPerPage') }}</span>
@@ -193,7 +188,7 @@ defineExpose({ refresh: loadData })
           </SelectContent>
         </Select>
       </div>
-      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :disabled="loading" @click="loadData">
+      <Button variant="ghost" size="sm" class="h-7 w-7 p-0" :disabled="loading" @click="loadData()">
         <RefreshCw class="size-3.5" :class="{ 'animate-spin': loading }" />
       </Button>
     </div>
@@ -206,12 +201,14 @@ defineExpose({ refresh: loadData })
         :has-more-server-rows="hasMoreServerRows"
         :is-table-browse="true"
         :connection-id="connectionId"
-        :database="tabContext?.database"
-        :table-name="tabContext?.table"
+        :database="browseContext?.database"
+        :table-name="browseContext?.table"
         :driver="driver"
+        :table-browse="browseContext"
         @load-more="loadMoreRows"
         @server-filter="handleServerFilter"
         @server-sort="handleServerSort"
+        @sync-table-browse="syncTableBrowse"
       />
     </div>
   </div>

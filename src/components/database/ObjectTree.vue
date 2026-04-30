@@ -18,7 +18,7 @@ import {
   FileUp, Code, Plus, Search, X, FolderOpen, Folder,
   HardDrive, Upload, Users, Activity, FileCode, FileDown,
   Trash2, Eraser, Network, GitCompareArrows, Play,
-  ArrowLeftRight, CalendarClock, Workflow,
+  ArrowLeftRight, CalendarClock, Workflow, Check,
 } from 'lucide-vue-next'
 import { useObjectTree } from '@/composables/useObjectTree'
 import type { DatabaseTreeNode } from '@/types/database'
@@ -200,6 +200,7 @@ function emitRestoreDatabase(node: DatabaseTreeNode) {
 defineExpose({
   loadDatabases: tree.loadDatabases,
   treeNodes: tree.treeNodes,
+  selectedDatabases: tree.selectedDatabases,
   clearTree: tree.clearTree,
   forceRefresh: tree.forceRefresh,
   silentRefresh: tree.silentRefresh,
@@ -214,6 +215,18 @@ defineExpose({
         {{ t('database.objects') }}
       </span>
       <div class="flex items-center gap-1">
+        <span v-if="tree.selectedDatabases.value.length > 0" class="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+          {{ tree.selectedDatabases.value.length }}
+        </span>
+        <Button
+          v-if="tree.treeNodes.value.length > 0"
+          variant="ghost" size="icon"
+          class="h-5 w-5 text-muted-foreground hover:text-foreground"
+          :title="tree.selectedDatabases.value.length === tree.treeNodes.value.length ? '清空数据库选择' : '全选数据库'"
+          @click="tree.selectedDatabases.value.length === tree.treeNodes.value.length ? tree.clearSelectedDatabases() : tree.selectAllDatabases()"
+        >
+          <Check class="h-3.5 w-3.5" />
+        </Button>
         <Button
           variant="ghost" size="icon"
           class="h-5 w-5 text-muted-foreground hover:text-foreground"
@@ -377,6 +390,7 @@ defineExpose({
                         : item.node.type === 'database' && item.node.isExpanded
                           ? 'bg-muted/30'
                           : 'border-transparent',
+                      item.node.type === 'database' && tree.isDatabaseSelected(item.node.meta?.database) && 'ring-1 ring-primary/20 bg-primary/5',
                       item.node.type === 'database' && SYSTEM_DATABASES.has(item.node.label.toLowerCase()) && 'opacity-50',
                     ]"
                     :style="{ paddingLeft: `${item.level * 12 + 8}px` }"
@@ -395,6 +409,14 @@ defineExpose({
                       :class="tree.highlightedNodeId.value === item.node.id ? 'scale-y-100 opacity-100' : 'scale-y-0 opacity-0'"
                     />
 
+                    <div
+                      v-if="item.node.type === 'database'"
+                      class="flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors"
+                      :class="tree.isDatabaseSelected(item.node.meta?.database) ? 'border-primary bg-primary text-primary-foreground' : 'border-border/70 bg-background/80 text-transparent group-hover:text-muted-foreground'"
+                      @click.stop="tree.toggleSelectedDatabase(item.node.meta?.database ?? '')"
+                    >
+                      <Check class="h-2.5 w-2.5" />
+                    </div>
                     <div class="w-4 shrink-0 flex items-center justify-center">
                       <ChevronRight
                         v-if="item.node.type !== 'column' && item.node.type !== 'procedure' && item.node.type !== 'function' && item.node.type !== 'trigger'"

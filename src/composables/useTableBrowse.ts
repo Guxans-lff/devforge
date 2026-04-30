@@ -153,16 +153,16 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
 
   function handleServerFilter(whereClause: string) {
     const ctx = tabContext.value
-    if (ctx?.tableBrowse) {
-      browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, whereClause || undefined, ctx.tableBrowse.orderBy)
-    }
+    if (!ctx?.tableBrowse) return
+    if (whereClause === (ctx.tableBrowse.whereClause ?? '')) return
+    browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, whereClause || undefined, ctx.tableBrowse.orderBy)
   }
 
   function handleServerSort(orderBy: string) {
     const ctx = tabContext.value
-    if (ctx?.tableBrowse) {
-      browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, ctx.tableBrowse.whereClause, orderBy || undefined)
-    }
+    if (!ctx?.tableBrowse) return
+    if (orderBy === (ctx.tableBrowse.orderBy ?? '')) return
+    browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, ctx.tableBrowse.whereClause, orderBy || undefined)
   }
 
   /** DML 操作后清除缓存 */

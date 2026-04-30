@@ -669,6 +669,20 @@ impl AiProvider for AnthropicProvider {
             finish_reason,
         })
     }
+
+    async fn completion(
+        &self,
+        _model: &str,
+        _prompt: &str,
+        _suffix: Option<&str>,
+        _api_key: &str,
+        _endpoint: &str,
+        _max_tokens: u32,
+        _temperature: f64,
+        _use_beta: bool,
+    ) -> Result<CompletionResult, AppError> {
+        Err(AppError::Validation("Anthropic 协议不支持 /completions 补全接口".to_string()))
+    }
 }
 
 #[cfg(test)]

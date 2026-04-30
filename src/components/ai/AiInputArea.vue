@@ -7,6 +7,8 @@
  */
 import { ref, computed, nextTick, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { aiCreateCompletion } from '@/api/ai'
+import { getCredential } from '@/api/connection'
 import type { ProviderConfig, FileAttachment } from '@/types/ai'
 import type { FileNode } from '@/types/workspace-files'
 import AtMentionPopover from './AtMentionPopover.vue'
@@ -24,6 +26,8 @@ import {
   Zap,
   Network,
   Paperclip,
+  Braces,
+  Wand2,
 } from 'lucide-vue-next'
 import AiFilePreviewBar from './AiFilePreviewBar.vue'
 import { Button } from '@/components/ui/button'
@@ -31,12 +35,18 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuCheckboxItem,
   DropdownMenuTrigger,
   DropdownMenuSeparator,
   DropdownMenuLabel,
 } from '@/components/ui/dropdown-menu'
 
 export type ChatMode = 'normal' | 'plan' | 'auto' | 'dispatcher'
+export interface AiInputAdvancedOptions {
+  jsonMode: boolean
+  prefixCompletion: boolean
+  prefixContent?: string
+}
 
 const props = withDefaults(defineProps<{
   isStreaming?: boolean
@@ -69,7 +79,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  send: [content: string]
+  send: [content: string, options: AiInputAdvancedOptions]
   abort: []
   'update:selectedProviderId': [id: string]
   'update:selectedModelId': [id: string]
@@ -91,7 +101,7 @@ const atMentionPopoverRef = ref<InstanceType<typeof AtMentionPopover> | null>(nu
 const slashCommandPopoverRef = ref<InstanceType<typeof SlashCommandPopover> | null>(null)
 const isDragOver = ref(false)
 
-// ─────────── 输入历史（G13） ───────────
+// 输入历史
 const INPUT_HISTORY_KEY = 'ai-input-history'
 const MAX_HISTORY = 50
 const inputHistory = ref<string[]>([])
@@ -176,7 +186,7 @@ function redo() {
   }
 }
 
-// ─────────── 发送快捷键配置（G12） ───────────
+// 发送快捷键配置
 /** 发送方式：enter = Enter 发送，cmd = Cmd/Ctrl+Enter 发送 */
 const SEND_MODE_KEY = 'ai-send-mode'
 const sendMode = ref<'enter' | 'cmd'>((localStorage.getItem(SEND_MODE_KEY) as 'enter' | 'cmd' | null) ?? 'enter')
@@ -199,10 +209,18 @@ const atAnchorPos = ref({ x: 0, y: 0 })
 const showSlashPopover = ref(false)
 const slashQuery = ref('')
 const slashAnchorPos = ref({ x: 0, y: 0 })
+const fimLoading = ref(false)
+const fimError = ref<string | null>(null)
+const advancedOptions = ref<AiInputAdvancedOptions>({
+  jsonMode: false,
+  prefixCompletion: false,
+  prefixContent: '',
+})
+const JSON_MODE_HINT = 'Return valid JSON only. Do not include markdown fences or any text outside JSON.'
 
 const canSend = computed(() => inputText.value.trim().length > 0 && !props.disabled && !props.isStreaming)
 
-// ─────────── 提示词优化（G14） ───────────
+// 提示词优化
 const showEnhancer = ref(false)
 function openEnhancer() {
   if (!inputText.value.trim()) return
@@ -211,6 +229,68 @@ function openEnhancer() {
 function handleEnhancerAccept(text: string) {
   inputText.value = text
   nextTick(adjustHeight)
+}
+
+function splitFimPrompt(text: string): { prompt: string; suffix: string } | null {
+  const marker = '<fim>'
+  const index = text.indexOf(marker)
+  if (index < 0) return null
+  return {
+    prompt: text.slice(0, index),
+    suffix: text.slice(index + marker.length),
+  }
+}
+
+function buildAdvancedMessage(content: string): string {
+  const hints: string[] = []
+  if (advancedOptions.value.jsonMode && !/\bjson\b/i.test(content)) {
+    hints.push(JSON_MODE_HINT)
+  }
+  if (advancedOptions.value.prefixCompletion && !advancedOptions.value.prefixContent?.trim()) {
+    hints.push('Continue from the assistant prefix.')
+  }
+  if (hints.length === 0) return content
+  return `${content.trim()}\n\n${hints.join('\n')}`
+}
+
+async function runFimCompletion(): Promise<void> {
+  if (!currentProvider.value || !currentModel.value) return
+  const parts = splitFimPrompt(inputText.value)
+  if (!parts) {
+    fimError.value = 'Insert <fim> at the cursor position as the completion placeholder.'
+    return
+  }
+  if (!parts.prompt.trim()) {
+    fimError.value = 'FIM prefix cannot be empty.'
+    return
+  }
+
+  fimLoading.value = true
+  fimError.value = null
+  try {
+    const apiKey = await getCredential(`ai-provider-${currentProvider.value.id}`) ?? ''
+    if (!apiKey) {
+      fimError.value = 'Current Provider has no API Key configured.'
+      return
+    }
+    const result = await aiCreateCompletion({
+      providerType: currentProvider.value.providerType,
+      model: currentModel.value.id,
+      apiKey,
+      endpoint: currentProvider.value.endpoint,
+      prompt: parts.prompt,
+      suffix: parts.suffix,
+      maxTokens: Math.min(currentModel.value.capabilities.maxOutput || 1024, 2048),
+      temperature: 0.2,
+      useBeta: true,
+    })
+    inputText.value = `${parts.prompt}${result.content}${parts.suffix}`
+    nextTick(adjustHeight)
+  } catch (error) {
+    fimError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    fimLoading.value = false
+  }
 }
 
 /** 当前 Provider */
@@ -222,6 +302,13 @@ const currentProvider = computed(() =>
 const currentModel = computed(() =>
   currentProvider.value?.models.find(m => m.id === props.selectedModelId) ?? null,
 )
+
+const supportsDeepSeekAdvanced = computed(() => {
+  const provider = currentProvider.value
+  if (!provider) return false
+  return provider.endpoint.includes('api.deepseek.com')
+    || provider.name.toLowerCase().includes('deepseek')
+})
 
 /** 模式配置 */
 const CHAT_MODES = computed(() => ({
@@ -262,7 +349,7 @@ const CHAT_MODES = computed(() => ({
 const currentModeConfig = computed(() => CHAT_MODES.value[props.chatMode])
 
 /**
- * 使用 mirror div 技术计算 textarea 中指定位置的光标坐标
+ * 使用 mirror div 计算 textarea 中指定位置的光标坐标。
  * @param position 文本位置索引
  * @returns 屏幕坐标 { x, y }
  */
@@ -307,8 +394,8 @@ function getCaretCoordinates(position: number): { x: number; y: number } {
 }
 
 /**
- * 检测光标前是否存在未闭合的 @ 引用
- * 从光标位置往前搜索，遇到空格或换行停止
+ * 检测光标前是否存在未闭合的 @ 引用。
+ * 从光标位置向前搜索，遇到空格或换行停止。
  */
 function detectAtMention() {
   const el = textareaRef.value
@@ -317,7 +404,7 @@ function detectAtMention() {
   const text = el.value
   const pos = el.selectionStart ?? 0
 
-  // 从光标往前查找 @
+  // 从光标向前查找 @
   let i = pos - 1
   while (i >= 0) {
     const ch = text[i]
@@ -346,7 +433,7 @@ function closeAtPopover() {
   atStartPos.value = -1
 }
 
-/** 检测斜杠命令：仅当文本以 "/" 开头时触发；浮层锚定到输入框上方 */
+/** 检测斜杠命令：仅当文本以 "/" 开头时触发，浮层锚定到输入框上方。 */
 function detectSlashCommand() {
   const el = textareaRef.value
   if (!el) return
@@ -354,7 +441,7 @@ function detectSlashCommand() {
   if (text.startsWith('/') && !text.includes(' ') && !text.includes('\n')) {
     slashQuery.value = text.slice(1)
     const rect = el.getBoundingClientRect()
-    // 宽度 320，定位在输入框左侧与顶部对齐上方 8px（上移浮层高度在 popover 内自适应）
+    // 宽度 320，定位在输入框左侧与顶部对齐。
     slashAnchorPos.value = { x: rect.left, y: rect.top }
     showSlashPopover.value = true
   } else {
@@ -367,7 +454,7 @@ function closeSlashPopover() {
   slashQuery.value = ''
 }
 
-/** 选中斜杠命令：用模板替换输入；/clear 走专用事件 */
+/** 选中斜杠命令：用模板替换输入，clear/compact 走专用事件。 */
 function handleSlashSelect(cmd: SlashCommand) {
   closeSlashPopover()
   if (cmd.template === '__CLEAR_SESSION__') {
@@ -392,7 +479,7 @@ function handleSlashSelect(cmd: SlashCommand) {
 }
 
 /**
- * 选中文件后替换 @query 为 @filename 并 emit mentionFile
+ * 选中文件后替换 @query 为 @filename 并 emit mentionFile。
  * @param node 选中的文件节点
  */
 function handleAtSelect(node: FileNode) {
@@ -415,9 +502,9 @@ function handleAtSelect(node: FileNode) {
   })
 }
 
-/** 处理按键 — 使用 Intent Resolver 统一仲裁 */
+/** 处理按键，使用 Intent Resolver 统一分发。 */
 function handleKeyDown(e: KeyboardEvent) {
-  // 浮层可见时，导航键继续交给浮层处理（保持现有行为）
+  // 浮层可见时，导航键继续交给浮层处理。
   if (showAtPopover.value || showSlashPopover.value) {
     if (['ArrowUp', 'ArrowDown', 'Enter', 'Escape', 'Tab'].includes(e.key)) {
       e.preventDefault()
@@ -482,12 +569,12 @@ function submitMessage(content: string) {
   pushHistory(content)
   historyIndex.value = -1
   savedDraft.value = ''
-  emit('send', content)
+  emit('send', buildAdvancedMessage(content), { ...advancedOptions.value })
   inputText.value = ''
   nextTick(adjustHeight)
 }
 
-/** 发送按钮点击 — 统一走 submitMessage */
+/** 发送按钮点击，统一走 submitMessage。 */
 function handleSend() {
   submitMessage(inputText.value.trim())
 }
@@ -548,10 +635,10 @@ function handlePaste(e: ClipboardEvent) {
     e.preventDefault()
     emit('dropFiles', files)
   }
-  // 如果没有文件，允许正常的文本粘贴
+  // 如果没有文件，允许正常文本粘贴
 }
 
-/** 选择具体模型（可能需要同时切换 Provider） */
+/** 选择具体模型，可能需要同时切换 Provider。 */
 function selectModel(providerId: string, modelId: string) {
   if (props.selectedProviderId !== providerId) {
     emit('update:selectedProviderId', providerId)
@@ -600,7 +687,7 @@ defineExpose({ focus, setDraft })
           <span class="text-xs text-primary font-medium">{{ t('ai.input.dropFiles') }}</span>
         </div>
 
-        <!-- 文件预览条 -->
+        <!-- 文件预览栏 -->
         <AiFilePreviewBar
           :attachments="attachments"
           @remove="emit('removeAttachment', $event)"
@@ -620,7 +707,7 @@ defineExpose({ focus, setDraft })
           @paste="handlePaste"
         />
 
-        <!-- 状态与操作带 -->
+        <!-- 状态与操作栏 -->
         <div class="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5 pt-0.5 text-muted-foreground">
           <div class="flex min-w-0 flex-wrap items-center gap-1">
             <!-- 模型选择 -->
@@ -711,7 +798,59 @@ defineExpose({ focus, setDraft })
               </span>
             </button>
 
-            <!-- 上下文预算 -->
+            <!-- DeepSeek 高级选项 -->
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <button
+                  class="composer-chip flex h-7 items-center gap-1 px-2.5"
+                  :class="advancedOptions.jsonMode || advancedOptions.prefixCompletion ? 'text-emerald-500' : 'text-muted-foreground/70'"
+                  :disabled="disabled || !supportsDeepSeekAdvanced"
+                  title="DeepSeek 高级模式"
+                >
+                  <Braces class="h-3 w-3" />
+                  <span>DS</span>
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" class="w-[230px]">
+                <DropdownMenuLabel class="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  DeepSeek 高级模式
+                </DropdownMenuLabel>
+                <DropdownMenuCheckboxItem
+                  :checked="advancedOptions.jsonMode"
+                  @update:checked="advancedOptions.jsonMode = Boolean($event)"
+                >
+                  JSON Mode
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuCheckboxItem
+                  :checked="advancedOptions.prefixCompletion"
+                  @update:checked="advancedOptions.prefixCompletion = Boolean($event)"
+                >
+                  Prefix Completion
+                </DropdownMenuCheckboxItem>
+                <div class="px-2 py-1.5">
+                  <input
+                    v-model="advancedOptions.prefixContent"
+                    class="h-7 w-full rounded-md border border-border/60 bg-background px-2 text-[11px] outline-none focus:border-primary/50"
+                    placeholder='assistant prefix example: answer:'
+                    @keydown.stop
+                  >
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  class="text-xs"
+                  :disabled="fimLoading || !inputText.includes('<fim>')"
+                  @click="runFimCompletion"
+                >
+                  <Wand2 class="mr-2 h-3 w-3" />
+                  {{ fimLoading ? 'FIM 补全中...' : '执行 FIM 补全' }}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <span v-if="fimError" class="max-w-[180px] truncate text-[10px] text-destructive" :title="fimError">
+              {{ fimError }}
+            </span>
+
             <div
               v-if="contextUsagePercent > 0"
               class="composer-chip flex h-7 items-center gap-1 px-2.5 text-muted-foreground/70"
@@ -796,7 +935,7 @@ defineExpose({ focus, setDraft })
       @close="closeSlashPopover"
     />
 
-    <p class="sr-only">{{ sendHint }} · {{ t('ai.input.replyDisclaimer') }}</p>
+    <p class="sr-only">{{ sendHint }} 路 {{ t('ai.input.replyDisclaimer') }}</p>
 
     <AiPromptEnhancer
       v-if="showEnhancer"

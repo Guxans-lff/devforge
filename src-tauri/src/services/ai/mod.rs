@@ -13,6 +13,7 @@ pub mod exec_web;
 pub mod http_retry;
 pub mod models;
 pub mod openai_compat;
+pub mod openai_dialect;
 pub mod provider;
 pub mod session_store;
 pub mod stream_parser;

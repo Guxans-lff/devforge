@@ -3,13 +3,15 @@
  * AI Provider 配置管理组件
  *
  * 在 AI 模块内提供 Provider 的新增、编辑、删除功能。
- * 支持预设常用 Provider 和自定义配置，品牌卡片式设计。
+ * 支持预设常用 Provider 和自定义配置。
  */
 import { ref, computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAiChatStore } from '@/stores/ai-chat'
-import { saveCredential } from '@/api/connection'
+import { aiListProviderModels } from '@/api/ai'
+import { getCredential, saveCredential } from '@/api/connection'
 import type { ProviderConfig, ModelConfig, ProviderType, ThinkingEffort, WorkspaceConfig } from '@/types/ai'
+import { ensureErrorString } from '@/types/error'
 import AiProviderProfileBundlePanel from '@/components/ai/AiProviderProfileBundlePanel.vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -49,6 +51,7 @@ import {
   Brain,
   ImageIcon,
   Shield,
+  RefreshCw,
 } from 'lucide-vue-next'
 
 const props = withDefaults(defineProps<{
@@ -74,8 +77,14 @@ const store = useAiChatStore()
 const { t } = useI18n()
 const THINKING_EFFORTS: ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const DISPATCHER_MODES: Array<'headless' | 'tab'> = ['headless', 'tab']
+const DEEPSEEK_MAX_CONTEXT = 1_000_000
+const DEEPSEEK_MAX_OUTPUT = 393_216
+const MIMO_MAX_CONTEXT = 1_000_000
+const MIMO_MAX_OUTPUT = 131_072
+const MIMO_FLASH_CONTEXT = 256_000
+const MIMO_FLASH_OUTPUT = 65_536
 
-// ─────────────────────── 预设 Provider 模板 ───────────────────────
+// 预设 Provider 模板
 
 interface ProviderPreset {
   name: string
@@ -83,7 +92,7 @@ interface ProviderPreset {
   endpoint: string
   /** 品牌色（Tailwind class） */
   brandColor: string
-  /** 品牌色背景 */
+  /** 品牌背景色 */
   brandBg: string
   /** 品牌标识首字母 */
   brandInitial: string
@@ -100,24 +109,24 @@ const PRESETS: Record<string, ProviderPreset> = {
     brandColor: 'text-blue-600 dark:text-blue-400',
     brandBg: 'bg-blue-500/10',
     brandInitial: 'D',
-    description: '国产顶尖推理模型',
+    description: '国产顶级推理模型',
     models: [
       {
-        id: 'deepseek-chat',
-        name: 'DeepSeek V3',
+        id: 'deepseek-v4-flash',
+        name: 'DeepSeek V4 Flash',
         capabilities: {
-          streaming: true, vision: false, thinking: false, toolUse: true,
-          maxContext: 65536, maxOutput: 8192,
-          pricing: { inputPer1m: 0.27, outputPer1m: 1.10, currency: 'CNY' },
+          streaming: true, vision: true, thinking: true, toolUse: true,
+          maxContext: DEEPSEEK_MAX_CONTEXT, maxOutput: DEEPSEEK_MAX_OUTPUT,
+          pricing: { inputPer1m: 0.5, outputPer1m: 2, currency: 'CNY' },
         },
       },
       {
-        id: 'deepseek-reasoner',
-        name: 'DeepSeek R1',
+        id: 'deepseek-v4-pro',
+        name: 'DeepSeek V4 Pro',
         capabilities: {
-          streaming: true, vision: false, thinking: true, toolUse: false,
-          maxContext: 65536, maxOutput: 8192,
-          pricing: { inputPer1m: 0.55, outputPer1m: 2.19, currency: 'CNY' },
+          streaming: true, vision: true, thinking: true, toolUse: true,
+          maxContext: DEEPSEEK_MAX_CONTEXT, maxOutput: DEEPSEEK_MAX_OUTPUT,
+          pricing: { inputPer1m: 3, outputPer1m: 9, currency: 'CNY' },
         },
       },
     ],
@@ -196,7 +205,7 @@ const PRESETS: Record<string, ProviderPreset> = {
     brandColor: 'text-amber-600 dark:text-amber-400',
     brandBg: 'bg-amber-500/10',
     brandInitial: 'A',
-    description: 'Claude 4.6 系列最新模型',
+    description: 'Claude 系列模型',
     models: [
       {
         id: 'claude-opus-4-7',
@@ -239,31 +248,83 @@ const PRESETS: Record<string, ProviderPreset> = {
       },
     ],
   },
-  moonshot: {
-    name: 'Moonshot',
+  kimiCode: {
+    name: 'Kimi Code',
     providerType: 'openai_compat',
-    endpoint: 'https://api.moonshot.cn/v1',
+    endpoint: 'https://api.kimi.com/coding/v1',
     brandColor: 'text-purple-600 dark:text-purple-400',
     brandBg: 'bg-purple-500/10',
-    brandInitial: 'M',
-    description: 'Kimi 系列长上下文模型',
+    brandInitial: 'K',
+    description: 'Kimi 编程专用模型',
     models: [
       {
-        id: 'moonshot-v1-32k',
-        name: 'Moonshot V1 32K',
+        id: 'kimi-for-coding',
+        name: 'Kimi for Coding',
         capabilities: {
-          streaming: true, vision: false, thinking: false, toolUse: true,
-          maxContext: 32000, maxOutput: 4096,
-          pricing: { inputPer1m: 24, outputPer1m: 24, currency: 'CNY' },
+          streaming: true, vision: true, thinking: false, toolUse: true,
+          maxContext: 256000, maxOutput: 16384,
+          pricing: undefined,
+        },
+      },
+    ],
+  },
+  xiaomiMimo: {
+    name: 'Xiaomi MiMo',
+    providerType: 'openai_compat',
+    endpoint: 'https://api.xiaomimimo.com/v1',
+    brandColor: 'text-orange-600 dark:text-orange-400',
+    brandBg: 'bg-orange-500/10',
+    brandInitial: '米',
+    description: '小米 MiMo 多模态与深度思考模型',
+    models: [
+      {
+        id: 'mimo-v2.5-pro',
+        name: 'MiMo V2.5 Pro',
+        thinkingEffort: 'high',
+        capabilities: {
+          streaming: true, vision: false, thinking: true, toolUse: true,
+          maxContext: MIMO_MAX_CONTEXT, maxOutput: MIMO_MAX_OUTPUT,
+          pricing: { inputPer1m: 7, outputPer1m: 21, currency: 'CNY' },
         },
       },
       {
-        id: 'moonshot-v1-128k',
-        name: 'Moonshot V1 128K',
+        id: 'mimo-v2-pro',
+        name: 'MiMo V2 Pro',
+        thinkingEffort: 'high',
         capabilities: {
-          streaming: true, vision: false, thinking: false, toolUse: true,
-          maxContext: 128000, maxOutput: 4096,
-          pricing: { inputPer1m: 60, outputPer1m: 60, currency: 'CNY' },
+          streaming: true, vision: false, thinking: true, toolUse: true,
+          maxContext: MIMO_MAX_CONTEXT, maxOutput: MIMO_MAX_OUTPUT,
+          pricing: { inputPer1m: 7, outputPer1m: 21, currency: 'CNY' },
+        },
+      },
+      {
+        id: 'mimo-v2.5',
+        name: 'MiMo V2.5',
+        thinkingEffort: 'high',
+        capabilities: {
+          streaming: true, vision: true, thinking: true, toolUse: true,
+          maxContext: MIMO_MAX_CONTEXT, maxOutput: MIMO_MAX_OUTPUT,
+          pricing: { inputPer1m: 2.8, outputPer1m: 14, currency: 'CNY' },
+        },
+      },
+      {
+        id: 'mimo-v2-omni',
+        name: 'MiMo V2 Omni',
+        thinkingEffort: 'high',
+        capabilities: {
+          streaming: true, vision: true, thinking: true, toolUse: true,
+          maxContext: MIMO_FLASH_CONTEXT, maxOutput: MIMO_MAX_OUTPUT,
+          pricing: { inputPer1m: 2.8, outputPer1m: 14, currency: 'CNY' },
+        },
+      },
+      {
+        id: 'mimo-v2-flash',
+        name: 'MiMo V2 Flash',
+        thinkingEffort: 'medium',
+        capabilities: {
+          streaming: true, vision: false, thinking: true, toolUse: true,
+          maxContext: MIMO_FLASH_CONTEXT, maxOutput: MIMO_FLASH_OUTPUT,
+          pricing: { inputPer1m: 0.7, outputPer1m: 2.1, currency: 'CNY' },
         },
       },
     ],
@@ -287,7 +348,126 @@ function isPresetAdded(presetKey: string): boolean {
   return store.providers.some(p => p.endpoint === preset.endpoint)
 }
 
-// ─────────────────────── 编辑状态 ───────────────────────
+function isDeepSeekProvider(provider: Pick<ProviderConfig, 'name' | 'endpoint'>): boolean {
+  return provider.endpoint.includes('api.deepseek.com')
+    || provider.name.toLowerCase().includes('deepseek')
+}
+
+function isMimoProvider(provider: Pick<ProviderConfig, 'name' | 'endpoint'>): boolean {
+  const lowerName = provider.name.toLowerCase()
+  const lowerEndpoint = provider.endpoint.toLowerCase()
+  return lowerEndpoint.includes('api.xiaomimimo.com')
+    || lowerEndpoint.includes('xiaomimimo.com')
+    || lowerName.includes('mimo')
+    || lowerName.includes('小米')
+}
+
+function normalizeProviderModels(provider: ProviderConfig): ModelConfig[] {
+  if (isDeepSeekProvider(provider)) {
+    return JSON.parse(JSON.stringify(PRESETS.deepseek?.models ?? provider.models))
+  }
+  if (isMimoProvider(provider) && provider.models.length === 0) {
+    return JSON.parse(JSON.stringify(PRESETS.xiaomiMimo?.models ?? provider.models))
+  }
+  return JSON.parse(JSON.stringify(provider.models))
+}
+
+function toTitleCaseModelName(modelId: string): string {
+  return modelId
+    .split(/[-_.\s]+/)
+    .filter(Boolean)
+    .map(part => part.length <= 3
+      ? part.toUpperCase()
+      : `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ')
+}
+
+function buildDeepSeekModelFromId(modelId: string): ModelConfig {
+  const preset = PRESETS.deepseek?.models.find(model => model.id === modelId)
+  if (preset) return JSON.parse(JSON.stringify(preset))
+
+  const lower = modelId.toLowerCase()
+  const isLegacyChat = lower === 'deepseek-chat' || lower.includes('v3')
+
+  return {
+    id: modelId,
+    name: toTitleCaseModelName(modelId),
+    thinkingEffort: 'high',
+    capabilities: {
+      streaming: true,
+      vision: true,
+      thinking: true,
+      toolUse: true,
+      maxContext: isLegacyChat ? 64_000 : DEEPSEEK_MAX_CONTEXT,
+      maxOutput: isLegacyChat ? 8_000 : DEEPSEEK_MAX_OUTPUT,
+      pricing: undefined,
+    },
+  }
+}
+
+function buildMimoModelFromId(modelId: string): ModelConfig {
+  const preset = PRESETS.xiaomiMimo?.models.find(model => model.id === modelId)
+  if (preset) return JSON.parse(JSON.stringify(preset))
+
+  const lower = modelId.toLowerCase()
+  const isOmni = lower.includes('omni') || lower === 'mimo-v2.5'
+  const isFlash = lower.includes('flash')
+  const isTts = lower.includes('tts')
+
+  return {
+    id: modelId,
+    name: toTitleCaseModelName(modelId),
+    thinkingEffort: isFlash ? 'medium' : 'high',
+    capabilities: {
+      streaming: true,
+      vision: isOmni,
+      thinking: !isTts,
+      toolUse: !isTts,
+      maxContext: isFlash ? MIMO_FLASH_CONTEXT : MIMO_MAX_CONTEXT,
+      maxOutput: isFlash ? MIMO_FLASH_OUTPUT : MIMO_MAX_OUTPUT,
+      pricing: undefined,
+    },
+  }
+}
+
+function buildSyncedModel(provider: Pick<ProviderConfig, 'name' | 'endpoint'>, modelId: string): ModelConfig {
+  if (isDeepSeekProvider(provider)) {
+    return buildDeepSeekModelFromId(modelId)
+  }
+  if (isMimoProvider(provider)) {
+    return buildMimoModelFromId(modelId)
+  }
+
+  const existing = form.models.find(model => model.id === modelId)
+  if (existing) return JSON.parse(JSON.stringify(existing))
+
+  return {
+    id: modelId,
+    name: toTitleCaseModelName(modelId),
+    capabilities: {
+      streaming: true,
+      vision: true,
+      thinking: true,
+      toolUse: true,
+      maxContext: 128_000,
+      maxOutput: 16_384,
+      pricing: undefined,
+    },
+  }
+}
+
+function setProviderType(value: unknown): void {
+  const providerType = String(value) as ProviderType
+  const wasDeepSeek = isDeepSeekProvider({ name: form.name, endpoint: form.endpoint })
+  form.providerType = providerType
+  if (wasDeepSeek) {
+    form.endpoint = providerType === 'anthropic'
+      ? 'https://api.deepseek.com/anthropic'
+      : 'https://api.deepseek.com'
+  }
+}
+
+// 编辑状态
 
 const showEditDialog = ref(false)
 const editMode = ref<'create' | 'edit'>('create')
@@ -305,12 +485,17 @@ const form = reactive({
 
 /** API Key 是否可见 */
 const showApiKey = ref(false)
+const loadingApiKey = ref(false)
+const apiKeyLoadError = ref<string | null>(null)
 
 /** 保存中状态 */
 const saving = ref(false)
 
 /** 保存错误提示 */
 const saveError = ref<string | null>(null)
+const syncingModels = ref(false)
+const modelSyncError = ref<string | null>(null)
+const modelSyncMessage = ref<string | null>(null)
 
 /** 删除确认 */
 const deleteConfirm = ref<string | null>(null)
@@ -337,7 +522,7 @@ watch(
   { immediate: true, deep: true },
 )
 
-// ─────────────────────── 模型编辑 ───────────────────────
+// 模型编辑
 
 const showModelDialog = ref(false)
 const editingModelIndex = ref<number>(-1)
@@ -345,10 +530,10 @@ const modelForm = reactive({
   id: '',
   name: '',
   streaming: true,
-  vision: false,
-  thinking: false,
+  vision: true,
+  thinking: true,
   thinkingEffort: 'high' as ThinkingEffort,
-  toolUse: false,
+  toolUse: true,
   maxContext: 200000,
   maxOutput: 16384,
   pricingEnabled: false,
@@ -357,7 +542,7 @@ const modelForm = reactive({
   currency: 'CNY',
 })
 
-// ─────────────────────── 操作 ───────────────────────
+// 操作
 
 /** 从预设创建 */
 function createFromPreset(presetKey: string) {
@@ -373,12 +558,28 @@ function createFromPreset(presetKey: string) {
   form.isDefault = store.providers.length === 0
   form.models = JSON.parse(JSON.stringify(preset.models))
   showApiKey.value = false
+  apiKeyLoadError.value = null
   saveError.value = null
+  modelSyncError.value = null
+  modelSyncMessage.value = null
   showEditDialog.value = true
 }
 
 /** 编辑已有 Provider */
-function editProvider(provider: ProviderConfig) {
+async function loadStoredApiKey(providerId: string): Promise<void> {
+  loadingApiKey.value = true
+  apiKeyLoadError.value = null
+  try {
+    form.apiKey = await getCredential(`ai-provider-${providerId}`) ?? ''
+  } catch (error) {
+    form.apiKey = ''
+    apiKeyLoadError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    loadingApiKey.value = false
+  }
+}
+
+async function editProvider(provider: ProviderConfig) {
   editMode.value = 'edit'
   editingId.value = provider.id
   form.name = provider.name
@@ -386,10 +587,14 @@ function editProvider(provider: ProviderConfig) {
   form.endpoint = provider.endpoint
   form.apiKey = ''
   form.isDefault = provider.isDefault
-  form.models = JSON.parse(JSON.stringify(provider.models))
+  form.models = normalizeProviderModels(provider)
   showApiKey.value = false
+  apiKeyLoadError.value = null
   saveError.value = null
+  modelSyncError.value = null
+  modelSyncMessage.value = null
   showEditDialog.value = true
+  await loadStoredApiKey(provider.id)
 }
 
 /** 保存 Provider */
@@ -429,6 +634,43 @@ async function handleSave() {
 async function handleDelete(id: string) {
   await store.removeProvider(id)
   deleteConfirm.value = null
+}
+
+async function syncProviderModels(): Promise<void> {
+  if (!form.endpoint.trim()) {
+    modelSyncError.value = '请先填写 API endpoint。'
+    modelSyncMessage.value = null
+    return
+  }
+  if (!form.apiKey.trim()) {
+    modelSyncError.value = '请先填写或读取 API Key。'
+    modelSyncMessage.value = null
+    return
+  }
+
+  syncingModels.value = true
+  modelSyncError.value = null
+  modelSyncMessage.value = null
+
+  try {
+    const response = await aiListProviderModels(form.endpoint.trim(), form.apiKey.trim())
+    const syncedModels = response.models
+      .map(model => model.id?.trim())
+      .filter((modelId): modelId is string => Boolean(modelId))
+      .map(modelId => buildSyncedModel({ name: form.name, endpoint: form.endpoint }, modelId))
+
+    if (syncedModels.length === 0) {
+      modelSyncError.value = '远端没有返回可用模型。'
+      return
+    }
+
+    form.models = syncedModels
+    modelSyncMessage.value = `已同步 ${syncedModels.length} 个模型。能力信息已按本地规则补全。`
+  } catch (error) {
+    modelSyncError.value = ensureErrorString(error)
+  } finally {
+    syncingModels.value = false
+  }
 }
 
 async function handleSaveWorkspaceDispatcher(): Promise<void> {
@@ -478,7 +720,7 @@ async function setDefault(provider: ProviderConfig) {
   await store.saveProvider({ ...provider, isDefault: true })
 }
 
-/** 获取 Provider 对应的品牌配置（先匹配名称，再匹配 endpoint） */
+/** 获取 Provider 对应品牌配置：先匹配名称，再匹配 endpoint。 */
 function getProviderBrand(provider: ProviderConfig) {
   const nameLower = provider.name.toLowerCase()
   // 按名称关键词匹配
@@ -486,8 +728,9 @@ function getProviderBrand(provider: ProviderConfig) {
     openai: 'openai', gpt: 'openai',
     anthropic: 'anthropic', claude: 'anthropic',
     deepseek: 'deepseek',
-    zhipu: 'zhipu', '智谱': 'zhipu', '智普': 'zhipu', glm: 'zhipu',
-    moonshot: 'moonshot', kimi: 'moonshot',
+    zhipu: 'zhipu', '智谱': 'zhipu', glm: 'zhipu',
+    kimi: 'kimiCode',
+    xiaomi: 'xiaomiMimo', mimo: 'xiaomiMimo', '小米': 'xiaomiMimo',
   }
   for (const [keyword, presetKey] of Object.entries(nameMap)) {
     if (nameLower.includes(keyword)) {
@@ -532,21 +775,27 @@ function getPresetTitle(presetKey: string, preset: ProviderPreset) {
   return preset.name
 }
 
-function getPresetDescription(presetKey: string) {
+function getPresetDescription(presetKey: string, preset?: ProviderPreset) {
+  if (presetKey === 'kimiCode') {
+    return preset?.description ?? 'Kimi 编程专用模型'
+  }
+  if (presetKey === 'xiaomiMimo') {
+    return preset?.description ?? '小米 MiMo 多模态与深度思考模型'
+  }
   return t(`ai.providerConfig.presets.${presetKey}.description`)
 }
 
-// ─────────────────────── 模型管理 ───────────────────────
+// 模型管理
 
 function openAddModel() {
   editingModelIndex.value = -1
   modelForm.id = ''
   modelForm.name = ''
   modelForm.streaming = true
-  modelForm.vision = false
-  modelForm.thinking = false
+  modelForm.vision = true
+  modelForm.thinking = true
   modelForm.thinkingEffort = 'high'
-  modelForm.toolUse = false
+  modelForm.toolUse = true
   modelForm.maxContext = 200000
   modelForm.maxOutput = 16384
   modelForm.pricingEnabled = false
@@ -632,9 +881,9 @@ const canSave = computed(() =>
     </div>
 
     <ScrollArea class="flex-1 min-h-0">
-      <div class="px-6 py-6 space-y-8 max-w-3xl mx-auto">
+      <div class="mx-auto w-full max-w-6xl space-y-8 px-6 py-6 xl:px-8">
 
-        <!-- ==================== 已配置的 Provider ==================== -->
+        <!-- 已配置 Provider -->
         <section v-if="store.providers.length > 0" class="space-y-3">
           <div class="flex items-center gap-2">
             <div class="h-1 w-1 rounded-full bg-emerald-500" />
@@ -648,16 +897,16 @@ const canSave = computed(() =>
               :key="provider.id"
               class="group relative rounded-xl border border-border/40 bg-card/50 backdrop-blur-sm overflow-hidden transition-all duration-200 hover:border-border hover:shadow-sm"
             >
-              <!-- 品牌色条 -->
+              <!-- 品牌侧边条 -->
               <div class="absolute left-0 top-0 bottom-0 w-1 rounded-l-xl" :class="getProviderBrandClasses(provider).brandBg.replace('/10', '')" />
 
               <div class="flex items-center gap-4 pl-5 pr-4 py-3.5">
-                <!-- 品牌图标 -->
+                <!-- 品牌标识 -->
                 <div class="flex h-10 w-10 items-center justify-center rounded-xl shrink-0 text-sm font-bold" :class="[getProviderBrandClasses(provider).brandBg, getProviderBrandClasses(provider).brandColor]">
                   {{ getProviderBrandClasses(provider).brandInitial }}
                 </div>
 
-                <!-- 信息 -->
+                <!-- 内容 -->
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
                     <span class="text-sm font-semibold">{{ provider.name }}</span>
@@ -720,14 +969,14 @@ const canSave = computed(() =>
           </div>
         </section>
 
-        <!-- ==================== 添加服务商 — 品牌卡片 ==================== -->
+        <!-- 添加服务商：品牌卡片 -->
         <section class="space-y-3">
           <div class="flex items-center gap-2">
             <div class="h-1 w-1 rounded-full bg-primary" />
             <h3 class="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{{ t('ai.providerConfig.addTitle') }}</h3>
           </div>
 
-          <div class="grid grid-cols-3 gap-3">
+          <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <button
               v-for="(preset, key) in PRESETS"
               :key="key"
@@ -743,7 +992,7 @@ const canSave = computed(() =>
                 <Check class="h-3 w-3 text-emerald-500" />
               </div>
 
-              <!-- 品牌图标 -->
+              <!-- 品牌标识 -->
               <div
                 class="flex h-12 w-12 items-center justify-center rounded-2xl text-lg font-bold transition-transform duration-200 group-hover:scale-110"
                 :class="[preset.brandBg, preset.brandColor]"
@@ -751,13 +1000,13 @@ const canSave = computed(() =>
                 {{ (key as string) === 'custom' ? '+' : preset.brandInitial }}
               </div>
 
-              <!-- 名称 & 描述 -->
+              <!-- 名称和描述 -->
               <div>
                 <p class="text-sm font-semibold">
                   {{ getPresetTitle(key as string, preset) }}
                 </p>
                 <p class="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
-                  {{ getPresetDescription(key as string) }}
+                  {{ getPresetDescription(key as string, preset) }}
                 </p>
               </div>
 
@@ -862,7 +1111,7 @@ const canSave = computed(() =>
       </div>
     </ScrollArea>
 
-    <!-- ==================== 编辑 Provider 对话框 ==================== -->
+    <!-- 编辑 Provider 对话框 -->
     <Dialog :open="showEditDialog" @update:open="showEditDialog = $event">
       <DialogContent class="sm:max-w-[640px] gap-0 p-0">
         <DialogHeader class="px-7 pt-6 pb-5 border-b border-border/20">
@@ -889,7 +1138,7 @@ const canSave = computed(() =>
                   <Label class="text-xs">{{ t('ai.providerConfig.fields.providerType') }}</Label>
                   <Select
                     :model-value="form.providerType"
-                    @update:model-value="(v: unknown) => form.providerType = String(v) as ProviderType"
+                    @update:model-value="setProviderType"
                   >
                     <SelectTrigger class="h-10 text-sm">
                       <SelectValue />
@@ -922,8 +1171,9 @@ const canSave = computed(() =>
                   <Input
                     v-model="form.apiKey"
                     :type="showApiKey ? 'text' : 'password'"
-                    placeholder="sk-..."
+                    :placeholder="loadingApiKey ? '正在读取已保存 API Key...' : 'sk-...'"
                     class="h-10 text-sm font-mono pr-10"
+                    :disabled="loadingApiKey"
                   />
                   <button
                     class="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
@@ -933,7 +1183,9 @@ const canSave = computed(() =>
                   </button>
                 </div>
                 <p class="text-[11px] text-muted-foreground mt-1">
-                  {{ editMode === 'edit' ? t('ai.providerConfig.apiKeyKeepHint') : t('ai.providerConfig.apiKeySaveHint') }}
+                  <span v-if="apiKeyLoadError" class="text-destructive">读取已保存 Key 失败：{{ apiKeyLoadError }}</span>
+                  <span v-else-if="editMode === 'edit' && !loadingApiKey && !form.apiKey">未读取到已保存 Key，保存时可重新填写。</span>
+                  <span v-else>{{ editMode === 'edit' ? '已读取完整 Key，可点击右侧图标查看；保存时会覆盖系统密钥。' : t('ai.providerConfig.apiKeySaveHint') }}</span>
                 </p>
               </div>
 
@@ -955,10 +1207,26 @@ const canSave = computed(() =>
                   {{ t('ai.providerConfig.sections.models') }}
                   <span class="text-[10px] text-muted-foreground/50">({{ form.models.length }})</span>
                 </div>
-                <Button variant="outline" size="sm" class="h-8 text-xs gap-1.5" @click="openAddModel">
-                  <Plus class="h-3.5 w-3.5" />
-                  {{ t('ai.providerConfig.actions.addModel') }}
-                </Button>
+                <div class="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    class="h-8 text-xs gap-1.5"
+                    :disabled="syncingModels || !form.endpoint.trim() || !form.apiKey.trim()"
+                    @click="syncProviderModels"
+                  >
+                    <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': syncingModels }" />
+                    {{ syncingModels ? '同步中...' : '同步模型' }}
+                  </Button>
+                  <Button variant="outline" size="sm" class="h-8 text-xs gap-1.5" @click="openAddModel">
+                    <Plus class="h-3.5 w-3.5" />
+                    {{ t('ai.providerConfig.actions.addModel') }}
+                  </Button>
+                </div>
+              </div>
+
+              <div v-if="modelSyncError || modelSyncMessage" class="ml-8 rounded-lg border px-3 py-2 text-[11px]" :class="modelSyncError ? 'border-destructive/25 bg-destructive/5 text-destructive' : 'border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'">
+                {{ modelSyncError || modelSyncMessage }}
               </div>
 
               <div v-if="form.models.length === 0" class="ml-8 rounded-lg border border-dashed border-border/40 p-8 text-center">
@@ -1024,7 +1292,7 @@ const canSave = computed(() =>
       </DialogContent>
     </Dialog>
 
-    <!-- ==================== 编辑模型对话框 ==================== -->
+    <!-- 编辑模型对话框 -->
     <Dialog :open="showModelDialog" @update:open="showModelDialog = $event">
       <DialogContent class="sm:max-w-[540px] gap-0 p-0">
         <DialogHeader class="px-7 pt-6 pb-5 border-b border-border/20">
@@ -1048,6 +1316,9 @@ const canSave = computed(() =>
           <!-- 模型能力 -->
           <div class="space-y-3.5">
             <Label class="text-xs font-semibold text-foreground/70">{{ t('ai.providerConfig.sections.modelCapabilities') }}</Label>
+            <p class="text-[11px] text-muted-foreground leading-relaxed">
+              默认按现代模型全能力开启；只有确认模型不支持时再手动关闭，否则会隐藏图片、工具或 thinking 相关入口。
+            </p>
             <div class="grid grid-cols-2 gap-x-6 gap-y-3.5">
               <label class="flex items-center gap-3 text-sm cursor-pointer">
                 <Switch v-model="modelForm.streaming" />

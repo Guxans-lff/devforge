@@ -3,9 +3,11 @@ import { Channel } from '@tauri-apps/api/core'
 import {
   aiAbortStream,
   aiChatStream,
+  aiCreateCompletion,
   aiExecuteTool,
   aiGetMcpStatus,
   aiGetSession,
+  aiListProviderModels,
   aiListProviders,
   aiReadContextFile,
   aiSaveMessage,
@@ -58,20 +60,71 @@ describe('ai bridge modules', () => {
       systemPrompt: null,
       enableTools: null,
       thinkingBudget: null,
+      responseFormat: null,
+      prefixCompletion: null,
+      prefixContent: null,
       onEvent: expect.any(Object),
     }), { source: 'AI' })
   })
 
   it('routes provider and session commands through stable exports', async () => {
     await aiListProviders()
+    await aiListProviderModels('https://api.deepseek.com', 'sk-test')
     await aiGetSession('s1', 300)
     await aiAbortStream('s1')
     await aiGetMcpStatus('D:/repo')
 
     expect(invokeCommandMock).toHaveBeenNthCalledWith(1, 'ai_list_providers', undefined, { source: 'AI' })
-    expect(invokeCommandMock).toHaveBeenNthCalledWith(2, 'ai_get_session', { id: 's1', messageLimit: 300 }, { source: 'AI' })
-    expect(invokeCommandMock).toHaveBeenNthCalledWith(3, 'ai_abort_stream', { sessionId: 's1' }, { source: 'AI' })
-    expect(invokeCommandMock).toHaveBeenNthCalledWith(4, 'ai_get_mcp_status', { workDir: 'D:/repo' }, { source: 'AI' })
+    expect(invokeCommandMock).toHaveBeenNthCalledWith(2, 'ai_list_provider_models', {
+      endpoint: 'https://api.deepseek.com',
+      apiKey: 'sk-test',
+    }, { source: 'AI' })
+    expect(invokeCommandMock).toHaveBeenNthCalledWith(3, 'ai_get_session', { id: 's1', messageLimit: 300 }, { source: 'AI' })
+    expect(invokeCommandMock).toHaveBeenNthCalledWith(4, 'ai_abort_stream', { sessionId: 's1' }, { source: 'AI' })
+    expect(invokeCommandMock).toHaveBeenNthCalledWith(5, 'ai_get_mcp_status', { workDir: 'D:/repo' }, { source: 'AI' })
+  })
+
+  it('passes DeepSeek JSON, prefix and FIM completion params', async () => {
+    await aiChatStream({
+      sessionId: 's2',
+      messages: [{ role: 'user', content: 'json' }],
+      providerType: 'openai_compat',
+      model: 'deepseek-v4-pro',
+      apiKey: 'key',
+      endpoint: 'https://api.deepseek.com',
+      responseFormat: 'json_object',
+      prefixCompletion: true,
+      prefixContent: '{"ok":',
+    }, vi.fn())
+
+    await aiCreateCompletion({
+      providerType: 'openai_compat',
+      model: 'deepseek-v4-flash',
+      apiKey: 'key',
+      endpoint: 'https://api.deepseek.com',
+      prompt: 'const a = ',
+      suffix: ';',
+      maxTokens: 128,
+      temperature: 0.2,
+      useBeta: true,
+    })
+
+    expect(invokeCommandMock).toHaveBeenNthCalledWith(1, 'ai_chat_stream', expect.objectContaining({
+      responseFormat: 'json_object',
+      prefixCompletion: true,
+      prefixContent: '{"ok":',
+    }), { source: 'AI' })
+    expect(invokeCommandMock).toHaveBeenNthCalledWith(2, 'ai_create_completion', {
+      providerType: 'openai_compat',
+      model: 'deepseek-v4-flash',
+      apiKey: 'key',
+      endpoint: 'https://api.deepseek.com',
+      prompt: 'const a = ',
+      suffix: ';',
+      maxTokens: 128,
+      temperature: 0.2,
+      useBeta: true,
+    }, { source: 'AI' })
   })
 
   it('normalizes optional tool and workspace parameters', async () => {

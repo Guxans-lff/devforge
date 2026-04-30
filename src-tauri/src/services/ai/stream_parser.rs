@@ -13,6 +13,7 @@ use tokio_util::bytes::Bytes;
 use futures::StreamExt;
 
 use super::models::{AiStreamEvent, ChatCompletionChunk, ChunkToolCall, ToolCallRecord, ToolCallFunction};
+use super::openai_dialect::OpenAiDialect;
 
 /// SSE 行解析状态
 ///
@@ -338,7 +339,7 @@ fn parse_error_event(data: &str) -> Option<AiStreamEvent> {
         .and_then(|value| value.as_str())
         .or_else(|| payload.get("code").and_then(|value| value.as_str()))
         .unwrap_or_default();
-    let retryable = matches!(code, "rate_limit_exceeded" | "server_error" | "temporarily_unavailable");
+    let retryable = OpenAiDialect::resolve("", "").is_retryable_error_code(code);
     Some(AiStreamEvent::Error { message, retryable })
 }
 
@@ -351,6 +352,20 @@ mod tests {
     #[test]
     fn parses_error_payload_into_retryable_stream_error() {
         let event = parse_error_event(r#"{"error":{"message":"rate limited","code":"rate_limit_exceeded"}}"#)
+            .expect("expected error event");
+
+        match event {
+            AiStreamEvent::Error { message, retryable } => {
+                assert_eq!(message, "rate limited");
+                assert!(retryable);
+            }
+            _ => panic!("unexpected event kind"),
+        }
+    }
+
+    #[test]
+    fn parses_kimi_rate_limit_error_as_retryable() {
+        let event = parse_error_event(r#"{"error":{"message":"rate limited","code":"rate_limit_reached_error"}}"#)
             .expect("expected error event");
 
         match event {

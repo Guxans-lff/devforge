@@ -4,7 +4,7 @@ use tauri::{command, ipc::Channel, AppHandle, Manager};
 use std::sync::Arc;
 
 use crate::models::query::{
-    QueryChunk, QueryResult, StatementResult,
+    QueryChunk, QueryResult, StatementResult, BatchDatabaseExecutionResult,
     detect_statement_type,
 };
 use crate::services::audit_log;
@@ -168,6 +168,70 @@ pub async fn db_execute_query_stream_in_database(
             }),
         )
         .await
+}
+
+#[command]
+pub async fn db_execute_query_in_databases(
+    app: AppHandle,
+    connection_id: String,
+    databases: Vec<String>,
+    sql: String,
+    error_strategy: Option<String>,
+    timeout_secs: Option<u64>,
+) -> Result<Vec<BatchDatabaseExecutionResult>, AppError> {
+    let engine = app.state::<DbEngineState>().inner().clone();
+    let stop_on_error = !matches!(error_strategy.as_deref(), Some("continueOnError"));
+    let mut results: Vec<BatchDatabaseExecutionResult> = Vec::new();
+    let mut should_stop = false;
+
+    for database in databases {
+        if should_stop {
+            break;
+        }
+        let start = std::time::Instant::now();
+        let query_result = match engine.clone().execute_query_in_database(connection_id.clone(), database.clone(), sql.clone(), timeout_secs).await {
+            Ok(result) => result,
+            Err(e) => QueryResult::error(e.to_string(), 0),
+        };
+        let elapsed = start.elapsed().as_millis() as u64;
+        let has_error = query_result.is_error;
+
+        if audit_log::classify_operation(&sql).is_some() {
+            let storage = app.state::<StorageState>().inner().clone();
+            let sql_clone = sql.clone();
+            let cid = connection_id.clone();
+            let db = database.clone();
+            let is_err = query_result.is_error;
+            let err_msg = query_result.error.clone();
+            let affected = query_result.affected_rows as i64;
+            tokio::spawn(async move {
+                let _ = audit_log::record(
+                    &storage, &cid, None, Some(&db), &sql_clone,
+                    affected, elapsed as i64, is_err, err_msg.as_deref(),
+                ).await;
+            });
+        }
+
+        results.push(BatchDatabaseExecutionResult {
+            database,
+            success: !has_error,
+            result: query_result,
+            execution_time_ms: elapsed,
+            stopped_by_strategy: false,
+        });
+
+        if has_error && stop_on_error {
+            should_stop = true;
+        }
+    }
+
+    if should_stop {
+        if let Some(last) = results.last_mut() {
+            last.stopped_by_strategy = true;
+        }
+    }
+
+    Ok(results)
 }
 
 #[command]

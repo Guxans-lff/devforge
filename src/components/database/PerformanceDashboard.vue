@@ -31,8 +31,12 @@ const dbWorkspaceStore = useDatabaseWorkspaceStore()
 
 /** 最新的服务器状态 */
 const currentStatus = ref<ServerStatus | null>(null)
-/** 是否正在加载 */
-const isLoading = ref(false)
+/** 实时仪表盘加载状态 */
+const dashboardLoading = ref(false)
+/** 进程列表加载状态 */
+const processesLoading = ref(false)
+/** 变量列表加载状态 */
+const variablesLoading = ref(false)
 /** 错误信息 */
 const errorMessage = ref<string | null>(null)
 /** 自动刷新定时器句柄 */
@@ -174,7 +178,7 @@ const metricCards = computed(() => {
 /** 获取服务器状态并更新历史数据 */
 async function fetchServerStatus() {
   if (!props.isConnected) return
-  isLoading.value = true
+  dashboardLoading.value = true
   errorMessage.value = null
   try {
     const status = await dbGetServerStatus(props.connectionId)
@@ -193,33 +197,33 @@ async function fetchServerStatus() {
   } catch (e) {
     errorMessage.value = String(e)
   } finally {
-    isLoading.value = false
+    dashboardLoading.value = false
   }
 }
 
 /** 获取进程列表 */
 async function fetchProcesses() {
   if (!props.isConnected) return
-  isLoading.value = true
+  processesLoading.value = true
   try {
     processes.value = await dbGetProcessList(props.connectionId)
   } catch (e) {
     message.error('获取进程列表失败: ' + e)
   } finally {
-    isLoading.value = false
+    processesLoading.value = false
   }
 }
 
 /** 获取服务器变量 */
 async function fetchVariables() {
   if (!props.isConnected) return
-  isLoading.value = true
+  variablesLoading.value = true
   try {
     variables.value = await dbGetServerVariables(props.connectionId)
   } catch (e) {
     message.error('获取变量失败: ' + e)
   } finally {
-    isLoading.value = false
+    variablesLoading.value = false
   }
 }
 
@@ -437,7 +441,7 @@ watch(activeSubTab, () => {
         <div class="flex flex-col items-end">
           <span class="text-[10px] font-black tracking-widest text-muted-foreground/30 uppercase">{{ currentTabLabel }}</span>
           <div class="flex items-center gap-1.5 min-w-[80px] justify-end">
-            <template v-if="isLoading">
+            <template v-if="activeSubTab === 'dashboard' ? dashboardLoading : activeSubTab === 'processes' ? processesLoading : activeSubTab === 'variables' ? variablesLoading : false">
               <RefreshCw class="h-2.5 w-2.5 animate-spin text-primary" />
               <span class="text-[10px] font-bold text-primary/80">采集数据中</span>
             </template>
@@ -449,7 +453,7 @@ watch(activeSubTab, () => {
         </div>
         <div class="h-8 w-[1px] bg-border/20 mx-2" />
         <Button size="icon" variant="ghost" class="h-8 w-8 rounded-full hover:bg-primary/10 hover:text-primary transition-colors" @click="startAutoRefresh">
-          <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': isLoading }" />
+          <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': activeSubTab === 'dashboard' ? dashboardLoading : activeSubTab === 'processes' ? processesLoading : activeSubTab === 'variables' ? variablesLoading : false }" />
         </Button>
       </div>
     </div>
@@ -460,7 +464,7 @@ watch(activeSubTab, () => {
         {{ errorMessage }}
       </div>
 
-      <div v-if="!currentStatus && !errorMessage" class="flex h-full items-center justify-center">
+      <div v-if="!currentStatus && !errorMessage && dashboardLoading" class="flex h-full items-center justify-center">
         <div class="text-center text-muted-foreground">
           <RefreshCw class="mx-auto h-8 w-8 animate-spin mb-2 opacity-50" />
           <p class="text-sm">正在获取服务器状态...</p>
@@ -590,7 +594,7 @@ watch(activeSubTab, () => {
               </tr>
             </tbody>
           </table>
-          <div v-if="processes.length === 0" class="flex flex-col items-center justify-center h-64 opacity-20">
+          <div v-if="processesLoading && processes.length === 0" class="flex flex-col items-center justify-center h-64 opacity-20">
             <Shield class="h-12 w-12 mb-3" />
             <p class="text-xs font-black uppercase tracking-widest">No Active Sessions</p>
           </div>
@@ -664,7 +668,7 @@ watch(activeSubTab, () => {
               </tr>
             </tbody>
           </table>
-          <div v-if="variables.length === 0" class="flex flex-col items-center justify-center h-64 opacity-20">
+          <div v-if="variablesLoading && variables.length === 0" class="flex flex-col items-center justify-center h-64 opacity-20">
             <Info class="h-12 w-12 mb-3" />
             <p class="text-xs font-black uppercase tracking-widest">Loading Variables...</p>
           </div>

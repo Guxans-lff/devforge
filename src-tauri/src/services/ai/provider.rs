@@ -37,6 +37,19 @@ pub trait AiProvider: Send + Sync {
         on_event: &Channel<AiStreamEvent>,
         abort_rx: watch::Receiver<bool>,
     ) -> Result<ChatResult, AppError>;
+
+    /// 文本补全 / FIM 补全（OpenAI compatible /completions）
+    async fn completion(
+        &self,
+        model: &str,
+        prompt: &str,
+        suffix: Option<&str>,
+        api_key: &str,
+        endpoint: &str,
+        max_tokens: u32,
+        temperature: f64,
+        use_beta: bool,
+    ) -> Result<super::models::CompletionResult, AppError>;
 }
 
 /// Provider 注册表

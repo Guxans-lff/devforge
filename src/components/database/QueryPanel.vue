@@ -8,6 +8,7 @@ import QueryResultSection from '@/components/database/QueryResultSection.vue'
 import DangerConfirmDialog from '@/components/database/DangerConfirmDialog.vue'
 import ParamInputDialog from '@/components/database/ParamInputDialog.vue'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
+import { useAiChatStore } from '@/stores/ai-chat'
 import { useQueryExecution } from '@/composables/useQueryExecution'
 import { useResultTabs } from '@/composables/useResultTabs'
 import { useI18n } from 'vue-i18n'
@@ -30,6 +31,7 @@ const props = defineProps<{
   isLoadingSchema?: boolean
   driver: string
   databases?: string[]
+  selectedDatabases?: string[]
   environment?: EnvironmentType
   readOnly?: boolean
   confirmDanger?: boolean
@@ -39,9 +41,11 @@ const emit = defineEmits<{
   reconnect: []
   executeSuccess: [sql: string]
   databaseChanged: [database: string]
+  openAiConfig: []
 }>()
 
 const store = useDatabaseWorkspaceStore()
+const aiStore = useAiChatStore()
 const { t } = useI18n()
 const editorRef = ref<InstanceType<typeof SqlEditor>>()
 
@@ -70,6 +74,22 @@ const currentDatabase = computed({
     if (val) execution.handleDatabaseSelect(val, emit)
   },
 })
+
+const batchDatabases = computed(() => props.selectedDatabases ?? [])
+const currentAiProvider = computed(() => {
+  const providerId = tabContext.value?.aiProviderId
+  return aiStore.providers.find(provider => provider.id === providerId) ?? null
+})
+const currentAiModel = computed(() => {
+  const modelId = tabContext.value?.aiModelId
+  if (!currentAiProvider.value || !modelId) return null
+  return currentAiProvider.value.models.find(model => model.id === modelId) ?? null
+})
+const aiConfigured = computed(() => Boolean(
+  tabContext.value?.aiProviderId
+  && tabContext.value?.aiModelId
+  && tabContext.value?.aiHasApiKey,
+))
 
 // ===== 结果标签页管理 =====
 const resultTabsManager = useResultTabs({
@@ -126,6 +146,14 @@ function executeCurrentSql() {
 }
 
 async function handleExecuteWithEmit(sql: string) {
+  execution.clearSqlErrorAnalysis()
+  const selectedBatchDatabases = batchDatabases.value
+  if (selectedBatchDatabases.length > 1) {
+    const result = await execution.handleBatchExecute(sql, selectedBatchDatabases)
+    if (result.success) emit('executeSuccess', sql)
+    return
+  }
+
   // 数据库未选择校验（SQLite 无需选库；USE/SHOW DATABASES 等语句不依赖数据库上下文）
   if (props.driver !== 'sqlite' && !currentDatabase.value && !isDatabaseIndependentSql(sql)) {
     store.updateTabContext(props.connectionId, props.tabId, {
@@ -171,16 +199,26 @@ function handleExplain() {
   })
 }
 
+async function handleAnalyzeSqlError() {
+  if (!aiConfigured.value) {
+    emit('openAiConfig')
+    return
+  }
+  await execution.analyzeSqlError()
+}
+
 function handleRefresh() {
   execution.handleRefresh(sqlContent.value)
 }
 
 function handleSnippetInsert(sql: string) {
   sqlContent.value = sql
+  execution.clearSqlErrorAnalysis()
 }
 
 function handleSnippetExecute(sql: string) {
   sqlContent.value = sql
+  execution.clearSqlErrorAnalysis()
   handleExecuteWithEmit(sql)
 }
 
@@ -216,12 +254,19 @@ onActivated(() => {
   checkPendingBrowse()
 })
 
-/** 检查 context 中是否有待执行的 tableBrowse（result 为空说明还没执行） */
+function hasPendingBrowse(ctx?: QueryTabContext): ctx is QueryTabContext & { tableBrowse: NonNullable<QueryTabContext['tableBrowse']> } {
+  if (!ctx?.tableBrowse || ctx.result || ctx.isExecuting) return false
+
+  const browseSql = `SELECT * FROM \`${ctx.tableBrowse.database}\`.\`${ctx.tableBrowse.table}\`;`
+  return ctx.sql.trim() === browseSql
+}
+
+/** 检查 context 中是否有待执行的 tableBrowse（仅恢复明确的表浏览待执行态） */
 function checkPendingBrowse() {
   const ctx = tabContext.value
-  if (ctx?.tableBrowse && !ctx.result && !ctx.isExecuting) {
-    execution.browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, ctx.tableBrowse.whereClause, ctx.tableBrowse.orderBy)
-  }
+  if (!hasPendingBrowse(ctx)) return
+
+  execution.browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, ctx.tableBrowse.whereClause, ctx.tableBrowse.orderBy)
 }
 
 onBeforeUnmount(() => {
@@ -252,7 +297,11 @@ watch(() => props.isConnected, (connected) => {
       :error-strategy="execution.errorStrategy.value"
       :query-timeout="execution.queryTimeout.value"
       :databases="databases ?? []"
+      :selected-databases="batchDatabases"
       :current-database="currentDatabase"
+      :ai-configured="aiConfigured"
+      :ai-provider-name="currentAiProvider?.name"
+      :ai-model-name="currentAiModel?.name"
       :timer-running="execution.executionTimer.isRunning.value"
       :timer-elapsed="execution.executionTimer.elapsed.value"
       @execute="executeCurrentSql"
@@ -264,6 +313,7 @@ watch(() => props.isConnected, (connected) => {
       @begin-transaction="execution.handleBeginTransaction"
       @commit="execution.handleCommit"
       @rollback="execution.handleRollback"
+      @open-ai-config="emit('openAiConfig')"
       @update:query-timeout="execution.queryTimeout.value = $event"
       @update:current-database="currentDatabase = $event"
     />
@@ -300,6 +350,7 @@ watch(() => props.isConnected, (connected) => {
             :current-database="currentDatabase"
             :driver="driver"
             :is-table-browse="!!tabContext?.tableBrowse"
+            :table-browse="tabContext?.tableBrowse"
             :sub-results="resultTabsManager.subResults.value"
             :is-multi-result-tab="resultTabsManager.isMultiResultTab.value"
             :active-sub-result-index="resultTabsManager.activeSubResultIndex.value"
@@ -307,12 +358,19 @@ watch(() => props.isConnected, (connected) => {
             :explain-result="execution.explainResult.value"
             :explain-table-rows="execution.explainTableRows.value"
             :is-explaining="execution.isExplaining.value"
+            :sql-error-analysis="tabContext?.sqlErrorAnalysis"
+            :ai-configured="aiConfigured"
+            :ai-provider-name="currentAiProvider?.name"
+            :ai-model-name="currentAiModel?.name"
             :context-menu="resultTabsManager.contextMenu.value"
+            @open-ai-config="emit('openAiConfig')"
             @reconnect="emit('reconnect')"
             @load-more="execution.loadMoreRows"
             @refresh="handleRefresh"
             @server-filter="execution.handleServerFilter"
             @server-sort="execution.handleServerSort"
+            @analyze-sql-error="handleAnalyzeSqlError"
+            @apply-fixed-sql="execution.applyFixedSql($event)"
             @set-active-result-tab="resultTabsManager.setActiveResultTab"
             @close-result-tab="resultTabsManager.closeResultTab"
             @close-other-result-tabs="resultTabsManager.closeOtherResultTabs"

@@ -262,7 +262,9 @@ function isAiRoot(rootPath: string): boolean {
 }
 
 function isAiRootPath(rootPath: string): boolean {
-  return isDescendantPath(rootPath, aiStore.currentWorkDir)
+  return isDescendantPath(rootPath, aiStore.currentWorkDir) && !store.roots.some(root =>
+    root.path !== rootPath && isSamePath(root.path, aiStore.currentWorkDir),
+  )
 }
 
 function isEditorRoot(rootPath: string): boolean {

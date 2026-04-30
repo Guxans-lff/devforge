@@ -469,7 +469,7 @@ async function executeIndexedTool(
     updateToolCalls(params.toolCalls, params.updateStreamingMessage)
 
     if (decision === 'deny') {
-      const content = `[user_rejected] User rejected ${toolCall.name}.`
+      const content = `[user_rejected] 用户拒绝执行 ${toolCall.name}。`
       if (toolCall.execution) {
         toolCall.execution.errorKind = 'user_rejected'
         toolCall.execution.finishedAt = Date.now()

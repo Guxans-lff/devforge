@@ -43,6 +43,9 @@ export interface ChatStreamParams {
   systemPrompt?: string
   enableTools?: boolean
   thinkingBudget?: number
+  responseFormat?: 'json_object'
+  prefixCompletion?: boolean
+  prefixContent?: string
 }
 
 export function aiChatStream(
@@ -64,8 +67,104 @@ export function aiChatStream(
     systemPrompt: params.systemPrompt ?? null,
     enableTools: params.enableTools ?? null,
     thinkingBudget: params.thinkingBudget ?? null,
+    responseFormat: params.responseFormat ?? null,
+    prefixCompletion: params.prefixCompletion ?? null,
+    prefixContent: params.prefixContent ?? null,
     onEvent: channel,
   }, { source: 'AI' })
+}
+
+export interface CompletionParams {
+  providerType: string
+  model: string
+  apiKey: string
+  endpoint: string
+  prompt: string
+  suffix?: string
+  maxTokens?: number
+  temperature?: number
+  useBeta?: boolean
+}
+
+export interface CompletionResult {
+  content: string
+  model: string
+  promptTokens: number
+  completionTokens: number
+  finishReason: string
+}
+
+export function aiCreateCompletion(params: CompletionParams): Promise<CompletionResult> {
+  return invokeCommand('ai_create_completion', {
+    providerType: params.providerType,
+    model: params.model,
+    apiKey: params.apiKey,
+    endpoint: params.endpoint,
+    prompt: params.prompt,
+    suffix: params.suffix ?? null,
+    maxTokens: params.maxTokens ?? null,
+    temperature: params.temperature ?? null,
+    useBeta: params.useBeta ?? null,
+  }, { source: 'AI' })
+}
+
+export interface AnalyzeDatabaseSqlErrorParams {
+  providerType: string
+  model: string
+  apiKey: string
+  endpoint: string
+  sql: string
+  error: string
+  database?: string
+  driver?: string
+  executionMode?: 'single' | 'multi' | 'batch'
+}
+
+export function buildDatabaseSqlErrorAnalysisPrompt(params: AnalyzeDatabaseSqlErrorParams): ChatMessage[] {
+  const context = [
+    `数据库驱动: ${params.driver || 'unknown'}`,
+    `当前数据库: ${params.database || '未选择'}`,
+    `执行模式: ${params.executionMode || 'single'}`,
+    '',
+    '[SQL]',
+    params.sql,
+    '',
+    '[ERROR]',
+    params.error,
+  ].join('\n')
+
+  return [
+    {
+      role: 'system',
+      content: [
+        '你是资深数据库故障分析助手。',
+        '你只根据给定 SQL、错误信息和最小上下文分析，不要编造不存在的表结构。',
+        '请输出严格 JSON，对象字段固定为 summary、fixSql、explanation。',
+        'summary 用一句中文概括根因；fixSql 填修复后的 SQL，若信息不足则返回空字符串；explanation 用中文说明修改原因与注意点。',
+        '不要输出 markdown 代码块，不要输出 JSON 之外的任何文字。',
+      ].join(' '),
+    },
+    {
+      role: 'user',
+      content: context,
+    },
+  ]
+}
+
+export function analyzeDatabaseSqlError(
+  params: AnalyzeDatabaseSqlErrorParams,
+  onEvent: (event: AiStreamEvent) => void,
+): Promise<ChatResult> {
+  return aiChatStream({
+    sessionId: crypto.randomUUID(),
+    messages: buildDatabaseSqlErrorAnalysisPrompt(params),
+    providerType: params.providerType,
+    model: params.model,
+    apiKey: params.apiKey,
+    endpoint: params.endpoint,
+    temperature: 0.2,
+    maxTokens: 1200,
+  }, onEvent)
 }
 
 export function aiAbortStream(sessionId: string): Promise<boolean> {
@@ -82,6 +181,20 @@ export function aiSaveProvider(config: ProviderConfig): Promise<void> {
 
 export function aiDeleteProvider(id: string): Promise<void> {
   return invokeCommand('ai_delete_provider', { id }, { source: 'AI' })
+}
+
+export interface ProviderRemoteModel {
+  id: string
+  object?: string
+  ownedBy?: string
+}
+
+export interface ProviderModelsResponse {
+  models: ProviderRemoteModel[]
+}
+
+export function aiListProviderModels(endpoint: string, apiKey: string): Promise<ProviderModelsResponse> {
+  return invokeCommand('ai_list_provider_models', { endpoint, apiKey }, { source: 'AI' })
 }
 
 export function aiSaveSession(session: AiSession): Promise<void> {

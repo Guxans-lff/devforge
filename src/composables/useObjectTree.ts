@@ -51,6 +51,7 @@ export function useObjectTree(options: UseObjectTreeOptions) {
   const searchQuery = ref('')
   const debouncedQuery = ref('')
   const searchCollapsedDbs = ref(new Set<string>())
+  const selectedDatabases = ref<string[]>([])
 
   // ===== 全局对象搜索 =====
   const {
@@ -259,6 +260,29 @@ export function useObjectTree(options: UseObjectTreeOptions) {
     }
   }
 
+  function toggleSelectedDatabase(database: string) {
+    if (!database) return
+    const next = new Set(selectedDatabases.value)
+    if (next.has(database)) {
+      next.delete(database)
+    } else {
+      next.add(database)
+    }
+    selectedDatabases.value = [...next]
+  }
+
+  function clearSelectedDatabases() {
+    selectedDatabases.value = []
+  }
+
+  function selectAllDatabases() {
+    selectedDatabases.value = treeNodes.value.map(node => node.label)
+  }
+
+  function isDatabaseSelected(database?: string) {
+    return !!database && selectedDatabases.value.includes(database)
+  }
+
   function createFolderNodes(database: string): DatabaseTreeNode[] {
     return [
       { id: `folder-tables-${database}`, label: t('objectTree.tables'), type: 'folder', folderType: 'tables', children: [], isExpanded: false, isLoading: false, meta: markRaw({ database }) },
@@ -451,6 +475,7 @@ export function useObjectTree(options: UseObjectTreeOptions) {
     treeNodes.value = []
     searchQuery.value = ''
     debouncedQuery.value = ''
+    selectedDatabases.value = []
     invalidateByPrefix(connectionId.value)
   }
 
@@ -473,6 +498,8 @@ export function useObjectTree(options: UseObjectTreeOptions) {
         meta: markRaw({ database: db.name }),
       }
     })
+    const available = new Set(treeNodes.value.map(node => node.label))
+    selectedDatabases.value = selectedDatabases.value.filter(db => available.has(db))
     onSchemaUpdated()
   }
 
@@ -553,7 +580,7 @@ export function useObjectTree(options: UseObjectTreeOptions) {
   return {
     // 核心状态
     treeNodes, loading, filteredNodes, flattenedNodes,
-    isSystemExpanded, debouncedQuery,
+    isSystemExpanded, debouncedQuery, selectedDatabases,
     // 搜索
     combinedSearchQuery, showObjectSearchDropdown,
     isObjectSearching, objectSearchResults, highlightedNodeId,
@@ -563,6 +590,7 @@ export function useObjectTree(options: UseObjectTreeOptions) {
     // 节点交互
     toggleNode, handleDoubleClick,
     handleRefreshDatabase, handleRefreshFolder,
+    toggleSelectedDatabase, clearSelectedDatabases, selectAllDatabases, isDatabaseSelected,
     getNodeIcon,
     // 数据加载
     loadDatabases, clearTree, forceRefresh, silentRefresh,

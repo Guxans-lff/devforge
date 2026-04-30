@@ -102,6 +102,9 @@ export interface AiGatewayRequest {
   enableTools?: boolean
   /** 思考预算 */
   thinkingBudget?: number
+  responseFormat?: 'json_object'
+  prefixCompletion?: boolean
+  prefixContent?: string
   /** 最大 token 数 */
   maxTokens?: number
   /** 温度 */

@@ -12,7 +12,7 @@ import {
 import {
   Play, Loader2, Square, WrapText, Bookmark, ListTree,
   PlayCircle, CheckCircle2, XCircle, Clock, Database,
-  ShieldAlert, ShieldCheck, Timer, ChevronDown, Check,
+  ShieldAlert, ShieldCheck, Timer, ChevronDown, Check, Sparkles,
 } from 'lucide-vue-next'
 import type { ErrorStrategy } from '@/types/database'
 
@@ -27,6 +27,10 @@ const props = defineProps<{
   queryTimeout: number
   databases: string[]
   currentDatabase: string
+  selectedDatabases?: string[]
+  aiConfigured?: boolean
+  aiProviderName?: string
+  aiModelName?: string
   /** 执行计时器是否运行中 */
   timerRunning: boolean
   /** 格式化的耗时文本 */
@@ -43,6 +47,7 @@ const emit = defineEmits<{
   beginTransaction: []
   commit: []
   rollback: []
+  openAiConfig: []
   'update:queryTimeout': [value: number]
   'update:currentDatabase': [value: string]
 }>()
@@ -67,6 +72,16 @@ const timeoutModel = computed({
   set: (val: number) => emit('update:queryTimeout', val),
 })
 
+const selectedDatabaseCount = computed(() => props.selectedDatabases?.length ?? 0)
+const isBatchMode = computed(() => selectedDatabaseCount.value > 1)
+const databaseDisplayText = computed(() => {
+  if (isBatchMode.value) return `已选 ${selectedDatabaseCount.value} 个库`
+  return props.currentDatabase || t('database.selectDatabase')
+})
+const aiSummaryText = computed(() => {
+  if (!props.aiConfigured || !props.aiProviderName || !props.aiModelName) return 'AI 未配置'
+  return `${props.aiProviderName} / ${props.aiModelName}`
+})
 </script>
 
 <template>
@@ -84,12 +99,12 @@ const timeoutModel = computed({
             <Button
               v-if="!isExecuting"
               size="sm"
-              :aria-label="t('database.execute') + ' (Ctrl+Enter)'"
+              :aria-label="(isBatchMode ? '批量执行' : t('database.execute')) + ' (Ctrl+Enter)'"
               class="h-7 gap-1.5 px-3 text-[11px] font-bold"
               @click="emit('execute')"
             >
               <Play class="h-3 w-3" />
-              {{ t('database.execute') }}
+              {{ isBatchMode ? `批量执行 (${selectedDatabases?.length ?? 0})` : t('database.execute') }}
             </Button>
             <!-- 执行中：切换为红色 Stop -->
             <Button
@@ -108,6 +123,7 @@ const timeoutModel = computed({
         <TooltipContent side="bottom" class="text-xs">
           <template v-if="executeDisabledReason">{{ executeDisabledReason }}</template>
           <template v-else-if="isExecuting">{{ t('common.cancel') }} (Ctrl+C)</template>
+          <template v-else-if="isBatchMode">批量执行 {{ selectedDatabases?.length ?? 0 }} 个数据库 (Ctrl+Enter)</template>
           <template v-else>{{ t('database.execute') }} (Ctrl+Enter)</template>
         </TooltipContent>
       </Tooltip>
@@ -170,12 +186,12 @@ const timeoutModel = computed({
           <Button
             variant="outline"
             role="combobox"
-            :aria-label="t('database.selectDatabase')"
-            class="h-6 min-w-[100px] max-w-[200px] justify-between px-2 text-[11px] font-normal hover:border-primary/50 transition-[border-color] bg-background border-border/50"
+            :aria-label="isBatchMode ? `已选 ${selectedDatabaseCount} 个数据库` : t('database.selectDatabase')"
+            class="h-6 min-w-[120px] max-w-[240px] justify-between px-2 text-[11px] font-normal hover:border-primary/50 transition-[border-color] bg-background border-border/50"
           >
             <div class="flex items-center gap-1.5 min-w-0">
               <Database class="h-3 w-3 shrink-0 text-primary/70" />
-              <span class="truncate font-medium">{{ currentDatabase || t('database.selectDatabase') }}</span>
+              <span class="truncate font-medium">{{ databaseDisplayText }}</span>
             </div>
             <ChevronDown class="ml-2 h-3 w-3 shrink-0 opacity-40" />
           </Button>
@@ -200,8 +216,14 @@ const timeoutModel = computed({
                     <Database class="h-2.5 w-2.5" />
                   </div>
                   <span class="flex-1 truncate font-medium">{{ db }}</span>
+                  <span
+                    v-if="selectedDatabases?.includes(db)"
+                    class="rounded bg-primary/10 px-1 py-0.5 text-[9px] font-medium text-primary"
+                  >
+                    已选
+                  </span>
                   <Check
-                    v-if="currentDatabase === db"
+                    v-else-if="currentDatabase === db"
                     class="ml-auto h-3 w-3 text-primary animate-in zoom-in-50 duration-200"
                   />
                 </CommandItem>
@@ -210,6 +232,25 @@ const timeoutModel = computed({
           </Command>
         </PopoverContent>
       </Popover>
+
+      <!-- AI 设置 -->
+      <Tooltip>
+        <TooltipTrigger as-child>
+          <Button
+            variant="ghost"
+            size="sm"
+            class="h-6 max-w-[220px] gap-1.5 px-2 text-[11px]"
+            :class="props.aiConfigured ? 'text-primary' : 'text-muted-foreground'"
+            @click="emit('openAiConfig')"
+          >
+            <Sparkles class="h-3 w-3 shrink-0" />
+            <span class="truncate">{{ aiSummaryText }}</span>
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" class="text-xs">
+          {{ props.aiConfigured ? '切换当前 SQL 错误分析使用的 AI 模型' : '配置 AI Provider、模型和 API Key' }}
+        </TooltipContent>
+      </Tooltip>
 
       <!-- 错误策略 -->
       <Tooltip>

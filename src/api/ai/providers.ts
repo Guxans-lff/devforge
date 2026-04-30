@@ -13,6 +13,20 @@ export function aiDeleteProvider(id: string): Promise<void> {
   return invokeAiCommand('ai_delete_provider', { id }, { source: 'AI' })
 }
 
+export interface ProviderRemoteModel {
+  id: string
+  object?: string
+  ownedBy?: string
+}
+
+export interface ProviderModelsResponse {
+  models: ProviderRemoteModel[]
+}
+
+export function aiListProviderModels(endpoint: string, apiKey: string): Promise<ProviderModelsResponse> {
+  return invokeAiCommand('ai_list_provider_models', { endpoint, apiKey }, { source: 'AI' })
+}
+
 export interface TestProviderParams {
   providerType: string
   endpoint: string

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick, onErrorCaptured } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, onErrorCaptured, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Splitpanes, Pane } from 'splitpanes'
 import 'splitpanes/dist/splitpanes.css'
@@ -8,7 +8,13 @@ import InnerTabBar from '@/components/database/InnerTabBar.vue'
 import QueryPanel from '@/components/database/QueryPanel.vue'
 import TableEditorPanel from '@/components/database/TableEditorPanel.vue'
 import ImportPanel from '@/components/database/ImportPanel.vue'
-import TableDataPanel from '@/components/database/TableDataPanel.vue'
+import AiProviderConfig from '@/components/ai/AiProviderConfig.vue'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { defineAsyncComponent } from 'vue'
 
 /** 懒加载 ER 图面板（vue-flow + dagre 较大） */
@@ -32,6 +38,7 @@ import BreadcrumbNav from '@/components/database/BreadcrumbNav.vue'
 import { useConnectionStore } from '@/stores/connections'
 import { useDatabaseWorkspaceStore } from '@/stores/database-workspace'
 import { useSchemaRegistryStore } from '@/stores/schema-registry'
+import { useAiChatStore } from '@/stores/ai-chat'
 import * as dbApi from '@/api/database'
 import type { ScriptOptions } from '@/api/database'
 import type { TableEditorTabContext, ImportTabContext, ErDiagramTabContext, SqlBuilderTabContext, QueryTabContext } from '@/types/database-workspace'
@@ -41,7 +48,7 @@ import { useSchemaCache } from '@/composables/useSchemaCache'
 import { usePoolStatusPolling } from '@/composables/usePoolStatusPolling'
 import { useDatabaseConnectionLifecycle } from '@/composables/useDatabaseConnectionLifecycle'
 import { useNotification } from '@/composables/useNotification'
-import { getConfirmDanger, getEnvironment, getReadOnly } from '@/api/connection'
+import { getConfirmDanger, getEnvironment, getReadOnly, getCredential } from '@/api/connection'
 import { parseBackendError, ensureErrorString } from '@/types/error'
 import type { EnvironmentType } from '@/types/environment'
 
@@ -53,6 +60,7 @@ const props = defineProps<{
 const connectionStore = useConnectionStore()
 const dbWorkspaceStore = useDatabaseWorkspaceStore()
 const schemaRegistry = useSchemaRegistryStore()
+const aiStore = useAiChatStore()
 
 // 当前连接状态（用于状态栏展示重连信息）
 const connectionState = computed(() => connectionStore.connections.get(props.connectionId))
@@ -151,6 +159,12 @@ const activeTab = computed(() => {
   const ws = workspace.value
   return ws.tabs.find((t) => t.id === ws.activeTabId)
 })
+const activeQueryTabContext = computed(() => {
+  if (activeTab.value?.type !== 'query') return null
+  return activeTab.value.context as QueryTabContext
+})
+const aiConfigVisible = ref(false)
+const aiStateHydrating = ref(false)
 
 // 类型安全的 tab context 访问
 const tableEditorContext = computed(() => {
@@ -165,8 +179,14 @@ const importContext = computed(() => {
   return null
 })
 
+defineExpose({
+  openAiConfig,
+  hydrateActiveQueryAiState,
+})
+
 // QueryPanel refs（用于外部触发执行）
 const queryPanelRef = ref<InstanceType<typeof QueryPanel>>()
+const pendingBrowseTarget = ref<{ database: string, table: string } | null>(null)
 
 // Schema 缓存更新事件处理（由 ObjectTree 触发）
 function handleSchemaUpdated() {
@@ -180,6 +200,8 @@ const databaseNames = computed(() => {
   return nodes.map((n) => n.label)
 })
 
+const selectedDatabases = computed(() => objectTreeRef.value?.selectedDatabases ?? [])
+
 // 捕获 QueryPanel 执行成功事件，若是 DDL 则触发对象树无感刷新
 function handleExecuteSuccess(sql: string) {
   const isDDL = /\b(CREATE|DROP|ALTER|RENAME|TRUNCATE)\b/i.test(sql)
@@ -191,6 +213,155 @@ function handleExecuteSuccess(sql: string) {
 /** 处理 QueryPanel 数据库切换事件，同步 ObjectTree 高亮和 Schema 缓存 */
 function handleDatabaseChanged(database: string) {
   handleDatabaseSwitch(database)
+}
+
+async function hydrateActiveQueryAiState(): Promise<void> {
+  const tab = activeTab.value
+  const ctx = activeQueryTabContext.value
+  if (tab?.type !== 'query' || !ctx || aiStateHydrating.value) return
+
+  aiStateHydrating.value = true
+  try {
+    await aiStore.init()
+
+    const provider = aiStore.providers.find(item => item.id === ctx.aiProviderId)
+      ?? aiStore.defaultProvider
+      ?? null
+    const model = provider?.models.find(item => item.id === ctx.aiModelId)
+      ?? provider?.models[0]
+      ?? null
+
+    if (!provider || !model) {
+      if (ctx.aiProviderId || ctx.aiModelId || ctx.aiHasApiKey) {
+        dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, {
+          aiProviderId: undefined,
+          aiModelId: undefined,
+          aiHasApiKey: false,
+        })
+      }
+      return
+    }
+
+    let hasApiKey = false
+    try {
+      const apiKey = await getCredential(`ai-provider-${provider.id}`)
+      hasApiKey = Boolean(apiKey?.trim())
+    } catch {
+      hasApiKey = false
+    }
+
+    if (
+      ctx.aiProviderId !== provider.id
+      || ctx.aiModelId !== model.id
+      || ctx.aiHasApiKey !== hasApiKey
+    ) {
+      dbWorkspaceStore.updateTabContext(props.connectionId, tab.id, {
+        aiProviderId: provider.id,
+        aiModelId: model.id,
+        aiHasApiKey: hasApiKey,
+      })
+    }
+  } finally {
+    aiStateHydrating.value = false
+  }
+}
+
+watch(
+  () => [props.connectionId, activeTab.value?.id, activeTab.value?.type] as const,
+  () => {
+    hydrateActiveQueryAiState().catch(error => console.warn('[DatabaseView] hydrate AI state failed:', error))
+  },
+  { immediate: true },
+)
+
+watch(
+  () => queryPanelRef.value,
+  (panel) => {
+    const target = pendingBrowseTarget.value
+    if (!panel || !target) return
+    const ctx = activeQueryTabContext.value
+    if (
+      activeTab.value?.type !== 'query'
+      || !ctx?.tableBrowse
+      || ctx.tableBrowse.database !== target.database
+      || ctx.tableBrowse.table !== target.table
+      || ctx.result !== null
+      || ctx.isExecuting
+    ) {
+      return
+    }
+
+    panel.browseTable(target.database, target.table)
+    pendingBrowseTarget.value = null
+  },
+)
+
+watch(
+  () => [pendingBrowseTarget.value?.database, pendingBrowseTarget.value?.table, activeTab.value?.id, activeTab.value?.type] as const,
+  ([database, table, activeTabId, activeTabType]) => {
+    if (!database || !table || !activeTabId || activeTabType !== 'query' || !queryPanelRef.value) return
+    const ctx = activeQueryTabContext.value
+    if (
+      !ctx?.tableBrowse
+      || ctx.tableBrowse.database !== database
+      || ctx.tableBrowse.table !== table
+      || ctx.result !== null
+      || ctx.isExecuting
+    ) {
+      return
+    }
+
+    queryPanelRef.value.browseTable(database, table)
+    pendingBrowseTarget.value = null
+  },
+)
+
+async function openAiConfig(): Promise<void> {
+  if (activeTab.value?.type !== 'query') return
+  await hydrateActiveQueryAiState()
+  await aiStore.loadWorkspaceConfig('D:/Project/DevForge/devforge')
+  const currentProviderId = activeQueryTabContext.value?.aiProviderId
+  const currentModelId = activeQueryTabContext.value?.aiModelId
+  const fallbackProvider = aiStore.defaultProvider
+  const provider = aiStore.providers.find(item => item.id === currentProviderId) ?? fallbackProvider ?? null
+  const model = provider?.models.find(item => item.id === currentModelId) ?? provider?.models[0] ?? null
+  if (provider && model) {
+    let hasApiKey = false
+    try {
+      const apiKey = await getCredential(`ai-provider-${provider.id}`)
+      hasApiKey = Boolean(apiKey?.trim())
+    } catch {
+      hasApiKey = false
+    }
+    dbWorkspaceStore.updateTabContext(props.connectionId, activeTab.value.id, {
+      aiProviderId: provider.id,
+      aiModelId: model.id,
+      aiHasApiKey: hasApiKey,
+    })
+  }
+  aiConfigVisible.value = true
+}
+
+async function handleApplyAiProfile(payload: { selectedProviderId: string, selectedModelId: string }): Promise<void> {
+  if (activeTab.value?.type !== 'query') return
+  const provider = aiStore.providers.find(item => item.id === payload.selectedProviderId)
+  if (!provider) return
+
+  let hasApiKey = false
+  try {
+    const apiKey = await getCredential(`ai-provider-${provider.id}`)
+    hasApiKey = Boolean(apiKey?.trim())
+  } catch {
+    hasApiKey = false
+  }
+
+  dbWorkspaceStore.updateTabContext(props.connectionId, activeTab.value.id, {
+    aiProviderId: provider.id,
+    aiModelId: payload.selectedModelId,
+    aiHasApiKey: hasApiKey,
+  })
+  await aiStore.loadProviders()
+  aiConfigVisible.value = false
 }
 
 /**
@@ -339,31 +510,15 @@ function handleSelectTable(database: string, table: string) {
     queryTab = dbWorkspaceStore.addQueryTab(props.connectionId)
   }
 
-  // 切换到该 tab 并更新内容（同时记录当前数据库上下文）
+  pendingBrowseTarget.value = { database, table }
   dbWorkspaceStore.setActiveInnerTab(props.connectionId, queryTab.id)
   dbWorkspaceStore.updateTabContext(props.connectionId, queryTab.id, {
     sql,
     tableBrowse: { database, table, currentPage: 1, pageSize: 200 },
     currentDatabase: database,
-    // 切换表时清空所有旧的结果标签页和激活状态，
-    // 防止 displayResult 通过 activeResultTab 路径返回旧数据
     resultTabs: [],
     activeResultTabId: undefined,
-    // 立即清除旧结果，避免短暂显示上一个表的数据
     result: null,
-  })
-
-  // 等待 QueryPanel 渲染完成后执行 browseTable
-  // 使用双 nextTick 确保 KeepAlive activate / 新组件 mount 完成
-  nextTick(() => {
-    if (queryPanelRef.value) {
-      queryPanelRef.value.browseTable(database, table)
-    } else {
-      // QueryPanel 尚未挂载（新建 tab 或从其他 tab 类型切换），再等一个渲染周期
-      nextTick(() => {
-        queryPanelRef.value?.browseTable(database, table)
-      })
-    }
   })
 }
 
@@ -822,12 +977,14 @@ function handleEditDatabaseSuccess() {
                 :is-loading-schema="isLoadingSchema"
                 :driver="driver"
                 :databases="databaseNames"
+                :selected-databases="selectedDatabases"
                 :environment="environment"
                 :read-only="readOnly"
                 :confirm-danger="confirmDanger"
                 @reconnect="connectAndLoad"
                 @execute-success="handleExecuteSuccess"
                 @database-changed="handleDatabaseChanged"
+                @open-ai-config="openAiConfig"
               />
               <TableEditorPanel
                 v-else-if="activeTab?.type === 'table-editor' && tableEditorContext"
@@ -846,14 +1003,6 @@ function handleEditDatabaseSuccess() {
                 :target-table="importContext.table"
                 :table-columns="importContext.columns"
                 @success="handleImportSuccess"
-              />
-              <TableDataPanel
-                v-else-if="activeTab?.type === 'table-data'"
-                :key="activeTab.id"
-                :connection-id="connectionId"
-                :tab-id="activeTab.id"
-                :is-connected="isConnected"
-                :driver="driver"
               />
               <SchemaComparePanel
                 v-else-if="activeTab?.type === 'schema-compare'"
@@ -906,6 +1055,23 @@ function handleEditDatabaseSuccess() {
         </div>
       </Pane>
     </Splitpanes>
+
+    <!-- AI 设置侧栏 -->
+    <Sheet v-model:open="aiConfigVisible">
+      <SheetContent side="right" class="w-[min(920px,96vw)] p-0 sm:max-w-none overflow-hidden">
+        <SheetHeader class="border-b border-border/40 px-6 py-4">
+          <SheetTitle class="text-sm font-semibold">AI 设置</SheetTitle>
+        </SheetHeader>
+        <div class="h-full overflow-hidden">
+          <AiProviderConfig
+            :current-provider-id="activeQueryTabContext?.aiProviderId ?? aiStore.defaultProvider?.id ?? null"
+            :current-model-id="activeQueryTabContext?.aiModelId ?? null"
+            @back="aiConfigVisible = false"
+            @apply-profile="handleApplyAiProfile"
+          />
+        </div>
+      </SheetContent>
+    </Sheet>
 
     <!-- 备份/恢复对话框 -->
     <BackupDialog

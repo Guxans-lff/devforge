@@ -226,6 +226,20 @@ export interface StatementResult {
   result: QueryResult
 }
 
+export interface BatchDatabaseExecutionResult {
+  database: string
+  success: boolean
+  result: QueryResult
+  executionTimeMs: number
+  stoppedByStrategy?: boolean
+}
+
+export interface BatchExecutionSummary {
+  targetDatabases: string[]
+  skippedDatabases?: string[]
+  stoppedByStrategy?: boolean
+}
+
 /** 多语句执行的错误策略 */
 export type ErrorStrategy = 'stopOnError' | 'continueOnError'
 

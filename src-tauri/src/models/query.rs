@@ -273,6 +273,16 @@ pub struct ScriptOptions {
 /// 单条语句的执行结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BatchDatabaseExecutionResult {
+    pub database: String,
+    pub success: bool,
+    pub result: QueryResult,
+    pub execution_time_ms: u64,
+    pub stopped_by_strategy: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct StatementResult {
     /// 语句序号（从 1 开始）
     pub index: u32,

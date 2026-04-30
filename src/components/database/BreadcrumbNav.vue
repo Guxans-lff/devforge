@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronRight, Database, Table2, Play, FileUp } from 'lucide-vue-next'
+import { ChevronRight, Table2, Play, FileUp } from 'lucide-vue-next'
 import type { EnvironmentType } from '@/types/environment'
 import { ENV_PRESETS } from '@/types/environment'
 import type { InnerTabType } from '@/types/database-workspace'
@@ -33,7 +33,6 @@ const operationLabels: Partial<Record<InnerTabType, string>> = {
   query: 'Query',
   'table-editor': 'Editor',
   import: 'Import',
-  'table-data': 'Data',
   'schema-compare': 'Compare',
   performance: 'Performance',
   'user-management': 'Users',
@@ -45,7 +44,6 @@ const operationIcons: Partial<Record<InnerTabType, typeof Play>> = {
   query: Play,
   'table-editor': Table2,
   import: FileUp,
-  'table-data': Database,
 }
 </script>
 

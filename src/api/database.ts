@@ -2,7 +2,7 @@ import { Channel } from '@tauri-apps/api/core'
 import { invokeCommand } from '@/api/base'
 import { useLogStore } from '@/stores/log'
 import { t } from '@/utils/i18n-helper'
-import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy, ForeignKeyRelation, IndexAnalysisResult, IndexSuggestion, SlowQueryDigest, InnoDbStatus, AuditLogEntry, AuditStats, SchemaBundle } from '@/types/database'
+import type { ColumnInfo, ConnectResult, DatabaseInfo, QueryChunk, QueryResult, RoutineInfo, RoutineParameter, TableInfo, TriggerInfo, ViewInfo, ServerStatus, ProcessInfo, ServerVariable, MysqlUser, CreateUserRequest, StatementResult, ErrorStrategy, ForeignKeyRelation, IndexAnalysisResult, IndexSuggestion, SlowQueryDigest, InnoDbStatus, AuditLogEntry, AuditStats, SchemaBundle, BatchDatabaseExecutionResult } from '@/types/database'
 import type { PoolStatus, ReconnectParams, ReconnectResult } from '@/types/connection'
 import type { ExportFormat } from '@/types/export'
 
@@ -85,6 +85,28 @@ export function dbExecuteQueryStreamInDatabase(
     timeoutSecs: timeoutSecs ?? null,
     onChunk: channel,
   })
+}
+
+export async function dbExecuteQueryInDatabases(
+  connectionId: string,
+  databases: string[],
+  sql: string,
+  errorStrategy?: ErrorStrategy,
+  timeoutSecs?: number,
+): Promise<BatchDatabaseExecutionResult[]> {
+  const logStore = useLogStore()
+  logStore.debug('DATABASE', `Batch database execute: ${sql.slice(0, 80)}${sql.length > 80 ? '...' : ''}`)
+  const results = await invokeCommand<BatchDatabaseExecutionResult[]>('db_execute_query_in_databases', {
+    connectionId,
+    databases,
+    sql,
+    errorStrategy: errorStrategy ?? null,
+    timeoutSecs: timeoutSecs ?? null,
+  }, { source: 'DATABASE' })
+  const successCount = results.filter(r => r.success).length
+  const failCount = results.length - successCount
+  logStore.debug('DATABASE', `Batch database completed: total ${results.length}, success ${successCount}, failed ${failCount}`)
+  return results
 }
 
 export function dbGetDatabases(connectionId: string): Promise<DatabaseInfo[]> {

@@ -263,7 +263,7 @@ pub fn run() {
                             log::info!("AI tables initialized");
                         }
                         if let Err(e) = services::background_job::init_table(&pool).await {
-                            log::error!("background_jobs 琛ㄥ垵濮嬪寲澶辫触: {}", e);
+                            log::error!("background_jobs 表初始化失败: {}", e);
                         } else {
                             log::info!("Background job table initialized");
                         }
@@ -347,6 +347,7 @@ pub fn run() {
             db::db_execute_query_stream,
             db::db_execute_query_in_database,
             db::db_execute_query_stream_in_database,
+            db::db_execute_query_in_databases,
             db::db_execute_multi,
             db::db_execute_multi_v2,
             db::db_execute_multi_v2_on_session,
@@ -698,7 +699,9 @@ pub fn run() {
             // AI
             ai_cmd::ai_chat_stream,
             ai_cmd::ai_abort_stream,
+            ai_cmd::ai_create_completion,
             ai_cmd::ai_list_providers,
+            ai_cmd::ai_list_provider_models,
             ai_cmd::ai_save_provider,
             ai_cmd::ai_delete_provider,
             ai_cmd::ai_save_session,

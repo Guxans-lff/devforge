@@ -15,7 +15,7 @@ import { formatData, getFilters, type ExportFormat } from '@/utils/exportData'
 import { useToast } from '@/composables/useToast'
 import { useAdaptiveOverscan } from '@/composables/useAdaptiveOverscan'
 import { computeColumnStatsAsync, type ColumnStatsResult } from '@/utils/columnStatistics'
-import { fetchPrimaryKeys } from '@/composables/usePrimaryKey'
+import { usePrimaryKeys } from '@/composables/usePrimaryKey'
 import { extractNumericCursorValue, isIntegerResultColumn } from '@/composables/useTableSeek'
 import type { QueryResult as QueryResultType } from '@/types/database'
 import { createLogger } from '@/utils/logger'
@@ -41,6 +41,25 @@ export interface UseQueryResultOptions {
   onRefresh: () => void
   onServerFilter: (where: string) => void
   onServerSort: (orderBy: string) => void
+  onSyncTableBrowse?: (patch: Partial<{
+    whereClause?: string
+    orderBy?: string
+    filterOperators?: Record<string, string>
+    showFilters?: boolean
+  }>) => void
+  tableBrowse?: Ref<{
+    database: string
+    table: string
+    currentPage: number
+    pageSize: number
+    whereClause?: string
+    orderBy?: string
+    filterOperators?: Record<string, string>
+    showFilters?: boolean
+    seekOrderBy?: string
+    seekColumn?: string
+    seekValue?: number
+  } | undefined>
 }
 
 const CHUNK_SIZE = 200
@@ -53,7 +72,10 @@ export function useQueryResult(options: UseQueryResultOptions) {
     connectionId, database, tableName, driver, isTableBrowse,
     tableScrollRef,
     onReconnect: _onReconnect, onLoadMore, onRefresh, onServerFilter, onServerSort,
+    onSyncTableBrowse,
+    tableBrowse,
   } = options
+
 
   const { t } = useI18n()
   const toast = useToast()
@@ -72,33 +94,24 @@ export function useQueryResult(options: UseQueryResultOptions) {
   const selectedStatsColumn = ref<string | null>(null)
   const columnStats = ref<ColumnStatsResult | null>(null)
   const computingStats = ref(false)
+  const columnStatsCache = new Map<string, ColumnStatsResult>()
+
+  function buildColumnStatsCacheKey(currentResult: QueryResultType, columnName: string): string {
+    const table = tableName.value || currentResult.tableName || '__query__'
+    return [
+      database.value || '__db__',
+      table,
+      columnName,
+      currentResult.rows.length,
+      currentResult.executionTimeMs,
+    ].join(':')
+  }
 
   // ===== 图表 =====
   const showChart = ref(false)
 
   // ===== 主键状态 =====
-  /** 当前表的主键列名列表（复合主键时有多个元素） */
-  const primaryKeys = ref<string[]>([])
-  /** 是否正在查询主键信息 */
-  const pkLoading = ref(false)
-
-  // 当 connectionId/database/tableName 变化时，自动拉取主键元数据
-  watch(
-    [connectionId, database, tableName],
-    async ([connId, db, tbl]) => {
-      if (!connId || !db || !tbl) {
-        primaryKeys.value = []
-        return
-      }
-      pkLoading.value = true
-      try {
-        primaryKeys.value = await fetchPrimaryKeys(connId, db, tbl)
-      } finally {
-        pkLoading.value = false
-      }
-    },
-    { immediate: true },
-  )
+  const { primaryKeys, pkLoading } = usePrimaryKeys(connectionId, database, tableName)
 
   // ===== 编辑状态 =====
   /**
@@ -135,9 +148,22 @@ export function useQueryResult(options: UseQueryResultOptions) {
 
   // ===== 过滤 =====
   const showFilters = ref(false)
-  const columnFilters = ref<Record<string, string>>({})
+  const localColumnFilters = ref<Record<string, string>>({})
+  const serverColumnFilters = ref<Record<string, string>>({})
   const filterOperators = ref<Record<string, string>>({})
   let filterDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+  const activeColumnFilters = computed(() => isTableBrowse.value ? serverColumnFilters.value : localColumnFilters.value)
+
+  const syncTableBrowseUiState = (extra: Partial<{
+    whereClause?: string
+    orderBy?: string
+    filterOperators?: Record<string, string>
+    showFilters?: boolean
+  }> = {}) => {
+    if (!isTableBrowse.value) return
+    onSyncTableBrowse?.(extra)
+  }
 
   // ===== 服务端排序 =====
   const serverSortCol = ref<string | null>(null)
@@ -156,7 +182,8 @@ export function useQueryResult(options: UseQueryResultOptions) {
       sorting.value = []
       columnPinning.value = { left: [], right: [] }
       // 重置过滤
-      columnFilters.value = {}
+      localColumnFilters.value = {}
+      serverColumnFilters.value = {}
       filterOperators.value = {}
       showFilters.value = false
       serverSortCol.value = null
@@ -172,6 +199,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
       // 重置统计
       selectedStatsColumn.value = null
       columnStats.value = null
+      columnStatsCache.clear()
       // 重置图表
       showChart.value = false
       // 重置可见行数
@@ -184,7 +212,40 @@ export function useQueryResult(options: UseQueryResultOptions) {
     },
   )
 
-  // ===== 连接错误判断 =====
+  // 当表浏览条件变化时，同步回填 UI 状态
+  watch(
+    () => ({
+      browse: tableBrowse?.value,
+      tableBrowseEnabled: isTableBrowse.value,
+      hasColumns: Boolean(result.value?.columns?.length),
+    }),
+    ({ browse, tableBrowseEnabled, hasColumns }) => {
+      if (!tableBrowseEnabled || !browse || !hasColumns) return
+
+      serverColumnFilters.value = parseServerWhereClause(browse.whereClause)
+      filterOperators.value = { ...browse.filterOperators ?? buildFilterOperatorsFromWhereClause(browse.whereClause) }
+      showFilters.value = browse.showFilters ?? Boolean(browse.whereClause?.trim())
+
+      const orderBy = browse.orderBy?.trim() ?? ''
+      if (!orderBy) {
+        serverSortCol.value = null
+        serverSortDir.value = null
+        return
+      }
+
+      const orderMatch = orderBy.match(/^([`"]?)(.+?)\1\s+(ASC|DESC)$/i)
+      if (!orderMatch) {
+        serverSortCol.value = null
+        serverSortDir.value = null
+        return
+      }
+
+      serverSortCol.value = orderMatch[2] ?? null
+      serverSortDir.value = (orderMatch[3]?.toUpperCase() as 'ASC' | 'DESC' | undefined) ?? null
+    },
+    { immediate: true, deep: true },
+  )
+
   const isConnectionError = computed(() => {
     const err = result.value?.error?.toLowerCase() ?? ''
     const keywords = [
@@ -203,7 +264,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
   const allTableData = computed<RowData[]>(() => {
     if (!result.value || result.value.isError || result.value.columns.length === 0) return []
     let indexed = result.value.rows.map((row, originalIdx) => ({ row, originalIdx }))
-    const activeFilters = Object.entries(columnFilters.value).filter(([, v]) => v.trim() !== '')
+    const activeFilters = Object.entries(activeColumnFilters.value).filter(([, v]) => v.trim() !== '')
     if (activeFilters.length > 0) {
       indexed = indexed.filter(({ row }) =>
         activeFilters.every(([colName, filterVal]) => {
@@ -301,6 +362,13 @@ export function useQueryResult(options: UseQueryResultOptions) {
     rowDetailOpen.value = true
   }
 
+  function copyCellValue(value: unknown) {
+    const text = value === null || value === undefined ? 'NULL' : String(value)
+    navigator.clipboard.writeText(text).then(() => {
+      toast.success(t('toast.copySuccess'))
+    }).catch(err => log.warn('copy_clipboard_failed', undefined, err))
+  }
+
   function handleRowDetailNavigate(direction: 'prev' | 'next') {
     if (selectedRowIndex.value === null) return
     selectedRowIndex.value = direction === 'prev'
@@ -357,46 +425,121 @@ export function useQueryResult(options: UseQueryResultOptions) {
       return
     }
     selectedStatsColumn.value = columnName
+    const cacheKey = buildColumnStatsCacheKey(result.value, columnName)
+    const cached = columnStatsCache.get(cacheKey)
+    if (cached) {
+      columnStats.value = cached
+      computingStats.value = false
+      return
+    }
     computingStats.value = true
     try {
       const colIndex = result.value.columns.findIndex(c => c.name === columnName)
       if (colIndex < 0) return
       const colType = result.value.columns[colIndex]?.dataType
-      columnStats.value = await computeColumnStatsAsync(result.value.rows, colIndex, colType)
+      const stats = await computeColumnStatsAsync(result.value.rows, colIndex, colType)
+      columnStatsCache.set(cacheKey, stats)
+      columnStats.value = stats
     } finally {
       computingStats.value = false
     }
   }
 
-  let cellClickTimer: ReturnType<typeof setTimeout> | null = null
-  function handleCellClick(value: unknown) {
-    // 编辑中不触发复制
+  function handleCellClick() {
+    // 编辑中不处理单击
     if (editingCell.value) return
-    // 防双击：延迟执行，双击时取消单击的复制
-    if (cellClickTimer) clearTimeout(cellClickTimer)
-    cellClickTimer = setTimeout(() => {
-      cellClickTimer = null
-      const text = value === null || value === undefined ? 'NULL' : String(value)
-      navigator.clipboard.writeText(text).then(() => {
-        toast.success(t('toast.copySuccess'))
-      }).catch(err => log.warn('copy_clipboard_failed', undefined, err))
-    }, 250)
   }
 
   // ===== 过滤 =====
 
   function toggleFilters() {
     showFilters.value = !showFilters.value
-    if (!showFilters.value) {
-      columnFilters.value = {}
-      filterOperators.value = {}
-      if (isTableBrowse.value) onServerFilter('')
+    if (isTableBrowse.value) {
+      syncTableBrowseUiState({ showFilters: showFilters.value })
+      return
     }
+    if (!showFilters.value) {
+      localColumnFilters.value = {}
+    }
+  }
+
+  function parseServerWhereClause(whereClause?: string): Record<string, string> {
+    if (!whereClause?.trim()) return {}
+
+    const filters: Record<string, string> = {}
+    const parts = whereClause.split(/\s+AND\s+/i)
+    for (const part of parts) {
+      const trimmed = part.trim()
+      if (!trimmed) continue
+
+      const nullMatch = trimmed.match(/^[`"]?(.+?)[`"]?\s+IS\s+(NOT\s+)?NULL$/i)
+      if (nullMatch) {
+        filters[nullMatch[1]!] = ''
+        continue
+      }
+
+      const likeMatch = trimmed.match(/^[`"]?(.+?)[`"]?\s+LIKE\s+'%(.*)%'$/i)
+      if (likeMatch) {
+        filters[likeMatch[1]!] = likeMatch[2]!.replace(/''/g, "'")
+        continue
+      }
+
+      const inMatch = trimmed.match(/^[`"]?(.+?)[`"]?\s+IN\s*\((.*)\)$/i)
+      if (inMatch) {
+        filters[inMatch[1]!] = inMatch[2]!
+          .split(',')
+          .map(item => item.trim().replace(/^'/, '').replace(/'$/, '').replace(/''/g, "'"))
+          .join(', ')
+        continue
+      }
+
+      const compareMatch = trimmed.match(/^[`"]?(.+?)[`"]?\s*(=|!=|>=|<=|>|<)\s*'(.*)'$/i)
+      if (compareMatch) {
+        filters[compareMatch[1]!] = compareMatch[3]!.replace(/''/g, "'")
+        continue
+      }
+    }
+    return filters
+  }
+
+  function buildFilterOperatorsFromWhereClause(whereClause?: string): Record<string, string> {
+    if (!whereClause?.trim()) return {}
+
+    const operators: Record<string, string> = {}
+    const parts = whereClause.split(/\s+AND\s+/i)
+    for (const part of parts) {
+      const trimmed = part.trim()
+      if (!trimmed) continue
+
+      const nullMatch = trimmed.match(/^[`"]?(.+?)[`"]?\s+IS\s+(NOT\s+)?NULL$/i)
+      if (nullMatch) {
+        operators[nullMatch[1]!] = nullMatch[2] ? 'IS NOT NULL' : 'IS NULL'
+        continue
+      }
+
+      const likeMatch = trimmed.match(/^[`"]?(.+?)[`"]?\s+LIKE\s+'%(.*)%'$/i)
+      if (likeMatch) {
+        operators[likeMatch[1]!] = 'LIKE'
+        continue
+      }
+
+      const inMatch = trimmed.match(/^[`"]?(.+?)[`"]?\s+IN\s*\((.*)\)$/i)
+      if (inMatch) {
+        operators[inMatch[1]!] = 'IN'
+        continue
+      }
+
+      const compareMatch = trimmed.match(/^[`"]?(.+?)[`"]?\s*(=|!=|>=|<=|>|<)\s*'(.*)'$/i)
+      if (compareMatch) {
+        operators[compareMatch[1]!] = compareMatch[2]!
+      }
+    }
+    return operators
   }
 
   function buildServerWhereClause(): string {
     const parts: string[] = []
-    for (const [colName, filterVal] of Object.entries(columnFilters.value)) {
+    for (const [colName, filterVal] of Object.entries(serverColumnFilters.value)) {
       const val = filterVal.trim()
       if (!val) continue
       const op = filterOperators.value[colName] || 'LIKE'
@@ -413,18 +556,29 @@ export function useQueryResult(options: UseQueryResultOptions) {
   }
 
   function handleFilterChange(colName: string, value: string) {
-    columnFilters.value = { ...columnFilters.value, [colName]: value }
     if (isTableBrowse.value) {
+      serverColumnFilters.value = { ...serverColumnFilters.value, [colName]: value }
       if (filterDebounceTimer) clearTimeout(filterDebounceTimer)
-      filterDebounceTimer = setTimeout(() => onServerFilter(buildServerWhereClause()), 500)
+      filterDebounceTimer = setTimeout(() => {
+        const whereClause = buildServerWhereClause()
+        syncTableBrowseUiState({ whereClause: whereClause || undefined, filterOperators: { ...filterOperators.value } })
+        onServerFilter(whereClause)
+      }, 500)
+      return
     }
+    localColumnFilters.value = { ...localColumnFilters.value, [colName]: value }
   }
 
   function handleOperatorChange(colName: string, op: string) {
     filterOperators.value = { ...filterOperators.value, [colName]: op }
-    if (isTableBrowse.value && (op === 'IS NULL' || op === 'IS NOT NULL')) {
-      onServerFilter(buildServerWhereClause())
-    }
+    if (!isTableBrowse.value) return
+
+    if (filterDebounceTimer) clearTimeout(filterDebounceTimer)
+    filterDebounceTimer = setTimeout(() => {
+      const whereClause = buildServerWhereClause()
+      syncTableBrowseUiState({ whereClause: whereClause || undefined, filterOperators: { ...filterOperators.value } })
+      onServerFilter(whereClause)
+    }, op === 'IS NULL' || op === 'IS NOT NULL' ? 0 : 500)
   }
 
   // ===== 服务端排序 =====
@@ -439,6 +593,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     }
     const orderBy = serverSortCol.value && serverSortDir.value
       ? `${quoteId(serverSortCol.value)} ${serverSortDir.value}` : ''
+    syncTableBrowseUiState({ orderBy: orderBy || undefined })
     onServerSort(orderBy)
   }
 
@@ -486,8 +641,6 @@ export function useQueryResult(options: UseQueryResultOptions) {
 
   function startEdit(rowIndex: number, colName: string, currentValue: unknown) {
     if (!editable.value) return
-    // 取消双击前的单击复制
-    if (cellClickTimer) { clearTimeout(cellClickTimer); cellClickTimer = null }
     editingCell.value = { rowIndex, colName }
     editingValue.value = currentValue === null || currentValue === undefined ? '' : String(currentValue)
   }
@@ -761,16 +914,22 @@ export function useQueryResult(options: UseQueryResultOptions) {
       if (isTableBrowse.value && hasMoreServerRows.value && connectionId.value && database.value && (tableName.value || result.value.tableName)) {
         const tbl = tableName.value || result.value.tableName!
         const batchSize = 1000
-        const whereClause = buildServerWhereClause()
-        const orderBy = serverSortCol.value && serverSortDir.value
-          ? `${serverSortCol.value} ${serverSortDir.value}` : null
-        const seekColumn = !orderBy && primaryKeys.value.length === 1 && isIntegerResultColumn(primaryKeys.value[0], result.value)
-          ? primaryKeys.value[0]
-          : undefined
-        const seekOrderBy = seekColumn ? `${seekColumn} ASC` : orderBy
+        const whereClause = tableBrowse?.value?.whereClause?.trim() || ''
+        const currentServerOrderBy = serverSortCol.value && serverSortDir.value
+          ? `${serverSortCol.value} ${serverSortDir.value}`
+          : ''
+        const explicitOrderBy = tableBrowse?.value?.orderBy?.trim() || currentServerOrderBy
+        const cachedSeekOrderBy = tableBrowse?.value?.seekOrderBy?.trim() || ''
+        const cachedSeekColumn = tableBrowse?.value?.seekColumn
+        const seekColumn = !explicitOrderBy && cachedSeekColumn && isIntegerResultColumn(cachedSeekColumn, result.value)
+          ? cachedSeekColumn
+          : !explicitOrderBy && primaryKeys.value.length === 1 && isIntegerResultColumn(primaryKeys.value[0], result.value)
+            ? primaryKeys.value[0]
+            : undefined
+        const seekOrderBy = explicitOrderBy || cachedSeekOrderBy || (seekColumn ? `${seekColumn} ASC` : null)
         const allRows: unknown[][] = []
         let page = 1
-        let seekValue: number | undefined
+        let seekValue = seekColumn ? tableBrowse?.value?.seekValue : undefined
         while (true) {
           const more = await dbGetTableData(
             connectionId.value,
@@ -864,7 +1023,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     // 核心状态
     visibleCount, selectedRowIndex, totalRows, hasMore, tableData,
     // 行详情
-    rowDetailOpen, selectedRowData, openRowDetail, handleRowDetailNavigate, copyRowAsJson, copyRowAsSql,
+    rowDetailOpen, selectedRowData, openRowDetail, handleRowDetailNavigate, copyCellValue, copyRowAsJson, copyRowAsSql,
     // 单元格交互
     handleCellClick,
     // 列统计
@@ -879,7 +1038,7 @@ export function useQueryResult(options: UseQueryResultOptions) {
     // 导出
     exportDialogOpen, exportSource, handleExport,
     // 过滤
-    showFilters, columnFilters, filterOperators,
+    showFilters, localColumnFilters, serverColumnFilters, activeColumnFilters, filterOperators,
     toggleFilters, handleFilterChange, handleOperatorChange,
     // 排序
     serverSortCol, serverSortDir, handleHeaderClick,

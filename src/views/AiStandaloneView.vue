@@ -210,10 +210,17 @@ async function saveCurrentSession(): Promise<void> {
   })
 }
 
-async function handleSend(content: string): Promise<void> {
+async function handleSend(
+  content: string,
+  options?: { jsonMode?: boolean; prefixCompletion?: boolean; prefixContent?: string },
+): Promise<void> {
   const attachments = fileAttachment.getReadyAttachments()
   await sendMessageNow(content, attachments, () => {
     fileAttachment.clearAttachments()
+  }, {
+    responseFormat: options?.jsonMode ? 'json_object' : undefined,
+    prefixCompletion: options?.prefixCompletion,
+    prefixContent: options?.prefixContent,
   })
 }
 

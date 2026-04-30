@@ -37,6 +37,9 @@ pub async fn ai_chat_stream(
     system_prompt: Option<String>,
     enable_tools: Option<bool>,
     thinking_budget: Option<u32>,
+    response_format: Option<String>,
+    prefix_completion: Option<bool>,
+    prefix_content: Option<String>,
     on_event: Channel<AiStreamEvent>,
     engine: State<'_, AiEngineState>,
     storage: State<'_, Arc<Storage>>,
@@ -68,6 +71,9 @@ pub async fn ai_chat_stream(
         tools,
         tool_choice,
         thinking_budget,
+        response_format,
+        prefix_completion,
+        prefix_content,
     };
 
     // 查找 Provider
@@ -144,8 +150,9 @@ fn sanitize_messages_for_request(messages: Vec<ChatMessage>, tools_enabled: bool
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_messages_for_request;
+    use super::{parse_provider_models_response, sanitize_messages_for_request};
     use crate::services::ai::models::{ChatMessage, MessageRole, ToolCallFunction, ToolCallRecord};
+    use serde_json::json;
 
     #[test]
     fn strips_tool_context_when_tools_are_disabled() {
@@ -158,6 +165,7 @@ mod tests {
                 tool_calls: None,
                 tool_call_id: None,
                 reasoning_content: None,
+                prefix: None,
             },
             ChatMessage {
                 role: MessageRole::Assistant,
@@ -174,6 +182,7 @@ mod tests {
                 }]),
                 tool_call_id: None,
                 reasoning_content: Some("thinking".to_string()),
+                prefix: None,
             },
             ChatMessage {
                 role: MessageRole::Tool,
@@ -183,6 +192,7 @@ mod tests {
                 tool_calls: None,
                 tool_call_id: Some("tool-1".to_string()),
                 reasoning_content: None,
+                prefix: None,
             },
         ];
 
@@ -194,6 +204,61 @@ mod tests {
         assert!(sanitized[1].tool_calls.is_none());
         assert_eq!(sanitized[1].content.as_deref(), Some("I checked the file."));
         assert_eq!(sanitized[1].reasoning_content.as_deref(), Some("thinking"));
+    }
+
+    #[test]
+    fn keeps_synthesis_summary_when_tools_are_disabled() {
+        let messages = vec![
+            ChatMessage {
+                role: MessageRole::Assistant,
+                content: None,
+                content_blocks: None,
+                name: None,
+                tool_calls: Some(vec![ToolCallRecord {
+                    id: "tool-1".to_string(),
+                    call_type: "function".to_string(),
+                    function: ToolCallFunction {
+                        name: "read_file".to_string(),
+                        arguments: "{\"path\":\"src/main.ts\"}".to_string(),
+                    },
+                }]),
+                tool_call_id: None,
+                reasoning_content: None,
+                prefix: None,
+            },
+            ChatMessage {
+                role: MessageRole::Tool,
+                content: Some("raw tool result".to_string()),
+                content_blocks: None,
+                name: Some("read_file".to_string()),
+                tool_calls: None,
+                tool_call_id: Some("tool-1".to_string()),
+                reasoning_content: None,
+                prefix: None,
+            },
+            ChatMessage {
+                role: MessageRole::User,
+                content: Some("[已有工具结果摘要]\nraw tool result".to_string()),
+                content_blocks: None,
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+                reasoning_content: None,
+                prefix: None,
+            },
+        ];
+
+        let sanitized = sanitize_messages_for_request(messages, false);
+
+        assert_eq!(sanitized.len(), 2);
+        assert_eq!(sanitized[0].role, MessageRole::Assistant);
+        assert!(sanitized[0].tool_calls.is_none());
+        assert_eq!(sanitized[1].role, MessageRole::User);
+        assert!(sanitized[1]
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .contains("[已有工具结果摘要]"));
     }
 
     #[test]
@@ -214,6 +279,7 @@ mod tests {
                 }]),
                 tool_call_id: None,
                 reasoning_content: None,
+                prefix: None,
             },
             ChatMessage {
                 role: MessageRole::Tool,
@@ -223,6 +289,7 @@ mod tests {
                 tool_calls: None,
                 tool_call_id: Some("tool-1".to_string()),
                 reasoning_content: None,
+                prefix: None,
             },
         ];
 
@@ -231,6 +298,43 @@ mod tests {
         assert_eq!(sanitized.len(), 2);
         assert!(sanitized[0].tool_calls.is_some());
         assert_eq!(sanitized[1].role, MessageRole::Tool);
+    }
+
+    #[test]
+    fn parses_provider_models_from_openai_data_shape() {
+        let models = parse_provider_models_response(json!({
+            "object": "list",
+            "data": [
+                { "id": "mimo-v2-pro", "object": "model", "owned_by": "xiaomi" },
+                { "id": "mimo-v2-pro", "object": "model" },
+                { "id": "mimo-v2-flash" }
+            ]
+        }));
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "mimo-v2-pro");
+        assert_eq!(models[0].object.as_deref(), Some("model"));
+        assert_eq!(models[0].owned_by.as_deref(), Some("xiaomi"));
+        assert_eq!(models[1].id, "mimo-v2-flash");
+    }
+
+    #[test]
+    fn parses_provider_models_from_compat_shapes() {
+        let models = parse_provider_models_response(json!({
+            "models": [
+                "mimo-v2-pro",
+                { "model": "mimo-v2-omni", "type": "model" },
+                { "modelId": "mimo-v2-flash", "owner": "xiaomi" },
+                { "id": "" }
+            ]
+        }));
+
+        assert_eq!(models.len(), 3);
+        assert_eq!(models[0].id, "mimo-v2-pro");
+        assert_eq!(models[1].id, "mimo-v2-omni");
+        assert_eq!(models[1].object.as_deref(), Some("model"));
+        assert_eq!(models[2].id, "mimo-v2-flash");
+        assert_eq!(models[2].owned_by.as_deref(), Some("xiaomi"));
     }
 }
 
@@ -248,6 +352,51 @@ pub async fn ai_abort_stream(
 // ─────────────────────────────────── Provider 管理 ───────────────────────────────────
 
 /// 获取已配置的 Provider 列表
+#[tauri::command]
+/// 文本补全 / FIM 补全
+pub async fn ai_create_completion(
+    provider_type: String,
+    model: String,
+    api_key: String,
+    endpoint: String,
+    prompt: String,
+    suffix: Option<String>,
+    max_tokens: Option<u32>,
+    temperature: Option<f64>,
+    use_beta: Option<bool>,
+    engine: State<'_, AiEngineState>,
+) -> Result<CompletionResult, AppError> {
+    if prompt.is_empty() {
+        return Err(AppError::Validation("prompt 不能为空".to_string()));
+    }
+    if api_key.trim().is_empty() {
+        return Err(AppError::Validation("API Key 不能为空".to_string()));
+    }
+
+    let provider_id = if provider_type == "anthropic" {
+        "anthropic"
+    } else {
+        "openai_compat"
+    };
+    let provider = engine
+        .registry
+        .get(provider_id)
+        .ok_or_else(|| AppError::Other(format!("未找到 Provider: {provider_id}")))?;
+
+    provider
+        .completion(
+            &model,
+            &prompt,
+            suffix.as_deref(),
+            &api_key,
+            &endpoint,
+            max_tokens.unwrap_or(512),
+            temperature.unwrap_or(0.2),
+            use_beta.unwrap_or(false),
+        )
+        .await
+}
+
 #[tauri::command]
 pub async fn ai_list_providers(
     storage: State<'_, Arc<Storage>>,
@@ -274,6 +423,114 @@ pub async fn ai_delete_provider(
 ) -> Result<(), AppError> {
     let pool = storage.get_pool().await;
     session_store::delete_provider(&pool, &id).await
+}
+
+fn provider_models_endpoint(endpoint: &str) -> Result<String, AppError> {
+    let trimmed = endpoint.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(AppError::Validation("Provider endpoint 不能为空".to_string()));
+    }
+    if !(trimmed.starts_with("https://") || trimmed.starts_with("http://")) {
+        return Err(AppError::Validation("Provider endpoint 只支持 http/https".to_string()));
+    }
+
+    let base = trimmed.strip_suffix("/anthropic").unwrap_or(trimmed);
+    Ok(format!("{base}/models"))
+}
+
+fn read_json_string_field(value: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    keys.iter()
+        .find_map(|key| value.get(*key)?.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn parse_provider_models_response(value: serde_json::Value) -> Vec<ProviderRemoteModel> {
+    let items = if let Some(data) = value.get("data").and_then(|data| data.as_array()) {
+        data.clone()
+    } else if let Some(models) = value.get("models").and_then(|models| models.as_array()) {
+        models.clone()
+    } else if let Some(result) = value.get("result").and_then(|result| result.as_array()) {
+        result.clone()
+    } else if let Some(array) = value.as_array() {
+        array.clone()
+    } else {
+        Vec::new()
+    };
+
+    let mut seen = std::collections::HashSet::new();
+    items
+        .into_iter()
+        .filter_map(|item| {
+            let id = match &item {
+                serde_json::Value::String(id) => id.trim().to_string(),
+                serde_json::Value::Object(_) => {
+                    read_json_string_field(&item, &["id", "model", "name", "model_id", "modelId"])
+                        .unwrap_or_default()
+                }
+                _ => String::new(),
+            };
+            if id.is_empty() || !seen.insert(id.clone()) {
+                return None;
+            }
+            Some(ProviderRemoteModel {
+                id,
+                object: read_json_string_field(&item, &["object", "type"]),
+                owned_by: read_json_string_field(&item, &["owned_by", "ownedBy", "owner"]),
+            })
+        })
+        .collect()
+}
+
+/// 从 Provider 远端拉取模型列表
+#[tauri::command]
+pub async fn ai_list_provider_models(
+    endpoint: String,
+    api_key: String,
+) -> Result<ProviderModelsResponse, AppError> {
+    if api_key.trim().is_empty() {
+        return Err(AppError::Validation("API Key 不能为空".to_string()));
+    }
+
+    let url = provider_models_endpoint(&endpoint)?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .read_timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|error| AppError::Connection(format!("创建 HTTP 客户端失败: {error}")))?;
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", api_key.trim()))
+        .send()
+        .await
+        .map_err(|error| AppError::Connection(format!("拉取模型列表失败: {error}")))?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "无法读取响应体".to_string());
+        let readable_msg = serde_json::from_str::<serde_json::Value>(&error_body)
+            .ok()
+            .and_then(|value| value.get("error")?.get("message")?.as_str().map(str::to_string))
+            .unwrap_or_else(|| error_body.chars().take(200).collect());
+        return Err(AppError::Connection(format!(
+            "拉取模型列表失败: {} ({})",
+            readable_msg,
+            status.as_u16()
+        )));
+    }
+
+    let raw: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|error| AppError::Connection(format!("解析模型列表失败: {error}")))?;
+    let models = parse_provider_models_response(raw);
+
+    Ok(ProviderModelsResponse { models })
 }
 
 // ─────────────────────────────────── 会话管理 ───────────────────────────────────

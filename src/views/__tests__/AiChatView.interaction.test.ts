@@ -236,6 +236,17 @@ const GenericStub = defineComponent({
   },
 })
 
+const AiPlanGateBarStub = defineComponent({
+  name: 'AiPlanGateBar',
+  emits: ['approve', 'reject'],
+  setup(_props, { emit }) {
+    return () => h('div', { class: 'ai-plan-gate-stub' }, [
+      h('button', { class: 'approve-plan', onClick: () => emit('approve') }, 'approve-plan'),
+      h('button', { class: 'reject-plan', onClick: () => emit('reject') }, 'reject-plan'),
+    ])
+  },
+})
+
 function makeModel(): ModelConfig {
   return {
     id: 'model-1',
@@ -391,7 +402,7 @@ function mountView(props: Record<string, unknown> = {}) {
         AiPlanPanel: true,
         AiBackgroundJobsPanel: true,
         AiProactiveTickPanel: true,
-        AiPlanGateBar: true,
+        AiPlanGateBar: AiPlanGateBarStub,
         AiPhaseBar: true,
         AiSpawnedTasksPanel: AiSpawnedTasksPanelStub,
         WorkspaceFilePicker: true,
@@ -1512,6 +1523,27 @@ describe('AiChatView interaction', () => {
 
     expect(mocks.state.chat.regenerate).toHaveBeenCalledTimes(1)
     expect(mocks.state.chat.regenerate).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'provider-1' }),
+      expect.objectContaining({ id: 'model-1' }),
+      'test-api-key',
+      undefined,
+    )
+  })
+
+  it('switches approval mode back to ask after plan approval before running tools', async () => {
+    mocks.state.chat.awaitingPlanApproval.value = true
+    mocks.state.chat.pendingPlan.value = '1. 修改文件'
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.approve-plan').trigger('click')
+    await flushPromises()
+
+    expect(mocks.state.chat.approvePlan).toHaveBeenCalledTimes(1)
+    expect(mocks.setApprovalModeMock).toHaveBeenCalledWith('ask', 'session-1')
+    expect(mocks.state.chat.send).toHaveBeenCalledWith(
+      expect.stringContaining('用户已确认执行计划'),
       expect.objectContaining({ id: 'provider-1' }),
       expect.objectContaining({ id: 'model-1' }),
       'test-api-key',

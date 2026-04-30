@@ -48,6 +48,11 @@ let activeController: AbortController | null = null
 
 const canIterate = computed(() => !!enhancedText.value && !isLoading.value)
 
+function handleTemplateChange(event: Event) {
+  selectedTemplateId.value = (event.target as HTMLSelectElement).value as Exclude<PromptOptimizerTemplate['id'], 'iterate-optimize'>
+  void runEnhance()
+}
+
 function renderDiff(original: string, enhanced: string): string {
   const parts = diffWords(original, enhanced)
   return parts.map(part => {
@@ -307,7 +312,7 @@ onBeforeUnmount(() => {
             v-model="selectedTemplateId"
             :disabled="isLoading"
             class="h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            @change="runEnhance"
+            @change="handleTemplateChange"
           >
             <option v-for="option in templateOptions" :key="option.value" :value="option.value">
               {{ option.label }}

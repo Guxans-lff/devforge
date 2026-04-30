@@ -37,12 +37,19 @@ import { createLogger } from '@/utils/logger'
 
 const log = createLogger('ai.chat')
 
-const MAX_TOOL_LOOPS = 50
+const MAX_TOOL_LOOPS = 10
 const HISTORY_LOAD_TIMEOUT_MS = 8_000
 
 export interface UseAiChatOptions {
   sessionId: MaybeRef<string>
   scrollContainer?: Ref<HTMLElement | null>
+  scrollToBottom?: () => void
+}
+
+export interface AiChatRequestOptions {
+  responseFormat?: 'json_object'
+  prefixCompletion?: boolean
+  prefixContent?: string
 }
 
 export function useAiChat(options: UseAiChatOptions) {
@@ -87,6 +94,7 @@ export function useAiChat(options: UseAiChatOptions) {
   let scrollRafId: number | null = null
   let watchdogTimer: ReturnType<typeof setTimeout> | null = null
   let watchdogWarnTimer: ReturnType<typeof setTimeout> | null = null
+  let programmaticScrollUntil = 0
   let streamWatchdogMs = 90_000
   let streamWatchdogWarnMs = 45_000
   let loadSeq = 0
@@ -467,6 +475,7 @@ export function useAiChat(options: UseAiChatOptions) {
     apiKey: string,
     systemPrompt?: string,
     attachments?: FileAttachment[],
+    requestOptions?: AiChatRequestOptions,
   ): Promise<AiChatSessionRunnerResult | undefined> {
     if (!canSend.value || !content.trim()) return
 
@@ -491,6 +500,7 @@ export function useAiChat(options: UseAiChatOptions) {
         apiKey,
         systemPrompt,
         attachments,
+        requestOptions,
         workDir,
         aiStore,
         memoryStore,
@@ -606,6 +616,10 @@ export function useAiChat(options: UseAiChatOptions) {
   async function loadMoreHistory(): Promise<void> {
     if (!canLoadMoreHistory.value) return
     if (historyLoadMorePending.value) return
+    if (isStreaming.value || isLoading.value) {
+      historyLoadMoreError.value = '当前正在生成回复，请等待结束后再加载更多历史。'
+      return
+    }
     const expandedWindowSize = getExpandedHistoryWindowSize(historyWindowSize.value)
     historyLoadMorePending.value = true
     historyLoadMoreError.value = null
@@ -632,6 +646,14 @@ export function useAiChat(options: UseAiChatOptions) {
   }
 
   function scrollToBottom(): void {
+    programmaticScrollUntil = Date.now() + 250
+    if (options.scrollToBottom) {
+      nextTick(() => {
+        options.scrollToBottom?.()
+      })
+      return
+    }
+
     const container = options.scrollContainer?.value
     if (!container) return
     nextTick(() => {
@@ -643,6 +665,7 @@ export function useAiChat(options: UseAiChatOptions) {
     if (scrollRafId !== null) return
     scrollRafId = requestAnimationFrame(() => {
       scrollRafId = null
+      if (Date.now() < programmaticScrollUntil) return
       const element = event.target as HTMLElement | null
       if (!element) return
       const threshold = 50

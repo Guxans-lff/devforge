@@ -4,7 +4,8 @@
 //! - OpenAI（GPT 系列，GPT-5+ 自动走 Responses API）
 //! - DeepSeek
 //! - 智普（GLM）
-//! - Moonshot（Kimi）
+//! - Kimi Code
+//! - Xiaomi MiMo
 //! - Qwen（通义千问）
 //! - 任意 OpenAI 兼容端点
 
@@ -16,18 +17,42 @@ use tauri::ipc::Channel;
 use tokio::sync::watch;
 
 use super::models::*;
+use super::openai_dialect::{completion_base_url, OpenAiDialect};
 use super::provider::AiProvider;
 use super::stream_parser;
 use crate::utils::error::AppError;
-
-fn is_retryable_stream_error_code(code: &str) -> bool {
-    matches!(code, "rate_limit_exceeded" | "server_error" | "temporarily_unavailable")
-}
 
 fn contains_done_event(events: &[AiStreamEvent]) -> bool {
     events
         .iter()
         .any(|event| matches!(event, AiStreamEvent::Done { .. }))
+}
+
+fn append_prefix_completion_message(
+    mut messages: Vec<serde_json::Value>,
+    prefix_content: Option<&str>,
+) -> serde_json::Value {
+    let already_has_prefix = messages
+        .last()
+        .and_then(|message| message.get("prefix"))
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+
+    if !already_has_prefix {
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "content": prefix_content.unwrap_or(""),
+            "prefix": true
+        }));
+    } else if let Some(content) = prefix_content {
+        if let Some(last) = messages.last_mut() {
+            if content != last.get("content").and_then(|value| value.as_str()).unwrap_or("") {
+                last["content"] = serde_json::json!(content);
+            }
+        }
+    }
+
+    serde_json::Value::Array(messages)
 }
 
 /// 检测模型是否需要走 OpenAI Responses API（GPT-5 / o3 / o4 系列）
@@ -73,6 +98,7 @@ impl OpenAiCompatProvider {
         &self,
         messages: &[ChatMessage],
         config: &ChatConfig,
+        dialect: OpenAiDialect,
     ) -> serde_json::Value {
         let mut api_messages: Vec<serde_json::Value> = Vec::new();
 
@@ -123,10 +149,15 @@ impl OpenAiCompatProvider {
                             .unwrap_or(serde_json::Value::Array(vec![]));
                     }
                     // 回传 reasoning_content（MiMo / DeepSeek 要求）
-                    if let Some(ref rc) = msg.reasoning_content {
-                        if !rc.is_empty() {
-                            obj["reasoning_content"] = serde_json::json!(rc);
+                    if dialect.supports_reasoning_content_replay {
+                        if let Some(ref rc) = msg.reasoning_content {
+                            if !rc.is_empty() {
+                                obj["reasoning_content"] = serde_json::json!(rc);
+                            }
                         }
+                    }
+                    if msg.prefix.unwrap_or(false) {
+                        obj["prefix"] = serde_json::json!(true);
                     }
                     api_messages.push(obj);
                 }
@@ -177,25 +208,131 @@ impl OpenAiCompatProvider {
         let mut body = serde_json::json!({
             "model": config.model,
             "messages": api_messages,
-            "max_completion_tokens": config.max_tokens,
-            "max_tokens": config.max_tokens,
             "temperature": config.temperature,
             "stream": true,
             "stream_options": { "include_usage": true }
         });
+        dialect.apply_token_budget(&mut body, config.max_tokens);
+        dialect.apply_thinking_control(&mut body, config.thinking_budget);
 
         // 工具定义
         if let Some(ref tools) = config.tools {
             if !tools.is_empty() {
                 body["tools"] = serde_json::to_value(tools)
                     .unwrap_or(serde_json::Value::Array(vec![]));
+                if !dialect.supports_parallel_tool_calls {
+                    body["parallel_tool_calls"] = serde_json::json!(false);
+                }
             }
         }
-        if let Some(ref choice) = config.tool_choice {
+        let has_tools = config.tools.as_ref().map(|tools| !tools.is_empty()).unwrap_or(false);
+        if let Some(choice) = dialect.normalize_tool_choice(config.tool_choice.as_deref(), has_tools) {
             body["tool_choice"] = serde_json::json!(choice);
+        }
+        if dialect.should_send_response_format(config) {
+            body["response_format"] = serde_json::json!({ "type": "json_object" });
+        }
+        if config.prefix_completion.unwrap_or(false) {
+            body["messages"] = append_prefix_completion_message(
+                api_messages,
+                config.prefix_content.as_deref(),
+            );
         }
 
         body
+    }
+
+    async fn create_completion(
+        &self,
+        model: &str,
+        prompt: &str,
+        suffix: Option<&str>,
+        api_key: &str,
+        endpoint: &str,
+        max_tokens: u32,
+        temperature: f64,
+        use_beta: bool,
+    ) -> Result<CompletionResult, AppError> {
+        let mut body = serde_json::json!({
+            "model": model,
+            "prompt": prompt,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": false,
+        });
+        if let Some(suffix) = suffix {
+            if !suffix.is_empty() {
+                body["suffix"] = serde_json::json!(suffix);
+            }
+        }
+
+        let dialect = OpenAiDialect::resolve(endpoint, model);
+        let use_beta = dialect.should_use_beta_completion(use_beta);
+        let url = format!("{}/completions", completion_base_url(endpoint, use_beta));
+        log::info!("AI completion request: {} dialect={} model={} prompt_chars={} suffix={} beta={}",
+            url, dialect.name(), model, prompt.chars().count(), suffix.map(|v| !v.is_empty()).unwrap_or(false), use_beta);
+
+        let response = super::http_retry::send_with_rebuild(
+            || {
+                self.current_client()
+                    .post(&url)
+                    .header("Authorization", format!("Bearer {}", api_key))
+                    .header("Content-Type", "application/json")
+                    .json(&body)
+            },
+            || self.rebuild_client(),
+        )
+        .await
+        .map_err(|e| AppError::Connection(format!("AI Completion API 请求失败: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_body = response.text().await.unwrap_or_else(|_| "无法读取响应体".to_string());
+            let readable_msg = serde_json::from_str::<serde_json::Value>(&error_body)
+                .ok()
+                .and_then(|v| v.get("error")?.get("message")?.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| error_body.chars().take(200).collect());
+            return Err(AppError::Other(format!("{} ({})", readable_msg, status.as_u16())));
+        }
+
+        let value: serde_json::Value = response
+            .json()
+            .await
+            .map_err(|e| AppError::Connection(format!("解析 Completion 响应失败: {e}")))?;
+        let content = value
+            .get("choices")
+            .and_then(|choices| choices.as_array())
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("text"))
+            .and_then(|text| text.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let finish_reason = value
+            .get("choices")
+            .and_then(|choices| choices.as_array())
+            .and_then(|choices| choices.first())
+            .and_then(|choice| choice.get("finish_reason"))
+            .and_then(|reason| reason.as_str())
+            .unwrap_or("stop")
+            .to_string();
+        let prompt_tokens = value
+            .get("usage")
+            .and_then(|usage| usage.get("prompt_tokens"))
+            .and_then(|tokens| tokens.as_u64())
+            .unwrap_or(0) as u32;
+        let completion_tokens = value
+            .get("usage")
+            .and_then(|usage| usage.get("completion_tokens"))
+            .and_then(|tokens| tokens.as_u64())
+            .unwrap_or(0) as u32;
+
+        Ok(CompletionResult {
+            content,
+            model: model.to_string(),
+            prompt_tokens,
+            completion_tokens,
+            finish_reason,
+        })
     }
 
     /// 构建 OpenAI Responses API 请求体
@@ -294,8 +431,10 @@ impl OpenAiCompatProvider {
         on_event: &Channel<AiStreamEvent>,
         mut abort_rx: watch::Receiver<bool>,
     ) -> Result<ChatResult, AppError> {
-        let body = self.build_request_body(&messages, config);
-        let url = format!("{}/chat/completions", endpoint.trim_end_matches('/'));
+        let dialect = OpenAiDialect::resolve(endpoint, &config.model);
+        let body = self.build_request_body(&messages, config, dialect);
+        let beta = dialect.should_use_beta_chat_completions(config);
+        let url = format!("{}/chat/completions", completion_base_url(endpoint, beta));
 
         let tools_bytes = config
             .tools
@@ -586,9 +725,10 @@ impl OpenAiCompatProvider {
                                             .get("code")
                                             .and_then(|v| v.as_str())
                                             .unwrap_or_default();
+                                        let dialect = OpenAiDialect::resolve(endpoint, &config.model);
                                         let _ = on_event.send(AiStreamEvent::Error {
                                             message: msg.clone(),
-                                            retryable: is_retryable_stream_error_code(code),
+                                            retryable: dialect.is_retryable_error_code(code),
                                         });
                                         return Err(AppError::Other(msg));
                                     }
@@ -623,17 +763,9 @@ impl OpenAiCompatProvider {
 
 #[cfg(test)]
 mod tests {
-    use super::{contains_done_event, is_retryable_stream_error_code};
-    use crate::services::ai::models::AiStreamEvent;
-
-    #[test]
-    fn marks_retryable_stream_error_codes() {
-        assert!(is_retryable_stream_error_code("rate_limit_exceeded"));
-        assert!(is_retryable_stream_error_code("server_error"));
-        assert!(is_retryable_stream_error_code("temporarily_unavailable"));
-        assert!(!is_retryable_stream_error_code("invalid_request_error"));
-        assert!(!is_retryable_stream_error_code("authentication_error"));
-    }
+    use super::{contains_done_event, OpenAiCompatProvider};
+    use crate::services::ai::openai_dialect::{completion_base_url, OpenAiDialect};
+    use crate::services::ai::models::{AiStreamEvent, ChatConfig, ChatMessage, MessageRole};
 
     #[test]
     fn detects_done_event_in_stream_batch() {
@@ -655,6 +787,145 @@ mod tests {
                 cache_read_tokens: 0,
             },
         ]));
+    }
+
+    #[test]
+    fn uses_beta_base_for_deepseek_beta_capabilities() {
+        assert_eq!(
+            completion_base_url("https://api.deepseek.com", true),
+            "https://api.deepseek.com/beta"
+        );
+        assert_eq!(
+            completion_base_url("https://api.deepseek.com/beta", true),
+            "https://api.deepseek.com/beta"
+        );
+        assert_eq!(
+            completion_base_url("https://api.deepseek.com", false),
+            "https://api.deepseek.com"
+        );
+    }
+
+    #[test]
+    fn builds_json_mode_and_prefix_completion_body() {
+        let provider = OpenAiCompatProvider::new();
+        let mut config = ChatConfig::default();
+        config.model = "deepseek-v4-pro".to_string();
+        config.response_format = Some("json_object".to_string());
+        config.prefix_completion = Some(true);
+        config.prefix_content = Some("{\"ok\":".to_string());
+
+        let body = provider.build_request_body(
+            &[ChatMessage {
+                role: MessageRole::User,
+                content: Some("Return json".to_string()),
+                content_blocks: None,
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+                reasoning_content: None,
+                prefix: None,
+            }],
+            &config,
+            OpenAiDialect::resolve("https://api.deepseek.com", &config.model),
+        );
+
+        assert_eq!(body["response_format"]["type"], "json_object");
+        let messages = body["messages"].as_array().expect("messages should be an array");
+        let last = messages.last().expect("prefix message should exist");
+        assert_eq!(last.get("role").and_then(|role| role.as_str()), Some("assistant"));
+        assert_eq!(last.get("content").and_then(|content| content.as_str()), Some("{\"ok\":"));
+        assert_eq!(last.get("prefix").and_then(|prefix| prefix.as_bool()), Some(true));
+    }
+
+    #[test]
+    fn omits_reasoning_replay_for_generic_openai_compatible_provider() {
+        let provider = OpenAiCompatProvider::new();
+        let config = ChatConfig::default();
+
+        let body = provider.build_request_body(
+            &[ChatMessage {
+                role: MessageRole::Assistant,
+                content: Some("done".to_string()),
+                content_blocks: None,
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+                reasoning_content: Some("hidden reasoning".to_string()),
+                prefix: None,
+            }],
+            &config,
+            OpenAiDialect::resolve("https://example.com", "generic-model"),
+        );
+
+        let messages = body["messages"].as_array().expect("messages should be an array");
+        assert!(messages[0].get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn kimi_dialect_normalizes_tool_choice_to_auto() {
+        let provider = OpenAiCompatProvider::new();
+        let mut config = ChatConfig::default();
+        config.model = "kimi-for-coding".to_string();
+        config.tool_choice = Some("required".to_string());
+        config.tools = Some(vec![crate::services::ai::models::ToolDefinition {
+            tool_type: "function".to_string(),
+            function: crate::services::ai::models::ToolFunctionDef {
+                name: "read_file".to_string(),
+                description: "read file".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string" }
+                    },
+                    "required": ["path"]
+                }),
+            },
+        }]);
+
+        let body = provider.build_request_body(
+            &[ChatMessage {
+                role: MessageRole::User,
+                content: Some("read package".to_string()),
+                content_blocks: None,
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+                reasoning_content: None,
+                prefix: None,
+            }],
+            &config,
+            OpenAiDialect::resolve("https://api.kimi.com/coding/v1", &config.model),
+        );
+
+        assert_eq!(body["tool_choice"], "auto");
+    }
+
+    #[test]
+    fn mimo_dialect_uses_official_token_and_thinking_fields() {
+        let provider = OpenAiCompatProvider::new();
+        let mut config = ChatConfig::default();
+        config.model = "mimo-v2.5-pro".to_string();
+        config.max_tokens = 8192;
+        config.thinking_budget = Some(4096);
+
+        let body = provider.build_request_body(
+            &[ChatMessage {
+                role: MessageRole::User,
+                content: Some("hello".to_string()),
+                content_blocks: None,
+                name: None,
+                tool_calls: None,
+                tool_call_id: None,
+                reasoning_content: None,
+                prefix: None,
+            }],
+            &config,
+            OpenAiDialect::resolve("https://api.xiaomimimo.com/v1", &config.model),
+        );
+
+        assert_eq!(body["max_completion_tokens"], 8192);
+        assert!(body.get("max_tokens").is_none());
+        assert_eq!(body["thinking"]["type"], "enabled");
     }
 }
 
@@ -682,5 +953,19 @@ impl AiProvider for OpenAiCompatProvider {
         } else {
             self.chat_stream_completions(messages, config, api_key, endpoint, on_event, abort_rx).await
         }
+    }
+
+    async fn completion(
+        &self,
+        model: &str,
+        prompt: &str,
+        suffix: Option<&str>,
+        api_key: &str,
+        endpoint: &str,
+        max_tokens: u32,
+        temperature: f64,
+        use_beta: bool,
+    ) -> Result<CompletionResult, AppError> {
+        self.create_completion(model, prompt, suffix, api_key, endpoint, max_tokens, temperature, use_beta).await
     }
 }

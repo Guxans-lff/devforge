@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, nextTick } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const {
@@ -8,6 +8,8 @@ const {
   dbGetTableDataMock,
   toastSuccessMock,
   toastErrorMock,
+  primaryKeysState,
+  pkLoadingState,
 } = vi.hoisted(() => ({
   saveMock: vi.fn(),
   writeTextFileMock: vi.fn(),
@@ -15,6 +17,8 @@ const {
   dbGetTableDataMock: vi.fn(),
   toastSuccessMock: vi.fn(),
   toastErrorMock: vi.fn(),
+  primaryKeysState: { value: ['id'] as string[] },
+  pkLoadingState: { value: false },
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -67,9 +71,15 @@ vi.mock('@/utils/exportData', () => ({
   getFilters: vi.fn(() => []),
 }))
 
-vi.mock('@/composables/usePrimaryKey', () => ({
-  fetchPrimaryKeys: vi.fn(),
-}))
+vi.mock('@/composables/usePrimaryKey', async () => {
+  const { computed } = await import('vue')
+  return {
+    usePrimaryKeys: vi.fn(() => ({
+      primaryKeys: computed(() => primaryKeysState.value),
+      pkLoading: computed(() => pkLoadingState.value),
+    })),
+  }
+})
 
 vi.mock('@/api/database', () => ({
   writeTextFile: writeTextFileMock,
@@ -78,7 +88,6 @@ vi.mock('@/api/database', () => ({
   dbGetTableData: dbGetTableDataMock,
 }))
 
-import { fetchPrimaryKeys } from '@/composables/usePrimaryKey'
 import { useQueryResult } from '@/composables/useQueryResult'
 
 function makeResult(rows: unknown[][], totalCount = rows.length): {
@@ -115,8 +124,22 @@ function makeRows(start: number, count: number): unknown[][] {
   })
 }
 
-function createUseQueryResult() {
+function createUseQueryResult(options?: {
+  tableBrowse?: {
+    database: string
+    table: string
+    currentPage: number
+    pageSize: number
+    whereClause?: string
+    orderBy?: string
+    filterOperators?: Record<string, string>
+    seekOrderBy?: string
+    seekColumn?: string
+    seekValue?: number
+  }
+}) {
   const result = ref(makeResult([[1, 'a'], [2, 'b']]))
+  const tableBrowse = ref(options?.tableBrowse)
   return useQueryResult({
     result,
     loading: computed(() => false),
@@ -134,8 +157,73 @@ function createUseQueryResult() {
     onRefresh: vi.fn(),
     onServerFilter: vi.fn(),
     onServerSort: vi.fn(),
+    tableBrowse,
   })
 }
+
+describe('useQueryResult table browse state restore', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    primaryKeysState.value = ['id']
+    pkLoadingState.value = false
+  })
+
+  it('从 tableBrowse 恢复服务端筛选、操作符和排序状态', async () => {
+    const qr = createUseQueryResult({
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        whereClause: "`name` LIKE '%Ada%' AND `id` >= '10'",
+        orderBy: '`id` DESC',
+        filterOperators: { name: 'LIKE', id: '>=' },
+      },
+    })
+
+    await nextTick()
+
+    expect(qr.serverColumnFilters.value).toEqual({
+      name: 'Ada',
+      id: '10',
+    })
+    expect(qr.activeColumnFilters.value).toEqual({
+      name: 'Ada',
+      id: '10',
+    })
+    expect(qr.filterOperators.value).toEqual({
+      name: 'LIKE',
+      id: '>=',
+    })
+    expect(qr.serverSortCol.value).toBe('id')
+    expect(qr.serverSortDir.value).toBe('DESC')
+  })
+
+  it('缺少显式 filterOperators 时从 whereClause 推导操作符', async () => {
+    const qr = createUseQueryResult({
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        whereClause: "`name` IN ('Ada', 'Linus') AND `deleted_at` IS NULL",
+      },
+    })
+
+    await nextTick()
+
+    expect(qr.serverColumnFilters.value).toEqual({
+      name: 'Ada, Linus',
+      deleted_at: '',
+    })
+    expect(qr.filterOperators.value).toEqual({
+      name: 'IN',
+      deleted_at: 'IS NULL',
+    })
+    expect(qr.serverSortCol.value).toBeNull()
+    expect(qr.serverSortDir.value).toBeNull()
+  })
+})
 
 describe('useQueryResult export', () => {
   beforeEach(() => {
@@ -143,7 +231,8 @@ describe('useQueryResult export', () => {
     saveMock.mockResolvedValue('D:/exports/users.csv')
     dbGenerateScriptMock.mockResolvedValue('CREATE TABLE users (...)')
     writeTextFileMock.mockResolvedValue(undefined)
-    vi.mocked(fetchPrimaryKeys).mockResolvedValue(['id'])
+    primaryKeysState.value = ['id']
+    pkLoadingState.value = false
   })
 
   it('uses keyset pagination when exporting remaining table rows with a numeric single-column primary key', async () => {

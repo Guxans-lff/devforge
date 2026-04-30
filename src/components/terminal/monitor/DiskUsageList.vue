@@ -3,15 +3,18 @@
  * 磁盘使用率进度条列表
  * 替代 ECharts 柱状图 + 详情表格，纯 CSS 无溢出问题
  */
+import { computed } from 'vue'
 import type { DiskInfo } from '@/types/server-monitor'
 import { HardDrive } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 
-defineProps<{
+const props = defineProps<{
   disks: DiskInfo[]
 }>()
 
 const { t } = useI18n()
+
+const displayDisks = computed(() => props.disks.filter(disk => !isPseudoDisk(disk)))
 
 /** MB → 可读容量 */
 function formatSize(mb: number): string {
@@ -21,10 +24,21 @@ function formatSize(mb: number): string {
   return `${(mb / 1024 / 1024).toFixed(2)}T`
 }
 
+function isPseudoDisk(disk: DiskInfo): boolean {
+  const filesystem = disk.filesystem.toLowerCase()
+  const mountPoint = disk.mountPoint.toLowerCase()
+  return filesystem.startsWith('/dev/loop')
+    || filesystem === 'overlay'
+    || filesystem === 'squashfs'
+    || mountPoint.startsWith('/snap/')
+    || mountPoint.startsWith('/var/lib/docker/overlay2')
+}
+
 /** 进度条颜色 class */
-function barColor(pct: number): string {
-  if (pct > 90) return 'bg-destructive'
-  if (pct > 70) return 'bg-df-warning'
+function barColor(disk: DiskInfo): string {
+  if (isPseudoDisk(disk)) return 'bg-muted-foreground/30'
+  if (disk.usePercent > 90) return 'bg-destructive'
+  if (disk.usePercent > 70) return 'bg-df-warning'
   return 'bg-df-success'
 }
 </script>
@@ -36,7 +50,7 @@ function barColor(pct: number): string {
       <span class="text-[11px] font-medium">{{ t('monitor.diskUsage') }}</span>
     </div>
     <div class="space-y-2.5">
-      <div v-for="disk in disks" :key="disk.mountPoint">
+      <div v-for="disk in displayDisks" :key="disk.mountPoint">
         <!-- 第一行：挂载点 + 文件系统 + 容量 + 百分比 -->
         <div class="flex items-center justify-between text-[11px] mb-1">
           <div class="flex items-center gap-2 min-w-0">
@@ -49,7 +63,7 @@ function barColor(pct: number): string {
             </span>
             <span
               class="tabular-nums w-10 text-right font-medium"
-              :class="disk.usePercent > 90 ? 'text-destructive' : 'text-foreground'"
+              :class="!isPseudoDisk(disk) && disk.usePercent > 90 ? 'text-destructive' : 'text-foreground'"
             >
               {{ disk.usePercent.toFixed(0) }}%
             </span>
@@ -59,7 +73,7 @@ function barColor(pct: number): string {
         <div class="h-1.5 bg-muted rounded-full overflow-hidden">
           <div
             class="h-full rounded-full transition-all duration-500"
-            :class="barColor(disk.usePercent)"
+            :class="barColor(disk)"
             :style="{ width: `${Math.min(disk.usePercent, 100)}%` }"
           />
         </div>

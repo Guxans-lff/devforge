@@ -1,7 +1,9 @@
 ﻿/**
- * AI Provider Gateway 缁熶竴鍏ュ彛
+ * AI Provider Gateway 统一入口
  *
- * 灏佽鎵€鏈?AI 璇锋眰锛屾彁渚?requestId銆佽拷韪€乽sage 璁板綍銆? * 鍐呴儴璋冪敤鐜版湁鐨?`aiChatStream`锛屼繚鎸佸悜鍚庡吋瀹广€? */
+ * 封装所有 AI 请求，提供 requestId、追踪和 usage 记录。
+ * 内部调用现有的 `aiChatStream`，保持向后兼容。
+ */
 
 import { aiChatStream, aiAbortStream } from '@/api/ai'
 import type { ModelConfig } from '@/types/ai'
@@ -34,7 +36,7 @@ function endSpan(spanId: string, status: string, attributes?: Record<string, unk
   log.debug('span_end', { spanId, status, ...attributes })
 }
 
-/** 鐢熸垚 requestId */
+/** 生成 requestId */
 function generateRequestId(): string {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) {
     return crypto.randomUUID()
@@ -42,7 +44,7 @@ function generateRequestId(): string {
   return `req-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
 
-/** 灏嗗師濮嬮敊璇垎绫讳负 GatewayError */
+/** 将原始错误分类为 GatewayError */
 function classifyError(err: unknown): AiGatewayError {
   // 提取 message：优先从对象属性读取，再尝试 Error.message，最后 String()
   let message: string
@@ -67,7 +69,7 @@ function classifyError(err: unknown): AiGatewayError {
   }
 
   if (retryable !== undefined) {
-    // 缁撴瀯鍖栭敊璇璞★細淇濈暀鍏?retryable锛岀被鍨嬪厹搴曚负 unknown
+    // 结构化错误对象：保留 retryable，类型兜底为 unknown
     return new AiGatewayError('unknown', message, retryable, err)
   }
 
@@ -92,7 +94,7 @@ function classifyError(err: unknown): AiGatewayError {
   return new AiGatewayError('unknown', message, true, err)
 }
 
-/** 璁＄畻鎴愭湰 */
+/** 计算成本 */
 function computeCost(usage: AiGatewayUsage, model: ModelConfig): AiGatewayCost | undefined {
   const pricing = model.capabilities.pricing
   if (!pricing) return undefined
@@ -112,7 +114,7 @@ function computeCost(usage: AiGatewayUsage, model: ModelConfig): AiGatewayCost |
   }
 }
 
-/** 鏋勫缓 GatewayContext */
+/** 构建 GatewayContext */
 function buildContext(
   request: AiGatewayRequest,
   requestId: string,
@@ -202,7 +204,7 @@ function preflightGatewayRequest(request: AiGatewayRequest, requestId: string): 
 }
 
 /**
- * 鎵ц鍗曟潯娴佸紡璇锋眰锛堝唴閮ㄤ娇鐢級
+ * 执行单条流式请求（内部使用）
  */
 async function executeSingleRequest(
   request: AiGatewayRequest,
@@ -277,6 +279,9 @@ async function executeSingleRequest(
         systemPrompt: request.systemPrompt,
         enableTools: request.enableTools,
         thinkingBudget: request.thinkingBudget,
+        responseFormat: request.responseFormat,
+        prefixCompletion: request.prefixCompletion,
+        prefixContent: request.prefixContent,
       },
       wrappedHandler,
     )
@@ -385,10 +390,11 @@ async function executeSingleRequest(
 }
 
 /**
- * 鎵ц Gateway 璇锋眰锛堝惈闄愭祦妫€鏌?+ Fallback 閲嶈瘯锛? *
- * @param request Gateway 璇锋眰鍙傛暟
- * @param onEvent 娴佸紡浜嬩欢鍥炶皟
- * @returns Gateway 鎵ц缁撴灉
+ * 执行 Gateway 请求（包含限流检查和 Fallback 重试）
+ *
+ * @param request Gateway 请求参数
+ * @param onEvent 流式事件回调
+ * @returns Gateway 执行结果
  */
 export async function executeGatewayRequest(
   request: AiGatewayRequest,
@@ -423,12 +429,12 @@ export async function executeGatewayRequest(
       throw gatewayError
     }
 
-    // 鍙栨秷閿欒鐩存帴鎶涘嚭
+    // 取消错误直接抛出
     if (gatewayError.type === 'cancelled') {
       throw gatewayError
     }
 
-    // 灏濊瘯 Fallback chain
+    // 尝试 Fallback chain
     const chain = request.fallbackChain ?? []
     if (chain.length === 0) {
       throw gatewayError
@@ -498,7 +504,8 @@ export async function executeGatewayRequest(
 }
 
 /**
- * 鍙栨秷鎸囧畾浼氳瘽鐨勬祦寮忚姹? */
+ * 取消指定会话的流式请求
+ */
 export async function abortGatewayRequest(sessionId: string): Promise<boolean> {
   return aiAbortStream(sessionId)
 }

@@ -28,7 +28,7 @@ import {
 } from '@/composables/ai/chatSideEffects'
 import { runAiChatSessionTurn } from '@/composables/ai/chatSessionRunner'
 import { createChatTaskDispatcher } from '@/composables/ai/chatTaskDispatcher'
-import { setActiveSessionId } from '@/composables/useToolApproval'
+import { setActiveSessionId, setApprovalMode } from '@/composables/useToolApproval'
 import { getCredential } from '@/api/connection'
 import type { AiMessage } from '@/types/ai'
 import type { ChatMode } from '@/components/ai/AiInputArea.vue'
@@ -75,6 +75,7 @@ interface MessageGroup {
 
 interface AiChatShellExposed {
   scrollContainer: HTMLElement | null
+  scrollToBottom?: () => void
   focusInput?: () => void
   setInputDraft?: (value: string, options?: { append?: boolean; focus?: boolean }) => void
 }
@@ -201,6 +202,7 @@ const currentSessionId = ref<string>(
 )
 const pendingSessionLoadId = ref<string | null>(null)
 const mountedHistoryLoaded = ref(false)
+const enableChatPerfLog = import.meta.env.DEV && localStorage.getItem('devforge.ai.perf') === '1'
 
 function canRestoreHistoryForThisTab(): boolean {
   return isOwnTabActive.value
@@ -222,13 +224,10 @@ async function loadHistoryForActiveTab(
     return false
   }
 
-  const t0 = performance.now()
   await chat.loadHistory(sessionId)
-  console.warn(`[perf] loadHistory returned: ${(performance.now() - t0).toFixed(1)}ms`)
   if (options.markMounted) {
     mountedHistoryLoaded.value = true
   }
-  console.warn(`[perf] loadHistoryForActiveTab done: ${(performance.now() - t0).toFixed(1)}ms`)
   return true
 }
 
@@ -244,6 +243,7 @@ watch(
 const chat = useAiChat({
   sessionId: currentSessionId,
   scrollContainer,
+  scrollToBottom: () => chatShellRef.value?.scrollToBottom?.(),
 })
 
 const latestAssistantSummary = computed(() => {
@@ -364,12 +364,14 @@ watch(
     if (loading) { aiReferencedPaths.value = []; return }
     _aiRefPathsRicHandle = requestIdleCallback(() => {
       _aiRefPathsRicHandle = null
-      const t0 = performance.now()
+      const t0 = enableChatPerfLog ? performance.now() : 0
       const attachedPaths = fileAttachment.attachments.value.map(a => a.path)
       const latestMessagePaths = chat.messages.value.slice(-8).flatMap(m => resolveReferencedPaths(m.content))
       aiReferencedPaths.value = collectUniquePaths([...attachedPaths, ...latestMessagePaths])
-      const elapsed = performance.now() - t0
-      if (elapsed > 2) console.warn('[perf] aiReferencedPaths:', elapsed.toFixed(1), 'ms, messages:', chat.messages.value.length)
+      if (enableChatPerfLog) {
+        const elapsed = performance.now() - t0
+        if (elapsed > 2) console.warn('[perf] aiReferencedPaths:', elapsed.toFixed(1), 'ms, messages:', chat.messages.value.length)
+      }
     }, { timeout: 500 })
   },
   { immediate: true },
@@ -791,7 +793,7 @@ watch(currentSessionId, (sessionId, oldSessionId) => {
 
 watch(
   () => {
-    const t0 = performance.now()
+    const t0 = enableChatPerfLog ? performance.now() : 0
     if (!sourceTaskId || chat.isHistoryLoading.value) return null
     const result = {
       taskStatus: taskCancelRequested.value
@@ -806,8 +808,10 @@ watch(
       taskError: taskCancelRequested.value ? t('ai.tasks.taskCancelled') : chat.error.value,
       taskSummary: latestAssistantSummary.value,
     }
-    const elapsed = performance.now() - t0
-    if (elapsed > 2) console.warn('[perf] taskStatus-source:', elapsed.toFixed(1), 'ms')
+    if (enableChatPerfLog) {
+      const elapsed = performance.now() - t0
+      if (elapsed > 2) console.warn('[perf] taskStatus-source:', elapsed.toFixed(1), 'ms')
+    }
     return result
   },
   (result) => {
@@ -839,13 +843,15 @@ watch(taskCancelRequested, (cancelRequested) => {
 let referencedPathsTimer: ReturnType<typeof setTimeout> | null = null
 watch(
   () => {
-    const t0 = performance.now()
+    const t0 = enableChatPerfLog ? performance.now() : 0
     const result = {
       aiReferencedPaths: aiReferencedPaths.value,
       taskReferencedPaths: taskReferencedPaths.value,
     }
-    const elapsed = performance.now() - t0
-    if (elapsed > 2) console.warn('[perf] referencedPaths-source:', elapsed.toFixed(1), 'ms')
+    if (enableChatPerfLog) {
+      const elapsed = performance.now() - t0
+      if (elapsed > 2) console.warn('[perf] referencedPaths-source:', elapsed.toFixed(1), 'ms')
+    }
     return result
   },
   ({ aiReferencedPaths: nextAiReferencedPaths, taskReferencedPaths: nextTaskReferencedPaths }) => {
@@ -924,7 +930,7 @@ watch(
 
 const groupedMessages = computed<MessageGroup[]>(() => {
   if (chat.isHistoryLoading.value) return []
-  const t0 = performance.now()
+  const t0 = enableChatPerfLog ? performance.now() : 0
   const result: MessageGroup[] = []
   const messages = chat.messages.value
   let index = 0
@@ -954,8 +960,10 @@ const groupedMessages = computed<MessageGroup[]>(() => {
     index = end
   }
 
-  const elapsed = performance.now() - t0
-  if (elapsed > 2) console.warn('[perf] groupedMessages:', elapsed.toFixed(1), 'ms, count:', result.length)
+  if (enableChatPerfLog) {
+    const elapsed = performance.now() - t0
+    if (elapsed > 2) console.warn('[perf] groupedMessages:', elapsed.toFixed(1), 'ms, count:', result.length)
+  }
   return result
 })
 
@@ -968,7 +976,7 @@ const latestUserMessageId = computed(() => {
 })
 
 const messageItems = computed(() => {
-  const t0 = performance.now()
+  const t0 = enableChatPerfLog ? performance.now() : 0
   const items = groupedMessages.value.map((item, index) => ({
     key: `${item.msg.id}-${index}${item.msg.isStreaming ? '-s' : ''}`,
     message: item.msg,
@@ -977,8 +985,10 @@ const messageItems = computed(() => {
     inGroup: item.groupSize > 1,
     stickyCompact: item.msg.id === latestUserMessageId.value,
   }))
-  const elapsed = performance.now() - t0
-  if (elapsed > 2) console.warn('[perf] messageItems:', elapsed.toFixed(1), 'ms, count:', items.length)
+  if (enableChatPerfLog) {
+    const elapsed = performance.now() - t0
+    if (elapsed > 2) console.warn('[perf] messageItems:', elapsed.toFixed(1), 'ms, count:', items.length)
+  }
   return items
 })
 
@@ -1006,16 +1016,16 @@ onMounted(async () => {
   if (chat.workDir.value) {
     const wsT0 = performance.now()
     await memoryStore.setWorkspace(chat.workDir.value)
-    console.warn(`[perf] onMounted: setWorkspace done: ${(performance.now() - wsT0).toFixed(1)}ms`)
+    if (enableChatPerfLog) console.warn(`[perf] onMounted: setWorkspace done: ${(performance.now() - wsT0).toFixed(1)}ms`)
     const cfgT0 = performance.now()
     await store.loadWorkspaceConfig(chat.workDir.value)
-    console.warn(`[perf] onMounted: loadWorkspaceConfig done: ${(performance.now() - cfgT0).toFixed(1)}ms`)
+    if (enableChatPerfLog) console.warn(`[perf] onMounted: loadWorkspaceConfig done: ${(performance.now() - cfgT0).toFixed(1)}ms`)
     applyWorkspacePreferredModel(store.currentWorkspaceConfig?.preferredModel)
     syncDefaultProviderSelection()
   }
 
   await maybeAutoStartTaskTab()
-  console.warn('[perf] onMounted: all done')
+  if (enableChatPerfLog) console.warn('[perf] onMounted: all done')
 })
 
 onActivated(async () => {
@@ -1320,7 +1330,7 @@ async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
       planGateEnabled,
       planApproved,
       log,
-      maxToolLoops: 50,
+      maxToolLoops: 10,
       totalTokens: () => {
         for (let i = taskMessages.value.length - 1; i >= 0; i -= 1) {
           const message = taskMessages.value[i]
@@ -1440,7 +1450,10 @@ const taskDispatcher = createChatTaskDispatcher({
   },
 })
 
-async function handleSend(content: string): Promise<void> {
+async function handleSend(
+  content: string,
+  options?: { jsonMode?: boolean; prefixCompletion?: boolean; prefixContent?: string },
+): Promise<void> {
   if (!currentProvider.value || !currentModel.value) return
 
   if (chat.isStreaming.value) {
@@ -1451,7 +1464,7 @@ async function handleSend(content: string): Promise<void> {
     return
   }
 
-  await doSend(content, fileAttachment.getReadyAttachments())
+  await doSend(content, fileAttachment.getReadyAttachments(), options)
   fileAttachment.clearAttachments()
 
   while (messageQueue.value.length > 0 && !chat.isStreaming.value) {
@@ -1464,6 +1477,7 @@ async function handleSend(content: string): Promise<void> {
 async function doSend(
   content: string,
   attachments: ReturnType<typeof fileAttachment.getReadyAttachments>,
+  options?: { jsonMode?: boolean; prefixCompletion?: boolean; prefixContent?: string },
 ): Promise<void> {
   const beforeTaskIds = new Set(chat.spawnedTasks.value.map(task => task.id))
   const sendOutcome = await sendMessageNow(content, attachments, (cleanContent) => {
@@ -1475,6 +1489,10 @@ async function doSend(
     const meaningful = cleanContent.trim().replace(/^[A-Za-z]:\\[^\s]*/g, '').trim() || cleanContent.trim()
     const shortTitle = meaningful.replace(/\s+/g, ' ').slice(0, 12)
     workspace.updateTabTitle(tab.id, shortTitle)
+  }, {
+    responseFormat: options?.jsonMode ? 'json_object' : undefined,
+    prefixCompletion: options?.prefixCompletion,
+    prefixContent: options?.prefixContent,
   })
   if (!sendOutcome) return
 
@@ -1544,8 +1562,9 @@ async function handlePlanApprove(): Promise<void> {
   }
 
   chat.approvePlan()
+  setApprovalMode('ask', currentSessionId.value)
   await chat.send(
-    '[The user approved the execution plan. Continue with the approved steps and use tools when needed.]',
+    '【用户已确认执行计划】请继续按已批准的步骤执行，必要时可以调用工具。',
     currentProvider.value,
     currentModel.value,
     apiKey,
@@ -2183,7 +2202,7 @@ function handleRewindMessage(messageId: string): void {
         />
       </div>
 
-      <div v-if="chat.awaitingPlanApproval.value" class="mx-auto max-w-4xl px-5">
+      <div v-if="chat.awaitingPlanApproval.value" class="mx-auto w-full max-w-6xl px-6 pb-4">
         <AiPlanGateBar
           :plan="chat.pendingPlan.value"
           @approve="handlePlanApprove"

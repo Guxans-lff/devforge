@@ -25,6 +25,9 @@ export interface BuildStreamParamsInput {
   temperature?: number
   enableTools?: boolean
   thinkingBudget?: number
+  responseFormat?: 'json_object'
+  prefixCompletion?: boolean
+  prefixContent?: string
 }
 
 /** Provider 适配器接口 */
@@ -97,6 +100,9 @@ export class GenericProviderAdapter implements ProviderAdapter {
       systemPrompt: input.systemPrompt,
       enableTools: input.enableTools,
       thinkingBudget: input.thinkingBudget,
+      responseFormat: input.responseFormat,
+      prefixCompletion: input.prefixCompletion,
+      prefixContent: input.prefixContent,
     }
   }
 

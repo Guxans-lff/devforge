@@ -49,6 +49,9 @@ describe('ProviderAdapter', () => {
       systemPrompt: 'system',
       enableTools: true,
       thinkingBudget: 4096,
+      responseFormat: 'json_object',
+      prefixCompletion: true,
+      prefixContent: '{"ok":',
     })
 
     expect(params).toMatchObject({
@@ -61,6 +64,9 @@ describe('ProviderAdapter', () => {
       systemPrompt: 'system',
       enableTools: true,
       thinkingBudget: 4096,
+      responseFormat: 'json_object',
+      prefixCompletion: true,
+      prefixContent: '{"ok":',
     })
   })
 
