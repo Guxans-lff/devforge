@@ -81,6 +81,7 @@ export interface QueryTabContext {
     orderBy?: string
     filterOperators?: Record<string, string>
     showFilters?: boolean
+    showChart?: boolean
     seekOrderBy?: string
     seekColumn?: string
     seekValue?: number
