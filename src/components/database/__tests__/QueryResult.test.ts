@@ -195,14 +195,21 @@ vi.mock('@/components/database/ColumnStatsBar.vue', () => ({
   }),
 }))
 
-vi.mock('@/components/database/chart/ChartPanel.vue', () => ({
-  default: defineComponent({
+vi.mock('@/components/database/chart/ChartPanel.vue', () => {
+  const ChartPanel = defineComponent({
     name: 'ChartPanel',
     setup() {
       return () => h('div')
     },
-  }),
-}))
+  })
+  return {
+    __esModule: true,
+    __isTeleport: false,
+    __isKeepAlive: false,
+    name: 'ChartPanel',
+    default: ChartPanel,
+  }
+})
 
 vi.mock('lucide-vue-next', () => {
   const createIcon = (name: string) => defineComponent({
@@ -328,6 +335,8 @@ function mountQueryResult(
       whereClause?: string
       orderBy?: string
       filterOperators?: Record<string, string>
+      showFilters?: boolean
+      showChart?: boolean
     }
     result?: ReturnType<typeof makeResult>
   },
@@ -442,6 +451,48 @@ describe('QueryResult 表浏览状态回填', () => {
     expect((filterInputs[0]!.element as HTMLInputElement).disabled).toBe(true)
     expect((filterInputs[0]!.element as HTMLInputElement).value).toBe('')
     expect((filterInputs[1]!.element as HTMLInputElement).value).toBe('Ada, Linus')
+
+    wrapper.unmount()
+  })
+
+  it('表浏览结果区切换图表视图时同步 showChart，避免切 tab 后丢失当前视图', async () => {
+    const wrapper = mountQueryResult({
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        showChart: false,
+      },
+    })
+
+    await flushPromises()
+
+    const buttons = wrapper.findAll('button')
+    const tableButton = buttons.find(btn => btn.text().includes('表格数据'))
+    const chartButton = buttons.find(btn => btn.text().includes('可视化分析'))
+    expect(tableButton).toBeTruthy()
+    expect(chartButton).toBeTruthy()
+
+    await chartButton!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('syncTableBrowse')?.[0]).toEqual([{ showChart: true }])
+
+    await wrapper.setProps({
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        showChart: true,
+      },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('配置图表')
+
+    await tableButton!.trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('syncTableBrowse')?.[1]).toEqual([{ showChart: false }])
 
     wrapper.unmount()
   })
