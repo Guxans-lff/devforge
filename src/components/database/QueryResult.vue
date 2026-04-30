@@ -86,6 +86,7 @@ const emit = defineEmits<{
     orderBy?: string
     filterOperators?: Record<string, string>
     showFilters?: boolean
+    showChart?: boolean
   }]
   analyzeSqlError: []
   applyFixedSql: [sql: string]
@@ -230,7 +231,7 @@ function isDateTimeColumn(colId: string): boolean {
               <button
                 class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium transition-[background-color,color,box-shadow]"
                 :class="!qr.showChart.value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-                @click="qr.showChart.value = false"
+                @click="qr.showChart.value = false; isTableBrowse && emit('syncTableBrowse', { showChart: false })"
               >
                 <TableIcon class="h-3 w-3" />
                 表格数据
@@ -238,7 +239,7 @@ function isDateTimeColumn(colId: string): boolean {
               <button
                 class="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-medium transition-[background-color,color,box-shadow]"
                 :class="qr.showChart.value ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
-                @click="qr.showChart.value = true"
+                @click="qr.showChart.value = true; isTableBrowse && emit('syncTableBrowse', { showChart: true })"
               >
                 <BarChart3 class="h-3 w-3" />
                 可视化分析
