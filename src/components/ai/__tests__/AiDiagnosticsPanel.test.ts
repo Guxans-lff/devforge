@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AiDiagnosticsPanel from '@/components/ai/AiDiagnosticsPanel.vue'
 import { setupTestPinia } from '@/__tests__/helpers'
 import { useSettingsStore } from '@/stores/settings'
+import { useAiChatStore } from '@/stores/ai-chat'
 import { clearUsageRecords, recordUsage } from '@/ai-gateway/usageTracker'
 import { AiGatewayError } from '@/ai-gateway/types'
 
@@ -140,6 +141,25 @@ describe('AiDiagnosticsPanel', () => {
 
   it('renders Gateway route latency, fallback, and error details', async () => {
     setupTestPinia()
+    const aiStore = useAiChatStore()
+    aiStore.providers = [{
+      id: 'provider-fallback',
+      name: 'Fallback Provider',
+      providerType: 'openai_compat',
+      endpoint: 'https://api.example.com',
+      models: [],
+      isDefault: false,
+      createdAt: 1,
+    }]
+    await aiStore.saveWorkspaceConfig('D:/Project/devforge', {
+      gatewayPolicy: {
+        fallbackEnabled: true,
+        fallbackProviderIds: ['provider-fallback'],
+        routingStrategy: 'cost',
+        rateLimit: { windowMs: 30000, maxRequests: 5 },
+      },
+    })
+    aiStore.currentWorkDir = 'D:/Project/devforge'
     recordUsage({
       requestId: 'req-gateway-error',
       sessionId: 'session-gateway',
@@ -211,17 +231,30 @@ describe('AiDiagnosticsPanel', () => {
 
     await wrapper.find('button').trigger('click')
 
-    expect(wrapper.text()).toContain('provider-fallback')
+    expect(wrapper.text()).toContain('Fallback Provider')
     expect(wrapper.text()).toContain('model-fallback')
     expect(wrapper.text()).toContain('120 ms')
     expect(wrapper.text()).toContain('40 ms')
     expect(wrapper.text()).toContain('当前请求由 fallback 路由承接')
     expect(wrapper.text()).toContain('provider_error')
     expect(wrapper.text()).toContain('Private IP is not allowed')
+    expect(wrapper.text()).toContain('Gateway Profile 策略')
+    expect(wrapper.text()).toContain('备用 Provider')
+    expect(wrapper.text()).toContain('Fallback Provider')
+    expect(wrapper.text()).toContain('成本优先')
+    expect(wrapper.text()).toContain('30000ms / 5 次')
   })
 
   it('copies full transcript when backend export loader is provided', async () => {
     setupTestPinia()
+    const aiStore = useAiChatStore()
+    await aiStore.saveWorkspaceConfig('D:/Project/devforge', {
+      gatewayPolicy: {
+        fallbackEnabled: false,
+        routingStrategy: 'speed',
+      },
+    })
+    aiStore.currentWorkDir = 'D:/Project/devforge'
     const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
 
     const wrapper = mount(AiDiagnosticsPanel, {
@@ -312,6 +345,10 @@ describe('AiDiagnosticsPanel', () => {
       hasBoundary: true,
       projectedEventCount: 1,
       originalTokens: 12000,
+    })
+    expect(copied.gatewayPolicy).toMatchObject({
+      fallbackEnabled: false,
+      routingStrategy: 'speed',
     })
   })
 

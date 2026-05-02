@@ -6,6 +6,7 @@ import type { AgentRuntimeSnapshot } from '@/composables/ai/AgentRuntimeSnapshot
 import { useSettingsStore } from '@/stores/settings'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { buildGatewayDashboardSnapshot, type GatewayDashboardSnapshot } from '@/ai-gateway/gatewayDashboard'
+import { describeGatewayPolicyValue } from '@/ai-gateway/gatewayPolicy'
 import { buildCompactBoundaryProjection } from '@/composables/ai-agent/context/compactBoundary'
 import type { AgentRuntimeGovernanceSnapshot, AiTranscriptEvent, AiTranscriptEventOf } from '@/composables/ai-agent/transcript/transcriptTypes'
 import { Activity, ChevronRight, Clock3, Copy, History, Route, ShieldAlert, TrendingUp, Wrench } from 'lucide-vue-next'
@@ -155,6 +156,16 @@ const gatewaySummary = computed(() => {
   ]
 })
 
+const gatewayPolicySummary = computed(() => {
+  const policy = aiChatStore.currentWorkspaceConfig?.gatewayPolicy
+  return [
+    { label: 'Fallback', value: describeGatewayPolicyValue(policy, 'fallbackEnabled', aiChatStore.providers) },
+    { label: '备用 Provider', value: describeGatewayPolicyValue(policy, 'fallbackProviderIds', aiChatStore.providers) },
+    { label: '路由策略', value: describeGatewayPolicyValue(policy, 'routingStrategy', aiChatStore.providers) },
+    { label: '限流覆盖', value: describeGatewayPolicyValue(policy, 'rateLimit', aiChatStore.providers) },
+  ]
+})
+
 const gatewayHealthTone = computed<Tone>(() => {
   const snapshot = gatewaySnapshot.value
   if (
@@ -279,6 +290,7 @@ const exportPayload = computed(() => JSON.stringify({
   sessionHistory: props.metrics.sessionHistory,
   errorBreakdown: props.metrics.errorBreakdown,
   gateway: gatewaySnapshot.value,
+  gatewayPolicy: aiChatStore.currentWorkspaceConfig?.gatewayPolicy ?? null,
   runtimeSnapshot: props.runtimeSnapshot,
   agentRuntimeContext: props.agentRuntimeContext?.payload.data,
   agentRuntimeGovernance: props.agentRuntimeGovernance,
@@ -786,6 +798,22 @@ function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
               >
                 {{ t('ai.diagnostics.gatewayNoRateLimit') }}
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mt-3 rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+          <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
+            Gateway Profile 策略
+          </div>
+          <div class="grid gap-x-4 gap-y-2 md:grid-cols-4">
+            <div
+              v-for="item in gatewayPolicySummary"
+              :key="item.label"
+              class="flex items-center justify-between gap-2 text-[11px]"
+            >
+              <span class="text-muted-foreground/65">{{ item.label }}</span>
+              <span class="max-w-[180px] truncate font-mono text-foreground/85">{{ item.value }}</span>
             </div>
           </div>
         </div>
