@@ -227,6 +227,49 @@ describe('AiProviderProfileBundlePanel', () => {
     expect(wrapper.emitted('apply')).toBeUndefined()
   })
 
+  it('asks confirmation before creating new profile with unsaved changes', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider(), makeFallbackProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('label').find(label => label.text().includes('provider-2'))!.find('input[type="checkbox"]').setValue(true)
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('清空，改为自动选择'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('新建'))!.trigger('click')
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('新建 Profile会丢弃这些改动'))
+    expect(wrapper.text()).toContain('已取消新建 Profile')
+  })
+
+  it('asks confirmation before switching profile with unsaved changes', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider(), makeFallbackProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('label').find(label => label.text().includes('provider-2'))!.find('input[type="checkbox"]').setValue(true)
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('新建'))!.trigger('click')
+    await wrapper.findAll('input').find(input => input.attributes('placeholder')?.includes('例如：主力编码配置'))!.setValue('第二个 Profile')
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('label').find(label => label.text().includes('provider-2'))!.find('input[type="checkbox"]').setValue(true)
+    await wrapper.findAll('button').find(button => button.text().includes('OpenAI / GPT-5.4') && button.text().includes('provider-1 / gpt-5.4'))!.trigger('click')
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('切换 Profile会丢弃这些改动'))
+    expect(wrapper.text()).toContain('已取消切换 Profile')
+  })
+
   it('keeps preview dialog open when preview apply is cancelled', async () => {
     vi.stubGlobal('confirm', vi.fn(() => false))
     const wrapper = mount(AiProviderProfileBundlePanel, {

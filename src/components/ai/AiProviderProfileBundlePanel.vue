@@ -252,13 +252,27 @@ function saveProfile(): void {
   message.value = 'Profile 已保存'
 }
 
+function confirmDiscardUnsavedChanges(action: string): boolean {
+  if (!hasUnsavedChanges.value) return true
+  return window.confirm(`当前 Profile 表单存在未保存改动，${action}会丢弃这些改动。是否继续？`)
+}
+
 function createNewProfile(): void {
+  if (!confirmDiscardUnsavedChanges('新建 Profile')) {
+    message.value = '已取消新建 Profile'
+    return
+  }
   selectedProfileId.value = null
   resetFormFromCurrent()
   message.value = ''
 }
 
 function selectProfile(profileId: string): void {
+  if (profileId === selectedProfileId.value) return
+  if (!confirmDiscardUnsavedChanges('切换 Profile')) {
+    message.value = '已取消切换 Profile'
+    return
+  }
   selectedProfileId.value = profileId
   const profile = selectedProfile.value
   if (profile) loadProfileToForm(profile)
