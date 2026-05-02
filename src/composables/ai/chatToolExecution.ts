@@ -468,6 +468,7 @@ async function executeIndexedTool(
   const previousFailures = params.toolFailureCounter.get(failureKey) ?? 0
   let isolationWarning: string | undefined
   let isolationRequiresDoubleConfirm = false
+  let isolationWarningDetails: ReturnType<typeof checkWorkspaceWriteGuard>['conflicts'] | undefined
 
   const permissionContext = buildToolPermissionContext(toolCall, params.permissionContext)
 
@@ -606,6 +607,7 @@ async function executeIndexedTool(
         const policyDecision = decideWorkspaceIsolationPolicy(isolationPolicy, ownerId, guard.conflicts)
         isolationWarning = `Workspace Isolation 检测到潜在覆盖：${guard.reason ?? guard.normalizedPath}。请确认是否继续写入。`
         isolationRequiresDoubleConfirm = policyDecision.requiresDoubleConfirm === true
+        isolationWarningDetails = guard.conflicts
         params.log.warn('workspace_isolation_conflict', {
           sessionId: params.sessionId,
           tool: toolCall.name,
@@ -647,7 +649,7 @@ async function executeIndexedTool(
   if (approvalTool) {
     const decision = await requestApprovalForTool(approvalTool, toolCall, params.sessionId, () => {
       updateToolCalls(params.toolCalls, params.updateStreamingMessage)
-    }, isolationWarning, isolationRequiresDoubleConfirm)
+    }, isolationWarning, isolationRequiresDoubleConfirm, isolationWarningDetails)
     updateToolCalls(params.toolCalls, params.updateStreamingMessage)
 
     if (decision === 'deny') {

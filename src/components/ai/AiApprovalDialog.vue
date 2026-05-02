@@ -121,6 +121,7 @@ watch(
 
 /** 预览区域限高（折叠时 ~5 行；展开时放高让其滚动） */
 const previewMaxHeight = computed(() => (expanded.value ? '70vh' : '100px'))
+const warningDetails = computed(() => pending.value?.warningDetails ?? [])
 
 function handleAllow() {
   if (pending.value?.requiresDoubleConfirm && !confirmingAllow.value) {
@@ -200,13 +201,28 @@ function handleAllow() {
           </span>
         </template>
         <div class="flex-1" />
-        <span
+        <div
           v-if="pending?.requiresDoubleConfirm && confirmingAllow"
-          class="text-[10px] font-medium text-amber-500"
+          class="max-w-[52%] rounded border border-amber-400/20 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-200"
           :title="pending?.warning"
         >
-          需要二次确认
-        </span>
+          <div class="font-medium">需要二次确认</div>
+          <div v-if="pending?.warning" class="mt-0.5 text-amber-100/70">
+            {{ pending.warning }}
+          </div>
+          <div v-if="warningDetails.length" class="mt-1 space-y-0.5">
+            <div
+              v-for="detail in warningDetails.slice(0, 3)"
+              :key="detail.path"
+              class="truncate font-mono text-amber-100/80"
+            >
+              {{ detail.path }} · {{ detail.owners.join(' / ') }}
+            </div>
+            <div v-if="warningDetails.length > 3" class="text-amber-100/55">
+              还有 {{ warningDetails.length - 3 }} 个冲突路径
+            </div>
+          </div>
+        </div>
         <button
           class="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] text-muted-foreground/70 hover:text-foreground hover:bg-muted/40 transition-colors"
           @click="resolveApproval('deny')"

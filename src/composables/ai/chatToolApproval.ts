@@ -1,6 +1,7 @@
 import { requestApproval, type ApprovalDecision, type ApprovalToolName } from '@/composables/useToolApproval'
 import type { ToolCallInfo } from '@/types/ai'
 import { tryParseJson } from './chatHelpers'
+import type { WorkspaceIsolationConflict } from '@/ai-gui/workspaceIsolation'
 
 export async function requestApprovalForTool(
   toolName: ApprovalToolName,
@@ -9,6 +10,7 @@ export async function requestApprovalForTool(
   onAwaiting?: () => void,
   warning?: string,
   requiresDoubleConfirm?: boolean,
+  warningDetails?: WorkspaceIsolationConflict[],
 ): Promise<'allow' | 'deny'> {
   const args = tc.parsedArgs ?? tryParseJson(tc.arguments) ?? {}
   tc.approvalState = 'awaiting'
@@ -24,6 +26,7 @@ export async function requestApprovalForTool(
       sessionId,
       warning,
       requiresDoubleConfirm,
+      warningDetails,
     })
   } else if (toolName === 'web_fetch' || toolName === 'web_search') {
     decision = await requestApproval({
@@ -32,6 +35,7 @@ export async function requestApprovalForTool(
       sessionId,
       warning,
       requiresDoubleConfirm,
+      warningDetails,
     })
   } else if (toolName === 'write_file') {
     decision = await requestApproval({
@@ -41,6 +45,7 @@ export async function requestApprovalForTool(
       sessionId,
       warning,
       requiresDoubleConfirm,
+      warningDetails,
     })
   } else if (toolName === 'edit_file') {
     decision = await requestApproval({
@@ -51,6 +56,7 @@ export async function requestApprovalForTool(
       sessionId,
       warning,
       requiresDoubleConfirm,
+      warningDetails,
     })
   } else {
     decision = await requestApproval({
@@ -60,6 +66,7 @@ export async function requestApprovalForTool(
       sessionId,
       warning,
       requiresDoubleConfirm,
+      warningDetails,
     })
   }
 

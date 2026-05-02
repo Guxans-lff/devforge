@@ -50,6 +50,11 @@ export interface PendingApproval {
   preview: string
   oldPreview?: string
   warning?: string
+  warningDetails?: Array<{
+    path: string
+    owners: string[]
+    ownerIds: string[]
+  }>
   requiresDoubleConfirm?: boolean
   trustKey: string
   resolve: (decision: ApprovalDecision) => void
@@ -169,6 +174,7 @@ export interface RequestApprovalOptions {
   newContent?: string
   oldContent?: string
   warning?: string
+  warningDetails?: PendingApproval['warningDetails']
   requiresDoubleConfirm?: boolean
   sessionId: string
 }
@@ -289,6 +295,7 @@ export function requestApproval(opts: RequestApprovalOptions): Promise<ApprovalD
       preview: resolvePreview(opts),
       oldPreview: opts.oldContent,
       warning: opts.warning,
+      warningDetails: opts.warningDetails,
       requiresDoubleConfirm: opts.requiresDoubleConfirm,
       trustKey,
       resolve,

@@ -69,6 +69,9 @@ describe('AiApprovalDialog', () => {
       path: 'src/main.ts',
       newContent: 'next',
       warning: 'Workspace Isolation conflict',
+      warningDetails: [
+        { path: 'src/main.ts', owners: ['手动 Patch', 'write_file:tool-1'], ownerIds: ['patch-1', 'tool:s1:tool-1'] },
+      ],
       requiresDoubleConfirm: true,
       sessionId,
     })
@@ -84,6 +87,8 @@ describe('AiApprovalDialog', () => {
 
     expect(settled).toBe(false)
     expect(wrapper.text()).toContain('需要二次确认')
+    expect(wrapper.text()).toContain('src/main.ts')
+    expect(wrapper.text()).toContain('手动 Patch / write_file:tool-1')
 
     await allowButton.trigger('click')
     await Promise.resolve()
