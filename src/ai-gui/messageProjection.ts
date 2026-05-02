@@ -94,6 +94,38 @@ function buildToolSignature(message: AiMessage): string {
   ].join('|')
 }
 
+function buildDividerMetaSignature(message: AiMessage): string {
+  if (!message.dividerMeta) return ''
+  return [
+    message.dividerMeta.kind,
+    message.dividerMeta.loadedRecords,
+    message.dividerMeta.totalRecords,
+    message.dividerMeta.remainingRecords,
+  ].join(':')
+}
+
+function buildCompactMetadataSignature(message: AiMessage): string {
+  if (!message.compactMetadata) return ''
+  return [
+    message.compactMetadata.trigger,
+    message.compactMetadata.preTokens,
+    message.compactMetadata.summarizedMessages,
+    message.compactMetadata.createdAt,
+    message.compactMetadata.summaryMessageId,
+    message.compactMetadata.source,
+  ].join(':')
+}
+
+function buildRewindMetadataSignature(message: AiMessage): string {
+  if (!message.rewindMetadata) return ''
+  return [
+    message.rewindMetadata.targetMessageId,
+    message.rewindMetadata.targetMessageRole,
+    message.rewindMetadata.hiddenMessages,
+    message.rewindMetadata.createdAt,
+  ].join(':')
+}
+
 function buildMessageSignature(message: AiMessage): string {
   return [
     message.id,
@@ -105,6 +137,9 @@ function buildMessageSignature(message: AiMessage): string {
     message.saveStatus ?? '',
     message.notice ? `${message.notice.kind}:${message.notice.text}` : '',
     message.dividerText ?? '',
+    buildDividerMetaSignature(message),
+    buildCompactMetadataSignature(message),
+    buildRewindMetadataSignature(message),
     message.tokens ?? 0,
     message.promptTokens ?? 0,
     message.completionTokens ?? 0,

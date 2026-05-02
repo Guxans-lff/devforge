@@ -89,4 +89,74 @@ describe('messageProjection', () => {
     expect(items.map(item => item.message.id)).toEqual(['a1', 'r1', 'a2'])
     expect(items.map(item => item.isGroupEnd)).toEqual([true, true, true])
   })
+
+  it('rebuilds boundary items when compact metadata changes', () => {
+    const cache = createAiMessageProjectionCache()
+    const first = cache.project([
+      msg({
+        id: 'b1',
+        role: 'system',
+        type: 'compact-boundary',
+        compactMetadata: {
+          trigger: 'auto',
+          preTokens: 1000,
+          summarizedMessages: 10,
+          createdAt: 100,
+          summaryMessageId: 's1',
+          source: 'ai',
+        },
+      }),
+    ], null)
+
+    const second = cache.project([
+      msg({
+        id: 'b1',
+        role: 'system',
+        type: 'compact-boundary',
+        compactMetadata: {
+          trigger: 'auto',
+          preTokens: 2000,
+          summarizedMessages: 20,
+          createdAt: 100,
+          summaryMessageId: 's1',
+          source: 'ai',
+        },
+      }),
+    ], null)
+
+    expect(second[0]).not.toBe(first[0])
+  })
+
+  it('rebuilds boundary items when rewind metadata changes', () => {
+    const cache = createAiMessageProjectionCache()
+    const first = cache.project([
+      msg({
+        id: 'r1',
+        role: 'system',
+        type: 'rewind-boundary',
+        rewindMetadata: {
+          targetMessageId: 'a1',
+          targetMessageRole: 'assistant',
+          hiddenMessages: 1,
+          createdAt: 100,
+        },
+      }),
+    ], null)
+
+    const second = cache.project([
+      msg({
+        id: 'r1',
+        role: 'system',
+        type: 'rewind-boundary',
+        rewindMetadata: {
+          targetMessageId: 'a1',
+          targetMessageRole: 'assistant',
+          hiddenMessages: 3,
+          createdAt: 100,
+        },
+      }),
+    ], null)
+
+    expect(second[0]).not.toBe(first[0])
+  })
 })
