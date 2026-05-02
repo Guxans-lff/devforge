@@ -72,6 +72,27 @@ function makeFallbackProvider(): ProviderConfig {
   }
 }
 
+function makeWeakFallbackProvider(): ProviderConfig {
+  return {
+    ...makeProvider(),
+    id: 'provider-weak',
+    name: 'Weak Fallback',
+    isDefault: false,
+    models: [{
+      id: 'weak-model',
+      name: 'Weak Model',
+      capabilities: {
+        streaming: false,
+        vision: false,
+        thinking: false,
+        toolUse: false,
+        maxContext: 4096,
+        maxOutput: 1024,
+      },
+    }],
+  }
+}
+
 const stubs = {
   Button: { template: '<button><slot /></button>' },
   Input: { props: ['modelValue'], emits: ['update:modelValue'], template: '<input v-bind="$attrs" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
@@ -171,6 +192,30 @@ describe('AiProviderProfileBundlePanel', () => {
       fallbackProviderIds: ['provider-2'],
       rateLimit: { windowMs: 30000, maxRequests: 5 },
     })
+  })
+
+  it('shows gateway policy risks before saving profile', async () => {
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider(), makeWeakFallbackProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    const advancedInput = wrapper.findAll('input')
+      .find(input => input.attributes('placeholder')?.includes('高级：手动填写 Provider ID'))!
+    await advancedInput.setValue('provider-1, provider-weak, provider-missing')
+    await wrapper.findAll('label').find(label => label.text().includes('启用 Profile 限流覆盖'))!.find('input[type="checkbox"]').setValue(true)
+    const refreshedInputs = wrapper.findAll('input')
+    await refreshedInputs.find(input => input.attributes('min') === '1000')!.setValue('5000')
+    await refreshedInputs.find(input => input.attributes('min') === '1' && input.attributes('type') === 'number')!.setValue('100')
+
+    expect(wrapper.text()).toContain('Fallback Provider 不存在：provider-missing')
+    expect(wrapper.text()).toContain('Fallback 列表包含当前主 Provider')
+    expect(wrapper.text()).toContain('Fallback Provider 模型能力可能不足：Weak Fallback')
+    expect(wrapper.text()).toContain('Profile 限流窗口较短且请求数偏高')
   })
 
   it('exports and imports profile json from the panel', async () => {

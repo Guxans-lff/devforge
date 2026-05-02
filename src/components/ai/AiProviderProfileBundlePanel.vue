@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Archive, Check, Download, Eye, RotateCcw, Save, Trash2, Upload } from 'lucide-vue-next'
 import type { AiProviderProfileBundle, ProviderConfig, WorkspaceConfig } from '@/types/ai'
+import { auditGatewayPolicy } from '@/ai-gateway/gatewayPolicyAudit'
 import { useProviderProfileBundleStore } from '@/stores/provider-profile-bundle'
 import { useOutputStyles } from '@/composables/useOutputStyles'
 import { Button } from '@/components/ui/button'
@@ -92,6 +93,14 @@ const unknownFallbackProviderIds = computed(() =>
   selectedFallbackProviderIds.value.filter(providerId =>
     !props.providers.some(provider => provider.id === providerId),
   ),
+)
+const gatewayPolicyIssues = computed(() =>
+  auditGatewayPolicy({
+    policy: buildGatewayPolicy(),
+    providers: props.providers,
+    primaryProviderId: form.providerId,
+    primaryProvider: selectedProvider.value,
+  }),
 )
 
 const preview = computed(() => {
@@ -488,6 +497,16 @@ onMounted(() => {
                   class="mt-2 h-8 text-xs font-mono"
                   placeholder="高级：手动填写 Provider ID，多个用英文逗号分隔；留空表示自动选择"
                 />
+                <div v-if="gatewayPolicyIssues.length" class="mt-2 space-y-1.5">
+                  <div
+                    v-for="issue in gatewayPolicyIssues"
+                    :key="issue.key"
+                    class="rounded border px-2 py-1.5 text-[11px]"
+                    :class="issue.level === 'danger' ? 'border-destructive/30 bg-destructive/5 text-destructive' : issue.level === 'warning' ? 'border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300' : 'border-sky-500/30 bg-sky-500/5 text-sky-700 dark:text-sky-300'"
+                  >
+                    {{ issue.message }}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
