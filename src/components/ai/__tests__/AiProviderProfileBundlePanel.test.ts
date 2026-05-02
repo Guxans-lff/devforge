@@ -206,6 +206,27 @@ describe('AiProviderProfileBundlePanel', () => {
     expect(wrapper.emitted('apply')).toHaveLength(1)
   })
 
+  it('warns before applying when form has unsaved changes', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider(), makeFallbackProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('label').find(label => label.text().includes('provider-2'))!.find('input[type="checkbox"]').setValue(true)
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('清空，改为自动选择'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('应用'))!.trigger('click')
+
+    expect(wrapper.text()).toContain('有未保存改动，应用前请先保存')
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('当前表单存在未保存改动'))
+    expect(wrapper.emitted('apply')).toBeUndefined()
+  })
+
   it('keeps preview dialog open when preview apply is cancelled', async () => {
     vi.stubGlobal('confirm', vi.fn(() => false))
     const wrapper = mount(AiProviderProfileBundlePanel, {

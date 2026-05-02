@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { Archive, Check, Download, Eye, RotateCcw, Save, Trash2, Upload } from 'lucide-vue-next'
 import type { AiProviderProfileBundle, ProviderConfig, WorkspaceConfig } from '@/types/ai'
 import { auditGatewayPolicy } from '@/ai-gateway/gatewayPolicyAudit'
+import { normalizeGatewayPolicy } from '@/ai-gateway/gatewayPolicy'
 import { useProviderProfileBundleStore } from '@/stores/provider-profile-bundle'
 import { useOutputStyles } from '@/composables/useOutputStyles'
 import { Button } from '@/components/ui/button'
@@ -102,6 +103,18 @@ const gatewayPolicyIssues = computed(() =>
     primaryProvider: selectedProvider.value,
   }),
 )
+const hasUnsavedChanges = computed(() => {
+  const profile = selectedProfile.value
+  if (!profile) return false
+  return form.name.trim() !== profile.name
+    || (form.description.trim() || undefined) !== profile.description
+    || form.providerId !== profile.providerId
+    || form.modelId !== profile.modelId
+    || (form.outputStyleId || undefined) !== profile.outputStyleId
+    || JSON.stringify(buildWorkspaceConfig()) !== JSON.stringify(profile.workspaceConfig ?? {})
+    || JSON.stringify(normalizeGatewayPolicy(buildGatewayPolicy()) ?? {}) !== JSON.stringify(normalizeGatewayPolicy(profile.gatewayPolicy) ?? {})
+    || JSON.stringify(buildSecurityConfig()) !== JSON.stringify(profile.security ?? {})
+})
 
 const preview = computed(() => {
   if (!selectedProfile.value) return null
@@ -204,6 +217,14 @@ function buildGatewayPolicy() {
   }
 }
 
+function buildSecurityConfig(): NonNullable<ProviderConfig['security']> {
+  return {
+    allowlist: form.allowlist.split(',').map(item => item.trim()).filter(Boolean),
+    allowLocalhost: form.allowLocalhost,
+    allowPrivateIP: form.allowPrivateIP,
+  }
+}
+
 function toggleFallbackProvider(providerId: string, enabled: boolean): void {
   const ids = new Set(selectedFallbackProviderIds.value)
   if (enabled) ids.add(providerId)
@@ -225,11 +246,7 @@ function saveProfile(): void {
     outputStyleId: form.outputStyleId,
     workspaceConfig: buildWorkspaceConfig(),
     gatewayPolicy: buildGatewayPolicy(),
-    security: {
-      allowlist: form.allowlist.split(',').map(item => item.trim()).filter(Boolean),
-      allowLocalhost: form.allowLocalhost,
-      allowPrivateIP: form.allowPrivateIP,
-    },
+    security: buildSecurityConfig(),
   })
   selectedProfileId.value = profile.id
   message.value = 'Profile 已保存'
@@ -249,6 +266,9 @@ function selectProfile(profileId: string): void {
 }
 
 function confirmApplyProfileRisks(): boolean {
+  if (hasUnsavedChanges.value && !window.confirm('当前表单存在未保存改动，直接应用会使用上一次保存的 Profile。是否继续应用已保存版本？')) {
+    return false
+  }
   const warnings = preview.value?.warnings ?? []
   if (warnings.length === 0) return true
   const summary = warnings
@@ -625,6 +645,9 @@ onMounted(() => {
             <Trash2 class="h-3.5 w-3.5" />
             删除
           </Button>
+          <span v-if="hasUnsavedChanges" class="text-xs text-amber-600 dark:text-amber-300">
+            有未保存改动，应用前请先保存
+          </span>
           <span v-if="message" class="text-xs text-muted-foreground">{{ message }}</span>
         </div>
       </div>
