@@ -169,6 +169,43 @@ describe('AiProviderProfileBundlePanel', () => {
     })
   })
 
+  it('asks confirmation before applying risky profile and can cancel', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('应用'))!.trigger('click')
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('应用该 Profile 会带来以下风险'))
+    expect(wrapper.emitted('apply')).toBeUndefined()
+    expect(wrapper.text()).toContain('已取消应用 Profile')
+  })
+
+  it('applies risky profile after confirmation', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('应用'))!.trigger('click')
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('当前只有一个 Provider'))
+    expect(wrapper.emitted('apply')).toHaveLength(1)
+  })
+
   it('shows gateway policy controls and includes policy in saved profile', async () => {
     const wrapper = mount(AiProviderProfileBundlePanel, {
       props: {

@@ -248,9 +248,24 @@ function selectProfile(profileId: string): void {
   message.value = ''
 }
 
+function confirmApplyProfileRisks(): boolean {
+  const warnings = preview.value?.warnings ?? []
+  if (warnings.length === 0) return true
+  const summary = warnings
+    .slice(0, 5)
+    .map(item => `- ${item.message}`)
+    .join('\n')
+  const suffix = warnings.length > 5 ? `\n- 还有 ${warnings.length - 5} 条风险，请先查看预览。` : ''
+  return window.confirm(`应用该 Profile 会带来以下风险：\n${summary}${suffix}\n\n是否继续应用？`)
+}
+
 function applyProfile(): void {
   const profile = selectedProfile.value
   if (!profile) return
+  if (!confirmApplyProfileRisks()) {
+    message.value = '已取消应用 Profile'
+    return
+  }
   const result = store.applyProfile({
     profileId: profile.id,
     providers: props.providers,
