@@ -3,6 +3,19 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useProviderProfileBundleStore } from '@/stores/provider-profile-bundle'
 import type { ProviderConfig } from '@/types/ai'
 
+vi.mock('@/api/provider-profile-bundle', () => ({
+  createProviderProfileBundleSnapshot: (profiles: unknown[], backups: unknown[]) => ({
+    profiles,
+    backups,
+    exportedAt: 1000,
+    schemaVersion: 1,
+  }),
+  exportProviderProfileBundleSnapshot: (snapshot: unknown) => JSON.stringify(snapshot, null, 2),
+  importProviderProfileBundleSnapshot: (raw: string) => JSON.parse(raw),
+  loadProviderProfileBundleSnapshot: vi.fn(async () => null),
+  saveProviderProfileBundleSnapshot: vi.fn(async () => undefined),
+}))
+
 class MemoryStorage implements Storage {
   private readonly data = new Map<string, string>()
   get length(): number { return this.data.size }
@@ -115,5 +128,21 @@ describe('provider-profile-bundle store', () => {
     expect(restored.name).toBe('Profile A')
     expect(store.profiles[0]?.name).toBe('Profile A')
     expect(store.backups.some(item => item.reason === 'rollback')).toBe(true)
+  })
+
+  it('exports and imports profile snapshots', () => {
+    const store = useProviderProfileBundleStore()
+    store.saveProfile({
+      name: '共享配置',
+      providerId: 'provider-1',
+      modelId: 'gpt-5.4',
+    })
+
+    const exported = store.exportSnapshot()
+    store.importSnapshot(exported)
+
+    expect(store.profiles).toHaveLength(1)
+    expect(store.profiles[0]?.name).toBe('共享配置')
+    expect(store.activeProfileId).toBe(store.profiles[0]?.id)
   })
 })

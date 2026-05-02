@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
-import { Archive, Check, Eye, RotateCcw, Save, Trash2 } from 'lucide-vue-next'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { Archive, Check, Download, Eye, RotateCcw, Save, Trash2, Upload } from 'lucide-vue-next'
 import type { AiProviderProfileBundle, ProviderConfig, WorkspaceConfig } from '@/types/ai'
 import { useProviderProfileBundleStore } from '@/stores/provider-profile-bundle'
 import { useOutputStyles } from '@/composables/useOutputStyles'
@@ -47,7 +47,9 @@ const outputStyles = useOutputStyles()
 const selectedProfileId = ref<string | null>(store.profiles[0]?.id ?? null)
 const previewOpen = ref(false)
 const rollbackOpen = ref(false)
+const importOpen = ref(false)
 const message = ref('')
+const importText = ref('')
 
 const form = reactive({
   name: '',
@@ -92,6 +94,12 @@ const profileBackups = computed(() =>
     ? store.backups.filter(backup => backup.profileId === selectedProfile.value!.id)
     : [],
 )
+
+const backendStatusText = computed(() => {
+  if (!store.backendHydrated) return '后端配置同步中'
+  if (store.backendSyncError) return `后端同步失败，本地兜底：${store.backendSyncError}`
+  return '已同步到后端配置存储'
+})
 
 function resetFormFromCurrent(): void {
   const provider = props.providers.find(item => item.id === props.currentProviderId) ?? props.providers[0]
@@ -209,8 +217,38 @@ function removeProfile(): void {
   message.value = 'Profile 已删除'
 }
 
+async function exportProfiles(): Promise<void> {
+  const content = store.exportSnapshot()
+  await navigator.clipboard?.writeText(content)
+  message.value = 'Profile JSON 已复制，可用于团队共享'
+}
+
+function importProfiles(): void {
+  if (!importText.value.trim()) return
+  if (!window.confirm('导入会覆盖当前 Profile Bundle 与备份，是否继续？')) return
+  try {
+    store.importSnapshot(importText.value)
+    selectedProfileId.value = store.profiles[0]?.id ?? null
+    const profile = selectedProfile.value
+    if (profile) loadProfileToForm(profile)
+    importOpen.value = false
+    importText.value = ''
+    message.value = 'Profile JSON 已导入'
+  } catch (error) {
+    message.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
 resetFormFromCurrent()
 if (selectedProfile.value) loadProfileToForm(selectedProfile.value)
+
+onMounted(() => {
+  store.hydrateFromBackend().then(() => {
+    if (!selectedProfileId.value) selectedProfileId.value = store.profiles[0]?.id ?? null
+    const profile = selectedProfile.value
+    if (profile) loadProfileToForm(profile)
+  })
+})
 </script>
 
 <template>
@@ -225,6 +263,9 @@ if (selectedProfile.value) loadProfileToForm(selectedProfile.value)
         </div>
         <p class="max-w-3xl text-xs leading-relaxed text-muted-foreground">
           把 Provider / Model / Output Style / Workspace Prompt / 安全策略打成可预览、可备份、可回滚的配置包。
+        </p>
+        <p class="text-[10px]" :class="store.backendSyncError ? 'text-amber-400' : 'text-muted-foreground/70'">
+          {{ backendStatusText }}
         </p>
       </div>
       <Button variant="outline" size="sm" class="h-8 shrink-0 text-xs" @click="createNewProfile">
@@ -376,6 +417,14 @@ if (selectedProfile.value) loadProfileToForm(selectedProfile.value)
             <RotateCcw class="h-3.5 w-3.5" />
             回滚
           </Button>
+          <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" :disabled="store.profiles.length === 0" @click="exportProfiles">
+            <Download class="h-3.5 w-3.5" />
+            导出
+          </Button>
+          <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" @click="importOpen = true">
+            <Upload class="h-3.5 w-3.5" />
+            导入
+          </Button>
           <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs text-destructive" :disabled="!selectedProfile" @click="removeProfile">
             <Trash2 class="h-3.5 w-3.5" />
             删除
@@ -444,6 +493,25 @@ if (selectedProfile.value) loadProfileToForm(selectedProfile.value)
             <div class="mt-1 text-muted-foreground">{{ backup.snapshot.name }} / {{ backup.snapshot.modelId }}</div>
           </button>
         </div>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog :open="importOpen" @update:open="importOpen = $event">
+      <DialogContent class="sm:max-w-[640px]">
+        <DialogHeader>
+          <DialogTitle>导入 Profile JSON</DialogTitle>
+          <DialogDescription>粘贴从其他工作区导出的 Provider Profile Bundle。不会包含 API Key。</DialogDescription>
+        </DialogHeader>
+        <textarea
+          v-model="importText"
+          rows="12"
+          class="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs outline-none focus:border-primary/50"
+          placeholder="{ profiles: [], backups: [] }"
+        />
+        <DialogFooter>
+          <Button variant="outline" @click="importOpen = false">取消</Button>
+          <Button :disabled="!importText.trim()" @click="importProfiles">确认导入</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   </section>

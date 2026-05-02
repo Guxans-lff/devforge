@@ -5,6 +5,19 @@ import AiProviderProfileBundlePanel from '@/components/ai/AiProviderProfileBundl
 import { useProviderProfileBundleStore } from '@/stores/provider-profile-bundle'
 import type { ProviderConfig } from '@/types/ai'
 
+vi.mock('@/api/provider-profile-bundle', () => ({
+  createProviderProfileBundleSnapshot: (profiles: unknown[], backups: unknown[]) => ({
+    profiles,
+    backups,
+    exportedAt: 1000,
+    schemaVersion: 1,
+  }),
+  exportProviderProfileBundleSnapshot: (snapshot: unknown) => JSON.stringify(snapshot, null, 2),
+  importProviderProfileBundleSnapshot: (raw: string) => JSON.parse(raw),
+  loadProviderProfileBundleSnapshot: vi.fn(async () => null),
+  saveProviderProfileBundleSnapshot: vi.fn(async () => undefined),
+}))
+
 class MemoryStorage implements Storage {
   private readonly data = new Map<string, string>()
   get length(): number { return this.data.size }
@@ -58,6 +71,8 @@ const stubs = {
 describe('AiProviderProfileBundlePanel', () => {
   beforeEach(() => {
     vi.stubGlobal('localStorage', new MemoryStorage())
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn(async () => undefined) } })
+    vi.stubGlobal('confirm', vi.fn(() => true))
     setActivePinia(createPinia())
   })
 
@@ -102,5 +117,28 @@ describe('AiProviderProfileBundlePanel', () => {
         preferredModel: 'gpt-5.4',
       },
     })
+  })
+
+  it('exports and imports profile json from the panel', async () => {
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('导出'))!.trigger('click')
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalled()
+
+    await wrapper.findAll('button').find(button => button.text().includes('导入'))!.trigger('click')
+    const exported = String(vi.mocked(navigator.clipboard.writeText).mock.calls[0]?.[0] ?? '')
+    await wrapper.findAll('textarea').at(-1)!.setValue(exported)
+    await wrapper.findAll('button').find(button => button.text().includes('确认导入'))!.trigger('click')
+
+    expect(wrapper.text()).toContain('Profile JSON 已导入')
   })
 })

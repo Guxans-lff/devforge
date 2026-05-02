@@ -1,5 +1,12 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import {
+  createProviderProfileBundleSnapshot,
+  exportProviderProfileBundleSnapshot,
+  importProviderProfileBundleSnapshot,
+  loadProviderProfileBundleSnapshot,
+  saveProviderProfileBundleSnapshot,
+} from '@/api/provider-profile-bundle'
 import type {
   AiProviderProfileBackup,
   AiProviderProfileBundle,
@@ -27,22 +34,79 @@ export const useProviderProfileBundleStore = defineStore('provider-profile-bundl
   const profiles = ref<AiProviderProfileBundle[]>(loadProviderProfileBundles())
   const backups = ref<AiProviderProfileBackup[]>(loadProviderProfileBackups())
   const activeProfileId = ref<string | null>(null)
+  const backendHydrated = ref(false)
+  const backendSyncError = ref<string | null>(null)
 
   const activeProfile = computed(() =>
     profiles.value.find(profile => profile.id === activeProfileId.value) ?? null,
   )
 
+  function persistBackendSnapshot(): void {
+    const snapshot = createProviderProfileBundleSnapshot(profiles.value, backups.value)
+    saveProviderProfileBundleSnapshot(snapshot)
+      .then(() => {
+        backendSyncError.value = null
+      })
+      .catch(error => {
+        backendSyncError.value = error instanceof Error ? error.message : String(error)
+      })
+  }
+
   function persistProfiles(): void {
     saveProviderProfileBundles(profiles.value)
+    persistBackendSnapshot()
   }
 
   function persistBackups(): void {
     saveProviderProfileBackups(backups.value)
+    persistBackendSnapshot()
   }
 
   function reload(): void {
     profiles.value = loadProviderProfileBundles()
     backups.value = loadProviderProfileBackups()
+  }
+
+  async function hydrateFromBackend(): Promise<void> {
+    try {
+      const snapshot = await loadProviderProfileBundleSnapshot()
+      backendHydrated.value = true
+      backendSyncError.value = null
+      if (!snapshot) {
+        persistBackendSnapshot()
+        return
+      }
+
+      const shouldUseBackend = snapshot.profiles.length > 0
+        && (profiles.value.length === 0
+          || Math.max(...snapshot.profiles.map(profile => profile.updatedAt)) >= Math.max(...profiles.value.map(profile => profile.updatedAt)))
+      if (!shouldUseBackend) return
+
+      profiles.value = snapshot.profiles
+      backups.value = snapshot.backups
+      saveProviderProfileBundles(profiles.value)
+      saveProviderProfileBackups(backups.value)
+      activeProfileId.value = profiles.value[0]?.id ?? activeProfileId.value
+    } catch (error) {
+      backendHydrated.value = true
+      backendSyncError.value = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  function exportSnapshot(): string {
+    return exportProviderProfileBundleSnapshot(
+      createProviderProfileBundleSnapshot(profiles.value, backups.value),
+    )
+  }
+
+  function importSnapshot(raw: string): void {
+    const snapshot = importProviderProfileBundleSnapshot(raw)
+    profiles.value = snapshot.profiles
+    backups.value = snapshot.backups
+    activeProfileId.value = profiles.value[0]?.id ?? null
+    saveProviderProfileBundles(profiles.value)
+    saveProviderProfileBackups(backups.value)
+    persistBackendSnapshot()
   }
 
   function saveProfile(draft: ProviderProfileBundleDraft): AiProviderProfileBundle {
@@ -146,7 +210,12 @@ export const useProviderProfileBundleStore = defineStore('provider-profile-bundl
     backups,
     activeProfileId,
     activeProfile,
+    backendHydrated,
+    backendSyncError,
     reload,
+    hydrateFromBackend,
+    exportSnapshot,
+    importSnapshot,
     saveProfile,
     removeProfile,
     backupProfile,

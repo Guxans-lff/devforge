@@ -79,7 +79,7 @@
 
 ### 14.3 阶段三：Provider Gateway 与模型治理
 
-当前状态：✅ Gateway MVP 已接入主链路；Provider Profile Bundle 已完成前端产品闭环 MVP，后端化与迁移回填仍待做。
+当前状态：✅ Gateway MVP 已接入主链路；Provider Profile Bundle 已从前端闭环推进到后端 KV 镜像与 JSON 导入导出，完整 SQLite/workspace 文件迁移仍待做。
 
 已核对落地：
 - ✅ `src/ai-gateway/AiGateway.ts`、`router.ts`、`rateLimiter.ts`、`usageTracker.ts`、`security.ts`、`types.ts` 已存在。
@@ -87,11 +87,13 @@
 - ✅ Gateway 已具备 fallback、rate limit、usage record、endpoint security、token estimate 等基础治理能力。
 - ✅ Bridge API 模块化、`AiBridgeError`、Provider Capability / Permission Mapper 等治理基础已存在。
 - ✅ Provider Profile Bundle 前端闭环已落地：支持 Provider / Model / Output Style / Workspace Prompt / Dispatcher / SSRF 安全策略打包、预览、应用、备份、回滚。
+- ✅ Provider Profile Bundle 已接入后端 `app_state` 快照镜像：启动时可从后端水合，保存/备份/回滚/导入后会同步后端；localStorage 保留为本地兜底。
+- ✅ Provider Profile Bundle 支持 JSON 导出/导入，便于团队共享配置包；导入前有覆盖确认，导出内容不包含 API Key。
 - ✅ Output Style 已从 Profile Bundle 进入主对话链路，会在 `chatSendPreparation` 中注入系统提示，不再只是配置字段。
 - ✅ Provider 级 `security` 已接入后端 Provider 持久化，SSRF allowlist / localhost / private IP 策略可随 Provider 保存并被 Gateway preflight 读取。
 
 当前边界：
-- ⚠️ Provider Profile Bundle 当前使用前端 localStorage 持久化；Provider security 已后端化，但 Profile 本身仍不是 SQLite / workspace 文件级配置，跨设备、团队共享、迁移回填尚未完成。
+- ⚠️ Provider Profile Bundle 当前是后端 KV 镜像 + localStorage 兜底；尚未升级为专用 SQLite 表或 workspace 文件级配置，跨设备冲突合并、团队权限和迁移回填仍待做。
 - ⚠️ SSRF allowlist 已能随 Provider 保存；fallback keys 和更细的 Profile 级策略仍需要进一步产品化。
 - ⚠️ Gateway 诊断信息已有记录能力，但 UI 对“实际落到哪个 provider/model”的显性展示仍可继续增强。
 
