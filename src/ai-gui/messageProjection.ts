@@ -35,9 +35,14 @@ function buildTextSignature(text = ''): string {
   return `${text.length}:${text.slice(0, 1_000)}:${text.slice(-1_000)}`
 }
 
-function shouldBreakAssistantGroup(message: AiMessage): boolean {
+export function isAiMessageBoundary(message: Pick<AiMessage, 'type'>): boolean {
   return message.type === 'divider'
     || message.type === 'compact-boundary'
+    || message.type === 'rewind-boundary'
+}
+
+function shouldBreakAssistantGroup(message: AiMessage): boolean {
+  return isAiMessageBoundary(message)
     || message.role === 'user'
     || message.role === 'error'
 }
@@ -58,8 +63,7 @@ function buildGroups(messages: AiMessage[]): MessageGroupProjection[] {
     while (
       end < messages.length
       && messages[end]!.role === 'assistant'
-      && messages[end]!.type !== 'divider'
-      && messages[end]!.type !== 'compact-boundary'
+      && !isAiMessageBoundary(messages[end]!)
     ) {
       end += 1
     }

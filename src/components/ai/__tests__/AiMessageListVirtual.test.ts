@@ -162,6 +162,62 @@ describe('AiMessageListVirtual', () => {
     expect(wrapper.text()).toContain('ai.history.loadMoreFailed')
   })
 
+  it('renders compact boundary as a divider instead of a message bubble', () => {
+    const wrapper = mount(AiMessageListVirtual, {
+      props: {
+        items: [
+          {
+            key: 'compact-boundary-1',
+            message: makeMessage('compact-boundary-1', 'system', {
+              type: 'compact-boundary',
+              compactMetadata: {
+                trigger: 'auto',
+                preTokens: 12000,
+                summarizedMessages: 36,
+                createdAt: 100,
+                summaryMessageId: 'summary-1',
+                source: 'ai',
+              },
+            }),
+          },
+          { key: 'assistant-1', message: makeMessage('assistant-1', 'assistant') },
+        ],
+      },
+    })
+
+    expect(wrapper.findAll('.bubble-stub')).toHaveLength(1)
+    expect(wrapper.findAll('.message-id').map(node => node.text())).toEqual(['assistant-1'])
+    expect(wrapper.text()).toContain('自动压缩')
+    expect(wrapper.text()).toContain('压缩 36 条')
+  })
+
+  it('renders rewind boundary as a divider instead of a message bubble', () => {
+    const wrapper = mount(AiMessageListVirtual, {
+      props: {
+        items: [
+          { key: 'user-1', message: makeMessage('user-1', 'user') },
+          {
+            key: 'rewind-boundary-1',
+            message: makeMessage('rewind-boundary-1', 'system', {
+              type: 'rewind-boundary',
+              rewindMetadata: {
+                targetMessageId: 'user-1',
+                targetMessageRole: 'user',
+                hiddenMessages: 4,
+                createdAt: 100,
+              },
+            }),
+          },
+        ],
+      },
+    })
+
+    expect(wrapper.findAll('.bubble-stub')).toHaveLength(1)
+    expect(wrapper.findAll('.message-id').map(node => node.text())).toEqual(['user-1'])
+    expect(wrapper.text()).toContain('已回退到此处继续')
+    expect(wrapper.text()).toContain('隐藏 4 条')
+  })
+
   it('does not render the sticky compact bubble while the latest user item is still visible', () => {
     const wrapper = mount(AiMessageListVirtual, {
       props: {

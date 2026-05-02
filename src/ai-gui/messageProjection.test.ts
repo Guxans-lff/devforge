@@ -66,4 +66,27 @@ describe('messageProjection', () => {
       { id: 'u1', hideHeader: false, isGroupEnd: true, inGroup: false, stickyCompact: true },
     ])
   })
+
+  it('breaks groups on rewind boundary without dropping later messages', () => {
+    const cache = createAiMessageProjectionCache()
+    const items = cache.project([
+      msg({ id: 'a1', role: 'assistant', content: 'one' }),
+      msg({
+        id: 'r1',
+        role: 'system',
+        type: 'rewind-boundary',
+        content: '已回退',
+        rewindMetadata: {
+          targetMessageId: 'a1',
+          targetMessageRole: 'assistant',
+          hiddenMessages: 2,
+          createdAt: 100,
+        },
+      }),
+      msg({ id: 'a2', role: 'assistant', content: 'two' }),
+    ], null)
+
+    expect(items.map(item => item.message.id)).toEqual(['a1', 'r1', 'a2'])
+    expect(items.map(item => item.isGroupEnd)).toEqual([true, true, true])
+  })
 })

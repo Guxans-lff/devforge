@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import AiMessageBubble from '@/components/ai/AiMessageBubble.vue'
+import { isAiMessageBoundary } from '@/ai-gui/messageProjection'
 import type { AiMessage } from '@/types/ai'
 
 interface MessageListItem {
@@ -49,7 +50,7 @@ const measuredSignatures = new Map<number, string>()
 let measureRafId: number | null = null
 
 function estimateItemHeight(item: MessageListItem): number {
-  if (item.message.type === 'divider') return 44
+  if (isAiMessageBoundary(item.message)) return 44
   if (item.message.role === 'user') return item.stickyCompact ? 88 : 112
   if (item.message.role === 'error') return 120
   if ((item.message.toolCalls?.length ?? 0) > 0) return 260
@@ -164,6 +165,18 @@ function getDividerText(message: AiMessage): string {
       total: message.dividerMeta.totalRecords,
     })
   }
+  if (message.type === 'compact-boundary') {
+    const metadata = message.compactMetadata
+    if (!metadata) return message.dividerText || '历史已压缩 · 上下文从这里继续'
+    const triggerText = metadata.trigger === 'auto' ? '自动压缩' : metadata.trigger === 'manual' ? '手动压缩' : '恢复压缩'
+    const sourceText = metadata.source === 'ai' ? 'AI 摘要' : '本地摘要'
+    return `${triggerText} · ${sourceText} · 压缩 ${metadata.summarizedMessages} 条 · 约 ${metadata.preTokens} tokens`
+  }
+  if (message.type === 'rewind-boundary') {
+    const hiddenMessages = message.rewindMetadata?.hiddenMessages
+    if (typeof hiddenMessages === 'number') return `已回退到此处继续 · 隐藏 ${hiddenMessages} 条后续消息`
+    return message.dividerText || '已回退到此处继续'
+  }
   return message.dividerText ?? ''
 }
 
@@ -228,7 +241,7 @@ onBeforeUnmount(() => {
           class="ai-message-row px-8 py-0.5 sm:px-10"
         >
           <div
-            v-if="items[virtualRow.index]!.message.type === 'divider'"
+            v-if="isAiMessageBoundary(items[virtualRow.index]!.message)"
             class="flex items-center justify-center gap-3 py-1.5 select-none"
           >
             <div class="flex-1 h-px bg-border/40" />
