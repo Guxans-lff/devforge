@@ -45,11 +45,13 @@ export interface BackgroundJob {
   error?: string
   title?: string
   contextSummary?: string
+  meta?: Record<string, unknown>
 }
 
 export interface SubmitBackgroundJobOptions {
   title?: string
   contextSummary?: string
+  meta?: Record<string, unknown>
 }
 
 function genJobId(): string {
@@ -139,6 +141,7 @@ export const useBackgroundJobStore = defineStore('background-job', () => {
       createdAt: Date.now(),
       title: options?.title,
       contextSummary: options?.contextSummary,
+      meta: options?.meta,
     }
     jobs.value = [...jobs.value, job]
     if (shouldAttachToPlan(kind)) {

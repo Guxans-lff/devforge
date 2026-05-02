@@ -462,6 +462,61 @@ describe('QueryResult 表浏览状态回填', () => {
     wrapper.unmount()
   })
 
+  it('同表结果刷新时不重置 tableBrowse 回填的显示态，避免筛选面板与图表视图闪回默认值', async () => {
+    const wrapper = mountQueryResult({
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        whereClause: "`name` LIKE '%Ada%'",
+        filterOperators: { name: 'LIKE' },
+        showFilters: true,
+        showChart: true,
+        selectedRowIndex: 1,
+        rowDetailOpen: true,
+        pinnedColumns: {
+          left: ['id'],
+          right: [],
+        },
+      },
+    })
+
+    await flushPromises()
+
+    await wrapper.setProps({
+      result: {
+        ...makeResult(),
+        executionTimeMs: 12,
+      },
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 1,
+        pageSize: 200,
+        whereClause: "`name` LIKE '%Ada%'",
+        filterOperators: { name: 'LIKE' },
+        showFilters: true,
+        showChart: true,
+        selectedRowIndex: 1,
+        rowDetailOpen: true,
+        pinnedColumns: {
+          left: ['id'],
+          right: [],
+        },
+      },
+    })
+    await flushPromises()
+
+    const filterInputs = wrapper.findAll('input[aria-label$="database.filterPlaceholder"]')
+    expect(filterInputs.length).toBeGreaterThan(0)
+    expect((filterInputs[1]!.element as HTMLInputElement).value).toBe('Ada')
+    expect(wrapper.text()).toContain('配置图表')
+    expect(wrapper.text()).toContain('取消固定')
+
+    wrapper.unmount()
+  })
+
   it('表浏览结果区固定列时同步 pinnedColumns，避免切 tab 后丢失列布局偏好', async () => {
     const wrapper = mountQueryResult({
       tableBrowse: {

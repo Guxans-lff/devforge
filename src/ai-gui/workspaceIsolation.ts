@@ -23,11 +23,38 @@ export interface WorkspaceWriteGuardResult {
 export type WorkspaceIsolationPolicy = 'warn' | 'deny'
 export type WorkspaceIsolationPolicyMode = WorkspaceIsolationPolicy | 'smart'
 export type WorkspaceIsolationDecision = 'allow' | 'warn' | 'deny'
+export type WorkspaceIsolationStrength = 'off' | 'session' | 'agent' | 'strict'
 
 export interface WorkspaceIsolationPolicyDecision {
   decision: WorkspaceIsolationDecision
   reason?: string
   requiresDoubleConfirm?: boolean
+}
+
+export interface WorkspaceIsolationBoundary {
+  sessionId: string
+  agentId?: string
+  allowedPaths?: string[]
+  blockedPaths?: string[]
+  strength?: WorkspaceIsolationStrength
+}
+
+export interface WorkspaceIsolationBoundaryResult {
+  allowed: boolean
+  normalizedPath: string
+  ownerId: string
+  reason?: string
+  matchedAllowedPath?: string
+  matchedBlockedPath?: string
+}
+
+export interface WorkspaceIsolationBoundarySummary {
+  ownerId: string
+  strength: WorkspaceIsolationStrength
+  allowedPaths: string[]
+  blockedPaths: string[]
+  writable: boolean
+  reason?: string
 }
 
 const STORAGE_KEY = 'devforge.ai.workspace.isolation.v1'
@@ -36,6 +63,99 @@ export const DEFAULT_SCOPE_TTL_MS = 24 * 60 * 60 * 1000
 
 function normalizePath(path: string): string {
   return path.replace(/\\/g, '/').replace(/^\.\//, '')
+}
+
+function normalizeBoundaryPattern(pattern: string): string {
+  return normalizePath(pattern).replace(/\/+$/, '')
+}
+
+function pathMatchesPattern(path: string, pattern: string): boolean {
+  const normalizedPath = normalizePath(path)
+  const normalizedPattern = normalizeBoundaryPattern(pattern)
+  if (!normalizedPattern) return false
+  if (normalizedPattern.endsWith('/**')) {
+    const prefix = normalizedPattern.slice(0, -3)
+    return normalizedPath === prefix || normalizedPath.startsWith(`${prefix}/`)
+  }
+  if (normalizedPattern.endsWith('/*')) {
+    const prefix = normalizedPattern.slice(0, -2)
+    const rest = normalizedPath.startsWith(`${prefix}/`) ? normalizedPath.slice(prefix.length + 1) : ''
+    return Boolean(rest) && !rest.includes('/')
+  }
+  return normalizedPath === normalizedPattern || normalizedPath.startsWith(`${normalizedPattern}/`)
+}
+
+export function createWorkspaceIsolationOwnerId(boundary: WorkspaceIsolationBoundary): string {
+  const agentPart = boundary.agentId ? `:${boundary.agentId}` : ''
+  return `tool:${boundary.sessionId}${agentPart}`
+}
+
+export function checkWorkspaceIsolationBoundary(
+  path: string,
+  boundary: WorkspaceIsolationBoundary,
+): WorkspaceIsolationBoundaryResult {
+  const normalizedPath = normalizePath(path)
+  const ownerId = createWorkspaceIsolationOwnerId(boundary)
+  const strength = boundary.strength ?? 'session'
+  if (strength === 'off') {
+    return { allowed: true, normalizedPath, ownerId }
+  }
+
+  const blockedPath = boundary.blockedPaths
+    ?.map(normalizeBoundaryPattern)
+    .find(pattern => pathMatchesPattern(normalizedPath, pattern))
+  if (blockedPath) {
+    return {
+      allowed: false,
+      normalizedPath,
+      ownerId,
+      matchedBlockedPath: blockedPath,
+      reason: `blocked by workspace isolation boundary: ${blockedPath}`,
+    }
+  }
+
+  const allowedPaths = boundary.allowedPaths?.map(normalizeBoundaryPattern).filter(Boolean) ?? []
+  if (strength === 'strict' && allowedPaths.length === 0) {
+    return {
+      allowed: false,
+      normalizedPath,
+      ownerId,
+      reason: 'strict workspace isolation requires explicit allowedPaths',
+    }
+  }
+
+  if (allowedPaths.length === 0) {
+    return { allowed: true, normalizedPath, ownerId }
+  }
+
+  const allowedPath = allowedPaths.find(pattern => pathMatchesPattern(normalizedPath, pattern))
+  return {
+    allowed: Boolean(allowedPath),
+    normalizedPath,
+    ownerId,
+    matchedAllowedPath: allowedPath,
+    reason: allowedPath ? undefined : `outside workspace isolation boundary: ${normalizedPath}`,
+  }
+}
+
+export function summarizeWorkspaceIsolationBoundary(
+  boundary: WorkspaceIsolationBoundary,
+): WorkspaceIsolationBoundarySummary {
+  const strength = boundary.strength ?? 'session'
+  const allowedPaths = boundary.allowedPaths?.map(normalizeBoundaryPattern).filter(Boolean) ?? []
+  const blockedPaths = boundary.blockedPaths?.map(normalizeBoundaryPattern).filter(Boolean) ?? []
+  const writable = strength !== 'off' && (strength === 'session' || strength === 'agent' || strength === 'strict')
+
+  return {
+    ownerId: createWorkspaceIsolationOwnerId(boundary),
+    strength,
+    allowedPaths,
+    blockedPaths,
+    writable,
+    reason: strength === 'strict' && allowedPaths.length === 0
+      ? 'strict 模式建议显式配置 allowedPaths，避免无限制写入。'
+      : undefined,
+  }
 }
 
 export function createWriteScope(ownerId: string, ownerLabel: string, allowedPaths: string[] = [], now = Date.now()): WorkspaceWriteScope {

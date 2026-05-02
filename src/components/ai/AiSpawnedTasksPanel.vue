@@ -6,11 +6,17 @@
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import type { MultiAgentAssignment, MultiAgentRole } from '@/ai-gui/multiAgentOrchestrator'
+import { buildSpawnedTaskIsolationContext } from '@/ai-gui/spawnedTaskIsolationPlan'
+import type { WorkspaceIsolationExecutionPlanItem, WorkspaceIsolationExecutionMode } from '@/ai-gui/workspaceIsolationPlan'
+import type { TaskIsolationBackendState, WorkspaceIsolationDiffEntry, WorkspaceIsolationMode } from '@/api/workspace-isolation'
 import { analyzeSpawnedTasks, type SpawnedTask } from '@/composables/ai/chatSideEffects'
-import { Network, Circle, Loader2, CheckCircle2, XCircle, Play, RotateCcw, AlertTriangle, ExternalLink } from 'lucide-vue-next'
+import { Network, Circle, Loader2, CheckCircle2, XCircle, Play, RotateCcw, AlertTriangle, ExternalLink, GitCompare, ShieldCheck, Trash2, UploadCloud } from 'lucide-vue-next'
 
 const props = defineProps<{
   tasks: SpawnedTask[]
+  isolationStates?: Record<string, TaskIsolationBackendState>
+  workspaceRoot?: string
 }>()
 
 const emit = defineEmits<{
@@ -23,6 +29,11 @@ const emit = defineEmits<{
   (e: 'cancel-batch', ids: string[]): void
   (e: 'retry-batch', ids: string[]): void
   (e: 'synthesize'): void
+  (e: 'isolation-prepare', taskId: string, plan: WorkspaceIsolationExecutionPlanItem): void
+  (e: 'isolation-diff', taskId: string, plan: WorkspaceIsolationExecutionPlanItem): void
+  (e: 'isolation-verify', taskId: string, plan: WorkspaceIsolationExecutionPlanItem): void
+  (e: 'isolation-apply', taskId: string, plan: WorkspaceIsolationExecutionPlanItem): void
+  (e: 'isolation-cleanup', taskId: string, plan: WorkspaceIsolationExecutionPlanItem): void
 }>()
 
 const { t } = useI18n()
@@ -52,6 +63,14 @@ const stats = computed(() => ({
 }))
 
 const taskAnalysis = computed(() => analyzeSpawnedTasks(props.tasks))
+const isolationContext = computed(() => buildSpawnedTaskIsolationContext(props.tasks, {
+  sessionId: 'dispatcher-panel',
+  maxAgents: Math.min(4, Math.max(1, props.tasks.length)),
+}))
+const multiAgentPlan = computed(() => isolationContext.value.multiAgentPlan)
+const multiAgentAssignmentByTaskId = computed(() => isolationContext.value.assignmentByTaskId)
+const isolationExecutionPlan = computed(() => isolationContext.value.isolationExecutionPlan)
+const isolationPlanByTaskId = computed(() => isolationContext.value.isolationPlanByTaskId)
 
 const canSynthesize = computed(() => stats.value.done > 0 || stats.value.error > 0 || stats.value.cancelled > 0)
 
@@ -81,6 +100,185 @@ function getTaskRelation(task: SpawnedTask) {
     displayDependencyDescriptions: [],
     displayMissingDependencyIds: [],
   }
+}
+
+function getMultiAgentAssignment(task: SpawnedTask): MultiAgentAssignment | undefined {
+  return multiAgentAssignmentByTaskId.value.get(task.id)
+}
+
+function getMultiAgentRoleLabel(role: MultiAgentRole): string {
+  switch (role) {
+    case 'planner': return '规划'
+    case 'implementer': return '实现'
+    case 'reviewer': return '审查'
+    case 'verifier': return '验证'
+    default: return role
+  }
+}
+
+function getTaskAgentLabel(task: SpawnedTask): string {
+  const assignment = getMultiAgentAssignment(task)
+  if (!assignment) return ''
+  return `Agent ${assignment.agentId} · ${getMultiAgentRoleLabel(assignment.role)}`
+}
+
+function getTaskAllowedPathsLabel(task: SpawnedTask): string {
+  const assignment = getMultiAgentAssignment(task)
+  return assignment ? formatAllowedPaths(assignment.allowedPaths) : ''
+}
+
+function getTaskAllowedPathsTitle(task: SpawnedTask): string {
+  const assignment = getMultiAgentAssignment(task)
+  return assignment?.allowedPaths.join(', ') ?? ''
+}
+
+function getTaskIsolationPlan(task: SpawnedTask): WorkspaceIsolationExecutionPlanItem | undefined {
+  return isolationPlanByTaskId.value.get(task.id)
+}
+
+function getTaskIsolationState(task: SpawnedTask): TaskIsolationBackendState | undefined {
+  return props.isolationStates?.[task.id]
+}
+
+function toBackendIsolationMode(mode: WorkspaceIsolationExecutionMode): WorkspaceIsolationMode | null {
+  if (mode === 'temporary' || mode === 'worktree') return mode
+  return null
+}
+
+function canUseIsolationBackend(task: SpawnedTask): boolean {
+  const plan = getTaskIsolationPlan(task)
+  return Boolean(props.workspaceRoot && plan?.workspace && toBackendIsolationMode(plan.mode))
+}
+
+function emitIsolationAction(
+  event: 'isolation-prepare' | 'isolation-diff' | 'isolation-verify' | 'isolation-apply' | 'isolation-cleanup',
+  task: SpawnedTask,
+): void {
+  const plan = getTaskIsolationPlan(task)
+  if (!plan?.workspace) return
+  switch (event) {
+    case 'isolation-prepare':
+      emit('isolation-prepare', task.id, plan)
+      break
+    case 'isolation-diff':
+      emit('isolation-diff', task.id, plan)
+      break
+    case 'isolation-verify':
+      emit('isolation-verify', task.id, plan)
+      break
+    case 'isolation-apply':
+      emit('isolation-apply', task.id, plan)
+      break
+    case 'isolation-cleanup':
+      emit('isolation-cleanup', task.id, plan)
+      break
+  }
+}
+
+function getTaskIsolationStatusLabel(task: SpawnedTask): string {
+  const state = getTaskIsolationState(task)
+  if (!state) {
+    return props.workspaceRoot ? '未准备' : '需要先添加 workspace root'
+  }
+  switch (state.status) {
+    case 'preparing': return '准备中'
+    case 'prepared': return '已准备'
+    case 'diffing': return '检查 Diff 中'
+    case 'diffed': return 'Diff 已生成'
+    case 'verifying': return '验证中'
+    case 'verified': return '验证已提交'
+    case 'applying': return '回放中'
+    case 'applied': return '已回放'
+    case 'cleaning': return '清理中'
+    case 'cleaned': return '已清理'
+    case 'error': return '执行失败'
+    default: return '未准备'
+  }
+}
+
+function getTaskIsolationDiffSummary(task: SpawnedTask): string {
+  const diff = getTaskIsolationState(task)?.diff
+  if (!diff) return ''
+  const summary = diff.summary
+  const total = diff.entries.length
+  return `新增 ${summary.added}，修改 ${summary.modified}，删除 ${summary.deleted}，共 ${total} 个`
+}
+
+function getTaskIsolationDiffEntries(task: SpawnedTask): WorkspaceIsolationDiffEntry[] {
+  return getTaskIsolationState(task)?.diff?.entries.slice(0, 5) ?? []
+}
+
+function getTaskIsolationHiddenDiffCount(task: SpawnedTask): number {
+  const diff = getTaskIsolationState(task)?.diff
+  if (!diff) return 0
+  return Math.max(0, diff.entries.length - 5)
+}
+
+function getDiffStatusLabel(status: string): string {
+  switch (status) {
+    case 'added': return '新增'
+    case 'modified': return '修改'
+    case 'deleted': return '删除'
+    case 'renamed': return '重命名'
+    case 'conflicted': return '冲突'
+    default: return status
+  }
+}
+
+function getDiffStatusClass(status: string): string {
+  switch (status) {
+    case 'added': return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+    case 'modified': return 'border-sky-500/20 bg-sky-500/10 text-sky-200'
+    case 'deleted': return 'border-red-500/20 bg-red-500/10 text-red-200'
+    case 'renamed': return 'border-violet-500/20 bg-violet-500/10 text-violet-200'
+    case 'conflicted': return 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+    default: return 'border-muted-foreground/20 bg-background/40 text-muted-foreground'
+  }
+}
+
+function getIsolationModeLabel(mode: WorkspaceIsolationExecutionMode): string {
+  switch (mode) {
+    case 'readonly': return '只读'
+    case 'temporary': return '临时空间'
+    case 'worktree': return 'Worktree'
+    case 'blocked': return '隔离阻塞'
+    default: return '共享'
+  }
+}
+
+function getTaskIsolationLabel(task: SpawnedTask): string {
+  const plan = getTaskIsolationPlan(task)
+  if (!plan) return ''
+  return `隔离 ${getIsolationModeLabel(plan.mode)}`
+}
+
+function getTaskIsolationTitle(task: SpawnedTask): string {
+  const plan = getTaskIsolationPlan(task)
+  if (!plan) return ''
+  const workspace = plan.workspace
+    ? `路径：${plan.workspace.workspacePath}${plan.workspace.branchName ? `；分支：${plan.workspace.branchName}` : ''}`
+    : ''
+  const cleanup = `清理策略：${getCleanupPolicyLabel(plan.cleanupPolicy)}`
+  const actions = `动作：${plan.actions.map(item => item.label).join(' -> ')}`
+  return [plan.reason, workspace, cleanup, actions].filter(Boolean).join('；')
+}
+
+function formatAllowedPaths(paths: string[]): string {
+  if (paths.length === 0) return '未限定路径'
+  const visible = paths.slice(0, 2).join(', ')
+  return paths.length > 2 ? `${visible} +${paths.length - 2}` : visible
+}
+
+function getCleanupPolicyLabel(policy: WorkspaceIsolationExecutionPlanItem['cleanupPolicy']): string {
+  switch (policy) {
+    case 'delete_on_success': return '成功后删除'
+    case 'keep_for_review': return '保留审核'
+    default: return '不清理'
+  }
+}
+
+function getTaskConfirmationCount(task: SpawnedTask): number {
+  return getTaskIsolationPlan(task)?.actions.filter(item => item.requiresConfirmation).length ?? 0
 }
 
 function isTaskRunBlocked(task: SpawnedTask): boolean {
@@ -231,6 +429,37 @@ function formatDuration(durationMs?: number): string {
           {{ t('ai.tasks.synthesize') }}
         </button>
       </div>
+      <div class="mt-2 rounded-lg border border-violet-500/15 bg-violet-500/5 px-2.5 py-2">
+        <div class="flex flex-wrap items-center gap-2 text-[10px] text-violet-100/75">
+          <span class="font-medium text-violet-300">Multi-Agent 预案</span>
+          <span class="rounded-full border border-violet-400/20 bg-background/40 px-2 py-0.5">分配 {{ multiAgentPlan.assignments.length }}</span>
+          <span class="rounded-full border border-amber-400/20 bg-background/40 px-2 py-0.5">阻塞 {{ multiAgentPlan.blocked.length }}</span>
+          <span class="rounded-full border border-violet-400/20 bg-background/40 px-2 py-0.5">需合并 {{ isolationExecutionPlan.mergeRequiredCount }}</span>
+          <span class="rounded-full border border-violet-400/20 bg-background/40 px-2 py-0.5">Worktree {{ isolationExecutionPlan.worktreeCount }}</span>
+          <span class="rounded-full border border-violet-400/20 bg-background/40 px-2 py-0.5">临时空间 {{ isolationExecutionPlan.temporaryWorkspaceCount }}</span>
+          <span class="rounded-full border border-amber-400/20 bg-background/40 px-2 py-0.5">需确认 {{ isolationExecutionPlan.confirmationRequiredCount }}</span>
+          <span class="rounded-full border border-amber-400/20 bg-background/40 px-2 py-0.5">门禁 {{ isolationExecutionPlan.gate.status }}</span>
+          <span class="rounded-full border border-red-400/20 bg-background/40 px-2 py-0.5">隔离阻塞 {{ isolationExecutionPlan.blockedCount }}</span>
+        </div>
+        <div v-if="isolationExecutionPlan.gate.reasons.length > 0" class="mt-1.5 space-y-1">
+          <div
+            v-for="reason in isolationExecutionPlan.gate.reasons"
+            :key="reason"
+            class="text-[10px] text-amber-300/85"
+          >
+            {{ reason }}
+          </div>
+        </div>
+        <div v-if="multiAgentPlan.warnings.length > 0" class="mt-1.5 space-y-1">
+          <div
+            v-for="warning in multiAgentPlan.warnings"
+            :key="warning"
+            class="text-[10px] text-amber-300/85"
+          >
+            {{ warning }}
+          </div>
+        </div>
+      </div>
     </div>
     <div class="space-y-3 px-3 py-3">
       <section
@@ -314,6 +543,46 @@ function formatDuration(durationMs?: number): string {
                           <span>{{ t('ai.tasks.autoRetryBudget', { count: task.autoRetryBudget ?? 1 }) }}</span>
                         </div>
                         <div class="mt-1.5 flex flex-wrap gap-1 text-[10px]">
+                          <span
+                            v-if="getMultiAgentAssignment(task)"
+                            class="rounded-full border border-violet-500/20 bg-violet-500/5 px-2 py-0.5 text-violet-300/85"
+                          >
+                            {{ getTaskAgentLabel(task) }}
+                          </span>
+                          <span
+                            v-if="getMultiAgentAssignment(task)"
+                            class="rounded-full border border-violet-500/20 bg-background/40 px-2 py-0.5 font-mono text-violet-200/75"
+                            :title="getTaskAllowedPathsTitle(task)"
+                          >
+                            {{ getTaskAllowedPathsLabel(task) }}
+                          </span>
+                          <span
+                            v-if="getTaskIsolationPlan(task)"
+                            class="rounded-full border border-purple-500/20 bg-purple-500/5 px-2 py-0.5 text-purple-200/85"
+                            :title="getTaskIsolationTitle(task)"
+                          >
+                            {{ getTaskIsolationLabel(task) }}
+                          </span>
+                          <span
+                            v-if="getTaskIsolationPlan(task)?.workspace"
+                            class="rounded-full border border-purple-500/20 bg-background/40 px-2 py-0.5 font-mono text-purple-200/70"
+                            :title="getTaskIsolationPlan(task)?.workspace?.workspacePath"
+                          >
+                            {{ getTaskIsolationPlan(task)?.workspace?.slug }}
+                          </span>
+                          <span
+                            v-if="getTaskIsolationPlan(task)?.requiresReview"
+                            class="rounded-full border border-amber-500/20 bg-amber-500/5 px-2 py-0.5 text-amber-300/80"
+                          >
+                            需审核
+                          </span>
+                          <span
+                            v-if="getTaskConfirmationCount(task) > 0"
+                            class="rounded-full border border-amber-500/20 bg-amber-500/5 px-2 py-0.5 text-amber-300/80"
+                            :title="getTaskIsolationTitle(task)"
+                          >
+                            确认动作 {{ getTaskConfirmationCount(task) }}
+                          </span>
                           <span class="rounded-full border border-sky-500/15 bg-background/40 px-2 py-0.5 text-sky-200/80">
                             {{ t('ai.tasks.executionMode', { mode: task.executionMode ?? 'headless' }) }}
                           </span>
@@ -352,6 +621,117 @@ function formatDuration(durationMs?: number): string {
                           >
                             {{ t('ai.tasks.dependencyMissing', { ids: getTaskRelation(task).displayMissingDependencyIds.join(', ') }) }}
                           </span>
+                        </div>
+                        <div
+                          v-if="getTaskIsolationPlan(task)?.workspace"
+                          class="mt-2 rounded-md border border-purple-500/15 bg-purple-500/5 px-2 py-1.5"
+                        >
+                          <div class="flex flex-wrap items-center gap-1.5 text-[10px] text-purple-100/75">
+                            <span class="font-medium text-purple-200">隔离执行空间</span>
+                            <span class="rounded-full border border-purple-500/20 bg-background/40 px-2 py-0.5">
+                              {{ getTaskIsolationStatusLabel(task) }}
+                            </span>
+                            <span
+                              v-if="getTaskIsolationDiffSummary(task)"
+                              class="rounded-full border border-amber-500/20 bg-amber-500/5 px-2 py-0.5 text-amber-200/80"
+                            >
+                              {{ getTaskIsolationDiffSummary(task) }}
+                            </span>
+                          </div>
+                          <div
+                            v-if="getTaskIsolationState(task)?.message"
+                            class="mt-1 line-clamp-2 text-[10px] text-muted-foreground/70"
+                          >
+                            {{ getTaskIsolationState(task)?.message }}
+                          </div>
+                          <div
+                            v-if="getTaskIsolationDiffEntries(task).length > 0"
+                            class="mt-1.5 space-y-1 rounded border border-border/40 bg-background/35 p-1.5"
+                          >
+                            <div
+                              v-for="entry in getTaskIsolationDiffEntries(task)"
+                              :key="`${entry.status}:${entry.path}`"
+                              class="flex items-center gap-1.5 text-[10px]"
+                            >
+                              <span
+                                class="shrink-0 rounded-full border px-1.5 py-0.5 leading-none"
+                                :class="getDiffStatusClass(entry.status)"
+                              >
+                                {{ getDiffStatusLabel(entry.status) }}
+                              </span>
+                              <span class="min-w-0 flex-1 truncate text-muted-foreground/80" :title="entry.path">
+                                {{ entry.path }}
+                              </span>
+                            </div>
+                            <div
+                              v-if="getTaskIsolationHiddenDiffCount(task) > 0"
+                              class="text-[10px] text-muted-foreground/60"
+                            >
+                              还有 {{ getTaskIsolationHiddenDiffCount(task) }} 个变更未显示
+                            </div>
+                          </div>
+                          <div class="mt-1.5 flex flex-wrap gap-1">
+                            <button
+                              type="button"
+                              class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors"
+                              :class="canUseIsolationBackend(task)
+                                ? 'text-purple-200 hover:bg-purple-500/10'
+                                : 'cursor-not-allowed text-muted-foreground/40'"
+                              :disabled="!canUseIsolationBackend(task)"
+                              @click="emitIsolationAction('isolation-prepare', task)"
+                            >
+                              <UploadCloud class="h-2.5 w-2.5" />
+                              准备
+                            </button>
+                            <button
+                              type="button"
+                              class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors"
+                              :class="canUseIsolationBackend(task)
+                                ? 'text-sky-300 hover:bg-sky-500/10'
+                                : 'cursor-not-allowed text-muted-foreground/40'"
+                              :disabled="!canUseIsolationBackend(task)"
+                              @click="emitIsolationAction('isolation-diff', task)"
+                            >
+                              <GitCompare class="h-2.5 w-2.5" />
+                              Diff
+                            </button>
+                            <button
+                              type="button"
+                              class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors"
+                              :class="canUseIsolationBackend(task)
+                                ? 'text-violet-300 hover:bg-violet-500/10'
+                                : 'cursor-not-allowed text-muted-foreground/40'"
+                              :disabled="!canUseIsolationBackend(task)"
+                              @click="emitIsolationAction('isolation-verify', task)"
+                            >
+                              <ShieldCheck class="h-2.5 w-2.5" />
+                              验证
+                            </button>
+                            <button
+                              v-if="getTaskIsolationPlan(task)?.mode === 'temporary'"
+                              type="button"
+                              class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors"
+                              :class="canUseIsolationBackend(task)
+                                ? 'text-emerald-300 hover:bg-emerald-500/10'
+                                : 'cursor-not-allowed text-muted-foreground/40'"
+                              :disabled="!canUseIsolationBackend(task)"
+                              @click="emitIsolationAction('isolation-apply', task)"
+                            >
+                              回放
+                            </button>
+                            <button
+                              type="button"
+                              class="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition-colors"
+                              :class="canUseIsolationBackend(task)
+                                ? 'text-amber-300 hover:bg-amber-500/10'
+                                : 'cursor-not-allowed text-muted-foreground/40'"
+                              :disabled="!canUseIsolationBackend(task)"
+                              @click="emitIsolationAction('isolation-cleanup', task)"
+                            >
+                              <Trash2 class="h-2.5 w-2.5" />
+                              清理
+                            </button>
+                          </div>
                         </div>
                       </div>
 

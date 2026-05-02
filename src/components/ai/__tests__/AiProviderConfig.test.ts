@@ -119,6 +119,11 @@ describe('AiProviderConfig', () => {
       dispatcherMaxParallel: 3,
       dispatcherAutoRetryCount: 1,
       dispatcherDefaultMode: 'headless',
+      workspaceIsolation: {
+        strength: 'session',
+        allowedPaths: [],
+        blockedPaths: [],
+      },
     })
   })
 

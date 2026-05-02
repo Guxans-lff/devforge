@@ -184,9 +184,6 @@ defineExpose({
   hydrateActiveQueryAiState,
 })
 
-// QueryPanel refs（用于外部触发执行）
-const queryPanelRef = ref<InstanceType<typeof QueryPanel>>()
-
 // Schema 缓存更新事件处理（由 ObjectTree 触发）
 function handleSchemaUpdated() {
   refreshSchemaCache()

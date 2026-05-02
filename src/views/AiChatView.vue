@@ -19,17 +19,14 @@ import { useVerificationJob } from '@/composables/useVerificationJob'
 import { useBackgroundJobStore } from '@/stores/background-job'
 import {
   analyzeSpawnedTasks,
-  markSpawnedTaskClosed,
-  markSpawnedTaskDone,
   normalizeSpawnedTask,
-  resetSpawnedTaskForRetry,
-  syncSpawnedTaskFromTabMeta,
   type SpawnedTask,
 } from '@/composables/ai/chatSideEffects'
 import { runAiChatSessionTurn } from '@/composables/ai/chatSessionRunner'
 import { createChatTaskDispatcher } from '@/composables/ai/chatTaskDispatcher'
 import { setActiveSessionId, setApprovalMode } from '@/composables/useToolApproval'
 import { getCredential } from '@/api/connection'
+import type { TaskIsolationBackendState } from '@/api/workspace-isolation'
 import type { AiMessage } from '@/types/ai'
 import type { ChatMode } from '@/components/ai/AiInputArea.vue'
 import { executeToolCalls as runToolCalls } from '@/composables/ai/chatToolExecution'
@@ -38,6 +35,31 @@ import { useAutoCompact } from '@/composables/useAutoCompact'
 import { useAiChatObservability } from '@/composables/ai/useAiChatObservability'
 import { collectFileOperations } from '@/ai-gui/fileChangeSummary'
 import { analyzeContextBudget } from '@/composables/ai-agent/diagnostics/contextBudgetAnalyzer'
+import type { WorkspaceIsolationExecutionPlanItem } from '@/ai-gui/workspaceIsolationPlan'
+import {
+  buildSpawnedTaskIsolationContext,
+  getWorkspaceIsolationPlanForTask,
+} from '@/ai-gui/spawnedTaskIsolationPlan'
+import {
+  buildSpawnedTaskAutoRunBlockedNotice,
+  buildSpawnedTaskIsolationPrepareDecision,
+  buildSpawnedTaskRuntimeConfirmMessage,
+  evaluateSpawnedTaskRuntimeGate as evaluateSpawnedTaskRuntimeGateDecision,
+  filterUnconfirmedSpawnedTasks,
+} from '@/ai-gui/spawnedTaskRuntimeGate'
+import {
+  buildSpawnedTaskAutoStartSpec,
+  buildSpawnedTaskCancelTabMeta,
+  buildSpawnedTaskTabSpec,
+  markSpawnedTaskCompleted,
+  markSpawnedTaskForRetry,
+  prepareSpawnedTasksForRun,
+  resolveHeadlessSpawnedTaskWorkDir,
+  selectReadySpawnedTasks,
+  syncRunningSpawnedTaskFromTab,
+} from '@/ai-gui/spawnedTaskRuntime'
+import { latestVerificationJob, parseVerificationReport } from '@/ai-gui/verificationReport'
+import { createWorkspaceIsolationRuntimeController } from '@/ai-gui/workspaceIsolationRuntimeController'
 import {
   recordProviderSuccess,
   recordProviderTransientFailure,
@@ -181,6 +203,8 @@ const showFilePicker = ref(false)
 const showTaskRail = ref(false)
 const expandedTaskCardIds = ref<string[]>([])
 const fileChangeOperations = ref<FileOperation[]>([])
+const isolationConfirmedTaskIds = ref<Set<string>>(new Set())
+const taskIsolationStates = ref<Record<string, TaskIsolationBackendState>>({})
 
 const chatShellRef = ref<AiChatShellExposed | null>(null)
 const scrollContainer = computed(() => chatShellRef.value?.scrollContainer ?? null)
@@ -244,6 +268,8 @@ const chat = useAiChat({
   sessionId: currentSessionId,
   scrollContainer,
   scrollToBottom: () => chatShellRef.value?.scrollToBottom?.(),
+  getVerificationReport: () => latestSessionVerificationReport.value,
+  isVerificationRunning: () => verificationRunning.value,
 })
 
 const latestAssistantSummary = computed(() => {
@@ -272,6 +298,10 @@ const preferredWorkspaceRoots = computed(() => {
 })
 
 const activeWorkspaceRoot = computed(() => preferredWorkspaceRoots.value[0] ?? '')
+const spawnedTaskIsolationContext = computed(() => buildSpawnedTaskIsolationContext(chat.spawnedTasks.value, {
+  sessionId: 'dispatcher-panel',
+  maxAgents: Math.min(4, Math.max(1, chat.spawnedTasks.value.length)),
+}))
 
 const ROOT_RELATIVE_PREFIXES = new Set(['src', 'docs', 'packages', 'apps', 'scripts', 'tests'])
 
@@ -546,6 +576,9 @@ watch(
   () => chat.spawnedTasks.value.map(task => task.id),
   (taskIds) => {
     expandedTaskCardIds.value = expandedTaskCardIds.value.filter(taskId => taskIds.includes(taskId))
+    isolationConfirmedTaskIds.value = new Set(
+      Array.from(isolationConfirmedTaskIds.value).filter(taskId => taskIds.includes(taskId)),
+    )
     if (focusedTaskId.value && !taskIds.includes(focusedTaskId.value)) {
       workspace.updateTabMeta(ownTabId, {
         focusedTaskId: null,
@@ -724,11 +757,29 @@ const currentSessionBackgroundJobs = computed(() =>
   backgroundJobStore.jobs.filter(job => job.sessionId === currentSessionId.value),
 )
 
+const latestSessionVerificationJob = computed(() =>
+  latestVerificationJob(currentSessionBackgroundJobs.value),
+)
+
+const latestSessionVerificationReport = computed(() =>
+  parseVerificationReport(latestSessionVerificationJob.value?.result ?? latestSessionVerificationJob.value?.error),
+)
+
 const verificationRunning = computed(() =>
   currentSessionBackgroundJobs.value.some(job =>
     job.kind === 'verification'
     && (job.status === 'queued' || job.status === 'running' || job.status === 'cancelling'),
   ),
+)
+
+watch(
+  () => latestSessionVerificationJob.value
+    ? `${latestSessionVerificationJob.value.id}:${latestSessionVerificationJob.value.status}:${latestSessionVerificationJob.value.finishedAt ?? 0}`
+    : '',
+  () => {
+    if (chat.spawnedTasks.value.length === 0) return
+    chat.refreshAdvancedRuntimeContext?.()
+  },
 )
 
 const runInspectorItemCount = computed(() =>
@@ -884,42 +935,16 @@ watch(
       if (index === -1) continue
 
       const tab = taskTabs.find(item => item.id === task.taskTabId)
-      if (!tab) {
-        chat.spawnedTasks.value[index] = markSpawnedTaskClosed(task, t('ai.tasks.taskClosed'))
-        const waiter = tabTaskWaiters.get(task.id)
-        if (waiter) {
-          waiter({
-            status: 'error',
-            error: t('ai.tasks.taskClosed'),
-            summary: task.lastSummary,
-            sessionId: task.taskSessionId,
-            taskTabId: task.taskTabId,
-            startedAt: task.startedAt ?? Date.now(),
-            finishedAt: Date.now(),
-          })
-          tabTaskWaiters.delete(task.id)
-        }
-        continue
-      }
-
-      chat.spawnedTasks.value[index] = syncSpawnedTaskFromTabMeta(task, {
-        taskStatus: tab.taskStatus,
-        taskError: tab.taskError || t('ai.tasks.taskFailed'),
-        taskSummary: tab.taskSummary,
+      const result = syncRunningSpawnedTaskFromTab(task, tab, {
+        taskClosed: t('ai.tasks.taskClosed'),
+        taskFailed: t('ai.tasks.taskFailed'),
       })
+      chat.spawnedTasks.value[index] = result.task
 
-      if (tab.taskStatus === 'done' || tab.taskStatus === 'error' || tab.taskStatus === 'cancelled') {
+      if (result.completion) {
         const waiter = tabTaskWaiters.get(task.id)
         if (waiter) {
-          waiter({
-            status: tab.taskStatus,
-            error: typeof tab.taskError === 'string' ? tab.taskError : undefined,
-            summary: typeof tab.taskSummary === 'string' ? tab.taskSummary : undefined,
-            sessionId: typeof tab.sessionId === 'string' ? tab.sessionId : task.taskSessionId,
-            taskTabId: tab.id,
-            startedAt: task.startedAt ?? Date.now(),
-            finishedAt: Date.now(),
-          })
+          waiter(result.completion)
           tabTaskWaiters.delete(task.id)
         }
       }
@@ -1157,33 +1182,157 @@ function buildDispatcherNotice(event: import('@/composables/ai/chatTaskDispatche
   }
 }
 
-function resolveTaskTabRuntime(task: SpawnedTask): {
-  taskTabId: string
-  taskSessionId: string
-} {
-  return {
-    taskTabId: task.taskTabId ?? `ai-task-${task.id}-${Date.now()}`,
-    taskSessionId: task.taskSessionId ?? `session-task-${task.id}-${Date.now()}`,
+async function evaluateSpawnedTaskRuntimeGate(tasks: SpawnedTask[]): Promise<{
+  allowed: boolean
+  requiresConfirmation: boolean
+  message: string
+}> {
+  return evaluateSpawnedTaskRuntimeGateDecision({
+    sessionId: currentSessionId.value,
+    tasks,
+    workspaceIsolation: store.currentWorkspaceConfig?.workspaceIsolation,
+    verificationReport: latestSessionVerificationReport.value,
+    verifying: verificationRunning.value,
+    maxAgents: store.currentWorkspaceConfig?.dispatcherMaxParallel,
+    resolveReferencedPaths,
+  })
+}
+
+async function confirmSpawnedTaskRuntimeGate(tasks: SpawnedTask[]): Promise<boolean> {
+  const unconfirmedTasks = filterUnconfirmedSpawnedTasks(tasks, isolationConfirmedTaskIds.value)
+  if (unconfirmedTasks.length === 0) return true
+
+  const gate = await evaluateSpawnedTaskRuntimeGate(unconfirmedTasks)
+  if (!gate.allowed) {
+    appendDispatcherNotice('warn', `隔离门禁阻止任务执行：\n${gate.message}`)
+    return false
   }
+  if (!gate.requiresConfirmation) return true
+
+  const confirmed = window.confirm(buildSpawnedTaskRuntimeConfirmMessage(unconfirmedTasks, gate.message))
+  if (confirmed) {
+    isolationConfirmedTaskIds.value = new Set([
+      ...isolationConfirmedTaskIds.value,
+      ...unconfirmedTasks.map(task => task.id),
+    ])
+  }
+  return confirmed
+}
+
+function isolationPlanForTask(task: SpawnedTask): WorkspaceIsolationExecutionPlanItem | null {
+  return getWorkspaceIsolationPlanForTask(spawnedTaskIsolationContext.value, task.id)
+}
+
+function updateSpawnedTaskById(taskId: string, updater: (task: SpawnedTask) => SpawnedTask): void {
+  chat.spawnedTasks.value = chat.spawnedTasks.value.map(task =>
+    task.id === taskId ? updater(task) : task,
+  )
+  taskDispatcher.syncTasks(chat.spawnedTasks.value)
+}
+
+function updateTaskIsolationState(taskId: string, state: TaskIsolationBackendState): void {
+  taskIsolationStates.value = {
+    ...taskIsolationStates.value,
+    [taskId]: state,
+  }
+}
+
+const workspaceIsolationRuntime = createWorkspaceIsolationRuntimeController({
+  confirm: message => window.confirm(message),
+  getContext: buildWorkspaceIsolationRuntimeContext,
+  notice: appendDispatcherNotice,
+  setState: updateTaskIsolationState,
+  setTaskIsolationWorkDir: (taskId, workspacePath) => {
+    updateSpawnedTaskById(taskId, task => ({
+      ...task,
+      isolationWorkDir: workspacePath,
+    }))
+  },
+  submitVerificationJob: (...args) => verificationJob.submitVerificationJob(...args),
+})
+
+function buildWorkspaceIsolationRuntimeContext() {
+  const repoPath = activeWorkspaceRoot.value
+  if (!repoPath) return null
+  return {
+    repoPath,
+    sessionId: currentSessionId.value,
+    states: taskIsolationStates.value,
+    jobs: currentSessionBackgroundJobs.value,
+    fallbackVerificationReport: latestSessionVerificationReport.value,
+    fallbackVerifying: verificationRunning.value,
+  }
+}
+
+async function prepareIsolationWorkspaceForTask(
+  taskId: string,
+  plan: WorkspaceIsolationExecutionPlanItem,
+  options?: { prompt?: boolean },
+): Promise<string | null> {
+  return workspaceIsolationRuntime.prepare(taskId, plan, options)
+}
+
+async function handleIsolationPrepare(taskId: string, plan: WorkspaceIsolationExecutionPlanItem): Promise<void> {
+  await prepareIsolationWorkspaceForTask(taskId, plan)
+}
+
+async function ensureIsolationWorkspaceBeforeRun(task: SpawnedTask): Promise<boolean> {
+  const plan = isolationPlanForTask(task)
+  const decision = buildSpawnedTaskIsolationPrepareDecision({
+    task,
+    plan,
+    repoPath: activeWorkspaceRoot.value,
+  })
+  if (!decision.required) return true
+
+  const confirmed = window.confirm(decision.confirmMessage)
+  if (!confirmed) return false
+
+  const workspacePath = await prepareIsolationWorkspaceForTask(task.id, decision.plan, { prompt: false })
+  return Boolean(workspacePath)
+}
+
+async function handleIsolationDiff(taskId: string, plan: WorkspaceIsolationExecutionPlanItem): Promise<void> {
+  await workspaceIsolationRuntime.run('diff', taskId, plan)
+}
+
+async function handleIsolationVerify(taskId: string, plan: WorkspaceIsolationExecutionPlanItem): Promise<void> {
+  await workspaceIsolationRuntime.run('verify', taskId, plan)
+}
+
+async function handleIsolationApply(taskId: string, plan: WorkspaceIsolationExecutionPlanItem): Promise<void> {
+  await workspaceIsolationRuntime.run('apply', taskId, plan)
+}
+
+async function handleIsolationCleanup(taskId: string, plan: WorkspaceIsolationExecutionPlanItem): Promise<void> {
+  await workspaceIsolationRuntime.run('cleanup', taskId, plan)
+}
+
+async function tryAutoRunSpawnedTasks(taskIds?: string[]): Promise<void> {
+  const runnableTasks = selectReadySpawnedTasks(taskDispatcher.snapshot(), taskIds)
+
+  if (runnableTasks.length === 0) return
+
+  const gate = await evaluateSpawnedTaskRuntimeGate(runnableTasks)
+  if (!gate.allowed || gate.requiresConfirmation) {
+    appendDispatcherNotice('warn', buildSpawnedTaskAutoRunBlockedNotice(gate.message))
+    return
+  }
+
+  void taskDispatcher.runReadyTasks(runnableTasks.map(task => task.id))
 }
 
 function openTaskTab(task: SpawnedTask): {
   taskTabId: string
   taskSessionId: string
 } {
-  const runtime = resolveTaskTabRuntime(task)
+  const runtime = buildSpawnedTaskTabSpec(task)
   workspace.addTab({
     id: runtime.taskTabId,
     type: 'ai-chat',
-    title: `[Task] ${task.description.slice(0, 20)}`,
+    title: runtime.title,
     closable: true,
-    meta: {
-      sessionId: runtime.taskSessionId,
-      initialMessage: task.description,
-      sourceTaskId: task.id,
-      taskExecutionMode: 'tab',
-      taskAutoStarted: true,
-    },
+    meta: runtime.meta,
   })
   return runtime
 }
@@ -1192,14 +1341,14 @@ async function maybeAutoStartTaskTab(): Promise<void> {
   if (!canRestoreHistoryForThisTab()) return
   if (autoStartingTaskTab.value || chat.isStreaming.value || chat.isLoading.value) return
 
-  const initialMessage = typeof ownTab.value?.meta?.initialMessage === 'string'
-    ? ownTab.value.meta.initialMessage.trim()
-    : ''
-  const shouldAutoStart = ownTab.value?.meta?.taskAutoStarted === true
+  const autoStart = buildSpawnedTaskAutoStartSpec(ownTab.value?.meta)
 
-  if (!shouldAutoStart || !initialMessage) return
+  if (!autoStart.shouldStart) return
 
   autoStartingTaskTab.value = true
+  if (autoStart.isolationWorkDir) {
+    chat.workDir.value = autoStart.isolationWorkDir
+  }
   workspace.updateTabMeta(ownTabId, {
     initialMessage: undefined,
     taskAutoStarted: false,
@@ -1209,7 +1358,7 @@ async function maybeAutoStartTaskTab(): Promise<void> {
   })
 
   try {
-    await handleSend(initialMessage)
+    await handleSend(autoStart.initialMessage)
   } finally {
     autoStartingTaskTab.value = false
   }
@@ -1256,7 +1405,7 @@ async function runHeadlessSpawnedTask(task: SpawnedTask): Promise<{
   const taskMessages = ref<AiMessage[]>([])
   const taskIsStreaming = ref(false)
   const taskError = ref<string | null>(null)
-  const taskWorkDir = ref(chat.workDir.value)
+  const taskWorkDir = ref(resolveHeadlessSpawnedTaskWorkDir(task, chat.workDir.value))
   const planGateEnabled = ref(false)
   const planApproved = ref(false)
   const currentPhase = ref(null)
@@ -1406,6 +1555,14 @@ const taskDispatcher = createChatTaskDispatcher({
   maxParallel: getDispatcherMaxParallel,
   autoRetryCount: getDispatcherAutoRetryCount,
   defaultExecutionMode: getDispatcherDefaultMode,
+  canRunTask: async (task, context) => {
+    if (!context.startedByDispatcher) return true
+    if (isolationConfirmedTaskIds.value.has(task.id)) return true
+    const gate = await evaluateSpawnedTaskRuntimeGate([task])
+    if (gate.allowed && !gate.requiresConfirmation) return true
+    appendDispatcherNotice('warn', buildSpawnedTaskAutoRunBlockedNotice(gate.message))
+    return false
+  },
   executors: {
     headless: {
       mode: 'headless',
@@ -1546,7 +1703,7 @@ async function doSend(
   const newTasks = nextTasks.filter(task => !beforeTaskIds.has(task.id))
   if (newTasks.length > 0) {
     taskDispatcher.enqueue(newTasks)
-    void taskDispatcher.drain()
+    void tryAutoRunSpawnedTasks(newTasks.map(task => task.id))
   } else {
     taskDispatcher.syncTasks(nextTasks)
   }
@@ -1580,26 +1737,25 @@ async function handleSpawnRun(taskId: string): Promise<void> {
   const task = taskDispatcher.snapshot().find(item => item.id === taskId)
   if (!task) return
   if (task.dispatchStatus !== 'ready') return
+  if (!await confirmSpawnedTaskRuntimeGate([task])) return
+  if (!await ensureIsolationWorkspaceBeforeRun(task)) return
   void taskDispatcher.runTask(taskId, { startedByDispatcher: false })
 }
 
 async function handleSpawnRunBatch(taskIds: string[]): Promise<void> {
-  const runnableTasks = taskDispatcher.snapshot()
-    .filter(task => taskIds.includes(task.id) && task.dispatchStatus === 'ready')
+  const runnableTasks = selectReadySpawnedTasks(taskDispatcher.snapshot(), taskIds)
 
   if (runnableTasks.length === 0) return
-
-  for (const taskId of runnableTasks.map(task => task.id)) {
-    const task = chat.spawnedTasks.value.find(item => item.id === taskId)
-    if (!task) continue
-  }
-  void taskDispatcher.runReadyTasks(runnableTasks.map(task => task.id))
+  if (!await confirmSpawnedTaskRuntimeGate(runnableTasks)) return
+  const preparedTaskIds = await prepareSpawnedTasksForRun(runnableTasks, ensureIsolationWorkspaceBeforeRun)
+  if (preparedTaskIds.length === 0) return
+  void taskDispatcher.runReadyTasks(preparedTaskIds)
 }
 
 function handleSpawnRetry(taskId: string): void {
-  const index = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
-  if (index === -1) return
-  chat.spawnedTasks.value[index] = resetSpawnedTaskForRetry(chat.spawnedTasks.value[index]!)
+  const result = markSpawnedTaskForRetry(chat.spawnedTasks.value, taskId)
+  if (!result.task) return
+  chat.spawnedTasks.value = result.tasks
   taskDispatcher.syncTasks(chat.spawnedTasks.value)
   void handleSpawnRun(taskId)
 }
@@ -1617,26 +1773,20 @@ function handleSpawnOpen(taskId: string): void {
 }
 
 function handleSpawnComplete(taskId: string): void {
-  const index = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
-  if (index === -1) return
-  chat.spawnedTasks.value[index] = markSpawnedTaskDone(chat.spawnedTasks.value[index]!)
+  const result = markSpawnedTaskCompleted(chat.spawnedTasks.value, taskId)
+  if (!result.task) return
+  chat.spawnedTasks.value = result.tasks
   taskDispatcher.syncTasks(chat.spawnedTasks.value)
 }
 
 function handleSpawnCancel(taskId: string): void {
-  const index = chat.spawnedTasks.value.findIndex(item => item.id === taskId)
-  if (index === -1) return
-
-  const task = chat.spawnedTasks.value[index]!
+  const task = chat.spawnedTasks.value.find(item => item.id === taskId)
+  if (!task) return
+  const cancelMessage = t('ai.tasks.taskCancelled')
   if (task.taskTabId) {
-    workspace.updateTabMeta(task.taskTabId, {
-      taskCancelRequested: true,
-      taskStatus: 'cancelled',
-      taskError: t('ai.tasks.taskCancelled'),
-      taskSummary: task.lastSummary,
-    })
+    workspace.updateTabMeta(task.taskTabId, buildSpawnedTaskCancelTabMeta(task, cancelMessage))
   }
-  void taskDispatcher.cancelTask(taskId, t('ai.tasks.taskCancelled'))
+  void taskDispatcher.cancelTask(taskId, cancelMessage)
 }
 
 function handleSpawnCancelBatch(taskIds: string[]): void {
@@ -2190,7 +2340,11 @@ function handleRewindMessage(messageId: string): void {
 
     <template #after-compact>
       <div v-if="settingsStore.settings.devMode" class="mx-auto max-w-4xl px-5">
-        <AiDiagnosticsPanel :metrics="chat.observability.value" />
+        <AiDiagnosticsPanel
+          :metrics="chat.observability.value"
+          :agent-runtime-context="chat.latestAgentRuntimeContextEvent.value"
+          :agent-runtime-governance="chat.agentRuntimeGovernance.value"
+        />
       </div>
 
       <div v-if="chat.currentPhase.value" class="mx-auto max-w-4xl px-5">
@@ -2404,6 +2558,8 @@ function handleRewindMessage(messageId: string): void {
                 <div class="rounded-xl border border-white/[0.08] bg-[#0f0f13] p-2">
                   <AiSpawnedTasksPanel
                     :tasks="chat.spawnedTasks.value"
+                    :workspace-root="activeWorkspaceRoot"
+                    :isolation-states="taskIsolationStates"
                     @run="handleSpawnRun"
                     @run-batch="handleSpawnRunBatch"
                     @retry="handleSpawnRetry"
@@ -2413,6 +2569,11 @@ function handleRewindMessage(messageId: string): void {
                     @cancel="handleSpawnCancel"
                     @cancel-batch="handleSpawnCancelBatch"
                     @synthesize="handleSpawnSynthesize"
+                    @isolation-prepare="handleIsolationPrepare"
+                    @isolation-diff="handleIsolationDiff"
+                    @isolation-verify="handleIsolationVerify"
+                    @isolation-apply="handleIsolationApply"
+                    @isolation-cleanup="handleIsolationCleanup"
                   />
                 </div>
               </div>
@@ -2441,7 +2602,11 @@ function handleRewindMessage(messageId: string): void {
             </section>
 
             <section v-if="settingsStore.settings.devMode" class="run-inspector-card">
-              <AiDiagnosticsPanel :metrics="chat.observability.value" />
+              <AiDiagnosticsPanel
+                :metrics="chat.observability.value"
+                :agent-runtime-context="chat.latestAgentRuntimeContextEvent.value"
+                :agent-runtime-governance="chat.agentRuntimeGovernance.value"
+              />
             </section>
           </div>
         </div>

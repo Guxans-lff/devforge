@@ -69,6 +69,14 @@ export interface AiPermissionRuleConfig {
   reason?: string
 }
 
+export type AiWorkspaceIsolationStrength = 'off' | 'session' | 'agent' | 'strict'
+
+export interface AiWorkspaceIsolationConfig {
+  strength?: AiWorkspaceIsolationStrength
+  allowedPaths?: string[]
+  blockedPaths?: string[]
+}
+
 /** 单个模型配置 */
 export interface ModelConfig {
   /** 模型 ID（API 调用使用） */
@@ -513,6 +521,8 @@ export interface WorkspaceConfig {
   dispatcherDefaultMode?: 'headless' | 'tab'
   /** Project 级工具权限规则 */
   permissionRules?: AiPermissionRuleConfig[]
+  /** Project 级 Workspace 强隔离边界 */
+  workspaceIsolation?: AiWorkspaceIsolationConfig
   features?: Record<string, boolean>
   skills?: WorkspaceSkillConfig[]
 }

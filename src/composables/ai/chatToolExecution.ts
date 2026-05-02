@@ -1,6 +1,7 @@
 import { aiEnforceToolResultBudget, aiExecuteTool } from '@/api/ai'
 import type {
   AiMessage,
+  AiWorkspaceIsolationConfig,
   ToolCallInfo,
   ToolExecutionClass,
   ToolExecutionMetadata,
@@ -13,6 +14,7 @@ import { checkWritePathSafety } from '@/ai-gui/pathSafety'
 import { mapProviderToolPermission, shouldDenyTool, type ProviderPermissionContext } from '@/ai-gui/providerPermissionMapper'
 import {
   checkWorkspaceWriteGuard,
+  checkWorkspaceIsolationBoundary,
   decideWorkspaceIsolationPolicy,
   loadWorkspaceIsolationPolicy,
   loadWriteScopes,
@@ -73,6 +75,7 @@ export interface ExecuteToolCallsParams {
   turnId?: string
   permissionContext?: ProviderPermissionContext
   transcriptStore?: TranscriptStore
+  workspaceIsolation?: AiWorkspaceIsolationConfig
 }
 
 function appendPermissionEvent(
@@ -531,6 +534,42 @@ async function executeIndexedTool(
 
     if (targetPath) {
       const ownerId = `tool:${params.sessionId}:${toolCall.id}`
+      const boundary = checkWorkspaceIsolationBoundary(targetPath, {
+        sessionId: params.sessionId,
+        agentId: toolCall.id,
+        allowedPaths: params.workspaceIsolation?.allowedPaths,
+        blockedPaths: params.workspaceIsolation?.blockedPaths,
+        strength: params.workspaceIsolation?.strength ?? 'session',
+      })
+      if (!boundary.allowed) {
+        const content = `[workspace_boundary_denied] ${boundary.reason ?? boundary.normalizedPath}`
+        if (toolCall.execution) {
+          toolCall.execution.errorKind = 'permission_denied'
+          toolCall.execution.finishedAt = Date.now()
+        }
+        markToolCallState(toolCall, {
+          status: 'error',
+          error: content,
+          result: content,
+        })
+        params.log.warn('workspace_boundary_denied', {
+          sessionId: params.sessionId,
+          tool: toolCall.name,
+          path: targetPath,
+          reason: boundary.reason,
+        })
+        appendPermissionEvent(params, toolCall, 'denied', boundary.reason ?? 'workspace_boundary_denied')
+        return {
+          result: {
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+            success: false,
+            content,
+            metadata: toolCall.execution ? copyResultMetadata(toolCall.execution) : undefined,
+          },
+        }
+      }
+
       const guard = checkWorkspaceWriteGuard(targetPath, ownerId, pruneExpiredWriteScopes(loadWriteScopes()))
       if (!guard.allowed) {
         const isolationPolicy = loadWorkspaceIsolationPolicy()
@@ -722,6 +761,7 @@ export async function executeToolCalls({
   turnId,
   permissionContext,
   transcriptStore,
+  workspaceIsolation,
 }: ExecuteToolCallsParams): Promise<ToolResultInfo[]> {
   setInToolExec(true)
   clearWatchdog()
@@ -784,6 +824,7 @@ export async function executeToolCalls({
         turnId,
         permissionContext,
         transcriptStore,
+        workspaceIsolation,
       }
       const executed = await executeIndexedTool(indexed, executionContext)
 

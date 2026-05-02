@@ -7,6 +7,7 @@
 
 import type { AiTranscriptEvent, AiTranscriptEventOf, AiTranscriptEventType, TranscriptDiagnosticReport } from './transcriptTypes'
 import type { TranscriptStore } from './transcriptStore'
+import { buildAdvancedAgentGovernanceSnapshot } from '@/ai-gui/advancedAgentGovernance'
 
 function isTranscriptEvent<T extends AiTranscriptEventType>(
   event: AiTranscriptEvent,
@@ -124,6 +125,35 @@ function toPlanHistory(events: AiTranscriptEvent[]): TranscriptDiagnosticReport[
     }))
 }
 
+function toAgentRuntimeContextHistory(events: AiTranscriptEvent[]): TranscriptDiagnosticReport['agentRuntimeContextHistory'] {
+  return events
+    .filter((e): e is AiTranscriptEventOf<'agent_runtime_context'> => isTranscriptEvent(e, 'agent_runtime_context'))
+    .map(e => ({
+      timestamp: e.timestamp,
+      assignmentCount: e.payload.data.assignmentCount,
+      blockedCount: e.payload.data.blockedCount,
+      warningCount: e.payload.data.warningCount,
+      verificationRisk: e.payload.data.verificationRisk,
+      verificationCommandCount: e.payload.data.verificationCommandCount,
+      verificationGateStatus: e.payload.data.verificationGateStatus,
+      verificationSafeToComplete: e.payload.data.verificationSafeToComplete,
+      verificationMissingCommandCount: e.payload.data.verificationMissingCommandCount,
+      verificationFailedCommandCount: e.payload.data.verificationFailedCommandCount,
+      isolationBoundaryCount: e.payload.data.isolationBoundaryCount,
+      isolationMergeRequiredCount: e.payload.data.isolationMergeRequiredCount,
+      isolationBlockedCount: e.payload.data.isolationBlockedCount,
+      isolationWorktreeCount: e.payload.data.isolationWorktreeCount,
+      isolationTemporaryWorkspaceCount: e.payload.data.isolationTemporaryWorkspaceCount,
+      isolationReviewRequiredCount: e.payload.data.isolationReviewRequiredCount,
+      isolationConfirmationRequiredCount: e.payload.data.isolationConfirmationRequiredCount,
+      isolationGateStatus: e.payload.data.isolationGateStatus,
+      isolationSafeToAutoRun: e.payload.data.isolationSafeToAutoRun,
+      lspDiagnosticCount: e.payload.data.lspDiagnosticCount,
+      lspSummary: e.payload.data.lspSummary,
+      warnings: e.payload.data.warnings,
+    }))
+}
+
 /**
  * Generate a diagnostic report from transcript events for a session.
  */
@@ -133,6 +163,7 @@ export function generateTranscriptDiagnosticReport(
 ): TranscriptDiagnosticReport {
   const events = store.getEvents(sessionId)
   const now = Date.now()
+  const agentRuntimeContextHistory = toAgentRuntimeContextHistory(events)
 
   return {
     sessionId,
@@ -144,6 +175,8 @@ export function generateTranscriptDiagnosticReport(
     compactHistory: toCompactHistory(events),
     routingHistory: toRoutingHistory(events),
     planHistory: toPlanHistory(events),
+    agentRuntimeContextHistory,
+    agentRuntimeGovernance: buildAdvancedAgentGovernanceSnapshot(agentRuntimeContextHistory),
   }
 }
 

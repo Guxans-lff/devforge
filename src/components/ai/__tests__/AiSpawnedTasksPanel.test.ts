@@ -283,4 +283,128 @@ describe('AiSpawnedTasksPanel', () => {
     const batchRunButton = wrapper.findAll('button').find(button => button.text().includes('ai.tasks.batchRun'))
     expect(batchRunButton).toBeUndefined()
   })
+
+  it('shows Multi-Agent assignments, roles and boundary warnings', () => {
+    const tasks: SpawnedTask[] = [
+      {
+        id: 'task-1',
+        description: '设计阶段四方案',
+        status: 'pending',
+        createdAt: 1000,
+        retryCount: 0,
+      },
+      {
+        id: 'task-2',
+        description: '实现 src/ai-gui/runtime.ts',
+        status: 'pending',
+        createdAt: 1001,
+        retryCount: 0,
+        dependsOn: ['task-3'],
+      },
+      {
+        id: 'task-3',
+        description: '验证 pnpm test',
+        status: 'pending',
+        createdAt: 1002,
+        retryCount: 0,
+        dependsOn: ['task-2'],
+      },
+      {
+        id: 'task-4',
+        description: '审查 docs/ai-upgrade-task-sequence.md',
+        status: 'pending',
+        createdAt: 1003,
+        retryCount: 0,
+      },
+    ]
+
+    const wrapper = mount(AiSpawnedTasksPanel, {
+      props: { tasks },
+    })
+
+    expect(wrapper.text()).toContain('Multi-Agent 预案')
+    expect(wrapper.text()).toContain('分配 2')
+    expect(wrapper.text()).toContain('阻塞 2')
+    expect(wrapper.text()).toContain('需合并 0')
+    expect(wrapper.text()).toContain('Worktree 0')
+    expect(wrapper.text()).toContain('临时空间 0')
+    expect(wrapper.text()).toContain('需确认 0')
+    expect(wrapper.text()).toContain('门禁 allow')
+    expect(wrapper.text()).toContain('隔离阻塞 0')
+    expect(wrapper.text()).toContain('检测到任务依赖环')
+    expect(wrapper.text()).toContain('Agent planner-1 · 规划')
+    expect(wrapper.text()).toContain('Agent reviewer-4 · 审查')
+    expect(wrapper.text()).toContain('隔离 共享')
+    expect(wrapper.text()).toContain('隔离 只读')
+    expect(wrapper.text()).toContain('docs/ai-upgrade-task-sequence.md')
+  })
+
+  it('emits workspace isolation backend actions for temporary execution spaces', async () => {
+    const tasks: SpawnedTask[] = [
+      {
+        id: 'task-1',
+        description: '实现 src/ai-gui/runtime.ts',
+        status: 'pending',
+        createdAt: 1000,
+        retryCount: 0,
+      },
+    ]
+
+    const wrapper = mount(AiSpawnedTasksPanel, {
+      props: {
+        tasks,
+        workspaceRoot: 'D:/repo',
+        isolationStates: {
+          'task-1': {
+            status: 'diffed',
+            message: 'Diff 已生成',
+            diff: {
+              repoPath: 'D:/repo',
+              workspacePath: 'D:/repo/.devforge/tmp/agents/session',
+              mode: 'temporary',
+              entries: [
+                { path: 'src/ai-gui/runtime.ts', status: 'modified' },
+                { path: 'src/ai-gui/new-runtime.ts', status: 'added' },
+                { path: 'src/ai-gui/old-runtime.ts', status: 'deleted' },
+                { path: 'src/ai-gui/renamed-runtime.ts', status: 'renamed' },
+                { path: 'src/ai-gui/conflict-runtime.ts', status: 'conflicted' },
+                { path: 'src/ai-gui/extra-runtime.ts', status: 'modified' },
+              ],
+              summary: { added: 1, modified: 3, deleted: 1, unchanged: 3 },
+            },
+          },
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('隔离执行空间')
+    expect(wrapper.text()).toContain('Diff 已生成')
+    expect(wrapper.text()).toContain('新增 1，修改 3，删除 1，共 6 个')
+    expect(wrapper.text()).toContain('修改')
+    expect(wrapper.text()).toContain('src/ai-gui/runtime.ts')
+    expect(wrapper.text()).toContain('新增')
+    expect(wrapper.text()).toContain('src/ai-gui/new-runtime.ts')
+    expect(wrapper.text()).toContain('删除')
+    expect(wrapper.text()).toContain('重命名')
+    expect(wrapper.text()).toContain('冲突')
+    expect(wrapper.text()).toContain('还有 1 个变更未显示')
+
+    const clickButton = async (text: string) => {
+      const button = wrapper.findAll('button').find(item => item.text().includes(text))
+      expect(button).toBeDefined()
+      await button!.trigger('click')
+    }
+
+    await clickButton('准备')
+    await clickButton('Diff')
+    await clickButton('验证')
+    await clickButton('回放')
+    await clickButton('清理')
+
+    expect(wrapper.emitted('isolation-prepare')?.[0]?.[0]).toBe('task-1')
+    expect(wrapper.emitted('isolation-diff')?.[0]?.[0]).toBe('task-1')
+    expect(wrapper.emitted('isolation-verify')?.[0]?.[0]).toBe('task-1')
+    expect(wrapper.emitted('isolation-apply')?.[0]?.[0]).toBe('task-1')
+    expect(wrapper.emitted('isolation-cleanup')?.[0]?.[0]).toBe('task-1')
+  })
 })

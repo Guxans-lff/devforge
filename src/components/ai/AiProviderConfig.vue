@@ -10,7 +10,7 @@ import { useI18n } from 'vue-i18n'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { aiListProviderModels } from '@/api/ai'
 import { getCredential, saveCredential } from '@/api/connection'
-import type { ProviderConfig, ModelConfig, ProviderType, ThinkingEffort, WorkspaceConfig } from '@/types/ai'
+import type { ProviderConfig, ModelConfig, ProviderType, ThinkingEffort, WorkspaceConfig, AiWorkspaceIsolationStrength } from '@/types/ai'
 import { ensureErrorString } from '@/types/error'
 import AiProviderProfileBundlePanel from '@/components/ai/AiProviderProfileBundlePanel.vue'
 import { Button } from '@/components/ui/button'
@@ -77,6 +77,7 @@ const store = useAiChatStore()
 const { t } = useI18n()
 const THINKING_EFFORTS: ThinkingEffort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const DISPATCHER_MODES: Array<'headless' | 'tab'> = ['headless', 'tab']
+const ISOLATION_STRENGTHS: AiWorkspaceIsolationStrength[] = ['off', 'session', 'agent', 'strict']
 const DEEPSEEK_MAX_CONTEXT = 1_000_000
 const DEEPSEEK_MAX_OUTPUT = 393_216
 const MIMO_MAX_CONTEXT = 1_000_000
@@ -506,6 +507,9 @@ const workspaceDispatcher = reactive({
   maxParallel: 3,
   autoRetryCount: 1,
   defaultMode: 'headless' as 'headless' | 'tab',
+  isolationStrength: 'session' as AiWorkspaceIsolationStrength,
+  allowedPathsText: '',
+  blockedPathsText: '',
 })
 
 const currentWorkDir = computed(() => store.currentWorkDir)
@@ -517,6 +521,9 @@ watch(
     workspaceDispatcher.maxParallel = Math.max(1, config?.dispatcherMaxParallel ?? 3)
     workspaceDispatcher.autoRetryCount = Math.max(0, config?.dispatcherAutoRetryCount ?? 1)
     workspaceDispatcher.defaultMode = config?.dispatcherDefaultMode ?? 'headless'
+    workspaceDispatcher.isolationStrength = config?.workspaceIsolation?.strength ?? 'session'
+    workspaceDispatcher.allowedPathsText = config?.workspaceIsolation?.allowedPaths?.join('\n') ?? ''
+    workspaceDispatcher.blockedPathsText = config?.workspaceIsolation?.blockedPaths?.join('\n') ?? ''
     workspaceSaveError.value = null
   },
   { immediate: true, deep: true },
@@ -685,6 +692,11 @@ async function handleSaveWorkspaceDispatcher(): Promise<void> {
       dispatcherMaxParallel: Math.max(1, Math.trunc(workspaceDispatcher.maxParallel || 1)),
       dispatcherAutoRetryCount: Math.max(0, Math.trunc(workspaceDispatcher.autoRetryCount || 0)),
       dispatcherDefaultMode: workspaceDispatcher.defaultMode,
+      workspaceIsolation: {
+        strength: workspaceDispatcher.isolationStrength,
+        allowedPaths: parsePathList(workspaceDispatcher.allowedPathsText),
+        blockedPaths: parsePathList(workspaceDispatcher.blockedPathsText),
+      },
     }
     await store.saveWorkspaceConfig(currentWorkDir.value, nextConfig)
   } catch (error) {
@@ -692,6 +704,15 @@ async function handleSaveWorkspaceDispatcher(): Promise<void> {
   } finally {
     workspaceSaving.value = false
   }
+}
+
+function parsePathList(value: string): string[] {
+  return [...new Set(
+    value
+      .split(/\r?\n|,/)
+      .map(item => item.trim())
+      .filter(Boolean),
+  )]
 }
 
 async function handleApplyProfile(payload: {
@@ -1088,6 +1109,57 @@ const canSave = computed(() =>
                   </SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border/25 bg-background/30 p-3">
+            <div class="mb-3 flex items-start justify-between gap-3">
+              <div>
+                <div class="text-xs font-semibold text-foreground/80">Workspace 强隔离</div>
+                <p class="mt-1 text-[11px] text-muted-foreground">
+                  限制 AI 写文件范围，Multi-Agent 并发时优先按 agent 边界隔离。
+                </p>
+              </div>
+              <div class="min-w-[150px]">
+                <Select
+                  :model-value="workspaceDispatcher.isolationStrength"
+                  :disabled="!hasCurrentWorkDir || workspaceSaving"
+                  @update:model-value="(v: unknown) => workspaceDispatcher.isolationStrength = String(v) as AiWorkspaceIsolationStrength"
+                >
+                  <SelectTrigger class="h-9 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem
+                      v-for="strength in ISOLATION_STRENGTHS"
+                      :key="strength"
+                      :value="strength"
+                    >
+                      {{ strength }}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div class="grid gap-3 sm:grid-cols-2">
+              <div class="space-y-2">
+                <Label class="text-xs">允许路径</Label>
+                <textarea
+                  v-model="workspaceDispatcher.allowedPathsText"
+                  class="min-h-20 w-full rounded-md border border-border/40 bg-background/60 px-3 py-2 font-mono text-xs outline-none focus:border-primary/40"
+                  placeholder="src/features/**&#10;docs/*"
+                  :disabled="!hasCurrentWorkDir || workspaceSaving"
+                />
+              </div>
+              <div class="space-y-2">
+                <Label class="text-xs">禁止路径</Label>
+                <textarea
+                  v-model="workspaceDispatcher.blockedPathsText"
+                  class="min-h-20 w-full rounded-md border border-border/40 bg-background/60 px-3 py-2 font-mono text-xs outline-none focus:border-primary/40"
+                  placeholder="src/secrets/**&#10;.env*"
+                  :disabled="!hasCurrentWorkDir || workspaceSaving"
+                />
+              </div>
             </div>
           </div>
 

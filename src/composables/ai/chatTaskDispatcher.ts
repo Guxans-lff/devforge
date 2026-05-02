@@ -49,6 +49,7 @@ export interface ChatTaskDispatcherOptions {
   maxParallel?: number | (() => number)
   autoRetryCount?: number | (() => number)
   defaultExecutionMode?: TaskExecutionMode | (() => TaskExecutionMode)
+  canRunTask?: (task: SpawnedTask, context: { startedByDispatcher: boolean }) => Promise<boolean> | boolean
   onEvent?: (event: DispatcherRuntimeEvent) => void
 }
 
@@ -280,6 +281,11 @@ export function createChatTaskDispatcher(options: ChatTaskDispatcherOptions) {
     if (runningTasks.has(taskId)) return
     if (task.dispatchStatus !== 'ready') return
     if (runningTasks.size >= resolveMaxParallel()) return
+    const startedByDispatcher = optionsOverride?.startedByDispatcher ?? true
+    if (options.canRunTask) {
+      const canRun = await options.canRunTask(task, { startedByDispatcher })
+      if (canRun === false) return
+    }
 
     const executor = options.executors[task.executionMode ?? resolveDefaultExecutionMode()]
     if (!executor) return
@@ -294,7 +300,7 @@ export function createChatTaskDispatcher(options: ChatTaskDispatcherOptions) {
     }, {
       taskTabId: preparedPatch.taskTabId ?? current.taskTabId,
       taskSessionId: preparedPatch.taskSessionId ?? current.taskSessionId,
-      startedByDispatcher: optionsOverride?.startedByDispatcher ?? true,
+      startedByDispatcher,
     }))
     if (!started) {
       runningTasks.delete(taskId)

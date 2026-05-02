@@ -1,5 +1,5 @@
 ﻿import { describe, expect, it } from 'vitest'
-import { checkWorkspaceWriteGuard, clearWriteScopesBySession, createWriteScope, decideWorkspaceIsolationPolicy, detectWriteScopeConflicts, loadWorkspaceIsolationPolicy, loadWriteScopes, pruneExpiredWriteScopes, registerWorkspaceWrite, saveWorkspaceIsolationPolicy, updateTouchedPaths } from '@/ai-gui/workspaceIsolation'
+import { checkWorkspaceIsolationBoundary, checkWorkspaceWriteGuard, clearWriteScopesBySession, createWorkspaceIsolationOwnerId, createWriteScope, decideWorkspaceIsolationPolicy, detectWriteScopeConflicts, loadWorkspaceIsolationPolicy, loadWriteScopes, pruneExpiredWriteScopes, registerWorkspaceWrite, saveWorkspaceIsolationPolicy, summarizeWorkspaceIsolationBoundary, updateTouchedPaths } from '@/ai-gui/workspaceIsolation'
 
 function createFakeStorage(): Storage {
   const storage = new Map<string, string>()
@@ -79,5 +79,58 @@ describe('workspaceIsolation', () => {
 
     expect(decideWorkspaceIsolationPolicy('smart', 'tool:s1:t2', checkWorkspaceWriteGuard('src/a.ts', 'tool:s1:t2', [sameSession]).conflicts)).toMatchObject({ decision: 'warn' })
     expect(decideWorkspaceIsolationPolicy('smart', 'tool:s1:t2', checkWorkspaceWriteGuard('src/b.ts', 'tool:s1:t2', [manual]).conflicts)).toMatchObject({ decision: 'warn', requiresDoubleConfirm: true })
+  })
+
+  it('enforces workspace isolation boundary allow and block lists', () => {
+    const boundary = {
+      sessionId: 's1',
+      agentId: 'agent-a',
+      allowedPaths: ['src/features/**', 'docs/*'],
+      blockedPaths: ['src/features/secrets/**'],
+      strength: 'agent' as const,
+    }
+
+    expect(createWorkspaceIsolationOwnerId(boundary)).toBe('tool:s1:agent-a')
+    expect(checkWorkspaceIsolationBoundary('src/features/chat/index.ts', boundary)).toMatchObject({
+      allowed: true,
+      matchedAllowedPath: 'src/features/**',
+    })
+    expect(checkWorkspaceIsolationBoundary('docs/readme.md', boundary)).toMatchObject({
+      allowed: true,
+      matchedAllowedPath: 'docs/*',
+    })
+    expect(checkWorkspaceIsolationBoundary('docs/nested/readme.md', boundary)).toMatchObject({
+      allowed: false,
+      reason: 'outside workspace isolation boundary: docs/nested/readme.md',
+    })
+    expect(checkWorkspaceIsolationBoundary('src/features/secrets/key.ts', boundary)).toMatchObject({
+      allowed: false,
+      matchedBlockedPath: 'src/features/secrets/**',
+    })
+  })
+
+  it('summarizes strict boundaries for runtime planning', () => {
+    expect(summarizeWorkspaceIsolationBoundary({
+      sessionId: 's1',
+      agentId: 'verifier-1',
+      strength: 'strict',
+    })).toMatchObject({
+      ownerId: 'tool:s1:verifier-1',
+      strength: 'strict',
+      allowedPaths: [],
+      writable: true,
+      reason: 'strict 模式建议显式配置 allowedPaths，避免无限制写入。',
+    })
+  })
+
+  it('denies strict boundaries without explicit allowed paths', () => {
+    expect(checkWorkspaceIsolationBoundary('src/a.ts', {
+      sessionId: 's1',
+      agentId: 'agent-a',
+      strength: 'strict',
+    })).toMatchObject({
+      allowed: false,
+      reason: 'strict workspace isolation requires explicit allowedPaths',
+    })
   })
 })

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useVerificationJob } from '@/composables/useVerificationJob'
+import { useBackgroundJobStore } from '@/stores/background-job'
 import {
   clearAllPlans,
   createPlan,
@@ -59,5 +60,33 @@ describe('useVerificationJob', () => {
       title: '验证任务',
     })
     expect(['queued', 'running', 'succeeded']).toContain(jobRef.status)
+  })
+
+  it('keeps verification job metadata for workspace isolation evidence', async () => {
+    const verification = useVerificationJob()
+    const jobId = await verification.submitVerificationJob(
+      'session-1',
+      'D:/Project/demo/.devforge/tmp/agents/task-1',
+      [{ command: 'pnpm test:typecheck', timeoutSeconds: 10 }],
+      {
+        title: '隔离验证：task-1',
+        contextSummary: 'Workspace Isolation task-1',
+        meta: {
+          workspaceIsolationTaskId: 'task-1',
+          workspaceIsolationMode: 'temporary',
+        },
+      },
+    )
+
+    const store = useBackgroundJobStore()
+    const job = store.jobs.find(item => item.id === jobId)
+    expect(job).toMatchObject({
+      title: '隔离验证：task-1',
+      contextSummary: 'Workspace Isolation task-1',
+      meta: {
+        workspaceIsolationTaskId: 'task-1',
+        workspaceIsolationMode: 'temporary',
+      },
+    })
   })
 })

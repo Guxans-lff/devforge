@@ -30,3 +30,4 @@ pub mod updater;
 pub mod git;
 pub mod screenshot;
 pub mod workspace_fs;
+pub mod workspace_isolation;

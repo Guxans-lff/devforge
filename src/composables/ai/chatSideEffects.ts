@@ -32,6 +32,7 @@ export interface SpawnedTask {
   startedByDispatcher?: boolean
   taskTabId?: string
   taskSessionId?: string
+  isolationWorkDir?: string
   retryCount: number
 }
 

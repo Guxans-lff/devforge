@@ -3,6 +3,7 @@ import { createTranscriptStore } from '../transcriptStore'
 import {
   searchTranscriptEvents,
   findErrors,
+  findLatestAgentRuntimeContext,
   findLastUserMessage,
   findLastAssistantMessage,
   getEventTypeSummary,
@@ -61,6 +62,34 @@ describe('transcriptSearch', () => {
       sessionId: 's1', turnId: 't2', type: 'turn_end', timestamp: 2500,
       payload: { type: 'turn_end', data: { turnId: 't2', status: 'error', durationMs: 500 } },
     }))
+    store.appendEvent(makeEvent({
+      sessionId: 's1',
+      turnId: 't2',
+      type: 'agent_runtime_context',
+      timestamp: 2600,
+      payload: {
+        type: 'agent_runtime_context',
+        data: {
+          assignmentCount: 2,
+          blockedCount: 1,
+          warningCount: 1,
+          verificationRisk: 'high',
+          verificationCommandCount: 3,
+          isolationBoundaryCount: 2,
+          isolationMergeRequiredCount: 1,
+          isolationBlockedCount: 1,
+          isolationWorktreeCount: 1,
+          isolationTemporaryWorkspaceCount: 1,
+          isolationReviewRequiredCount: 1,
+          isolationConfirmationRequiredCount: 7,
+          isolationGateStatus: 'confirm_required',
+          isolationSafeToAutoRun: false,
+          lspDiagnosticCount: 4,
+          lspSummary: '诊断 4 条：error 0，warning 4，info/hint 0。',
+          warnings: ['检测到任务依赖环：a -> b'],
+        },
+      },
+    }))
   }
 
   it('searches by query text', () => {
@@ -87,7 +116,7 @@ describe('transcriptSearch', () => {
     const t1 = searchTranscriptEvents(store, { sessionId: 's1', turnId: 't1' })
     expect(t1).toHaveLength(6)
     const t2 = searchTranscriptEvents(store, { sessionId: 's1', turnId: 't2' })
-    expect(t2).toHaveLength(4)
+    expect(t2).toHaveLength(5)
   })
 
   it('filters by time range', () => {
@@ -131,6 +160,7 @@ describe('transcriptSearch', () => {
     expect(summary.turn_end).toBe(2)
     expect(summary.stream_error).toBe(1)
     expect(summary.recovery).toBe(1)
+    expect(summary.agent_runtime_context).toBe(1)
   })
 
   it('supports pagination', () => {
@@ -142,5 +172,20 @@ describe('transcriptSearch', () => {
     const page2 = searchTranscriptEvents(store, { sessionId: 's1', limit: 3, offset: 3 })
     expect(page2).toHaveLength(3)
     expect(page2[0]!.timestamp).toBe(1300)
+  })
+
+  it('searches and finds latest P2 Agent Runtime context', () => {
+    seedEvents()
+
+    const results = searchTranscriptEvents(store, { sessionId: 's1', query: '依赖环' })
+    expect(results).toHaveLength(1)
+    expect(results[0]!.type).toBe('agent_runtime_context')
+
+    const latest = findLatestAgentRuntimeContext(store, 's1')
+    expect(latest?.payload.data.verificationRisk).toBe('high')
+    expect(latest?.payload.data.blockedCount).toBe(1)
+    expect(latest?.payload.data.isolationWorktreeCount).toBe(1)
+    expect(latest?.payload.data.isolationConfirmationRequiredCount).toBe(7)
+    expect(latest?.payload.data.isolationGateStatus).toBe('confirm_required')
   })
 })

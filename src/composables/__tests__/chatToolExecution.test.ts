@@ -328,6 +328,66 @@ describe('chatToolExecution', () => {
     expect(results[0]?.success).toBe(true)
   })
 
+  it('blocks writes outside configured workspace isolation boundary', async () => {
+    const toolCalls = [
+      makeToolCall('write-boundary', 'write_file', { path: 'src/secrets/key.ts', content: 'x' }),
+    ]
+
+    const params = makeParams(toolCalls)
+    params.workspaceIsolation = {
+      strength: 'agent',
+      allowedPaths: ['src/features/**'],
+      blockedPaths: ['src/secrets/**'],
+    }
+
+    const results = await executeToolCalls(params)
+
+    expect(aiExecuteToolMock).not.toHaveBeenCalled()
+    expect(results[0]?.success).toBe(false)
+    expect(results[0]?.content).toContain('[workspace_boundary_denied]')
+    expect(toolCalls[0]?.status).toBe('error')
+  })
+
+  it('blocks strict workspace isolation when allowed paths are not configured', async () => {
+    const toolCalls = [
+      makeToolCall('write-strict', 'write_file', { path: 'src/a.ts', content: 'x' }),
+    ]
+
+    const params = makeParams(toolCalls)
+    params.workspaceIsolation = {
+      strength: 'strict',
+    }
+
+    const results = await executeToolCalls(params)
+
+    expect(aiExecuteToolMock).not.toHaveBeenCalled()
+    expect(results[0]?.success).toBe(false)
+    expect(results[0]?.content).toContain('[workspace_boundary_denied]')
+    expect(results[0]?.content).toContain('strict workspace isolation requires explicit allowedPaths')
+  })
+
+  it('allows strict workspace isolation when the target path is explicitly allowed', async () => {
+    const toolCalls = [
+      makeToolCall('write-strict-allow', 'write_file', { path: 'src/allowed/a.ts', content: 'x' }),
+    ]
+    aiExecuteToolMock.mockResolvedValue({
+      success: true,
+      content: 'written',
+    })
+
+    const params = makeParams(toolCalls)
+    params.workspaceIsolation = {
+      strength: 'strict',
+      allowedPaths: ['src/allowed/**'],
+    }
+
+    const results = await executeToolCalls(params)
+
+    expect(aiExecuteToolMock).toHaveBeenCalledTimes(1)
+    expect(results[0]?.success).toBe(true)
+    expect(toolCalls[0]?.status).toBe('success')
+  })
+
   it('denies conflicting writes when workspace isolation policy is deny', async () => {
     localStorage.setItem('devforge.ai.workspace.isolation.policy.v1', 'deny')
     localStorage.setItem('devforge.ai.workspace.isolation.v1', JSON.stringify([

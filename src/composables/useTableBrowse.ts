@@ -24,8 +24,16 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
   const store = useDatabaseWorkspaceStore()
   const isLoadingMore = ref(false)
   const pageCache = new TablePageCache()
-  /** 请求版本号，防止快速切换表时旧响应覆盖新数据 */
   let browseVersion = 0
+
+  function resetBrowseResultState() {
+    store.updateTabContext(connectionId.value, tabId.value, {
+      isExecuting: true,
+      result: null,
+      resultTabs: [],
+      activeResultTabId: undefined,
+    })
+  }
 
   async function browseTable(database: string, table: string, whereClause?: string, orderBy?: string) {
     if (!isConnected.value) return
@@ -35,12 +43,7 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
     console.log(`[browseTable] 开始 v${currentVersion}: ${database}.${table}`)
 
     // 切换表时立即清除旧结果和结果标签页，防止新旧数据混杂
-    store.updateTabContext(connectionId.value, tabId.value, {
-      isExecuting: true,
-      result: null,
-      resultTabs: [],
-      activeResultTabId: undefined,
-    })
+    resetBrowseResultState()
     try {
       const initialSeek = await resolveInitialTableSeek(connectionId.value, database, table, orderBy)
       const effectiveOrderBy = initialSeek.effectiveOrderBy
@@ -92,18 +95,21 @@ export function useTableBrowse(options: UseTableBrowseOptions) {
     // 优先查缓存
     const cached = pageCache.get(database, table, nextPage, pageSize, whereClause, effectiveOrderBy)
     if (cached && cached.rows.length > 0) {
-      const nextSeekValue = extractNumericCursorValue(cached.rows, cached.columns, ctx.tableBrowse.seekColumn)
-      const merged: typeof ctx.result = {
-        ...ctx.result,
-        rows: [...ctx.result.rows, ...cached.rows],
+      const currentCtx = tabContext.value
+      if (!currentCtx?.tableBrowse || currentCtx.tableBrowse.database !== database || currentCtx.tableBrowse.table !== table) return
+      if (!currentCtx.result) return
+      const nextSeekValue = extractNumericCursorValue(cached.rows, cached.columns, currentCtx.tableBrowse.seekColumn)
+      const merged: typeof currentCtx.result = {
+        ...currentCtx.result,
+        rows: [...currentCtx.result.rows, ...cached.rows],
         totalCount: cached.totalCount,
       }
       store.updateTabContext(connectionId.value, tabId.value, {
         result: merged,
         tableBrowse: {
-          ...ctx.tableBrowse,
+          ...currentCtx.tableBrowse,
           currentPage: nextPage,
-          seekValue: nextSeekValue ?? ctx.tableBrowse.seekValue,
+          seekValue: nextSeekValue ?? currentCtx.tableBrowse.seekValue,
         },
       })
       return

@@ -5,12 +5,15 @@ import type { AiChatMetricsSnapshot } from '@/composables/ai/useAiChatObservabil
 import { useSettingsStore } from '@/stores/settings'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { buildGatewayDashboardSnapshot, type GatewayDashboardSnapshot } from '@/ai-gateway/gatewayDashboard'
+import type { AgentRuntimeGovernanceSnapshot, AiTranscriptEventOf } from '@/composables/ai-agent/transcript/transcriptTypes'
 import { Activity, ChevronRight, Clock3, Copy, History, Route, ShieldAlert, TrendingUp, Wrench } from 'lucide-vue-next'
 
 type Tone = 'ok' | 'warn' | 'danger'
 
 const props = defineProps<{
   metrics: AiChatMetricsSnapshot
+  agentRuntimeContext?: AiTranscriptEventOf<'agent_runtime_context'>
+  agentRuntimeGovernance?: AgentRuntimeGovernanceSnapshot
 }>()
 
 const { t } = useI18n()
@@ -161,6 +164,47 @@ const gatewayHealthTone = computed<Tone>(() => {
   return 'ok'
 })
 
+const agentRuntimeContextSummary = computed(() => {
+  const data = props.agentRuntimeContext?.payload.data
+  if (!data) return null
+  return [
+    { label: 'Agent 分配', value: data.assignmentCount },
+    { label: '阻塞任务', value: data.blockedCount },
+    { label: '验证风险', value: data.verificationRisk },
+    { label: '验证命令', value: data.verificationCommandCount },
+    { label: '验证门禁', value: data.verificationGateStatus ?? 'unknown' },
+    { label: '可完成', value: data.verificationSafeToComplete ? '是' : '否' },
+    { label: '缺验证', value: data.verificationMissingCommandCount ?? 0 },
+    { label: '失败验证', value: data.verificationFailedCommandCount ?? 0 },
+    { label: '隔离边界', value: data.isolationBoundaryCount },
+    { label: '需合并', value: data.isolationMergeRequiredCount ?? 0 },
+    { label: '隔离阻塞', value: data.isolationBlockedCount ?? 0 },
+    { label: 'Worktree', value: data.isolationWorktreeCount ?? 0 },
+    { label: '临时空间', value: data.isolationTemporaryWorkspaceCount ?? 0 },
+    { label: '需审核', value: data.isolationReviewRequiredCount ?? 0 },
+    { label: '需确认动作', value: data.isolationConfirmationRequiredCount ?? 0 },
+    { label: '隔离门禁', value: data.isolationGateStatus ?? 'unknown' },
+    { label: '可自动执行', value: data.isolationSafeToAutoRun ? '是' : '否' },
+    { label: 'LSP 诊断', value: data.lspDiagnosticCount },
+  ]
+})
+
+const agentRuntimeContextData = computed(() => props.agentRuntimeContext?.payload.data ?? null)
+
+const agentRuntimeContextTone = computed<Tone>(() => {
+  const data = agentRuntimeContextData.value
+  if (!data) return 'ok'
+  if (data.blockedCount > 0 || data.verificationRisk === 'high' || data.verificationGateStatus === 'block') return 'danger'
+  if (data.warningCount > 0 || data.verificationRisk === 'medium' || data.verificationGateStatus === 'warn' || data.lspDiagnosticCount > 0) return 'warn'
+  return 'ok'
+})
+
+const agentRuntimeGovernanceTone = computed<Tone>(() => {
+  if (props.agentRuntimeGovernance?.status === 'critical') return 'danger'
+  if (props.agentRuntimeGovernance?.status === 'watch') return 'warn'
+  return 'ok'
+})
+
 const sessionHistorySummary = computed(() =>
   props.metrics.sessionHistory
     .slice()
@@ -231,6 +275,8 @@ const exportPayload = computed(() => JSON.stringify({
   sessionHistory: props.metrics.sessionHistory,
   errorBreakdown: props.metrics.errorBreakdown,
   gateway: gatewaySnapshot.value,
+  agentRuntimeContext: props.agentRuntimeContext?.payload.data,
+  agentRuntimeGovernance: props.agentRuntimeGovernance,
 }, null, 2))
 
 onMounted(() => {
@@ -441,6 +487,115 @@ function formatDelta(value: number | null): string {
             <div v-if="metrics.errorBreakdown.length === 0" class="text-[11px] text-muted-foreground/55">
               {{ t('ai.diagnostics.noErrors') }}
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div
+        v-if="agentRuntimeContextSummary"
+        class="rounded-lg border px-3 py-3"
+        :class="toneClass(agentRuntimeGovernance ? agentRuntimeGovernanceTone : agentRuntimeContextTone)"
+      >
+        <div class="mb-2 flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 text-muted-foreground/70">
+            <Activity class="h-3.5 w-3.5" />
+            <span class="text-[10px] uppercase tracking-[0.16em]">P2 Agent Runtime</span>
+          </div>
+          <span class="rounded-full bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground">
+            {{ toneLabel(agentRuntimeGovernance ? agentRuntimeGovernanceTone : agentRuntimeContextTone) }}
+          </span>
+        </div>
+        <div class="grid gap-x-4 gap-y-2 md:grid-cols-6">
+          <div
+            v-for="item in agentRuntimeContextSummary"
+            :key="item.label"
+            class="flex items-center justify-between gap-2 text-[11px]"
+          >
+            <span class="text-muted-foreground/65">{{ item.label }}</span>
+            <span class="font-mono text-foreground/85">{{ item.value }}</span>
+          </div>
+        </div>
+        <div class="mt-2 text-[11px] text-muted-foreground/65">
+          {{ agentRuntimeContextData?.lspSummary }}
+        </div>
+        <div v-if="agentRuntimeGovernance" class="mt-2 grid gap-x-4 gap-y-2 md:grid-cols-6">
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">治理上下文</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.contextCount }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">最高阻塞</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.maxBlockedCount }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">隔离阻塞</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.maxIsolationBlockedCount }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">合并审核</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.maxIsolationMergeRequiredCount }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">Worktree</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.maxIsolationWorktreeCount ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">临时空间</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.maxIsolationTemporaryWorkspaceCount ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">需审核</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.maxIsolationReviewRequiredCount ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">需确认动作</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.maxIsolationConfirmationRequiredCount ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">最高 LSP</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.maxLspDiagnosticCount }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">高风险次数</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.highRiskCount }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">门禁阻塞</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.verificationBlockedCount ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">门禁警告</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.verificationWarningCount ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">最多缺验证</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.maxVerificationMissingCommandCount ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">最多失败验证</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.maxVerificationFailedCommandCount ?? 0 }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-2 text-[11px]">
+            <span class="text-muted-foreground/65">治理警告</span>
+            <span class="font-mono text-foreground/85">{{ agentRuntimeGovernance.warningCount }}</span>
+          </div>
+        </div>
+        <div v-if="agentRuntimeGovernance?.recommendations.length" class="mt-2 space-y-1">
+          <div
+            v-for="recommendation in agentRuntimeGovernance.recommendations"
+            :key="recommendation"
+            class="rounded border border-sky-500/20 bg-sky-500/8 px-2 py-1 text-[10px] text-sky-200/85"
+          >
+            {{ recommendation }}
+          </div>
+        </div>
+        <div v-if="agentRuntimeContextData && agentRuntimeContextData.warnings.length > 0" class="mt-2 space-y-1">
+          <div
+            v-for="warning in agentRuntimeContextData.warnings"
+            :key="warning"
+            class="rounded border border-amber-500/20 bg-amber-500/8 px-2 py-1 text-[10px] text-amber-300/85"
+          >
+            {{ warning }}
           </div>
         </div>
       </div>

@@ -2,6 +2,51 @@
 
 ---
 
+## 15. 阶段五 Workspace Isolation Backend Executor 更新（2026-05-02）
+
+状态：✅ 后端最小闭环已落地。Workspace Isolation 已从“前端计划 / 写入前 Guard / UI 门禁”推进到 Tauri 后端真实执行能力，可准备隔离工作区、检查 Diff、回放临时空间变更和清理执行空间。
+
+本轮落地：
+- ✅ 新增 Tauri 隔离命令：`workspace_isolation_validate_path`、`workspace_isolation_prepare`、`workspace_isolation_diff`、`workspace_isolation_apply_changes`、`workspace_isolation_cleanup`。
+- ✅ `temporary` 模式只允许在仓库内 `.devforge/tmp/agents/*` 创建执行空间；按 `allowedPaths` 复制上下文，按 `blockedPaths` 排除敏感路径，并写入 manifest / sha256 基线。
+- ✅ `worktree` 模式只允许在仓库内 `.devforge/worktrees/*` 创建 Git worktree；分支名和目标路径做安全校验。
+- ✅ Diff 能返回新增、修改、删除摘要；临时空间支持人工确认后回放 allowedPaths 内变更，Worktree 不自动合并，保留给 Git 审核流程。
+- ✅ `AiSpawnedTasksPanel` 已接入“准备 / Diff / 回放 / 清理”操作区，`AiChatView` 持有状态并负责危险动作确认。
+- ✅ Diff 审查门禁已补强：任务面板展示前 5 个变更文件和状态；临时空间回放前必须先生成最新 Diff，确认弹窗展示摘要和文件预览，避免用户盲目覆盖。
+- ✅ 回放前接入 Verification Gate：最近验证失败会阻断临时空间回放；缺少完整通过证据时必须额外确认，降低未经验证的变更进入主工作区的风险。
+- ✅ 隔离验证入口已接入：任务面板可直接对隔离目录提交 Verification Job，验证任务带 `workspaceIsolationTaskId` metadata，回放门禁优先读取对应任务的隔离验证证据。
+- ✅ 隔离运行纯逻辑已从 `AiChatView` 下沉到 `workspaceIsolationRuntime.ts`：Diff 摘要、文件预览、任务级验证 Job 选择、验证命令生成和 Verification Gate 计算可独立测试。
+- ✅ 隔离动作编排已继续下沉到 `workspaceIsolationRuntimeService.ts`：准备、Diff、验证、回放、清理的状态更新和通知副作用从 `AiChatView` 收敛到独立 service。
+- ✅ 隔离 runtime controller 已补齐到 `workspaceIsolationRuntimeController.ts`：统一处理 runtime context 缺失、动作转发和 prepare 返回值，`AiChatView` 的隔离事件处理函数只保留薄接线。
+- ✅ 子任务 Multi-Agent 分配与 Workspace Isolation 执行计划已收敛到 `spawnedTaskIsolationPlan.ts`：`AiSpawnedTasksPanel`、`AiChatView` 和 `advancedAgentRuntime` 复用同一套 assignment / boundary / execution plan 构建逻辑，避免三处策略漂移。
+- ✅ 子任务隔离运行门禁已下沉到 `spawnedTaskRuntimeGate.ts`：隔离关闭放行、门禁确认、阻塞提示和自动运行拦截文案可独立测试，`AiChatView` 只保留 UI 确认与调度接线。
+- ✅ 子任务运行前隔离空间准备决策也已收敛到 `spawnedTaskRuntimeGate.ts`：已准备、无隔离计划、不支持模式和需准备的确认文案统一生成，页面不再手写 mode/path 判断。
+- ✅ 子任务 tab/headless 启动元数据已下沉到 `spawnedTaskRuntime.ts`：tab/session id、tab meta、自动启动 payload、headless workDir、ready 任务筛选、批量准备顺序、retry/done/cancel 元数据、task tab 终态同步可独立测试，降低隔离目录回归风险。
+- ✅ 准备成功后会把隔离目录写回子任务元数据；`headless` 子任务和 `tab` 子任务都会优先在该隔离目录作为 `workDir` 执行；手动运行未准备的隔离任务时会先确认并准备隔离空间。
+- ✅ 已补充后端 Rust 单测与前端 API / 面板接线测试。
+
+当前边界：
+- ⚠️ 后端执行器仍是“人工触发 + 安全最小闭环”，当前只在用户准备隔离空间后切换子任务工作目录，不会自动创建/启动/合并 Worktree。
+- ⚠️ `temporary` 复制为受控文件复制，不是完整沙箱；后续如要运行命令，应继续接入独立进程、权限策略和资源限制。
+- ⚠️ Worktree 合并回主工作区需要单独做 Patch Review / Verification / 二次确认闭环，不能直接自动 merge。
+
+验证结果：
+- ✅ `cargo test --manifest-path src-tauri\Cargo.toml workspace_isolation`
+- ✅ `cargo check --manifest-path src-tauri\Cargo.toml`
+- ✅ `pnpm test:typecheck`
+- ✅ `pnpm vitest run src/api/workspace-isolation.test.ts src/components/ai/__tests__/AiSpawnedTasksPanel.test.ts`
+- ✅ `pnpm vitest run src/views/__tests__/AiChatView.interaction.test.ts src/components/ai/__tests__/AiSpawnedTasksPanel.test.ts src/api/workspace-isolation.test.ts`
+- ✅ `pnpm vitest run src/components/ai/__tests__/AiSpawnedTasksPanel.test.ts src/views/__tests__/AiChatView.interaction.test.ts src/composables/__tests__/useVerificationJob.test.ts src/api/workspace-isolation.test.ts src/components/ai/__tests__/AiPatchReviewPanel.test.ts src/ai-gui/__tests__/verificationGate.test.ts src/ai-gui/__tests__/verificationAgent.test.ts`
+- ✅ `pnpm vitest run src/ai-gui/__tests__/workspaceIsolationRuntime.test.ts src/ai-gui/__tests__/workspaceIsolationPlan.test.ts src/ai-gui/__tests__/verificationGate.test.ts src/ai-gui/__tests__/verificationAgent.test.ts src/views/__tests__/AiChatView.interaction.test.ts src/components/ai/__tests__/AiSpawnedTasksPanel.test.ts src/composables/__tests__/useVerificationJob.test.ts src/api/workspace-isolation.test.ts`
+- ✅ `pnpm vitest run src/ai-gui/__tests__/workspaceIsolationRuntimeService.test.ts src/ai-gui/__tests__/workspaceIsolationRuntime.test.ts src/ai-gui/__tests__/workspaceIsolationPlan.test.ts src/ai-gui/__tests__/verificationGate.test.ts src/ai-gui/__tests__/verificationAgent.test.ts src/views/__tests__/AiChatView.interaction.test.ts src/components/ai/__tests__/AiSpawnedTasksPanel.test.ts src/composables/__tests__/useVerificationJob.test.ts src/api/workspace-isolation.test.ts`
+- ✅ `pnpm vitest run src/ai-gui/__tests__/spawnedTaskIsolationPlan.test.ts src/ai-gui/__tests__/advancedAgentRuntime.test.ts src/components/ai/__tests__/AiSpawnedTasksPanel.test.ts src/views/__tests__/AiChatView.interaction.test.ts`
+- ✅ `pnpm vitest run src/ai-gui/__tests__/spawnedTaskRuntimeGate.test.ts src/ai-gui/__tests__/spawnedTaskIsolationPlan.test.ts src/ai-gui/__tests__/advancedAgentRuntime.test.ts src/views/__tests__/AiChatView.interaction.test.ts`
+- ✅ `pnpm vitest run src/ai-gui/__tests__/spawnedTaskRuntimeGate.test.ts src/views/__tests__/AiChatView.interaction.test.ts`
+- ✅ `pnpm vitest run src/ai-gui/__tests__/workspaceIsolationRuntimeController.test.ts src/ai-gui/__tests__/workspaceIsolationRuntimeService.test.ts src/views/__tests__/AiChatView.interaction.test.ts`
+- ✅ `pnpm vitest run src/ai-gui/__tests__/spawnedTaskRuntime.test.ts src/views/__tests__/AiChatView.interaction.test.ts src/composables/__tests__/chatTaskDispatcher.test.ts`
+
+---
+
 ## 14. 当前阶段差异复核与最新状态（2026-04-29）
 
 状态：✅ 已按当前代码重新核对阶段一至阶段五。文档中早期“待实现/部分完成”的条目，有一部分已经在后续迭代中落地；剩余差异主要集中在后端化、Profile 化、真实 LSP 与多 Agent 协作深度上。

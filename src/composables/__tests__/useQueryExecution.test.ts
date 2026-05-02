@@ -100,6 +100,181 @@ describe('useQueryExecution', () => {
     })
   })
 
+  it('普通查询执行前清空旧 tableBrowse 与结果标签，避免沿用表浏览状态', async () => {
+    const addResultTab = vi.fn()
+    const { execution, workspaceStore, tabId } = setupQueryExecution({ addResultTab })
+
+    workspaceStore.updateTabContext('conn-1', tabId, {
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 2,
+        pageSize: 200,
+      },
+      resultTabs: [{
+        id: 'tab-1',
+        title: '结果 1',
+        result: makeQueryResult([[1]]),
+        sql: 'SELECT * FROM users',
+        isPinned: false,
+        createdAt: 1,
+      }],
+      activeResultTabId: 'tab-1',
+    })
+
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === 'db_execute_query_stream_on_session') {
+        throw new Error('stream unsupported')
+      }
+      if (command === 'db_execute_query_on_session') {
+        return makeQueryResult([[1]])
+      }
+      throw new Error(`unmocked command: ${command}`)
+    })
+
+    const result = await execution.handleExecute('SELECT 1')
+    const ctx = workspaceStore.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+
+    expect(result.success).toBe(true)
+    expect(ctx.tableBrowse).toBeUndefined()
+    expect(ctx.resultTabs).toEqual([])
+    expect(ctx.activeResultTabId).toBeUndefined()
+    expect(addResultTab).toHaveBeenCalledWith('SELECT 1', expect.objectContaining({ rows: [[1]] }))
+  })
+
+  it('USE 成功时只切库，不清空现有 tableBrowse 与结果标签', async () => {
+    const { execution, workspaceStore, tabId } = setupQueryExecution()
+
+    workspaceStore.updateTabContext('conn-1', tabId, {
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 2,
+        pageSize: 200,
+      },
+      resultTabs: [{
+        id: 'tab-1',
+        title: '结果 1',
+        result: makeQueryResult([[1]]),
+        sql: 'SELECT * FROM users',
+        isPinned: false,
+        createdAt: 1,
+      }],
+      activeResultTabId: 'tab-1',
+    })
+
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === 'db_switch_database') {
+        return true
+      }
+      throw new Error(`unmocked command: ${command}`)
+    })
+
+    const result = await execution.handleExecute('USE analytics;')
+    const ctx = workspaceStore.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+
+    expect(result.success).toBe(true)
+    expect(ctx.currentDatabase).toBe('analytics')
+    expect(ctx.tableBrowse).toEqual({
+      database: 'demo',
+      table: 'users',
+      currentPage: 2,
+      pageSize: 200,
+    })
+    expect(ctx.activeResultTabId).toBe('tab-1')
+  })
+
+  it('表浏览刷新时清空旧结果标签并重置 activeResultTabId，避免沿用普通查询结果页', async () => {
+    const { execution, workspaceStore, tabId } = setupQueryExecution()
+
+    workspaceStore.updateTabContext('conn-1', tabId, {
+      result: makeQueryResult([[1], [2]]),
+      tableBrowse: {
+        database: 'demo',
+        table: 'users',
+        currentPage: 2,
+        pageSize: 200,
+      },
+      resultTabs: [{
+        id: 'tab-1',
+        title: '结果 1',
+        result: makeQueryResult([[99]]),
+        sql: 'SELECT 99',
+        isPinned: false,
+        createdAt: 1,
+      }],
+      activeResultTabId: 'tab-1',
+    })
+
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === 'db_get_table_data') {
+        return makeQueryResult([[3]])
+      }
+      if (command === 'db_list_table_indexes') {
+        return [{ columnName: 'id', unique: true, seqInIndex: 1 }]
+      }
+      throw new Error(`unmocked command: ${command}`)
+    })
+
+    execution.handleRefresh('SELECT ignored')
+    await vi.waitFor(() => {
+      const ctx = workspaceStore.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+      expect(ctx.isExecuting).toBe(false)
+      expect(ctx.result.rows).toEqual([[3]])
+    })
+
+    const ctx = workspaceStore.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+    expect(ctx.resultTabs).toEqual([])
+    expect(ctx.activeResultTabId).toBeUndefined()
+    expect(ctx.tableBrowse).toMatchObject({
+      database: 'demo',
+      table: 'users',
+      currentPage: 1,
+      pageSize: 200,
+    })
+  })
+
+  it('普通查询刷新时复用统一执行重置语义，清空旧 tableBrowse', async () => {
+    const addResultTab = vi.fn()
+    const { execution, workspaceStore, tabId } = setupQueryExecution({ addResultTab })
+
+    workspaceStore.updateTabContext('conn-1', tabId, {
+      result: makeQueryResult([[1]]),
+      resultTabs: [{
+        id: 'tab-1',
+        title: '结果 1',
+        result: makeQueryResult([[99]]),
+        sql: 'SELECT 99',
+        isPinned: false,
+        createdAt: 1,
+      }],
+      activeResultTabId: 'tab-1',
+    })
+
+    vi.mocked(invoke).mockImplementation(async (command: string) => {
+      if (command === 'db_execute_query_stream_on_session') {
+        throw new Error('stream unsupported')
+      }
+      if (command === 'db_execute_query_on_session') {
+        return makeQueryResult([[5]])
+      }
+      throw new Error(`unmocked command: ${command}`)
+    })
+
+    execution.handleRefresh('SELECT 5')
+    await vi.waitFor(() => {
+      const ctx = workspaceStore.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+      expect(ctx.isExecuting).toBe(false)
+      expect(ctx.result.rows).toEqual([[5]])
+    })
+
+    const ctx = workspaceStore.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+    expect(ctx.tableBrowse).toBeUndefined()
+    expect(ctx.resultTabs).toEqual([])
+    expect(ctx.activeResultTabId).toBeUndefined()
+    expect(addResultTab).toHaveBeenCalledWith('SELECT 5', expect.objectContaining({ rows: [[5]] }))
+  })
+
   it('reconnects, reacquires the tab session, and retries once after an idle disconnect error', async () => {
     const disconnectError = 'error communicating with database: os error 10054'
     vi.mocked(invoke).mockImplementation(async (command: string, args?: any) => {

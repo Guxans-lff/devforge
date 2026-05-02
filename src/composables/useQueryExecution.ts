@@ -420,6 +420,17 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     store.updateTabContext(connectionId.value, tabId.value, { result })
   }
 
+  function resetExecutionState(partial: Partial<QueryTabContext> = {}) {
+    store.updateTabContext(connectionId.value, tabId.value, {
+      isExecuting: true,
+      result: null,
+      tableBrowse: undefined,
+      resultTabs: [],
+      activeResultTabId: undefined,
+      ...partial,
+    })
+  }
+
   // ===== 长耗时通知 =====
   let longRunningDelayTimer: ReturnType<typeof setTimeout> | null = null
   let longRunningUpdateTimer: ReturnType<typeof setInterval> | null = null
@@ -548,9 +559,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     const currentExecVersion = ++executeVersion
     explainAnalysis.showExplain.value = false
     startExecutionTimer()
-    store.updateTabContext(connectionId.value, tabId.value, {
-      isExecuting: true, result: null, tableBrowse: undefined, activeResultTabId: undefined,
-    })
+    resetExecutionState()
 
     const startTime = Date.now()
 
@@ -725,9 +734,7 @@ export function useQueryExecution(options: UseQueryExecutionOptions) {
     }
 
     // 清除旧状态
-    store.updateTabContext(connectionId.value, tabId.value, {
-      isExecuting: true, result: null, tableBrowse: undefined, activeResultTabId: undefined,
-    })
+    resetExecutionState()
 
     const startTime = Date.now()
 

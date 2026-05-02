@@ -119,6 +119,7 @@ function isTranscriptType(value: unknown): value is AiTranscriptEventType {
     'plan_status',
     'usage',
     'routing',
+    'agent_runtime_context',
   ].includes(value)
 }
 

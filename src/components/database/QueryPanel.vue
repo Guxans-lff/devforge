@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, toRef } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, toRef } from 'vue'
 import { Splitpanes, Pane } from 'splitpanes'
 import SqlEditor from '@/components/database/SqlEditorLazy.vue'
 import SqlSnippetPanel from '@/components/database/SqlSnippetPanel.vue'
@@ -122,10 +122,40 @@ const hasMoreServerRows = computed(() => {
 })
 
 const currentBrowseDb = computed(() => tabContext.value?.tableBrowse?.database)
+function hasPendingBrowse(ctx?: QueryTabContext): ctx is QueryTabContext & { tableBrowse: NonNullable<QueryTabContext['tableBrowse']> } {
+  if (!ctx?.tableBrowse || ctx.result || ctx.isExecuting) return false
+  if (ctx.currentDatabase && ctx.currentDatabase !== ctx.tableBrowse.database) return false
+
+  const browseSql = `SELECT * FROM \`${ctx.tableBrowse.database}\`.\`${ctx.tableBrowse.table}\`;`
+  return ctx.sql.trim() === browseSql
+}
+
 const currentBrowseTable = computed(() => tabContext.value?.tableBrowse?.table)
+const pendingBrowseRecoveryKey = computed(() => {
+  const ctx = tabContext.value
+  if (!hasPendingBrowse(ctx)) return null
+  return [
+    props.isConnected ? '1' : '0',
+    ctx.tableBrowse.database,
+    ctx.tableBrowse.table,
+    ctx.tableBrowse.whereClause ?? '',
+    ctx.tableBrowse.orderBy ?? '',
+    ctx.sql.trim(),
+  ].join('::')
+})
 
 // ===== Snippet 面板 =====
 const snippetPanelOpen = ref(false)
+
+const sessionAcquireKey = computed(() => {
+  if (!props.isConnected) return null
+  return `${props.connectionId}::${props.tabId}`
+})
+
+const sessionReleaseKey = computed(() => {
+  if (props.isConnected) return null
+  return `${props.connectionId}::${props.tabId}`
+})
 
 // ===== SQL 执行入口 =====
 
@@ -240,48 +270,33 @@ watch(execution.pendingExecuteSql, (sql) => {
 // ===== Session 生命周期管理 =====
 onMounted(() => {
   document.addEventListener('click', resultTabsManager.closeContextMenu)
-  if (props.isConnected) {
-    dbApi.dbAcquireSession(props.connectionId, props.tabId).catch((e) => {
-      log.warn('session_acquire_failed_fallback', undefined, e)
-    })
-  }
-  // 挂载时检查：如果 context 中有 tableBrowse 但没有 result，说明需要执行 browseTable
-  checkPendingBrowse()
 })
 
-// KeepAlive 激活时也检查 pending browseTable
-onActivated(() => {
-  checkPendingBrowse()
-})
+watch(sessionAcquireKey, (key, prevKey) => {
+  if (!key || key === prevKey) return
+  dbApi.dbAcquireSession(props.connectionId, props.tabId).catch((e) => {
+    log.warn('session_acquire_failed_fallback', undefined, e)
+  })
+}, { immediate: true })
 
-function hasPendingBrowse(ctx?: QueryTabContext): ctx is QueryTabContext & { tableBrowse: NonNullable<QueryTabContext['tableBrowse']> } {
-  if (!ctx?.tableBrowse || ctx.result || ctx.isExecuting) return false
-  if (ctx.currentDatabase && ctx.currentDatabase !== ctx.tableBrowse.database) return false
+watch(sessionReleaseKey, (key, prevKey) => {
+  if (!key || key === prevKey) return
+  dbApi.dbReleaseSession(props.connectionId, props.tabId).catch((e: unknown) => {
+    log.warn('release_session_failed', undefined, e)
+  })
+}, { immediate: true })
 
-  const browseSql = `SELECT * FROM \`${ctx.tableBrowse.database}\`.\`${ctx.tableBrowse.table}\`;`
-  return ctx.sql.trim() === browseSql
-}
-
-/** 检查 context 中是否有待执行的 tableBrowse（仅恢复明确的表浏览待执行态） */
-function checkPendingBrowse() {
+watch(pendingBrowseRecoveryKey, (key, prevKey) => {
+  if (!props.isConnected || !key || key === prevKey) return
   const ctx = tabContext.value
-  if (!hasPendingBrowse(ctx)) return
+  if (!ctx?.tableBrowse) return
 
   execution.browseTable(ctx.tableBrowse.database, ctx.tableBrowse.table, ctx.tableBrowse.whereClause, ctx.tableBrowse.orderBy)
-}
+}, { immediate: true })
 
 onBeforeUnmount(() => {
   document.removeEventListener('click', resultTabsManager.closeContextMenu)
-  dbApi.dbReleaseSession(props.connectionId, props.tabId).catch((e: unknown) => log.warn('release_session_failed', undefined, e))
   execution.clearLongRunningNotify()
-})
-
-watch(() => props.isConnected, (connected) => {
-  if (connected) {
-    dbApi.dbAcquireSession(props.connectionId, props.tabId).catch((e) => {
-      log.warn('reconnect_session_acquire_failed', undefined, e)
-    })
-  }
 })
 </script>
 

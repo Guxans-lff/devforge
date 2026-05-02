@@ -140,6 +140,11 @@ async function loadMoreRows() {
       ctx.seekColumn,
       typeof ctx.seekValue === 'number' ? ctx.seekValue : undefined,
     )
+
+    const latestBrowse = currentTableBrowse.value
+    if (!latestBrowse || latestBrowse.database !== ctx.database || latestBrowse.table !== ctx.table) return
+    if (!result.value) return
+
     if (more.rows.length > 0) {
       result.value = {
         ...result.value,
@@ -148,7 +153,7 @@ async function loadMoreRows() {
       }
       syncTableBrowse({
         currentPage: nextPage,
-        seekValue: extractNumericCursorValue(more.rows, more.columns, ctx.seekColumn) ?? ctx.seekValue,
+        seekValue: extractNumericCursorValue(more.rows, more.columns, latestBrowse.seekColumn) ?? latestBrowse.seekValue,
       })
     }
   } catch (_e) {

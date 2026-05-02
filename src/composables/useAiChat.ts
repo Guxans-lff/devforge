@@ -27,6 +27,13 @@ import {
 import { executeToolCalls as runToolCalls } from '@/composables/ai/chatToolExecution'
 import { resolveStreamWatchdogConfig } from '@/composables/ai/chatHelpers'
 import { buildPermissionRuleSet, type PermissionRuleConfig } from '@/ai-gui/permissionRules'
+import {
+  buildAdvancedAgentRuntimeContext,
+  buildAdvancedAgentRuntimePayload,
+  createAdvancedAgentRuntimePayloadSignature,
+} from '@/ai-gui/advancedAgentRuntime'
+import { buildAdvancedAgentGovernanceSnapshot } from '@/ai-gui/advancedAgentGovernance'
+import type { ParsedVerificationReport } from '@/ai-gui/verificationReport'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { useAiMemoryStore } from '@/stores/ai-memory'
 import { useSettingsStore } from '@/stores/settings'
@@ -50,6 +57,8 @@ export interface UseAiChatOptions {
   sessionId: MaybeRef<string>
   scrollContainer?: Ref<HTMLElement | null>
   scrollToBottom?: () => void
+  getVerificationReport?: () => ParsedVerificationReport | null
+  isVerificationRunning?: () => boolean
 }
 
 export interface AiChatRequestOptions {
@@ -135,6 +144,7 @@ export function useAiChat(options: UseAiChatOptions) {
   let loadSeq = 0
   let lastLoadedHistoryKey = ''
   let streamingMessageIndex = -1
+  let lastAdvancedRuntimeContextSignature = ''
 
   const toolFailureCounter = new Map<string, number>()
   const sessionPermissionRules = ref<PermissionRuleConfig[]>([])
@@ -164,6 +174,40 @@ export function useAiChat(options: UseAiChatOptions) {
     void transcriptEventsVersion.value
     const sid = sessionIdRef.value
     return sid ? transcriptStore.getEventCount(sid) : 0
+  })
+  const latestAgentRuntimeContextEvent = computed(() => {
+    void transcriptEventsVersion.value
+    const sid = sessionIdRef.value
+    return sid ? transcriptStore.getLatestEvent(sid, 'agent_runtime_context') : undefined
+  })
+  const agentRuntimeGovernance = computed(() => {
+    void transcriptEventsVersion.value
+    const sid = sessionIdRef.value
+    const events = sid ? transcriptStore.getEventsByType(sid, ['agent_runtime_context']) : []
+    return buildAdvancedAgentGovernanceSnapshot(events.map(event => ({
+      timestamp: event.timestamp,
+      assignmentCount: event.payload.data.assignmentCount,
+      blockedCount: event.payload.data.blockedCount,
+      warningCount: event.payload.data.warningCount,
+      verificationRisk: event.payload.data.verificationRisk,
+      verificationCommandCount: event.payload.data.verificationCommandCount,
+      verificationGateStatus: event.payload.data.verificationGateStatus,
+      verificationSafeToComplete: event.payload.data.verificationSafeToComplete,
+      verificationMissingCommandCount: event.payload.data.verificationMissingCommandCount,
+      verificationFailedCommandCount: event.payload.data.verificationFailedCommandCount,
+      isolationBoundaryCount: event.payload.data.isolationBoundaryCount,
+      isolationMergeRequiredCount: event.payload.data.isolationMergeRequiredCount,
+      isolationBlockedCount: event.payload.data.isolationBlockedCount,
+      isolationWorktreeCount: event.payload.data.isolationWorktreeCount,
+      isolationTemporaryWorkspaceCount: event.payload.data.isolationTemporaryWorkspaceCount,
+      isolationReviewRequiredCount: event.payload.data.isolationReviewRequiredCount,
+      isolationConfirmationRequiredCount: event.payload.data.isolationConfirmationRequiredCount,
+      isolationGateStatus: event.payload.data.isolationGateStatus,
+      isolationSafeToAutoRun: event.payload.data.isolationSafeToAutoRun,
+      lspDiagnosticCount: event.payload.data.lspDiagnosticCount,
+      lspSummary: event.payload.data.lspSummary,
+      warnings: event.payload.data.warnings,
+    })))
   })
 
   const totalTokens = computed(() => {
@@ -478,6 +522,7 @@ export function useAiChat(options: UseAiChatOptions) {
           session: sessionPermissionRules.value,
         }),
       },
+      workspaceIsolation: aiStore.currentWorkspaceConfig?.workspaceIsolation,
     })
     observability.recordToolRun(toolCalls, results)
     transcriptEventsVersion.value += results.length
@@ -501,6 +546,56 @@ export function useAiChat(options: UseAiChatOptions) {
     const tasks = collectSpawnedTasks(text, { sourceMessageId })
     if (tasks.length === 0) return
     spawnedTasks.value = [...spawnedTasks.value, ...tasks]
+    void appendAdvancedRuntimeContextEvent()
+  }
+
+  function extractRuntimeContextChangedFiles(): string[] {
+    const fromTasks = spawnedTasks.value
+      .flatMap(task => task.description.match(/(?:src|docs|src-tauri|tests|packages|apps)\/[A-Za-z0-9_./*-]+/g) ?? [])
+    const fromOperations = messages.value
+      .flatMap(message => message.toolCalls ?? [])
+      .filter(toolCall => (toolCall.name === 'write_file' || toolCall.name === 'edit_file') && typeof toolCall.parsedArgs?.path === 'string')
+      .map(toolCall => String(toolCall.parsedArgs?.path))
+    return [...new Set([...fromTasks, ...fromOperations].map(path => path.replace(/\\/g, '/')))]
+  }
+
+  async function appendAdvancedRuntimeContextEvent(): Promise<void> {
+    const sid = sessionIdRef.value
+    if (!sid || spawnedTasks.value.length === 0) return
+
+    try {
+      const context = await buildAdvancedAgentRuntimeContext({
+        sessionId: sid,
+        tasks: spawnedTasks.value,
+        changedFiles: extractRuntimeContextChangedFiles(),
+        workspaceIsolation: aiStore.currentWorkspaceConfig?.workspaceIsolation,
+        verificationReport: options.getVerificationReport?.() ?? null,
+        verifying: options.isVerificationRunning?.() ?? false,
+        maxAgents: aiStore.currentWorkspaceConfig?.dispatcherMaxParallel,
+      })
+      const payload = buildAdvancedAgentRuntimePayload(context)
+      const signature = createAdvancedAgentRuntimePayloadSignature(payload)
+      if (signature === lastAdvancedRuntimeContextSignature) return
+      lastAdvancedRuntimeContextSignature = signature
+
+      transcriptStore.appendEvent({
+        sessionId: sid,
+        turnId: agentRuntime.state.value.turnId || undefined,
+        type: 'agent_runtime_context',
+        timestamp: Date.now(),
+        payload: {
+          type: 'agent_runtime_context',
+          data: payload,
+        },
+      })
+      transcriptEventsVersion.value += 1
+    } catch (error) {
+      log.warn('advanced_runtime_context_failed', { sessionId: sid }, error)
+    }
+  }
+
+  function refreshAdvancedRuntimeContext(): void {
+    void appendAdvancedRuntimeContextEvent()
   }
 
   async function loadHistory(overrideSessionId?: string, options?: { windowSize?: number }): Promise<void> {
@@ -753,6 +848,7 @@ export function useAiChat(options: UseAiChatOptions) {
     historyTotalRecords.value = 0
     historyWindowSize.value = HISTORY_RECENT_RECORD_LIMIT
     lastLoadedHistoryKey = ''
+    lastAdvancedRuntimeContextSignature = ''
     invalidateChatHistoryCache(sessionIdRef.value)
     streamState.streamingMessageId = ''
     streamingMessageIndex = -1
@@ -874,6 +970,9 @@ export function useAiChat(options: UseAiChatOptions) {
     turnState: agentRuntime.state,
     transcriptEvents,
     transcriptEventCount,
+    latestAgentRuntimeContextEvent,
+    agentRuntimeGovernance,
+    refreshAdvancedRuntimeContext,
     sessionPermissionRules,
     addSessionPermissionRule,
     removeSessionPermissionRule,

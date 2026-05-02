@@ -36,6 +36,12 @@ function formatReport(report: VerificationReport): string {
   return [header, ...details].join('\n\n---\n\n').slice(0, 6000)
 }
 
+export interface SubmitVerificationJobOptions {
+  title?: string
+  contextSummary?: string
+  meta?: Record<string, unknown>
+}
+
 export function useVerificationJob() {
   const store = useBackgroundJobStore()
   const worker = useJobWorker()
@@ -95,8 +101,13 @@ export function useVerificationJob() {
     })
   })
 
-  async function submitVerificationJob(sessionId: string, workDir: string, commands: VerificationCommand[]): Promise<string> {
-    const jobId = await store.submitVerificationJob(sessionId)
+  async function submitVerificationJob(
+    sessionId: string,
+    workDir: string,
+    commands: VerificationCommand[],
+    options?: SubmitVerificationJobOptions,
+  ): Promise<string> {
+    const jobId = await store.submitVerificationJob(sessionId, options)
     void worker.dispatch(jobId, 'verification', sessionId, { workDir, commands }, { timeoutMs: 10 * 60 * 1000 })
     return jobId
   }

@@ -70,6 +70,12 @@ function matchesQuery(event: AiTranscriptEvent, query: string): boolean {
       return payload.data.trigger.toLowerCase().includes(lowerQuery)
     case 'routing':
       return payload.data.reason.toLowerCase().includes(lowerQuery)
+    case 'agent_runtime_context':
+      return (
+        payload.data.verificationRisk.toLowerCase().includes(lowerQuery)
+        || payload.data.lspSummary.toLowerCase().includes(lowerQuery)
+        || payload.data.warnings.some(warning => warning.toLowerCase().includes(lowerQuery))
+      )
     default:
       return false
   }
@@ -171,6 +177,16 @@ export function findErrors(store: TranscriptStore, sessionId: string): AiTranscr
     || (isTranscriptEvent(e, 'turn_end') && e.payload.data.status === 'error')
     || (isTranscriptEvent(e, 'tool_result') && !e.payload.data.success),
   )
+}
+
+/**
+ * Find the latest P2 Agent Runtime context event.
+ */
+export function findLatestAgentRuntimeContext(
+  store: TranscriptStore,
+  sessionId: string,
+): AiTranscriptEventOf<'agent_runtime_context'> | undefined {
+  return store.getLatestEvent(sessionId, 'agent_runtime_context')
 }
 
 /**

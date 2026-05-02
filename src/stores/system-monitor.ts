@@ -13,7 +13,6 @@ import type {
   HistoryPoint,
   ProcessFilter,
   ProcessSortField,
-  SortDirection,
 } from '@/types/system-monitor'
 import {
   getSystemInfo,
@@ -42,9 +41,6 @@ export const useSystemMonitorStore = defineStore('system-monitor', () => {
   // 内存历史数据
   const memoryHistoryUsed = ref<HistoryPoint[]>([])
   const memoryHistoryAvailable = ref<HistoryPoint[]>([])
-
-  // 网络速率计算
-  const lastNetworkData = ref<Map<string, { received: number; transmitted: number }>>(new Map())
 
   // ─────────────────────── 进程列表状态 ───────────────────────
 

@@ -29,6 +29,7 @@ use commands::feature_gate;
 use commands::git::{self as git_cmd, GitEngineState};
 use commands::screenshot::{self as screenshot_cmd, ScreenshotEngineState};
 use commands::workspace_fs::{self, FileWatcherState};
+use commands::workspace_isolation;
 use services::file_watcher::FileWatcher;
 use commands::table_editor;
 use commands::terminal_recorder::{self, TerminalRecorderState};
@@ -740,6 +741,12 @@ pub fn run() {
             workspace_fs::ws_watch_directory,
             workspace_fs::ws_unwatch_directory,
             workspace_fs::ws_get_git_status,
+            // Workspace isolation
+            workspace_isolation::workspace_isolation_validate_path,
+            workspace_isolation::workspace_isolation_prepare,
+            workspace_isolation::workspace_isolation_diff,
+            workspace_isolation::workspace_isolation_apply_changes,
+            workspace_isolation::workspace_isolation_cleanup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

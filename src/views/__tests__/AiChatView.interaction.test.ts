@@ -22,6 +22,11 @@ const mocks = vi.hoisted(() => ({
   dispatcher: null as any,
   setApprovalModeMock: vi.fn(),
   setActiveSessionIdMock: vi.fn(),
+  submitVerificationJobMock: vi.fn(),
+  workspaceIsolationPrepareMock: vi.fn(),
+  workspaceIsolationDiffMock: vi.fn(),
+  workspaceIsolationApplyChangesMock: vi.fn(),
+  workspaceIsolationCleanupMock: vi.fn(),
 }))
 
 vi.mock('@/composables/useAiChat', () => ({
@@ -54,7 +59,7 @@ vi.mock('@/stores/background-job', () => ({
 
 vi.mock('@/composables/useVerificationJob', () => ({
   useVerificationJob: () => ({
-    submitVerificationJob: vi.fn().mockResolvedValue('job-test'),
+    submitVerificationJob: mocks.submitVerificationJobMock,
     cancelVerificationJob: vi.fn(),
   }),
 }))
@@ -67,6 +72,43 @@ vi.mock('@/composables/useFileAttachment', () => ({
 vi.mock('@/api/connection', () => ({
   getCredential: mocks.getCredentialMock,
 }))
+
+vi.mock('@/api/workspace-isolation', () => ({
+  workspaceIsolationPrepare: mocks.workspaceIsolationPrepareMock,
+  workspaceIsolationDiff: mocks.workspaceIsolationDiffMock,
+  workspaceIsolationApplyChanges: mocks.workspaceIsolationApplyChangesMock,
+  workspaceIsolationCleanup: mocks.workspaceIsolationCleanupMock,
+}))
+
+function resetWorkspaceIsolationMocks(): void {
+  mocks.workspaceIsolationPrepareMock.mockResolvedValue({
+    repoPath: 'D:/Project/devforge',
+    workspacePath: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+    mode: 'temporary',
+    copiedFiles: 1,
+    skippedPaths: [],
+    reusedExisting: false,
+  })
+  mocks.workspaceIsolationDiffMock.mockResolvedValue({
+    repoPath: 'D:/Project/devforge',
+    workspacePath: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+    mode: 'temporary',
+    entries: [],
+    summary: { added: 0, modified: 0, deleted: 0, unchanged: 0 },
+  })
+  mocks.workspaceIsolationApplyChangesMock.mockResolvedValue({
+    repoPath: 'D:/Project/devforge',
+    workspacePath: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+    appliedFiles: 0,
+    deletedFiles: 0,
+    skippedPaths: [],
+  })
+  mocks.workspaceIsolationCleanupMock.mockResolvedValue({
+    workspacePath: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+    mode: 'temporary',
+    removed: true,
+  })
+}
 
 vi.mock('@/composables/ai/chatSessionRunner', () => ({
   runAiChatSessionTurn: (...args: unknown[]) => mocks.runAiChatSessionTurnMock(...args),
@@ -141,8 +183,42 @@ const AiSessionDrawerStub = defineComponent({
 
 const AiSpawnedTasksPanelStub = defineComponent({
   name: 'AiSpawnedTasksPanel',
-  emits: ['run', 'run-batch', 'retry', 'retry-batch', 'open', 'complete', 'cancel', 'cancel-batch', 'synthesize'],
-  setup(_props, { emit }) {
+  props: {
+    tasks: Array,
+  },
+  emits: [
+    'run',
+    'run-batch',
+    'retry',
+    'retry-batch',
+    'open',
+    'complete',
+    'cancel',
+    'cancel-batch',
+    'synthesize',
+    'isolation-prepare',
+    'isolation-diff',
+    'isolation-verify',
+    'isolation-apply',
+    'isolation-cleanup',
+  ],
+  setup(props, { emit }) {
+    const temporaryPlan = {
+      agentId: 'implementer-1',
+      taskId: 'task-1',
+      mode: 'temporary',
+      allowedPaths: ['src/**'],
+      blockedPaths: [],
+      reason: 'test',
+      mergeRequired: true,
+      requiresReview: false,
+      cleanupPolicy: 'delete_on_success',
+      workspace: {
+        slug: 'dispatcher-panel-implementer-1-task-1',
+        workspacePath: '.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+      },
+      actions: [],
+    }
     return () => h('div', { class: 'ai-spawned-tasks-panel-stub' }, [
       h('button', { class: 'run-task', onClick: () => emit('run', 'task-1') }, 'run-task'),
       h('button', { class: 'run-task-batch', onClick: () => emit('run-batch', ['task-1', 'task-2']) }, 'run-task-batch'),
@@ -152,6 +228,12 @@ const AiSpawnedTasksPanelStub = defineComponent({
       h('button', { class: 'cancel-task', onClick: () => emit('cancel', 'task-1') }, 'cancel-task'),
       h('button', { class: 'cancel-task-batch', onClick: () => emit('cancel-batch', ['task-1', 'task-2']) }, 'cancel-task-batch'),
       h('button', { class: 'synthesize-tasks', onClick: () => emit('synthesize') }, 'synthesize-tasks'),
+      h('button', { class: 'prepare-isolation', onClick: () => emit('isolation-prepare', 'task-1', temporaryPlan) }, 'prepare-isolation'),
+      h('button', { class: 'diff-isolation', onClick: () => emit('isolation-diff', 'task-1', temporaryPlan) }, 'diff-isolation'),
+      h('button', { class: 'verify-isolation', onClick: () => emit('isolation-verify', 'task-1', temporaryPlan) }, 'verify-isolation'),
+      h('button', { class: 'apply-isolation', onClick: () => emit('isolation-apply', 'task-1', temporaryPlan) }, 'apply-isolation'),
+      h('button', { class: 'cleanup-isolation', onClick: () => emit('isolation-cleanup', 'task-1', temporaryPlan) }, 'cleanup-isolation'),
+      h('span', { class: 'task-count' }, String((props.tasks as unknown[] | undefined)?.length ?? 0)),
     ])
   },
 })
@@ -354,6 +436,19 @@ function createChatMock(messages: AiMessage[] = []) {
     awaitingPlanApproval: ref(false),
     pendingPlan: ref(''),
     spawnedTasks: ref([]),
+    latestAgentRuntimeContextEvent: ref(undefined),
+    refreshAdvancedRuntimeContext: vi.fn(),
+    agentRuntimeGovernance: ref({
+      status: 'healthy',
+      contextCount: 0,
+      maxBlockedCount: 0,
+      maxIsolationBlockedCount: 0,
+      maxIsolationMergeRequiredCount: 0,
+      maxLspDiagnosticCount: 0,
+      highRiskCount: 0,
+      warningCount: 0,
+      recommendations: [],
+    }),
     availableWorkDirs: computed(() => []),
     planGateEnabled: ref(false),
     planApproved: ref(false),
@@ -617,6 +712,18 @@ describe('AiChatView interaction', () => {
     })
     mocks.setApprovalModeMock.mockReset()
     mocks.setActiveSessionIdMock.mockReset()
+    mocks.submitVerificationJobMock.mockReset()
+    mocks.submitVerificationJobMock.mockResolvedValue('job-test')
+    mocks.workspaceIsolationPrepareMock.mockReset()
+    mocks.workspaceIsolationDiffMock.mockReset()
+    mocks.workspaceIsolationApplyChangesMock.mockReset()
+    mocks.workspaceIsolationCleanupMock.mockReset()
+    resetWorkspaceIsolationMocks()
+    Object.defineProperty(window, 'confirm', {
+      value: vi.fn(() => true),
+      configurable: true,
+      writable: true,
+    })
   })
 
   afterEach(() => {
@@ -771,6 +878,7 @@ describe('AiChatView interaction', () => {
 
     await wrapper.find('.toggle-task-rail').trigger('click')
     await wrapper.find('.run-task').trigger('click')
+    await flushPromises()
 
     expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledWith(expect.objectContaining({
       id: expect.stringContaining('ai-task-task-1-'),
@@ -779,6 +887,8 @@ describe('AiChatView interaction', () => {
       meta: expect.objectContaining({
         initialMessage: 'inspect scheduler',
         sourceTaskId: 'task-1',
+        isolationWorkDir: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+        workDir: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
       }),
     }))
     expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({
@@ -871,6 +981,189 @@ describe('AiChatView interaction', () => {
       taskSessionId: expect.stringContaining('session-headless-task-1-'),
     })
     expect(mocks.state.chat.spawnedTasks.value[0].resultSummary).toContain('Headless child completed successfully')
+  })
+
+  it('runs prepared headless spawned tasks inside the isolation workspace', async () => {
+    mocks.state.chat.workDir.value = 'D:/Project/devforge'
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: '实现 src/ai-gui/runtime.ts',
+      status: 'pending',
+      executionMode: 'headless',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+    mocks.runAiChatSessionTurnMock.mockResolvedValue({
+      status: 'done',
+      summary: 'Isolation child completed.',
+      sessionId: 'session-headless-task-1-789',
+      startedAt: 1000,
+      finishedAt: 1200,
+      retryable: false,
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.toggle-task-rail').trigger('click')
+    await wrapper.find('.prepare-isolation').trigger('click')
+    await flushPromises()
+
+    expect(mocks.workspaceIsolationPrepareMock).toHaveBeenCalled()
+    expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({
+      isolationWorkDir: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+    })
+
+    await wrapper.find('.run-task').trigger('click')
+    await flushPromises()
+
+    expect(mocks.runAiChatSessionTurnMock).toHaveBeenCalledWith(expect.objectContaining({
+      workDir: expect.objectContaining({
+        value: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+      }),
+    }))
+  })
+
+  it('blocks temporary isolation apply until a fresh diff is generated', async () => {
+    mocks.state.chat.workDir.value = 'D:/Project/devforge'
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: '实现 src/ai-gui/runtime.ts',
+      status: 'pending',
+      executionMode: 'headless',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+    mocks.workspaceIsolationDiffMock.mockResolvedValue({
+      repoPath: 'D:/Project/devforge',
+      workspacePath: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+      mode: 'temporary',
+      entries: [{ path: 'src/ai-gui/runtime.ts', status: 'modified' }],
+      summary: { added: 0, modified: 1, deleted: 0, unchanged: 0 },
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.toggle-task-rail').trigger('click')
+    await wrapper.find('.apply-isolation').trigger('click')
+    await flushPromises()
+
+    expect(mocks.workspaceIsolationApplyChangesMock).not.toHaveBeenCalled()
+    expect(mocks.state.chat.messages.value.some((message: AiMessage) =>
+      message.notice?.text.includes('请先生成最新 Diff'),
+    )).toBe(true)
+
+    await wrapper.find('.prepare-isolation').trigger('click')
+    await flushPromises()
+    await wrapper.find('.diff-isolation').trigger('click')
+    await flushPromises()
+    await wrapper.find('.apply-isolation').trigger('click')
+    await flushPromises()
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('Verification Gate 缺少完整通过证据'))
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('修改 src/ai-gui/runtime.ts'))
+    expect(mocks.workspaceIsolationApplyChangesMock).toHaveBeenCalledWith(expect.objectContaining({
+      confirmed: true,
+      mode: 'temporary',
+    }))
+  })
+
+  it('submits verification job inside the isolation workspace after diff', async () => {
+    mocks.state.chat.workDir.value = 'D:/Project/devforge'
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: '实现 src/ai-gui/runtime.ts',
+      status: 'pending',
+      executionMode: 'headless',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+    mocks.workspaceIsolationDiffMock.mockResolvedValue({
+      repoPath: 'D:/Project/devforge',
+      workspacePath: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+      mode: 'temporary',
+      entries: [{ path: 'src/ai-gui/runtime.ts', status: 'modified' }],
+      summary: { added: 0, modified: 1, deleted: 0, unchanged: 0 },
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.toggle-task-rail').trigger('click')
+    await wrapper.find('.prepare-isolation').trigger('click')
+    await flushPromises()
+    await wrapper.find('.diff-isolation').trigger('click')
+    await flushPromises()
+    await wrapper.find('.verify-isolation').trigger('click')
+    await flushPromises()
+
+    expect(mocks.submitVerificationJobMock).toHaveBeenCalledWith(
+      'session-1',
+      'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+      expect.arrayContaining([
+        expect.objectContaining({ command: 'pnpm vitest run src/ai-gui src/ai-gateway src/composables/__tests__' }),
+        expect.objectContaining({ command: 'pnpm test:typecheck' }),
+      ]),
+      expect.objectContaining({
+        title: expect.stringContaining('隔离验证'),
+        meta: expect.objectContaining({
+          workspaceIsolationTaskId: 'task-1',
+          workspaceIsolationMode: 'temporary',
+        }),
+      }),
+    )
+    expect(mocks.state.chat.messages.value.some((message: AiMessage) =>
+      message.notice?.text.includes('隔离验证任务已提交'),
+    )).toBe(true)
+  })
+
+  it('blocks temporary isolation apply when latest verification failed', async () => {
+    mocks.state.chat.workDir.value = 'D:/Project/devforge'
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: '实现 src/ai-gui/runtime.ts',
+      status: 'pending',
+      executionMode: 'headless',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+    mocks.state.backgroundJobStore.jobs = [{
+      id: 'job-verification-failed',
+      kind: 'verification',
+      sessionId: 'session-1',
+      status: 'failed',
+      progress: 100,
+      createdAt: 1000,
+      finishedAt: 1200,
+      error: [
+        'Verification failed | duration=100ms | commands=1',
+        '$ pnpm test:typecheck\nstatus=failed duration=100ms\ntype error',
+      ].join('\n\n---\n\n'),
+    }]
+    mocks.workspaceIsolationDiffMock.mockResolvedValue({
+      repoPath: 'D:/Project/devforge',
+      workspacePath: 'D:/Project/devforge/.devforge/tmp/agents/dispatcher-panel-implementer-1-task-1',
+      mode: 'temporary',
+      entries: [{ path: 'src/ai-gui/runtime.ts', status: 'modified' }],
+      summary: { added: 0, modified: 1, deleted: 0, unchanged: 0 },
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.toggle-task-rail').trigger('click')
+    await wrapper.find('.prepare-isolation').trigger('click')
+    await flushPromises()
+    await wrapper.find('.diff-isolation').trigger('click')
+    await flushPromises()
+    await wrapper.find('.apply-isolation').trigger('click')
+    await flushPromises()
+
+    expect(mocks.workspaceIsolationApplyChangesMock).not.toHaveBeenCalled()
+    expect(mocks.state.chat.messages.value.some((message: AiMessage) =>
+      message.notice?.text.includes('Verification Gate 阻止回放'),
+    )).toBe(true)
   })
 
   it('returns from parent send without waiting for background dispatcher completion', async () => {
@@ -1204,6 +1497,7 @@ describe('AiChatView interaction', () => {
 
     await wrapper.find('.toggle-task-rail').trigger('click')
     await wrapper.find('.run-task-batch').trigger('click')
+    await flushPromises()
 
     expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledTimes(2)
     expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({ status: 'running' })
@@ -1257,6 +1551,55 @@ describe('AiChatView interaction', () => {
     })
 
     releaseTabTask()
+  })
+
+  it('holds auto-dispatch behind workspace isolation gate and runs after manual confirmation', async () => {
+    mocks.state.aiStore.currentWorkspaceConfig = {
+      workspaceIsolation: {
+        strength: 'agent',
+        allowedPaths: ['src/**'],
+      },
+    }
+    mocks.state.chat.send.mockImplementation(async (content: string) => {
+      if (content === 'first request') {
+        mocks.state.chat.spawnedTasks.value = [{
+          id: 'task-1',
+          description: '实现 src/views/AiChatView.vue',
+          status: 'pending',
+          executionMode: 'tab',
+          createdAt: 1000,
+          retryCount: 0,
+        }]
+      }
+    })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.find('.send-first').trigger('click')
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+
+    expect(mocks.state.workspaceStore.addTab).not.toHaveBeenCalled()
+    expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({
+      status: 'pending',
+      dispatchStatus: 'ready',
+    })
+    expect(mocks.state.chat.messages.value.some((message: AiMessage) =>
+      message.notice?.text.includes('隔离门禁未自动放行'),
+    )).toBe(true)
+
+    await wrapper.find('.toggle-task-rail').trigger('click')
+    await wrapper.find('.run-task').trigger('click')
+    await flushPromises()
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('需要确认后再启动'))
+    expect(mocks.state.workspaceStore.addTab).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'ai-chat',
+      title: expect.stringContaining('[Task] 实现 src/views/AiChat'),
+    }))
+    expect(mocks.state.chat.spawnedTasks.value[0]).toMatchObject({ status: 'running' })
   })
 
   it('synthesizes spawned task results into the parent input draft', async () => {
@@ -1558,6 +1901,42 @@ describe('AiChatView interaction', () => {
     await flushPromises()
 
     expect(wrapper.find('.ai-diagnostics-panel-stub').exists()).toBe(true)
+  })
+
+  it('refreshes Agent Runtime context when verification job finishes', async () => {
+    mocks.state.backgroundJobStore = reactive({
+      ...mocks.state.backgroundJobStore,
+      jobs: [],
+    })
+    mocks.state.chat.spawnedTasks.value = [{
+      id: 'task-1',
+      description: '实现 src/ai-gui/runtime.ts',
+      status: 'pending',
+      createdAt: 1000,
+      retryCount: 0,
+    }]
+
+    mountView()
+    await flushPromises()
+    vi.mocked(mocks.state.chat.refreshAdvancedRuntimeContext).mockClear()
+
+    mocks.state.backgroundJobStore.jobs = [{
+      id: 'job-verification-1',
+      kind: 'verification',
+      sessionId: 'session-1',
+      status: 'failed',
+      progress: 100,
+      createdAt: 1000,
+      finishedAt: 1200,
+      error: [
+        'Verification failed | duration=100ms | commands=1',
+        '$ pnpm test:typecheck\nstatus=failed duration=100ms\ntype error',
+      ].join('\n\n---\n\n'),
+    }]
+    await nextTick()
+    await flushPromises()
+
+    expect(mocks.state.chat.refreshAdvancedRuntimeContext).toHaveBeenCalledTimes(1)
   })
 
   it('renders the run inspector rail with Chinese labels', async () => {

@@ -22,6 +22,7 @@ export type AiTranscriptEventType =
   | 'plan_status'
   | 'usage'
   | 'routing'
+  | 'agent_runtime_context'
 
 // ─────────────────────────── Payload Types ───────────────────────────
 
@@ -110,6 +111,30 @@ export interface RoutingPayload {
   toModel?: string
 }
 
+export interface AgentRuntimeContextPayload {
+  assignmentCount: number
+  blockedCount: number
+  warningCount: number
+  verificationRisk: string
+  verificationCommandCount: number
+  verificationGateStatus?: string
+  verificationSafeToComplete?: boolean
+  verificationMissingCommandCount?: number
+  verificationFailedCommandCount?: number
+  isolationBoundaryCount: number
+  isolationMergeRequiredCount?: number
+  isolationBlockedCount?: number
+  isolationWorktreeCount?: number
+  isolationTemporaryWorkspaceCount?: number
+  isolationReviewRequiredCount?: number
+  isolationConfirmationRequiredCount?: number
+  isolationGateStatus?: string
+  isolationSafeToAutoRun?: boolean
+  lspDiagnosticCount: number
+  lspSummary: string
+  warnings: string[]
+}
+
 // ─────────────────────────── Tagged Union Payload ───────────────────────────
 
 export type AiTranscriptPayload =
@@ -126,6 +151,7 @@ export type AiTranscriptPayload =
   | { type: 'plan_status'; data: PlanStatusPayload }
   | { type: 'usage'; data: UsagePayload }
   | { type: 'routing'; data: RoutingPayload }
+  | { type: 'agent_runtime_context'; data: AgentRuntimeContextPayload }
 
 // ─────────────────────────── Core Event Interface ───────────────────────────
 
@@ -191,6 +217,52 @@ export interface PlanHistoryItem {
   stepTitle?: string
 }
 
+export interface AgentRuntimeContextHistoryItem {
+  timestamp: number
+  assignmentCount: number
+  blockedCount: number
+  warningCount: number
+  verificationRisk: string
+  verificationCommandCount: number
+  verificationGateStatus?: string
+  verificationSafeToComplete?: boolean
+  verificationMissingCommandCount?: number
+  verificationFailedCommandCount?: number
+  isolationBoundaryCount: number
+  isolationMergeRequiredCount?: number
+  isolationBlockedCount?: number
+  isolationWorktreeCount?: number
+  isolationTemporaryWorkspaceCount?: number
+  isolationReviewRequiredCount?: number
+  isolationConfirmationRequiredCount?: number
+  isolationGateStatus?: string
+  isolationSafeToAutoRun?: boolean
+  lspDiagnosticCount: number
+  lspSummary: string
+  warnings: string[]
+}
+
+export interface AgentRuntimeGovernanceSnapshot {
+  status: 'healthy' | 'watch' | 'critical'
+  contextCount: number
+  latestRisk?: string
+  maxBlockedCount: number
+  maxIsolationBlockedCount: number
+  maxIsolationMergeRequiredCount: number
+  maxIsolationWorktreeCount?: number
+  maxIsolationTemporaryWorkspaceCount?: number
+  maxIsolationReviewRequiredCount?: number
+  maxIsolationConfirmationRequiredCount?: number
+  maxLspDiagnosticCount: number
+  highRiskCount: number
+  verificationBlockedCount?: number
+  verificationWarningCount?: number
+  maxVerificationMissingCommandCount?: number
+  maxVerificationFailedCommandCount?: number
+  warningCount: number
+  recommendations: string[]
+}
+
 export interface TranscriptDiagnosticReport {
   sessionId: string
   exportedAt: number
@@ -201,4 +273,6 @@ export interface TranscriptDiagnosticReport {
   compactHistory: CompactHistoryItem[]
   routingHistory: RoutingHistoryItem[]
   planHistory: PlanHistoryItem[]
+  agentRuntimeContextHistory: AgentRuntimeContextHistoryItem[]
+  agentRuntimeGovernance: AgentRuntimeGovernanceSnapshot
 }

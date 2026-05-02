@@ -258,6 +258,38 @@ describe('TableDataPanel', () => {
     expect(ctx.tableBrowse.seekValue).toBe(10)
   })
 
+  it('load more 请求返回后若 tableBrowse 已变化则丢弃旧结果，避免旧分页回写污染新状态', async () => {
+    let resolveMore!: (value: QueryResult) => void
+    dbGetTableDataMock
+      .mockResolvedValueOnce(makeResult([[1, 'Ada'], [2, 'Linus']], 'INT', 4))
+      .mockImplementationOnce(() => new Promise<QueryResult>(resolve => {
+        resolveMore = resolve
+      }))
+
+    const { store, tabId, wrapper } = mountPanel()
+    await flushPromises()
+
+    await wrapper.findComponent({ name: 'QueryResultComponent' }).vm.$emit('load-more')
+    await flushPromises()
+
+    store.updateTabContext('conn-1', tabId, {
+      tableBrowse: {
+        database: 'demo',
+        table: 'orders',
+        currentPage: 1,
+        pageSize: 100,
+      },
+    })
+
+    resolveMore(makeResult([[3, 'Grace']], 'INT', 4))
+    await flushPromises()
+
+    const ctx = store.getWorkspace('conn-1')?.tabs.find(tab => tab.id === tabId)?.context as any
+    expect(ctx.tableBrowse.table).toBe('orders')
+    expect(ctx.tableBrowse.currentPage).toBe(1)
+    expect(ctx.result).toBeNull()
+  })
+
   it('changes page size then resets to first page and syncs new size to tableBrowse', async () => {
     dbGetTableDataMock
       .mockResolvedValueOnce(makeResult([[1, 'Ada']], 'INT', 3))

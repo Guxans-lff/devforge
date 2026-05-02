@@ -193,7 +193,8 @@ export function useQueryResult(options: UseQueryResultOptions) {
   // 当表/数据库切换时，重置所有 UI 交互状态
   watch(
     [database, tableName],
-    () => {
+    ([nextDatabase, nextTable], [prevDatabase, prevTable]) => {
+      if (nextDatabase === prevDatabase && nextTable === prevTable) return
       // 清除过滤防抖定时器，防止旧表的过滤请求污染新表
       if (filterDebounceTimer) {
         clearTimeout(filterDebounceTimer)

@@ -444,4 +444,42 @@ describe('chatTaskDispatcher', () => {
       dispatchStatus: 'done',
     })
   })
+
+  it('honors runtime gate before starting ready tasks', async () => {
+    const state = ref<SpawnedTask[]>([
+      makeTask({ id: 'task-1', description: 'needs isolation confirmation' }),
+    ])
+    const run = vi.fn(async () => ({
+      status: 'done' as const,
+      summary: 'should not run',
+      startedAt: Date.now(),
+      finishedAt: Date.now(),
+    }))
+    const canRunTask = vi.fn(() => false)
+
+    const dispatcher = createChatTaskDispatcher({
+      getTasks: () => state.value,
+      setTasks: tasks => {
+        state.value = tasks
+      },
+      canRunTask,
+      executors: {
+        headless: { mode: 'headless', run },
+        tab: { mode: 'tab', run: vi.fn() },
+      },
+    })
+
+    dispatcher.syncTasks(state.value)
+    await dispatcher.runReadyTasks()
+
+    expect(canRunTask).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task-1' }),
+      { startedByDispatcher: true },
+    )
+    expect(run).not.toHaveBeenCalled()
+    expect(state.value[0]).toMatchObject({
+      status: 'pending',
+      dispatchStatus: 'ready',
+    })
+  })
 })

@@ -115,4 +115,145 @@ describe('AiDiagnosticsPanel', () => {
     expect(wrapper.text()).toContain('ai.diagnostics.timeouts')
     expect(wrapper.text()).toContain('420 ms')
   })
+
+  it('renders P2 Agent Runtime context when transcript event is available', async () => {
+    setupTestPinia()
+
+    const wrapper = mount(AiDiagnosticsPanel, {
+      props: {
+        metrics: {
+          sessionStartedAt: 1000,
+          prepareCompletedAt: 1100,
+          prepareDurationMs: 100,
+          requestStartedAt: 1200,
+          requestCount: 1,
+          recoveryCount: 0,
+          firstTokenAt: 1300,
+          firstTokenLatencyMs: 100,
+          requestFirstTokenLatencyMs: 100,
+          responseCompletedAt: 1800,
+          responseDurationMs: 600,
+          loadHistoryStartedAt: null,
+          loadHistoryDurationMs: null,
+          historyRestoreCount: 0,
+          compactTriggeredCount: 0,
+          providerRerouteCount: 0,
+          autoDowngradeCount: 0,
+          autoSwitchProviderCount: 0,
+          lastRoutingReason: null,
+          pendingToolQueueLength: 0,
+          lastToolRun: {
+            totalCalls: 0,
+            successCount: 0,
+            errorCount: 0,
+            cancelledCount: 0,
+            timeoutCount: 0,
+            retryCount: 0,
+            totalDurationMs: 0,
+            maxDurationMs: 0,
+            averageDurationMs: 0,
+          },
+          trend: {
+            sampleCount: 1,
+            firstTokenAverageMs: 100,
+            requestFirstTokenAverageMs: 100,
+            responseAverageMs: 600,
+            toolRunAverageMs: 0,
+            lastFirstTokenDeltaMs: 0,
+            lastRequestFirstTokenDeltaMs: 0,
+            lastResponseDeltaMs: 0,
+            lastToolRunDeltaMs: 0,
+          },
+          sessionHistory: [],
+          errorBreakdown: [],
+        },
+        agentRuntimeContext: {
+          id: 'evt-1',
+          sessionId: 's1',
+          type: 'agent_runtime_context',
+          timestamp: 1000,
+          payload: {
+            type: 'agent_runtime_context',
+            data: {
+              assignmentCount: 3,
+              blockedCount: 1,
+              warningCount: 1,
+              verificationRisk: 'high',
+              verificationCommandCount: 2,
+              verificationGateStatus: 'block',
+              verificationSafeToComplete: false,
+              verificationMissingCommandCount: 2,
+              verificationFailedCommandCount: 1,
+              isolationBoundaryCount: 3,
+              isolationMergeRequiredCount: 1,
+              isolationBlockedCount: 1,
+              isolationWorktreeCount: 1,
+              isolationTemporaryWorkspaceCount: 1,
+              isolationReviewRequiredCount: 1,
+              isolationConfirmationRequiredCount: 7,
+              isolationGateStatus: 'confirm_required',
+              isolationSafeToAutoRun: false,
+              lspDiagnosticCount: 4,
+              lspSummary: '诊断 4 条：error 0，warning 4，info/hint 0。',
+              warnings: ['检测到任务依赖环：a -> b'],
+            },
+          },
+        },
+        agentRuntimeGovernance: {
+          status: 'critical',
+          contextCount: 2,
+          latestRisk: 'high',
+          maxBlockedCount: 1,
+          maxIsolationBlockedCount: 1,
+          maxIsolationMergeRequiredCount: 1,
+          maxIsolationWorktreeCount: 1,
+          maxIsolationTemporaryWorkspaceCount: 1,
+          maxIsolationReviewRequiredCount: 1,
+          maxIsolationConfirmationRequiredCount: 7,
+          maxLspDiagnosticCount: 4,
+          highRiskCount: 1,
+          verificationBlockedCount: 1,
+          verificationWarningCount: 0,
+          maxVerificationMissingCommandCount: 2,
+          maxVerificationFailedCommandCount: 1,
+          warningCount: 2,
+          recommendations: [
+            '存在阻塞的 Multi-Agent 任务，优先检查依赖环或缺失依赖。',
+            '存在需要合并审核的隔离执行空间，合入前应查看 diff。',
+            '存在 high 风险验证计划，合入前必须保留验证证据。',
+            'Verification Gate 已阻止完成，必须先修复失败命令并重新验证。',
+          ],
+        },
+      },
+    })
+
+    await wrapper.find('button').trigger('click')
+
+    expect(wrapper.text()).toContain('P2 Agent Runtime')
+    expect(wrapper.text()).toContain('Agent 分配')
+    expect(wrapper.text()).toContain('验证风险')
+    expect(wrapper.text()).toContain('验证门禁')
+    expect(wrapper.text()).toContain('缺验证')
+    expect(wrapper.text()).toContain('失败验证')
+    expect(wrapper.text()).toContain('block')
+    expect(wrapper.text()).toContain('high')
+    expect(wrapper.text()).toContain('诊断 4 条')
+    expect(wrapper.text()).toContain('治理上下文')
+    expect(wrapper.text()).toContain('高风险次数')
+    expect(wrapper.text()).toContain('门禁阻塞')
+    expect(wrapper.text()).toContain('最多缺验证')
+    expect(wrapper.text()).toContain('最多失败验证')
+    expect(wrapper.text()).toContain('合并审核')
+    expect(wrapper.text()).toContain('Worktree')
+    expect(wrapper.text()).toContain('临时空间')
+    expect(wrapper.text()).toContain('需审核')
+    expect(wrapper.text()).toContain('需确认动作')
+    expect(wrapper.text()).toContain('隔离门禁')
+    expect(wrapper.text()).toContain('confirm_required')
+    expect(wrapper.text()).toContain('可自动执行')
+    expect(wrapper.text()).toContain('存在阻塞的 Multi-Agent')
+    expect(wrapper.text()).toContain('合入前应查看 diff')
+    expect(wrapper.text()).toContain('Verification Gate 已阻止完成')
+    expect(wrapper.text()).toContain('检测到任务依赖环')
+  })
 })
