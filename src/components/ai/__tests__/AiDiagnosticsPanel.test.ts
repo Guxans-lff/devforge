@@ -244,7 +244,7 @@ describe('AiDiagnosticsPanel', () => {
     expect(wrapper.text()).toContain('成本优先')
     expect(wrapper.text()).toContain('30000ms / 5 次')
     expect(wrapper.text()).toContain('Fallback 列表包含当前主 Provider')
-    expect(wrapper.text()).toContain('当前只配置了一个 Provider')
+    expect(wrapper.text()).toContain('当前只有一个 Provider')
   })
 
   it('renders Gateway policy risks for missing and weak fallback providers', async () => {
@@ -368,7 +368,7 @@ describe('AiDiagnosticsPanel', () => {
     expect(wrapper.text()).toContain('能力优先')
     expect(wrapper.text()).toContain('Fallback Provider 不存在：provider-missing')
     expect(wrapper.text()).toContain('Fallback 列表包含当前主 Provider')
-    expect(wrapper.text()).toContain('Fallback 模型能力可能不足：Weak Provider')
+    expect(wrapper.text()).toContain('Fallback Provider 模型能力可能不足：Weak Provider')
     expect(wrapper.text()).toContain('Profile 限流窗口较短且请求数偏高')
   })
 

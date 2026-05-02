@@ -9,6 +9,7 @@ import type {
 import type { OutputStyle } from '@/composables/useOutputStyles'
 import { normalizeWorkspaceSkills, validateWorkspaceSkills } from '@/ai-gui/workspaceSkills'
 import { describeGatewayPolicyValue, normalizeGatewayPolicy } from '@/ai-gateway/gatewayPolicy'
+import { auditGatewayPolicy } from '@/ai-gateway/gatewayPolicyAudit'
 
 const STORAGE_KEY = 'devforge.ai.providerProfileBundles.v1'
 const BACKUP_STORAGE_KEY = 'devforge.ai.providerProfileBackups.v1'
@@ -223,17 +224,6 @@ function securityValue(security: ProviderConfig['security'] | undefined, key: ke
   }
 }
 
-function fallbackModelCompatible(primary: ProviderConfig | undefined, fallback: ProviderConfig): boolean {
-  if (!primary?.models.length) return true
-  const primaryBest = primary.models.reduce((best, model) =>
-    model.capabilities.maxContext > best.capabilities.maxContext ? model : best,
-  )
-  return fallback.models.some(model =>
-    model.capabilities.streaming
-    && model.capabilities.maxContext >= Math.min(primaryBest.capabilities.maxContext, 128_000),
-  )
-}
-
 export function buildProviderProfilePreview(input: {
   profile: AiProviderProfileBundle
   providers: ProviderConfig[]
@@ -300,56 +290,12 @@ export function buildProviderProfilePreview(input: {
   if (input.profile.security?.allowPrivateIP) {
     warnings.push({ key: 'private-ip', level: 'warning', message: 'Profile 允许私网地址，请确认只用于可信内网 Provider。' })
   }
-  if (input.profile.gatewayPolicy?.fallbackEnabled === false) {
-    warnings.push({ key: 'fallback-disabled', level: 'warning', message: 'Profile 已关闭 fallback，Provider 瞬时故障时不会自动切换备用模型。' })
-  }
-  const missingFallbackProviderIds = (input.profile.gatewayPolicy?.fallbackProviderIds ?? [])
-    .filter(providerId => !input.providers.some(provider => provider.id === providerId))
-  if (missingFallbackProviderIds.length > 0) {
-    warnings.push({
-      key: 'missing-fallback-provider',
-      level: 'warning',
-      message: `Fallback Provider 不存在：${missingFallbackProviderIds.join(', ')}`,
-    })
-  }
-  const fallbackProviders = (input.profile.gatewayPolicy?.fallbackProviderIds ?? [])
-    .map(providerId => input.providers.find(provider => provider.id === providerId))
-    .filter((item): item is ProviderConfig => !!item)
-  const duplicatePrimaryFallback = fallbackProviders.some(item => item.id === input.profile.providerId)
-  if (duplicatePrimaryFallback) {
-    warnings.push({
-      key: 'primary-fallback-provider',
-      level: 'info',
-      message: 'Fallback 列表包含当前主 Provider，Gateway 会优先尝试同 Provider 降级模型。',
-    })
-  }
-  const weakFallbackProviders = fallbackProviders
-    .filter(item => !fallbackModelCompatible(provider, item))
-    .map(item => item.name || item.id)
-  if (weakFallbackProviders.length > 0) {
-    warnings.push({
-      key: 'weak-fallback-capability',
-      level: 'warning',
-      message: `Fallback Provider 模型能力可能不足：${weakFallbackProviders.join(', ')}`,
-    })
-  }
-  if (input.profile.gatewayPolicy?.fallbackEnabled !== false && input.providers.length <= 1) {
-    warnings.push({
-      key: 'single-provider-fallback',
-      level: 'info',
-      message: '当前只有一个 Provider，fallback 只能尝试同 Provider 的其他模型。',
-    })
-  }
-  if (input.profile.gatewayPolicy?.rateLimit) {
-    const { windowMs, maxRequests } = input.profile.gatewayPolicy.rateLimit
-    if (windowMs < 10_000 && maxRequests > 20) {
-      warnings.push({
-        key: 'aggressive-rate-limit',
-        level: 'warning',
-        message: 'Profile 限流窗口较短且请求数偏高，可能无法有效保护 Provider 配额。',
-      })
-    }
-  }
+  warnings.push(...auditGatewayPolicy({
+    policy: input.profile.gatewayPolicy,
+    providers: input.providers,
+    primaryProviderId: input.profile.providerId,
+    primaryProvider: provider,
+  }))
 
   return {
     profileId: input.profile.id,

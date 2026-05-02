@@ -7,9 +7,9 @@ import { useSettingsStore } from '@/stores/settings'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { buildGatewayDashboardSnapshot, type GatewayDashboardSnapshot } from '@/ai-gateway/gatewayDashboard'
 import { describeGatewayPolicyValue } from '@/ai-gateway/gatewayPolicy'
+import { auditGatewayPolicy } from '@/ai-gateway/gatewayPolicyAudit'
 import { buildCompactBoundaryProjection } from '@/composables/ai-agent/context/compactBoundary'
 import type { AgentRuntimeGovernanceSnapshot, AiTranscriptEvent, AiTranscriptEventOf } from '@/composables/ai-agent/transcript/transcriptTypes'
-import type { ProviderConfig } from '@/types/ai'
 import { Activity, ChevronRight, Clock3, Copy, History, Route, ShieldAlert, TrendingUp, Wrench } from 'lucide-vue-next'
 
 type Tone = 'ok' | 'warn' | 'danger'
@@ -170,77 +170,23 @@ const gatewayPolicySummary = computed(() => {
 const gatewayPolicyIssues = computed<Array<{ key: string; tone: Tone; message: string }>>(() => {
   const policy = aiChatStore.currentWorkspaceConfig?.gatewayPolicy
   const providers = aiChatStore.providers
-  const issues: Array<{ key: string; tone: Tone; message: string }> = []
-  const fallbackProviderIds = policy?.fallbackProviderIds ?? []
   const activeProviderId = aiChatStore.activeSession?.providerId
   const activeProvider = providers.find(provider => provider.id === activeProviderId)
     ?? aiChatStore.defaultProvider
     ?? providers[0]
-
-  if (policy?.fallbackEnabled === false && gatewaySnapshot.value.summary.errorCount > 0) {
-    issues.push({
-      key: 'fallback-disabled-with-errors',
-      tone: 'danger',
-      message: '当前 Profile 已关闭 fallback，且 Gateway 已出现错误；建议恢复 fallback 或切换 Provider。',
-    })
-  } else if (policy?.fallbackEnabled === false) {
-    issues.push({
-      key: 'fallback-disabled',
-      tone: 'warn',
-      message: '当前 Profile 已关闭 fallback，Provider 瞬时故障时不会自动切换。',
-    })
-  }
-
-  const missingProviderIds = fallbackProviderIds.filter(providerId =>
-    !providers.some(provider => provider.id === providerId),
-  )
-  if (missingProviderIds.length > 0) {
-    issues.push({
-      key: 'missing-fallback-provider',
-      tone: 'warn',
-      message: `Fallback Provider 不存在：${missingProviderIds.join(', ')}`,
-    })
-  }
-
-  if (activeProvider && fallbackProviderIds.includes(activeProvider.id)) {
-    issues.push({
-      key: 'primary-in-fallback',
-      tone: 'warn',
-      message: 'Fallback 列表包含当前主 Provider，建议只保留真正备用 Provider，主 Provider 降级模型会自动处理。',
-    })
-  }
-
-  const fallbackProviders = fallbackProviderIds
-    .map(providerId => providers.find(provider => provider.id === providerId))
-    .filter((provider): provider is ProviderConfig => !!provider)
-  const weakFallbackProviders = fallbackProviders
-    .filter(provider => !gatewayFallbackModelCompatible(activeProvider, provider))
-    .map(provider => provider.name || provider.id)
-  if (weakFallbackProviders.length > 0) {
-    issues.push({
-      key: 'weak-fallback-capability',
-      tone: 'warn',
-      message: `Fallback 模型能力可能不足：${weakFallbackProviders.join(', ')}`,
-    })
-  }
-
-  if (policy?.fallbackEnabled !== false && providers.length <= 1) {
-    issues.push({
-      key: 'single-provider-fallback',
-      tone: 'warn',
-      message: '当前只配置了一个 Provider，fallback 只能尝试同 Provider 降级模型。',
-    })
-  }
-
-  if (policy?.rateLimit && policy.rateLimit.windowMs < 10_000 && policy.rateLimit.maxRequests > 20) {
-    issues.push({
-      key: 'aggressive-rate-limit',
-      tone: 'warn',
-      message: 'Profile 限流窗口较短且请求数偏高，可能无法有效保护 Provider 配额。',
-    })
-  }
-
-  return issues
+  return auditGatewayPolicy({
+    policy,
+    providers,
+    primaryProviderId: activeProvider?.id,
+    primaryProvider: activeProvider,
+    gatewayErrorCount: gatewaySnapshot.value.summary.errorCount,
+    singleProviderLevel: 'warning',
+    primaryFallbackMessage: 'Fallback 列表包含当前主 Provider，建议只保留真正备用 Provider，主 Provider 降级模型会自动处理。',
+  }).map(issue => ({
+    key: issue.key,
+    tone: issue.level === 'danger' ? 'danger' : 'warn',
+    message: issue.message,
+  }))
 })
 
 const gatewayHealthTone = computed<Tone>(() => {
@@ -480,17 +426,6 @@ function formatDelta(value: number | null): string {
   return t('ai.diagnostics.deltaVsPrev', {
     delta: `${prefix}${formatMs(Math.abs(value))}`,
   })
-}
-
-function gatewayFallbackModelCompatible(primary: ProviderConfig | null | undefined, fallback: ProviderConfig): boolean {
-  if (!primary?.models.length) return true
-  const primaryBest = primary.models.reduce((best, model) =>
-    model.capabilities.maxContext > best.capabilities.maxContext ? model : best,
-  )
-  return fallback.models.some(model =>
-    model.capabilities.streaming
-    && model.capabilities.maxContext >= Math.min(primaryBest.capabilities.maxContext, 128_000),
-  )
 }
 
 function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
