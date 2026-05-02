@@ -10,11 +10,13 @@ import { ref } from 'vue'
 import { useAiMemoryStore } from '@/stores/ai-memory'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { aiSaveCompaction } from '@/api/ai-memory'
+import { aiSaveMessage } from '@/api/ai'
 import { executeGatewayRequest } from '@/ai-gateway/AiGateway'
 import { collectFallbackApiKeys } from '@/ai-gateway/fallbackKeys'
 import { buildFallbackChain } from '@/ai-gateway/router'
 import { createLogger } from '@/utils/logger'
-import type { AiMessage, AiMemory, AiStreamEvent, ProviderConfig, ModelConfig, CompactRule, AiCompaction } from '@/types/ai'
+import { COMPACT_BOUNDARY_CONTENT_TYPE, serializeCompactBoundaryPayload } from './ai/chatCompactBoundaryRecord'
+import type { AiMessage, AiMemory, AiMessageRecord, AiStreamEvent, ProviderConfig, ModelConfig, CompactRule, AiCompaction } from '@/types/ai'
 
 const log = createLogger('ai.compact')
 
@@ -29,6 +31,61 @@ const MAX_FAILURES = 3
 
 function genId(): string {
   return `compact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+}
+
+function makeCompactBoundaryMessage(params: {
+  id: string
+  summaryMessageId: string
+  trigger: 'manual' | 'auto' | 'recovery'
+  compressedTokens: number
+  summarizedMessages: number
+  source: 'ai' | 'local'
+  createdAt: number
+}): AiMessage {
+  return {
+    id: params.id,
+    role: 'system',
+    type: 'compact-boundary',
+    content: '',
+    timestamp: params.createdAt,
+    tokens: 0,
+    compactMetadata: {
+      trigger: params.trigger,
+      preTokens: params.compressedTokens,
+      summarizedMessages: params.summarizedMessages,
+      createdAt: params.createdAt,
+      summaryMessageId: params.summaryMessageId,
+      source: params.source,
+    },
+  }
+}
+
+function persistCompactBoundary(sessionId: string, boundary: AiMessage, logContext: Record<string, unknown>): void {
+  const record: AiMessageRecord = {
+    id: boundary.id,
+    sessionId,
+    role: 'system',
+    content: serializeCompactBoundaryPayload(boundary),
+    contentType: COMPACT_BOUNDARY_CONTENT_TYPE,
+    tokens: boundary.compactMetadata?.preTokens ?? 0,
+    cost: 0,
+    createdAt: boundary.timestamp,
+  }
+  aiSaveMessage(record).catch(error => log.warn('save_compact_boundary_failed', logContext, error))
+}
+
+function persistCompactSummary(sessionId: string, summary: AiMessage, logContext: Record<string, unknown>): void {
+  const record: AiMessageRecord = {
+    id: summary.id,
+    sessionId,
+    role: 'system',
+    content: summary.content,
+    contentType: 'text',
+    tokens: summary.tokens ?? 0,
+    cost: 0,
+    createdAt: summary.timestamp,
+  }
+  aiSaveMessage(record).catch(error => log.warn('save_compact_summary_failed', logContext, error))
 }
 
 export function findLastCompactBoundaryIndex(messages: AiMessage[]): number {
@@ -117,16 +174,38 @@ export function useAutoCompact() {
 
       if (removedTokens < maxContext * LEVEL1_MAX_RATIO) {
         // Level 1 够用：直接裁剪
+        const keepStartAt = messages[messages.length - keepCount]?.timestamp ?? Date.now()
+        const boundaryCreatedAt = Math.max(0, keepStartAt - 2)
+        const summaryCreatedAt = Math.max(0, keepStartAt - 1)
+        const summaryMessageId = `compact-local-summary-${boundaryCreatedAt}`
+        const boundary = makeCompactBoundaryMessage({
+          id: `compact-boundary-${boundaryCreatedAt}`,
+          summaryMessageId,
+          trigger: 'auto',
+          compressedTokens: removedTokens,
+          summarizedMessages: toRemove.length,
+          source: 'local',
+          createdAt: boundaryCreatedAt,
+        })
+        const summaryMsg: AiMessage = {
+          id: summaryMessageId,
+          role: 'system',
+          content: `【本地轻量压缩】已移除 ${toRemove.length} 条较早消息，释放约 ${removedTokens.toLocaleString()} tokens。`,
+          timestamp: summaryCreatedAt,
+        }
         const kept = messages.slice(messages.length - keepCount)
-        const newTotal = kept.reduce((sum, m) => sum + (m.tokens ?? 0), 0)
+        const compacted = [boundary, summaryMsg, ...kept]
+        const newTotal = compacted.reduce((sum, m) => sum + (m.tokens ?? 0), 0)
 
         // 裁剪后仍超阈值？升级 Level 2
         if (newTotal >= maxContext * COMPACT_THRESHOLD) {
           return await level2Compact(messages, sessionId, provider, model, apiKey)
         }
 
+        persistCompactBoundary(sessionId, boundary, { sessionId, trigger: 'auto', source: 'local' })
+        persistCompactSummary(sessionId, summaryMsg, { sessionId, trigger: 'auto', source: 'local' })
         consecutiveFailures.value = 0
-        return kept
+        return compacted
       }
 
       // ── Level 2: AI 摘要压缩 ──
@@ -149,6 +228,7 @@ export function useAutoCompact() {
     provider: ProviderConfig,
     model: ModelConfig,
     apiKey: string,
+    trigger: 'manual' | 'auto' | 'recovery' = 'auto',
   ): Promise<AiMessage[] | null> {
     const nonErrorMsgs = messages.filter(m => m.role !== 'error')
     const keepCount = KEEP_RECENT_ROUNDS * 2
@@ -216,24 +296,40 @@ export function useAutoCompact() {
     }
     memoryStore.saveMemory(knowledgeMemory).catch(e => log.warn('save_summary_memory_failed', { sessionId }, e))
 
+    const keepStartAt = toKeep[0]?.timestamp ?? Date.now()
+    const createdAt = Math.max(0, keepStartAt - 2)
+    const summaryCreatedAt = Math.max(0, keepStartAt - 1)
+    const summaryMessageId = genId()
+    const boundaryMsg = makeCompactBoundaryMessage({
+      id: `compact-boundary-${createdAt}`,
+      summaryMessageId,
+      trigger,
+      compressedTokens,
+      summarizedMessages: toCompress.length,
+      source: 'ai',
+      createdAt,
+    })
+
     // 构建摘要消息
     const summaryMsg: AiMessage = {
-      id: genId(),
+      id: summaryMessageId,
       role: 'system',
       content: summary,
-      timestamp: Date.now(),
+      timestamp: summaryCreatedAt,
     }
 
     // 插入压缩分割线，显示释放了多少 tokens
     const dividerMsg: AiMessage = {
-      id: `compact-divider-${Date.now()}`,
+      id: `compact-divider-${createdAt}`,
       role: 'system',
       type: 'divider',
       dividerText: `Compacted chat · auto · ${compressedTokens.toLocaleString()} tokens freed`,
       content: '',
-      timestamp: Date.now(),
+      timestamp: summaryCreatedAt,
     }
 
+    persistCompactBoundary(sessionId, boundaryMsg, { sessionId, trigger, source: 'ai' })
+    persistCompactSummary(sessionId, summaryMsg, { sessionId, trigger, source: 'ai' })
     consecutiveFailures.value = 0
     log.info('compact_done', {
       sessionId,
@@ -241,7 +337,7 @@ export function useAutoCompact() {
       originalTokens: compressedTokens,
       summaryChars: summary.length,
     })
-    return [summaryMsg, dividerMsg, ...toKeep]
+    return [boundaryMsg, summaryMsg, dividerMsg, ...toKeep]
   }
 
   /** 重置熔断器（新对话时调用） */
@@ -259,13 +355,14 @@ export function useAutoCompact() {
     provider: ProviderConfig,
     model: ModelConfig,
     apiKey: string,
+    trigger: 'manual' | 'auto' | 'recovery' = 'recovery',
   ): Promise<AiMessage[] | null> {
     if (consecutiveFailures.value >= MAX_FAILURES) return null
     const nonErrorMsgs = messages.filter(m => m.role !== 'error')
     if (nonErrorMsgs.length <= KEEP_RECENT_ROUNDS * 2) return null
     isCompacting.value = true
     try {
-      return await level2Compact(messages, sessionId, provider, model, apiKey)
+      return await level2Compact(messages, sessionId, provider, model, apiKey, trigger)
     } catch (e) {
       consecutiveFailures.value++
       log.error('force_compact_failed', { sessionId }, e)

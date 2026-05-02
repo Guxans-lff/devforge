@@ -228,6 +228,31 @@ export function useAiChat(options: UseAiChatOptions) {
     return sid ? aiExportTranscriptEvents(sid) : Promise.resolve([])
   }
 
+  function appendCompactTranscriptEvent(compacted: AiMessage[]): void {
+    const sid = sessionIdRef.value
+    if (!sid) return
+    const boundary = compacted.find(message => message.type === 'compact-boundary')
+    const metadata = boundary?.compactMetadata
+    if (!boundary || !metadata) return
+    transcriptStore.appendEvent({
+      sessionId: sid,
+      turnId: agentRuntime.state.value.turnId || undefined,
+      type: 'compact',
+      timestamp: metadata.createdAt,
+      payload: {
+        type: 'compact',
+        data: {
+          trigger: metadata.trigger,
+          originalMessageCount: metadata.summarizedMessages,
+          originalTokens: metadata.preTokens,
+          summaryLength: compacted.find(message => message.id === metadata.summaryMessageId)?.content.length ?? 0,
+          source: metadata.source,
+        },
+      },
+    })
+    transcriptEventsVersion.value += 1
+  }
+
   const totalTokens = computed(() => {
     for (let i = messages.value.length - 1; i >= 0; i--) {
       const message = messages.value[i]
@@ -766,7 +791,11 @@ export function useAiChat(options: UseAiChatOptions) {
         maxToolLoops: MAX_TOOL_LOOPS,
         totalTokens: () => totalTokens.value,
         forceCompact: autoCompact.forceCompact,
-        checkAndCompact: autoCompact.checkAndCompact,
+        checkAndCompact: async (...args) => {
+          const compacted = await autoCompact.checkAndCompact(...args)
+          if (compacted) appendCompactTranscriptEvent(compacted)
+          return compacted
+        },
         clearWatchdog,
         resetWatchdog,
         flushPendingDelta,
@@ -1018,10 +1047,11 @@ export function useAiChat(options: UseAiChatOptions) {
     removeLastError,
     clearMessages,
     manualCompact: (provider: ProviderConfig, model: ModelConfig, apiKey: string) =>
-      autoCompact.forceCompact(messages.value, sessionIdRef.value ?? '', provider, model, apiKey)
+      autoCompact.forceCompact(messages.value, sessionIdRef.value ?? '', provider, model, apiKey, 'manual')
         .then(compacted => {
           if (compacted) {
             messages.value = compacted
+            appendCompactTranscriptEvent(compacted)
             observability.markCompactTriggered()
           }
           return !!compacted

@@ -59,6 +59,7 @@ export interface AiChatSessionRunnerParams {
     provider: ProviderConfig,
     model: ModelConfig,
     apiKey: string,
+    trigger?: 'manual' | 'auto' | 'recovery',
   ) => Promise<AiMessage[] | null>
   checkAndCompact: (
     messages: AiMessage[],

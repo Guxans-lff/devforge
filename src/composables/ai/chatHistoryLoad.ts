@@ -1,6 +1,7 @@
 import { aiGetSession } from '@/api/ai'
 import type { AiMessage, AiMessageRecord, AiSession, ToolCallInfo, ToolResultInfo } from '@/types/ai'
 import { sanitizeLoadedMessages } from './chatMessageBuilder'
+import { restoreCompactBoundaryRecord } from './chatCompactBoundaryRecord'
 import { summarizeToolActivity } from './toolActivitySummary'
 
 export const HISTORY_RECENT_RECORD_LIMIT = 50
@@ -547,6 +548,13 @@ function restoreMessagesLightweight(records: AiMessageRecord[]): AiMessage[] {
   }
 
   for (const record of records) {
+    const compactBoundary = restoreCompactBoundaryRecord(record)
+    if (compactBoundary) {
+      flushGroup()
+      messages.push(compactBoundary)
+      continue
+    }
+
     if (record.role === 'assistant' && record.contentType === 'tool_calls') {
       flushGroup()
       const toolNames: string[] = []

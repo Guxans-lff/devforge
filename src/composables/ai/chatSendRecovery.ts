@@ -26,6 +26,7 @@ export interface HandleSendFailureParams {
     provider: ProviderConfig,
     model: ModelConfig,
     apiKey: string,
+    trigger?: 'manual' | 'auto' | 'recovery',
   ) => Promise<AiMessage[] | null>
   streamWithToolLoop: (
     sid: string,
@@ -84,7 +85,7 @@ export async function handleSendFailure(params: HandleSendFailureParams): Promis
     streamState.streamingMessageId = ''
   }
 
-  const compacted = await forceCompact(messages.value, sessionId, provider, model, apiKey)
+  const compacted = await forceCompact(messages.value, sessionId, provider, model, apiKey, 'recovery')
   if (!compacted) {
     log.error('overflow_compact_failed', { sessionId })
     errorRef.value = `${errMsg}\n已尝试自动压缩但失败，请手动清空历史或切换更大上下文模型。`

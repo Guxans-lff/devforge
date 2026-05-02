@@ -8,6 +8,7 @@
 import type { AiTranscriptEvent, AiTranscriptEventOf, AiTranscriptEventType, TranscriptDiagnosticReport } from './transcriptTypes'
 import type { TranscriptStore } from './transcriptStore'
 import { buildAdvancedAgentGovernanceSnapshot } from '@/ai-gui/advancedAgentGovernance'
+import { buildCompactBoundaryProjection } from '@/composables/ai-agent/context/compactBoundary'
 
 function isTranscriptEvent<T extends AiTranscriptEventType>(
   event: AiTranscriptEvent,
@@ -177,6 +178,7 @@ export function generateTranscriptDiagnosticReport(
     planHistory: toPlanHistory(events),
     agentRuntimeContextHistory,
     agentRuntimeGovernance: buildAdvancedAgentGovernanceSnapshot(agentRuntimeContextHistory),
+    compactBoundaryProjection: buildCompactBoundaryProjection(events),
   }
 }
 

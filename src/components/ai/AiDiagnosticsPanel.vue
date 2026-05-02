@@ -6,7 +6,8 @@ import type { AgentRuntimeSnapshot } from '@/composables/ai/AgentRuntimeSnapshot
 import { useSettingsStore } from '@/stores/settings'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { buildGatewayDashboardSnapshot, type GatewayDashboardSnapshot } from '@/ai-gateway/gatewayDashboard'
-import type { AgentRuntimeGovernanceSnapshot, AiTranscriptEventOf } from '@/composables/ai-agent/transcript/transcriptTypes'
+import { buildCompactBoundaryProjection } from '@/composables/ai-agent/context/compactBoundary'
+import type { AgentRuntimeGovernanceSnapshot, AiTranscriptEvent, AiTranscriptEventOf } from '@/composables/ai-agent/transcript/transcriptTypes'
 import { Activity, ChevronRight, Clock3, Copy, History, Route, ShieldAlert, TrendingUp, Wrench } from 'lucide-vue-next'
 
 type Tone = 'ok' | 'warn' | 'danger'
@@ -301,11 +302,13 @@ async function copySnapshot(): Promise<void> {
   if (props.loadFullTranscript) {
     try {
       const transcript = await props.loadFullTranscript()
+      const transcriptEvents = transcript.filter(isTranscriptEvent)
       payload = JSON.stringify({
         ...JSON.parse(exportPayload.value),
         fullTranscript: {
           eventCount: transcript.length,
           events: transcript,
+          compactBoundaryProjection: buildCompactBoundaryProjection(transcriptEvents),
         },
       }, null, 2)
     } catch {
@@ -387,6 +390,16 @@ function formatDelta(value: number | null): string {
   return t('ai.diagnostics.deltaVsPrev', {
     delta: `${prefix}${formatMs(Math.abs(value))}`,
   })
+}
+
+function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
+  if (!value || typeof value !== 'object') return false
+  const event = value as Partial<AiTranscriptEvent>
+  return typeof event.id === 'string'
+    && typeof event.sessionId === 'string'
+    && typeof event.type === 'string'
+    && typeof event.timestamp === 'number'
+    && !!event.payload
 }
 </script>
 

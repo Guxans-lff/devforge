@@ -1,6 +1,7 @@
 import type { AiMessage, AiMessageRecord, ToolCallInfo, ToolResultInfo } from '@/types/ai'
 import { sanitizeLoadedMessages } from './chatMessageBuilder'
 import { tryParseJson } from './chatHelpers'
+import { restoreCompactBoundaryRecord } from './chatCompactBoundaryRecord'
 
 interface AssistantToolFrame {
   message: AiMessage
@@ -77,6 +78,12 @@ export function restoreMessagesFromRecords(records: AiMessageRecord[]): AiMessag
   const openFrames: AssistantToolFrame[] = []
 
   for (const record of records) {
+    const compactBoundary = restoreCompactBoundaryRecord(record)
+    if (compactBoundary) {
+      restored.push(compactBoundary)
+      continue
+    }
+
     if (record.role === 'assistant' && record.contentType === 'tool_calls') {
       const toolCalls = normalizeToolCalls(record.content)
       const assistantMessage: AiMessage = {

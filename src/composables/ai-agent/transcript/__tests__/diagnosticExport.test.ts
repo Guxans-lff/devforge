@@ -83,4 +83,56 @@ describe('diagnosticExport', () => {
     expect(report.agentRuntimeGovernance.recommendations.join('\n')).toContain('阻塞的 Multi-Agent')
     expect(report.agentRuntimeGovernance.recommendations.join('\n')).toContain('Verification Gate 已阻止完成')
   })
+
+  it('exports compact boundary projection', () => {
+    const store = createTranscriptStore()
+    store.appendEvent(makeEvent({
+      sessionId: 's1',
+      type: 'user_message',
+      timestamp: 1000,
+      payload: { type: 'user_message', data: { contentPreview: 'old', attachmentCount: 0 } },
+    }))
+    store.appendEvent(makeEvent({
+      sessionId: 's1',
+      type: 'compact',
+      timestamp: 2000,
+      payload: {
+        type: 'compact',
+        data: {
+          trigger: 'auto',
+          originalMessageCount: 8,
+          originalTokens: 12000,
+          summaryLength: 700,
+          source: 'ai',
+        },
+      },
+    }))
+    store.appendEvent(makeEvent({
+      sessionId: 's1',
+      turnId: 't2',
+      type: 'tool_call',
+      timestamp: 3000,
+      payload: {
+        type: 'tool_call',
+        data: { toolCallId: 'tc-1', toolName: 'read_file', argumentsPreview: '{}' },
+      },
+    }))
+
+    const report = generateTranscriptDiagnosticReport(store, 's1')
+
+    expect(report.compactBoundaryProjection).toMatchObject({
+      hasBoundary: true,
+      trigger: 'auto',
+      source: 'ai',
+      originalMessageCount: 8,
+      originalTokens: 12000,
+      summaryLength: 700,
+      eventsBeforeBoundary: 1,
+      projectedEventCount: 1,
+      projectedTurnCount: 1,
+      projectedToolCallCount: 1,
+      projectedToolResultCount: 0,
+      unpairedToolCallIds: ['tc-1'],
+    })
+  })
 })

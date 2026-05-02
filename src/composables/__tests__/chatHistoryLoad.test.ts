@@ -128,6 +128,72 @@ describe('chatHistoryLoad cache', () => {
     })
   })
 
+  it('restores persisted compact boundary in lightweight history load', async () => {
+    aiGetSessionMock.mockResolvedValueOnce({
+      ...makeSessionDetail('session-compact', HISTORY_RECENT_RECORD_LIMIT),
+      messages: [
+        {
+          id: 'compact-boundary-1',
+          sessionId: 'session-compact',
+          role: 'system',
+          content: JSON.stringify({
+            trigger: 'auto',
+            preTokens: 9000,
+            summarizedMessages: 14,
+            createdAt: 1700000000000,
+            summaryMessageId: 'summary-1',
+            source: 'ai',
+          }),
+          contentType: 'compact_boundary',
+          tokens: 9000,
+          cost: 0,
+          createdAt: 1699999999999,
+        },
+        {
+          id: 'summary-1',
+          sessionId: 'session-compact',
+          role: 'system',
+          content: '压缩摘要',
+          contentType: 'text',
+          tokens: 1,
+          cost: 0,
+          createdAt: 1700000000001,
+        },
+        {
+          id: 'user-1',
+          sessionId: 'session-compact',
+          role: 'user',
+          content: '继续',
+          contentType: 'text',
+          tokens: 1,
+          cost: 0,
+          createdAt: 1700000000002,
+        },
+      ],
+      totalRecords: 3,
+      loadedRecords: 3,
+      truncated: false,
+    })
+
+    const loaded = await loadChatHistoryWindow('session-compact', HISTORY_RECENT_RECORD_LIMIT)
+
+    expect(loaded.messages[0]).toMatchObject({
+      id: 'compact-boundary-1',
+      type: 'compact-boundary',
+      compactMetadata: {
+        trigger: 'auto',
+        preTokens: 9000,
+        summarizedMessages: 14,
+        summaryMessageId: 'summary-1',
+      },
+    })
+    expect(loaded.messages[1]).toMatchObject({
+      id: 'summary-1',
+      role: 'system',
+      content: '压缩摘要',
+    })
+  })
+
   it('folds oversized message content before it reaches the UI renderer', async () => {
     const oversized = 'A'.repeat(HISTORY_SAFE_MESSAGE_CHAR_LIMIT + 10_000)
     aiGetSessionMock.mockResolvedValueOnce({

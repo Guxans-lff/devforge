@@ -263,6 +263,25 @@ export interface AgentRuntimeGovernanceSnapshot {
   recommendations: string[]
 }
 
+export interface CompactBoundaryProjectionReport {
+  hasBoundary: boolean
+  boundaryEventId?: string
+  boundaryTimestamp?: number
+  trigger?: 'manual' | 'auto' | 'recovery'
+  source?: 'ai' | 'local'
+  originalMessageCount: number
+  originalTokens: number
+  summaryLength: number
+  eventsBeforeBoundary: number
+  projectedEventCount: number
+  projectedTurnCount: number
+  projectedToolCallCount: number
+  projectedToolResultCount: number
+  unpairedToolCallIds: string[]
+  orphanToolResultIds: string[]
+  warnings: string[]
+}
+
 export interface TranscriptDiagnosticReport {
   sessionId: string
   exportedAt: number
@@ -275,4 +294,5 @@ export interface TranscriptDiagnosticReport {
   planHistory: PlanHistoryItem[]
   agentRuntimeContextHistory: AgentRuntimeContextHistoryItem[]
   agentRuntimeGovernance: AgentRuntimeGovernanceSnapshot
+  compactBoundaryProjection: CompactBoundaryProjectionReport
 }

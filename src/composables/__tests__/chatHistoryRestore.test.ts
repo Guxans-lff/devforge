@@ -254,4 +254,51 @@ describe('restoreMessagesFromRecords', () => {
       content: 'hello',
     })
   })
+
+  it('restores persisted compact_boundary content type', () => {
+    const records: AiMessageRecord[] = [
+      createRecord({
+        id: 'boundary-persisted',
+        role: 'system',
+        contentType: 'compact_boundary',
+        content: JSON.stringify({
+          trigger: 'recovery',
+          preTokens: 12000,
+          summarizedMessages: 18,
+          createdAt: 1700000000000,
+          summaryMessageId: 'summary-persisted',
+          source: 'ai',
+        }),
+        tokens: 12000,
+        createdAt: 1699999999999,
+      }),
+      createRecord({
+        id: 'summary-persisted',
+        role: 'system',
+        content: '压缩摘要',
+        createdAt: 1700000000001,
+      }),
+    ]
+
+    const restored = restoreMessagesFromRecords(records)
+
+    expect(restored[0]).toMatchObject({
+      id: 'boundary-persisted',
+      role: 'system',
+      type: 'compact-boundary',
+      compactMetadata: {
+        trigger: 'recovery',
+        preTokens: 12000,
+        summarizedMessages: 18,
+        createdAt: 1700000000000,
+        summaryMessageId: 'summary-persisted',
+        source: 'ai',
+      },
+    })
+    expect(restored[1]).toMatchObject({
+      id: 'summary-persisted',
+      role: 'system',
+      content: '压缩摘要',
+    })
+  })
 })

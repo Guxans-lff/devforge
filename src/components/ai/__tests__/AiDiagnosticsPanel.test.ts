@@ -184,7 +184,32 @@ describe('AiDiagnosticsPanel', () => {
           sessionHistory: [],
           errorBreakdown: [],
         },
-        loadFullTranscript: vi.fn().mockResolvedValue([{ id: 'evt-1', type: 'turn_start' }]),
+        loadFullTranscript: vi.fn().mockResolvedValue([
+          {
+            id: 'evt-1',
+            sessionId: 's1',
+            type: 'compact',
+            timestamp: 1000,
+            payload: {
+              type: 'compact',
+              data: {
+                trigger: 'auto',
+                originalMessageCount: 8,
+                originalTokens: 12000,
+                summaryLength: 600,
+                source: 'ai',
+              },
+            },
+          },
+          {
+            id: 'evt-2',
+            sessionId: 's1',
+            turnId: 't2',
+            type: 'user_message',
+            timestamp: 2000,
+            payload: { type: 'user_message', data: { contentPreview: 'new', attachmentCount: 0 } },
+          },
+        ]),
       },
     })
 
@@ -193,8 +218,13 @@ describe('AiDiagnosticsPanel', () => {
 
     const lastCall = writeText.mock.calls[writeText.mock.calls.length - 1]
     const copied = JSON.parse(String(lastCall?.[0]))
-    expect(copied.fullTranscript.eventCount).toBe(1)
+    expect(copied.fullTranscript.eventCount).toBe(2)
     expect(copied.fullTranscript.events[0].id).toBe('evt-1')
+    expect(copied.fullTranscript.compactBoundaryProjection).toMatchObject({
+      hasBoundary: true,
+      projectedEventCount: 1,
+      originalTokens: 12000,
+    })
   })
 
   it('renders P2 Agent Runtime context when transcript event is available', async () => {
