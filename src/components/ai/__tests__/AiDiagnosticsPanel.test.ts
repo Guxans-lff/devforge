@@ -243,6 +243,133 @@ describe('AiDiagnosticsPanel', () => {
     expect(wrapper.text()).toContain('Fallback Provider')
     expect(wrapper.text()).toContain('成本优先')
     expect(wrapper.text()).toContain('30000ms / 5 次')
+    expect(wrapper.text()).toContain('Fallback 列表包含当前主 Provider')
+    expect(wrapper.text()).toContain('当前只配置了一个 Provider')
+  })
+
+  it('renders Gateway policy risks for missing and weak fallback providers', async () => {
+    setupTestPinia()
+    const aiStore = useAiChatStore()
+    aiStore.providers = [
+      {
+        id: 'provider-primary',
+        name: 'Primary Provider',
+        providerType: 'openai_compat',
+        endpoint: 'https://api.primary.example.com',
+        models: [{
+          id: 'primary-model',
+          name: 'Primary Model',
+          capabilities: {
+            streaming: true,
+            vision: true,
+            thinking: true,
+            toolUse: true,
+            maxContext: 1000000,
+            maxOutput: 128000,
+          },
+        }],
+        isDefault: true,
+        createdAt: 1,
+      },
+      {
+        id: 'provider-weak',
+        name: 'Weak Provider',
+        providerType: 'openai_compat',
+        endpoint: 'https://api.weak.example.com',
+        models: [{
+          id: 'weak-model',
+          name: 'Weak Model',
+          capabilities: {
+            streaming: false,
+            vision: false,
+            thinking: false,
+            toolUse: false,
+            maxContext: 4096,
+            maxOutput: 1024,
+          },
+        }],
+        isDefault: false,
+        createdAt: 2,
+      },
+    ]
+    await aiStore.saveSession({
+      id: 'session-policy-risk',
+      title: 'Gateway Policy Risk',
+      providerId: 'provider-primary',
+      model: 'primary-model',
+      messages: [],
+      createdAt: 100,
+      updatedAt: 100,
+    })
+    aiStore.setActiveSession('session-policy-risk')
+    await aiStore.saveWorkspaceConfig('D:/Project/devforge', {
+      gatewayPolicy: {
+        fallbackEnabled: true,
+        fallbackProviderIds: ['provider-primary', 'provider-weak', 'provider-missing'],
+        routingStrategy: 'capability',
+        rateLimit: { windowMs: 5000, maxRequests: 100 },
+      },
+    })
+    aiStore.currentWorkDir = 'D:/Project/devforge'
+
+    const wrapper = mount(AiDiagnosticsPanel, {
+      props: {
+        metrics: {
+          sessionStartedAt: 1000,
+          prepareCompletedAt: 1100,
+          prepareDurationMs: 100,
+          requestStartedAt: 1200,
+          requestCount: 1,
+          recoveryCount: 0,
+          firstTokenAt: 1300,
+          firstTokenLatencyMs: 100,
+          requestFirstTokenLatencyMs: 100,
+          responseCompletedAt: 1800,
+          responseDurationMs: 600,
+          loadHistoryStartedAt: null,
+          loadHistoryDurationMs: null,
+          historyRestoreCount: 0,
+          compactTriggeredCount: 0,
+          providerRerouteCount: 0,
+          autoDowngradeCount: 0,
+          autoSwitchProviderCount: 0,
+          lastRoutingReason: null,
+          pendingToolQueueLength: 0,
+          lastToolRun: {
+            totalCalls: 0,
+            successCount: 0,
+            errorCount: 0,
+            cancelledCount: 0,
+            timeoutCount: 0,
+            retryCount: 0,
+            totalDurationMs: 0,
+            maxDurationMs: 0,
+            averageDurationMs: 0,
+          },
+          trend: {
+            sampleCount: 0,
+            firstTokenAverageMs: null,
+            requestFirstTokenAverageMs: null,
+            responseAverageMs: null,
+            toolRunAverageMs: null,
+            lastFirstTokenDeltaMs: null,
+            lastRequestFirstTokenDeltaMs: null,
+            lastResponseDeltaMs: null,
+            lastToolRunDeltaMs: null,
+          },
+          sessionHistory: [],
+          errorBreakdown: [],
+        },
+      },
+    })
+
+    await wrapper.find('button').trigger('click')
+
+    expect(wrapper.text()).toContain('能力优先')
+    expect(wrapper.text()).toContain('Fallback Provider 不存在：provider-missing')
+    expect(wrapper.text()).toContain('Fallback 列表包含当前主 Provider')
+    expect(wrapper.text()).toContain('Fallback 模型能力可能不足：Weak Provider')
+    expect(wrapper.text()).toContain('Profile 限流窗口较短且请求数偏高')
   })
 
   it('copies full transcript when backend export loader is provided', async () => {
