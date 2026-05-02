@@ -206,6 +206,45 @@ describe('AiProviderProfileBundlePanel', () => {
     expect(wrapper.emitted('apply')).toHaveLength(1)
   })
 
+  it('keeps preview dialog open when preview apply is cancelled', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('预览'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('应用 Profile'))!.trigger('click')
+
+    expect(wrapper.text()).toContain('Profile 应用预览')
+    expect(wrapper.text()).toContain('已取消应用 Profile')
+    expect(wrapper.emitted('apply')).toBeUndefined()
+  })
+
+  it('closes preview dialog after confirmed preview apply', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('预览'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('应用 Profile'))!.trigger('click')
+
+    expect(wrapper.text()).not.toContain('Profile 应用预览')
+    expect(wrapper.emitted('apply')).toHaveLength(1)
+  })
+
   it('shows gateway policy controls and includes policy in saved profile', async () => {
     const wrapper = mount(AiProviderProfileBundlePanel, {
       props: {

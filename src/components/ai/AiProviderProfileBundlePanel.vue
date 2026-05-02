@@ -259,12 +259,12 @@ function confirmApplyProfileRisks(): boolean {
   return window.confirm(`应用该 Profile 会带来以下风险：\n${summary}${suffix}\n\n是否继续应用？`)
 }
 
-function applyProfile(): void {
+function applyProfile(): boolean {
   const profile = selectedProfile.value
-  if (!profile) return
+  if (!profile) return false
   if (!confirmApplyProfileRisks()) {
     message.value = '已取消应用 Profile'
-    return
+    return false
   }
   const result = store.applyProfile({
     profileId: profile.id,
@@ -273,6 +273,13 @@ function applyProfile(): void {
   })
   emit('apply', { profile, ...result })
   message.value = 'Profile 已应用'
+  return true
+}
+
+function applyProfileFromPreview(): void {
+  if (applyProfile()) {
+    previewOpen.value = false
+  }
 }
 
 function backupProfile(): void {
@@ -668,7 +675,7 @@ onMounted(() => {
         </div>
         <DialogFooter>
           <Button variant="outline" @click="previewOpen = false">关闭</Button>
-          <Button :disabled="!selectedProfile" @click="applyProfile(); previewOpen = false">应用 Profile</Button>
+          <Button :disabled="!selectedProfile" @click="applyProfileFromPreview">应用 Profile</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
