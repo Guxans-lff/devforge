@@ -282,6 +282,12 @@ function backupProfile(): void {
 }
 
 function rollbackProfile(backupId: string): void {
+  const backup = profileBackups.value.find(item => item.id === backupId)
+  const backupName = backup?.snapshot.name ?? selectedProfile.value?.name ?? '当前 Profile'
+  if (!window.confirm(`确认回滚 Profile「${backupName}」？当前版本会先自动备份，但工作区配置可能被恢复到旧状态。`)) {
+    message.value = '已取消回滚 Profile'
+    return
+  }
   const restored = store.rollbackProfile(backupId)
   selectedProfileId.value = restored.id
   loadProfileToForm(restored)
@@ -291,6 +297,11 @@ function rollbackProfile(backupId: string): void {
 
 function removeProfile(): void {
   if (!selectedProfile.value) return
+  const profileName = selectedProfile.value.name
+  if (!window.confirm(`确认删除 Profile「${profileName}」？该操作不会删除历史备份，但会从当前配置列表移除。`)) {
+    message.value = '已取消删除 Profile'
+    return
+  }
   store.removeProfile(selectedProfile.value.id)
   selectedProfileId.value = store.profiles[0]?.id ?? null
   if (selectedProfile.value) loadProfileToForm(selectedProfile.value)

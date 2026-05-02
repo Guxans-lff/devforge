@@ -255,6 +255,65 @@ describe('AiProviderProfileBundlePanel', () => {
     expect(wrapper.text()).toContain('Profile 限流窗口较短且请求数偏高')
   })
 
+  it('asks confirmation before deleting profile', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('删除'))!.trigger('click')
+
+    const store = useProviderProfileBundleStore()
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('确认删除 Profile'))
+    expect(store.profiles).toHaveLength(1)
+    expect(wrapper.text()).toContain('已取消删除 Profile')
+  })
+
+  it('deletes profile after confirmation', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => true))
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('删除'))!.trigger('click')
+
+    const store = useProviderProfileBundleStore()
+    expect(store.profiles).toHaveLength(0)
+    expect(wrapper.text()).toContain('Profile 已删除')
+  })
+
+  it('asks confirmation before rolling back profile', async () => {
+    vi.stubGlobal('confirm', vi.fn(() => false))
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('备份'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('回滚'))!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text().includes('manual'))!.trigger('click')
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('确认回滚 Profile'))
+    expect(wrapper.text()).toContain('已取消回滚 Profile')
+  })
+
   it('exports and imports profile json from the panel', async () => {
     const wrapper = mount(AiProviderProfileBundlePanel, {
       props: {
