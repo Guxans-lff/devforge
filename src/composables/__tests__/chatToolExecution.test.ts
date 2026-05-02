@@ -227,9 +227,45 @@ describe('chatToolExecution', () => {
 
     expect(results[0]?.success).toBe(true)
     const events = transcriptStore.getEvents('session-1')
-    expect(events.map(event => event.type)).toEqual(['permission', 'tool_result'])
+    expect(events.map(event => event.type)).toEqual(['tool_call', 'permission', 'tool_result'])
     expect(transcriptStore.getLatestEvent('session-1', 'permission')?.payload.data.decision).toBe('allowed')
+    expect(transcriptStore.getLatestEvent('session-1', 'tool_call')?.payload.data.toolCallId).toBe('read-1')
     expect(transcriptStore.getLatestEvent('session-1', 'tool_result')?.payload.data.contentPreview).toBe('file content')
+  })
+
+  it('does not duplicate existing transcript tool_call events', async () => {
+    const toolCalls = [
+      makeToolCall('read-1', 'read_file', { path: 'src/a.ts' }),
+    ]
+    const transcriptStore = createTranscriptStore()
+    transcriptStore.appendEvent({
+      sessionId: 'session-1',
+      turnId: 'turn-1',
+      type: 'tool_call',
+      timestamp: 1000,
+      payload: {
+        type: 'tool_call',
+        data: {
+          toolCallId: 'read-1',
+          toolName: 'read_file',
+          argumentsPreview: '{"path":"src/a.ts"}',
+        },
+      },
+    })
+    aiExecuteToolMock.mockResolvedValue({
+      success: true,
+      content: 'file content',
+    })
+
+    const params = makeParams(toolCalls)
+    params.transcriptStore = transcriptStore
+    params.turnId = 'turn-1'
+
+    await executeToolCalls(params)
+
+    const toolCallsEvents = transcriptStore.getEventsByType('session-1', ['tool_call'])
+    expect(toolCallsEvents).toHaveLength(1)
+    expect(transcriptStore.getLatestEvent('session-1', 'tool_result')?.payload.data.toolCallId).toBe('read-1')
   })
 
   it('routes read tools through approval when strict provider permission is enabled', async () => {

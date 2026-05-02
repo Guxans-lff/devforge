@@ -161,4 +161,31 @@ describe('agentRuntimeTranscriptBridge', () => {
     expect(toolEvents).toHaveLength(1)
     expect(toolEvents[0]!.payload.data.toolCallId).toBe('tool-1')
   })
+
+  it('records tool calls emitted as streaming deltas', () => {
+    const store = createTranscriptStore()
+    const bridge = createAgentRuntimeTranscriptBridge({
+      sessionId: 's1',
+      transcriptStore: store,
+      log,
+    })
+    const runtime = createAgentRuntime({
+      log,
+      onTransition: transition => bridge.appendTransition(transition),
+    })
+
+    runtime.startTurn()
+    runtime.transitionToStreaming('msg-1')
+    runtime.handleStreamEvent({
+      type: 'ToolCallDelta',
+      index: 0,
+      id: 'tool-delta-1',
+      name: 'read_file',
+      arguments_delta: '{"path"',
+    })
+
+    const toolEvent = store.getLatestEvent('s1', 'tool_call')
+    expect(toolEvent?.payload.data.toolCallId).toBe('tool-delta-1')
+    expect(toolEvent?.payload.data.toolName).toBe('read_file')
+  })
 })

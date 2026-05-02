@@ -123,6 +123,36 @@ function appendToolResultEvent(params: ExecuteToolCallsParams, result: ToolResul
   })
 }
 
+function ensureToolCallEvent(params: ExecuteToolCallsParams, toolCall: ToolCallInfo): void {
+  if (!params.transcriptStore || !params.turnId) return
+  const exists = params.transcriptStore
+    .getEventsByTurn(params.sessionId, params.turnId)
+    .some(event =>
+      event.type === 'tool_call'
+      && event.payload.type === 'tool_call'
+      && event.payload.data.toolCallId === toolCall.id,
+    )
+  if (exists) return
+
+  params.transcriptStore.appendEvent({
+    sessionId: params.sessionId,
+    turnId: params.turnId,
+    type: 'tool_call',
+    timestamp: Math.max(0, Date.now() - 1),
+    payload: {
+      type: 'tool_call',
+      data: {
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+        argumentsPreview: toolCall.arguments.length > 200
+          ? `${toolCall.arguments.slice(0, 200).trimEnd()}...`
+          : toolCall.arguments,
+        path: typeof toolCall.parsedArgs?.path === 'string' ? toolCall.parsedArgs.path : undefined,
+      },
+    },
+  })
+}
+
 function updateToolCalls(
   toolCalls: ToolCallInfo[],
   updateStreamingMessage: ExecuteToolCallsParams['updateStreamingMessage'],
@@ -826,6 +856,7 @@ export async function executeToolCalls({
         transcriptStore,
         workspaceIsolation,
       }
+      ensureToolCallEvent(executionContext, indexed.toolCall)
       const executed = await executeIndexedTool(indexed, executionContext)
 
       results[indexed.index] = executed.result

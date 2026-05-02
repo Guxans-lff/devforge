@@ -141,6 +141,12 @@ export function createAgentRuntime(options: AgentRuntimeOptions) {
         toolName: event.name,
       })
     }
+    if (event.type === 'ToolCallDelta' && event.id && event.name) {
+      emitTransition(from, 'streaming', 'tool_queue', {
+        toolCallId: event.id,
+        toolName: event.name,
+      })
+    }
   }
 
   function transitionToToolExecuting(toolCalls: ToolCallInfo[]): void {
