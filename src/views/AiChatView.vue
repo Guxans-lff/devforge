@@ -2345,6 +2345,7 @@ function handleRewindMessage(messageId: string): void {
           :runtime-snapshot="chat.runtimeSnapshot.value"
           :agent-runtime-context="chat.latestAgentRuntimeContextEvent.value"
           :agent-runtime-governance="chat.agentRuntimeGovernance.value"
+          :load-full-transcript="chat.exportFullTranscript"
         />
       </div>
 
@@ -2608,6 +2609,7 @@ function handleRewindMessage(messageId: string): void {
                 :runtime-snapshot="chat.runtimeSnapshot.value"
                 :agent-runtime-context="chat.latestAgentRuntimeContextEvent.value"
                 :agent-runtime-governance="chat.agentRuntimeGovernance.value"
+                :load-full-transcript="chat.exportFullTranscript"
               />
             </section>
           </div>

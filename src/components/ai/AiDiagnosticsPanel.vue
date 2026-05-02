@@ -16,6 +16,7 @@ const props = defineProps<{
   runtimeSnapshot?: AgentRuntimeSnapshot
   agentRuntimeContext?: AiTranscriptEventOf<'agent_runtime_context'>
   agentRuntimeGovernance?: AgentRuntimeGovernanceSnapshot
+  loadFullTranscript?: () => Promise<unknown[]>
 }>()
 
 const { t } = useI18n()
@@ -296,7 +297,27 @@ onBeforeUnmount(() => {
 })
 
 async function copySnapshot(): Promise<void> {
-  await navigator.clipboard.writeText(exportPayload.value)
+  let payload = exportPayload.value
+  if (props.loadFullTranscript) {
+    try {
+      const transcript = await props.loadFullTranscript()
+      payload = JSON.stringify({
+        ...JSON.parse(exportPayload.value),
+        fullTranscript: {
+          eventCount: transcript.length,
+          events: transcript,
+        },
+      }, null, 2)
+    } catch {
+      payload = JSON.stringify({
+        ...JSON.parse(exportPayload.value),
+        fullTranscript: {
+          error: 'full_transcript_export_failed',
+        },
+      }, null, 2)
+    }
+  }
+  await navigator.clipboard.writeText(payload)
   copied.value = true
   setTimeout(() => {
     copied.value = false

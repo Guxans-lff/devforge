@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import AiDiagnosticsPanel from '@/components/ai/AiDiagnosticsPanel.vue'
 import { setupTestPinia } from '@/__tests__/helpers'
 import { useSettingsStore } from '@/stores/settings'
@@ -130,6 +130,71 @@ describe('AiDiagnosticsPanel', () => {
     expect(wrapper.text()).toContain('ai.diagnostics.timeouts')
     expect(wrapper.text()).toContain('420 ms')
     expect(wrapper.vm.$props.runtimeSnapshot?.turnId).toBe('turn-1')
+  })
+
+  it('copies full transcript when backend export loader is provided', async () => {
+    setupTestPinia()
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+
+    const wrapper = mount(AiDiagnosticsPanel, {
+      props: {
+        metrics: {
+          sessionStartedAt: 1000,
+          prepareCompletedAt: 1100,
+          prepareDurationMs: 100,
+          requestStartedAt: 1200,
+          requestCount: 1,
+          recoveryCount: 0,
+          firstTokenAt: 1300,
+          firstTokenLatencyMs: 100,
+          requestFirstTokenLatencyMs: 100,
+          responseCompletedAt: 1800,
+          responseDurationMs: 600,
+          loadHistoryStartedAt: null,
+          loadHistoryDurationMs: null,
+          historyRestoreCount: 0,
+          compactTriggeredCount: 0,
+          providerRerouteCount: 0,
+          autoDowngradeCount: 0,
+          autoSwitchProviderCount: 0,
+          lastRoutingReason: null,
+          pendingToolQueueLength: 0,
+          lastToolRun: {
+            totalCalls: 0,
+            successCount: 0,
+            errorCount: 0,
+            cancelledCount: 0,
+            timeoutCount: 0,
+            retryCount: 0,
+            totalDurationMs: 0,
+            maxDurationMs: 0,
+            averageDurationMs: 0,
+          },
+          trend: {
+            sampleCount: 0,
+            firstTokenAverageMs: null,
+            requestFirstTokenAverageMs: null,
+            responseAverageMs: null,
+            toolRunAverageMs: null,
+            lastFirstTokenDeltaMs: null,
+            lastRequestFirstTokenDeltaMs: null,
+            lastResponseDeltaMs: null,
+            lastToolRunDeltaMs: null,
+          },
+          sessionHistory: [],
+          errorBreakdown: [],
+        },
+        loadFullTranscript: vi.fn().mockResolvedValue([{ id: 'evt-1', type: 'turn_start' }]),
+      },
+    })
+
+    await wrapper.find('button').trigger('click')
+    await wrapper.findAll('button')[1]!.trigger('click')
+
+    const lastCall = writeText.mock.calls[writeText.mock.calls.length - 1]
+    const copied = JSON.parse(String(lastCall?.[0]))
+    expect(copied.fullTranscript.eventCount).toBe(1)
+    expect(copied.fullTranscript.events[0].id).toBe('evt-1')
   })
 
   it('renders P2 Agent Runtime context when transcript event is available', async () => {

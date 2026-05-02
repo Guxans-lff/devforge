@@ -12,7 +12,12 @@ import { runAiChatSessionTurn, type AiChatSessionRunnerResult } from '@/composab
 import { createAgentRuntime } from '@/composables/ai/AgentRuntime'
 import { createAgentRuntimeTranscriptBridge } from '@/composables/ai-agent/transcript/agentRuntimeTranscriptBridge'
 import { createTranscriptStore } from '@/composables/ai-agent/transcript/transcriptStore'
-import { aiAppendTranscriptEvent, aiListTranscriptEvents, aiQueryTranscriptEvents } from '@/api/ai/transcript'
+import {
+  aiAppendTranscriptEvent,
+  aiExportTranscriptEvents,
+  aiListTranscriptEvents,
+  aiQueryTranscriptEvents,
+} from '@/api/ai/transcript'
 import { useAiChatObservability } from '@/composables/ai/useAiChatObservability'
 import {
   parseAndWriteJournalSections as writeJournalSectionsFromText,
@@ -218,6 +223,10 @@ export function useAiChat(options: UseAiChatOptions) {
       warnings: event.payload.data.warnings,
     })))
   })
+  const exportFullTranscript = () => {
+    const sid = sessionIdRef.value
+    return sid ? aiExportTranscriptEvents(sid) : Promise.resolve([])
+  }
 
   const totalTokens = computed(() => {
     for (let i = messages.value.length - 1; i >= 0; i--) {
@@ -994,6 +1003,7 @@ export function useAiChat(options: UseAiChatOptions) {
     transcriptEventCount,
     latestAgentRuntimeContextEvent,
     agentRuntimeGovernance,
+    exportFullTranscript,
     refreshAdvancedRuntimeContext,
     sessionPermissionRules,
     addSessionPermissionRule,

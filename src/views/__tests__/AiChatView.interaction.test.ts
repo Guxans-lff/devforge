@@ -462,6 +462,7 @@ function createChatMock(messages: AiMessage[] = []) {
       warningCount: 0,
       recommendations: [],
     }),
+    exportFullTranscript: vi.fn().mockResolvedValue([]),
     availableWorkDirs: computed(() => []),
     planGateEnabled: ref(false),
     planApproved: ref(false),
