@@ -980,6 +980,7 @@ export function useAiChat(options: UseAiChatOptions) {
     spawnedTasks,
     agentRuntime,
     turnState: agentRuntime.state,
+    runtimeSnapshot: agentRuntime.snapshot,
     transcriptEvents,
     transcriptEventCount,
     latestAgentRuntimeContextEvent,

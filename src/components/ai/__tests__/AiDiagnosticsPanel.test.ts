@@ -85,6 +85,21 @@ describe('AiDiagnosticsPanel', () => {
             { kind: 'tool_error', count: 1 },
           ],
         },
+        runtimeSnapshot: {
+          turnId: 'turn-1',
+          phase: 'streaming',
+          health: 'healthy',
+          isBusy: true,
+          canAbort: true,
+          durationMs: 800,
+          activeToolCount: 1,
+          pendingToolCount: 1,
+          textDeltaLength: 12,
+          thinkingDeltaLength: 5,
+          transitionCount: 3,
+          lastTransitionReason: 'request_start',
+          lastTransitionAt: 1200,
+        },
       },
     })
 
@@ -114,6 +129,7 @@ describe('AiDiagnosticsPanel', () => {
     expect(wrapper.text()).toContain('ai.diagnostics.lastToolRun')
     expect(wrapper.text()).toContain('ai.diagnostics.timeouts')
     expect(wrapper.text()).toContain('420 ms')
+    expect(wrapper.vm.$props.runtimeSnapshot?.turnId).toBe('turn-1')
   })
 
   it('renders P2 Agent Runtime context when transcript event is available', async () => {

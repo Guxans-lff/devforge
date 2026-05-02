@@ -9,6 +9,7 @@ import { computed } from 'vue'
 import type { AiStreamEvent, ToolCallInfo } from '@/types/ai'
 import type { Logger } from '@/utils/logger'
 import { createAiTurnRuntime, type AiTurnRuntime } from './AiTurnRuntime'
+import { buildAgentRuntimeSnapshot } from './AgentRuntimeSnapshot'
 
 export type AgentRuntimePhase =
   | 'idle'
@@ -67,6 +68,7 @@ function mapTurnPhase(phase: AiTurnRuntime['state']['phase']): AgentRuntimePhase
 export function createAgentRuntime(options: AgentRuntimeOptions) {
   const { log, onTransition } = options
   const turnRuntime = createAiTurnRuntime({ log })
+  const transitions: AgentRuntimeTransition[] = []
 
   function currentPhase(): AgentRuntimePhase {
     return mapTurnPhase(turnRuntime.state.phase)
@@ -96,6 +98,10 @@ export function createAgentRuntime(options: AgentRuntimeOptions) {
       timestamp: transition.timestamp,
       data: transition.data,
     })
+    transitions.push(transition)
+    if (transitions.length > 200) {
+      transitions.splice(0, transitions.length - 200)
+    }
     onTransition?.(transition)
   }
 
@@ -196,9 +202,12 @@ export function createAgentRuntime(options: AgentRuntimeOptions) {
   }
 
   const state = computed(() => turnRuntime.state)
+  const snapshot = computed(() => buildAgentRuntimeSnapshot(turnRuntime.state, transitions))
 
   return {
     state,
+    snapshot,
+    transitions,
     turnRuntime,
     startTurn,
     markPrepareComplete,

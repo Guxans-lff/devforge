@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AiChatMetricsSnapshot } from '@/composables/ai/useAiChatObservability'
+import type { AgentRuntimeSnapshot } from '@/composables/ai/AgentRuntimeSnapshot'
 import { useSettingsStore } from '@/stores/settings'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { buildGatewayDashboardSnapshot, type GatewayDashboardSnapshot } from '@/ai-gateway/gatewayDashboard'
@@ -12,6 +13,7 @@ type Tone = 'ok' | 'warn' | 'danger'
 
 const props = defineProps<{
   metrics: AiChatMetricsSnapshot
+  runtimeSnapshot?: AgentRuntimeSnapshot
   agentRuntimeContext?: AiTranscriptEventOf<'agent_runtime_context'>
   agentRuntimeGovernance?: AgentRuntimeGovernanceSnapshot
 }>()
@@ -275,6 +277,7 @@ const exportPayload = computed(() => JSON.stringify({
   sessionHistory: props.metrics.sessionHistory,
   errorBreakdown: props.metrics.errorBreakdown,
   gateway: gatewaySnapshot.value,
+  runtimeSnapshot: props.runtimeSnapshot,
   agentRuntimeContext: props.agentRuntimeContext?.payload.data,
   agentRuntimeGovernance: props.agentRuntimeGovernance,
 }, null, 2))

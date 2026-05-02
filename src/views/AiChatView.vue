@@ -2342,6 +2342,7 @@ function handleRewindMessage(messageId: string): void {
       <div v-if="settingsStore.settings.devMode" class="mx-auto max-w-4xl px-5">
         <AiDiagnosticsPanel
           :metrics="chat.observability.value"
+          :runtime-snapshot="chat.runtimeSnapshot.value"
           :agent-runtime-context="chat.latestAgentRuntimeContextEvent.value"
           :agent-runtime-governance="chat.agentRuntimeGovernance.value"
         />
@@ -2604,6 +2605,7 @@ function handleRewindMessage(messageId: string): void {
             <section v-if="settingsStore.settings.devMode" class="run-inspector-card">
               <AiDiagnosticsPanel
                 :metrics="chat.observability.value"
+                :runtime-snapshot="chat.runtimeSnapshot.value"
                 :agent-runtime-context="chat.latestAgentRuntimeContextEvent.value"
                 :agent-runtime-governance="chat.agentRuntimeGovernance.value"
               />
