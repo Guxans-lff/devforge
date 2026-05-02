@@ -712,6 +712,8 @@ pub fn run() {
             ai_cmd::ai_save_message,
             ai_cmd::ai_append_transcript_event,
             ai_cmd::ai_list_transcript_events,
+            ai_cmd::ai_query_transcript_events,
+            ai_cmd::ai_export_transcript_events,
             ai_cmd::ai_count_transcript_events,
             ai_cmd::ai_get_usage_stats,
             ai_cmd::ai_get_tools,

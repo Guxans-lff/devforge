@@ -760,6 +760,26 @@ pub async fn ai_list_transcript_events(
     session_store::list_transcript_events(&pool, &session_id, limit.unwrap_or(500)).await
 }
 
+/// 按条件查询 Transcript 事件
+#[tauri::command]
+pub async fn ai_query_transcript_events(
+    query: AiTranscriptEventQuery,
+    storage: State<'_, Arc<Storage>>,
+) -> Result<Vec<AiTranscriptEventRecord>, AppError> {
+    let pool = storage.get_pool().await;
+    session_store::query_transcript_events(&pool, &query).await
+}
+
+/// 导出完整 Transcript 事件
+#[tauri::command]
+pub async fn ai_export_transcript_events(
+    session_id: String,
+    storage: State<'_, Arc<Storage>>,
+) -> Result<Vec<AiTranscriptEventRecord>, AppError> {
+    let pool = storage.get_pool().await;
+    session_store::export_transcript_events(&pool, &session_id).await
+}
+
 /// 统计 Transcript 事件数量
 #[tauri::command]
 pub async fn ai_count_transcript_events(

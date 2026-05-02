@@ -233,6 +233,40 @@ describe('transcriptStore', () => {
     expect(backendStore.getLatestEvent('s1')?.id).toBe('remote-1')
   })
 
+  it('queries backend events with pagination filters and hydrates memory', async () => {
+    const remoteEvent = {
+      ...makeEvent({ sessionId: 's1', timestamp: 3000, type: 'tool_call', payload: { type: 'tool_call', data: { toolCallId: 'tc1', toolName: 'read_file', argumentsPreview: '{}' } } }),
+      id: 'remote-1',
+    } as AiTranscriptEvent
+    const queries: unknown[] = []
+    const backendStore = createTranscriptStore({
+      backend: {
+        queryEvents: async query => {
+          queries.push(query)
+          return [remoteEvent]
+        },
+      },
+    })
+
+    const events = await backendStore.queryBackend?.({
+      sessionId: 's1',
+      limit: 20,
+      offset: 40,
+      types: ['tool_call'],
+      turnId: 't1',
+    })
+
+    expect(events).toHaveLength(1)
+    expect(queries).toEqual([{
+      sessionId: 's1',
+      limit: 20,
+      offset: 40,
+      types: ['tool_call'],
+      turnId: 't1',
+    }])
+    expect(backendStore.getLatestEvent('s1', 'tool_call')?.id).toBe('remote-1')
+  })
+
   it('ignores invalid persisted transcript data', () => {
     const storage = createMemoryStorage()
     storage.setItem(TRANSCRIPT_STORE_STORAGE_KEY, JSON.stringify({

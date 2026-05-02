@@ -414,6 +414,19 @@ pub struct AiTranscriptEventRecord {
     pub payload_json: String,
 }
 
+/// AI Transcript 查询参数
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiTranscriptEventQuery {
+    pub session_id: String,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    pub event_types: Option<Vec<String>>,
+    pub turn_id: Option<String>,
+    pub start_time: Option<i64>,
+    pub end_time: Option<i64>,
+}
+
 // ─────────────────────────────────── OpenAI 兼容 API 响应 ───────────────────────────────────
 
 /// OpenAI Chat Completions 流式 chunk 响应

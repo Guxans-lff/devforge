@@ -2,7 +2,10 @@
 //!
 //! 基于 SQLite 的会话和消息 CRUD 操作。
 
-use super::models::{AiMessageRecord, AiSession, AiTranscriptEventRecord, DailyUsage, ProviderConfig};
+use super::models::{
+    AiMessageRecord, AiSession, AiTranscriptEventQuery, AiTranscriptEventRecord, DailyUsage,
+    ProviderConfig,
+};
 use crate::utils::error::AppError;
 use sqlx::SqlitePool;
 
@@ -454,6 +457,109 @@ pub async fn list_transcript_events(
     });
 
     Ok(events)
+}
+
+fn transcript_query_limit(limit: Option<u32>) -> i64 {
+    limit.unwrap_or(500).clamp(1, 5000) as i64
+}
+
+fn transcript_query_offset(offset: Option<u32>) -> i64 {
+    offset.unwrap_or(0) as i64
+}
+
+fn validate_transcript_event_types(event_types: &[String]) -> Result<(), AppError> {
+    if event_types.len() > 32 {
+        return Err(AppError::Validation(
+            "Transcript 事件类型过滤数量不能超过 32 个".to_string(),
+        ));
+    }
+    if event_types
+        .iter()
+        .any(|event_type| event_type.trim().is_empty() || event_type.len() > 80)
+    {
+        return Err(AppError::Validation(
+            "Transcript 事件类型不能为空或超过 80 字符".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn transcript_record_from_row(
+    row: (String, String, Option<String>, String, i64, String),
+) -> AiTranscriptEventRecord {
+    let (id, session_id, turn_id, event_type, timestamp, payload_json) = row;
+    AiTranscriptEventRecord {
+        id,
+        session_id,
+        turn_id,
+        event_type,
+        timestamp,
+        payload_json,
+    }
+}
+
+/// 按条件查询 Transcript 事件，支持分页和基础过滤
+pub async fn query_transcript_events(
+    pool: &SqlitePool,
+    query: &AiTranscriptEventQuery,
+) -> Result<Vec<AiTranscriptEventRecord>, AppError> {
+    if query.session_id.trim().is_empty() {
+        return Err(AppError::Validation("会话 ID 不能为空".to_string()));
+    }
+    let event_types = query.event_types.clone().unwrap_or_default();
+    validate_transcript_event_types(&event_types)?;
+
+    let limit = transcript_query_limit(query.limit);
+    let offset = transcript_query_offset(query.offset);
+    let has_types = !event_types.is_empty();
+    let type_json = serde_json::to_string(&event_types)?;
+
+    let rows: Vec<(String, String, Option<String>, String, i64, String)> = sqlx::query_as(
+        r#"
+        SELECT id, session_id, turn_id, event_type, timestamp, payload_json
+        FROM ai_transcript_events
+        WHERE session_id = ?
+          AND (? IS NULL OR turn_id = ?)
+          AND (? IS NULL OR timestamp >= ?)
+          AND (? IS NULL OR timestamp <= ?)
+          AND (? = 0 OR event_type IN (SELECT value FROM json_each(?)))
+        ORDER BY timestamp ASC, id ASC
+        LIMIT ? OFFSET ?
+        "#,
+    )
+    .bind(&query.session_id)
+    .bind(&query.turn_id)
+    .bind(&query.turn_id)
+    .bind(query.start_time)
+    .bind(query.start_time)
+    .bind(query.end_time)
+    .bind(query.end_time)
+    .bind(if has_types { 1 } else { 0 })
+    .bind(&type_json)
+    .bind(limit)
+    .bind(offset)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| AppError::Other(format!("查询 Transcript 事件失败: {e}")))?;
+
+    Ok(rows.into_iter().map(transcript_record_from_row).collect())
+}
+
+/// 导出完整 Transcript 事件，限制最大数量避免一次性导出过大
+pub async fn export_transcript_events(
+    pool: &SqlitePool,
+    session_id: &str,
+) -> Result<Vec<AiTranscriptEventRecord>, AppError> {
+    let query = AiTranscriptEventQuery {
+        session_id: session_id.to_string(),
+        limit: Some(20_000),
+        offset: Some(0),
+        event_types: None,
+        turn_id: None,
+        start_time: None,
+        end_time: None,
+    };
+    query_transcript_events(pool, &query).await
 }
 
 /// 统计 Transcript 事件数量

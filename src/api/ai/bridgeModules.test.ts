@@ -5,8 +5,10 @@ import {
   aiChatStream,
   aiCreateCompletion,
   aiExecuteTool,
+  aiExportTranscriptEvents,
   aiGetMcpStatus,
   aiGetSession,
+  aiQueryTranscriptEvents,
   aiListProviderModels,
   aiListProviders,
   aiReadContextFile,
@@ -161,6 +163,34 @@ describe('ai bridge modules', () => {
     await aiSaveMessage(message)
 
     expect(invokeCommandMock).toHaveBeenCalledWith('ai_save_message', { message }, { source: 'AI' })
+  })
+
+  it('queries and exports transcript events through stable bridge params', async () => {
+    await aiQueryTranscriptEvents({
+      sessionId: 's1',
+      limit: 20,
+      offset: 40,
+      eventTypes: ['tool_call'],
+      turnId: 't1',
+      startTime: 1000,
+      endTime: 2000,
+    })
+    await aiExportTranscriptEvents('s1')
+
+    expect(invokeCommandMock).toHaveBeenNthCalledWith(1, 'ai_query_transcript_events', {
+      query: {
+        sessionId: 's1',
+        limit: 20,
+        offset: 40,
+        eventTypes: ['tool_call'],
+        turnId: 't1',
+        startTime: 1000,
+        endTime: 2000,
+      },
+    }, { source: 'AI', silent: true })
+    expect(invokeCommandMock).toHaveBeenNthCalledWith(2, 'ai_export_transcript_events', {
+      sessionId: 's1',
+    }, { source: 'AI', silent: true })
   })
 
   it('wraps AI bridge failures with command metadata', async () => {

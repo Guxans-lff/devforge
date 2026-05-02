@@ -12,7 +12,7 @@ import { runAiChatSessionTurn, type AiChatSessionRunnerResult } from '@/composab
 import { createAgentRuntime } from '@/composables/ai/AgentRuntime'
 import { createAgentRuntimeTranscriptBridge } from '@/composables/ai-agent/transcript/agentRuntimeTranscriptBridge'
 import { createTranscriptStore } from '@/composables/ai-agent/transcript/transcriptStore'
-import { aiAppendTranscriptEvent, aiListTranscriptEvents } from '@/api/ai/transcript'
+import { aiAppendTranscriptEvent, aiListTranscriptEvents, aiQueryTranscriptEvents } from '@/api/ai/transcript'
 import { useAiChatObservability } from '@/composables/ai/useAiChatObservability'
 import {
   parseAndWriteJournalSections as writeJournalSectionsFromText,
@@ -82,6 +82,15 @@ export function useAiChat(options: UseAiChatOptions) {
     backend: {
       appendEvent: aiAppendTranscriptEvent,
       listEvents: aiListTranscriptEvents,
+      queryEvents: query => aiQueryTranscriptEvents({
+        sessionId: query.sessionId,
+        limit: query.limit,
+        offset: query.offset,
+        eventTypes: query.types,
+        turnId: query.turnId,
+        startTime: query.startTime,
+        endTime: query.endTime,
+      }),
       onError: (err, context) => {
         log.warn('transcript_backend_sync_failed', {
           operation: context.operation,

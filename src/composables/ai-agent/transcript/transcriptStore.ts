@@ -77,6 +77,9 @@ export interface TranscriptStore {
 
   /** Restore transcript events from backend event store */
   loadBackend?(sessionId: string, limit?: number): Promise<boolean>
+
+  /** Restore transcript events from backend with pagination/filtering */
+  queryBackend?(query: TranscriptStoreBackendQuery): Promise<AiTranscriptEvent[]>
 }
 
 export interface TranscriptStoreOptions {
@@ -89,7 +92,18 @@ export interface TranscriptStoreOptions {
 export interface TranscriptStoreBackend {
   appendEvent?: (event: AiTranscriptEvent) => Promise<void>
   listEvents?: (sessionId: string, limit: number) => Promise<AiTranscriptEvent[]>
+  queryEvents?: (query: TranscriptStoreBackendQuery) => Promise<AiTranscriptEvent[]>
   onError?: (error: unknown, context: { operation: 'append' | 'load'; sessionId: string }) => void
+}
+
+export interface TranscriptStoreBackendQuery {
+  sessionId: string
+  limit?: number
+  offset?: number
+  types?: AiTranscriptEventType[]
+  turnId?: string
+  startTime?: number
+  endTime?: number
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -369,6 +383,21 @@ export function createTranscriptStore(options: TranscriptStoreOptions = {}): Tra
     }
   }
 
+  async function queryBackend(query: TranscriptStoreBackendQuery): Promise<AiTranscriptEvent[]> {
+    if (!backend?.queryEvents) return []
+    try {
+      const events = await backend.queryEvents(query)
+      for (const event of events) {
+        insertEvent(event, { sort: true })
+      }
+      if (events.length > 0 && persistEnabled) save()
+      return events
+    } catch (error) {
+      backend.onError?.(error, { operation: 'load', sessionId: query.sessionId })
+      return []
+    }
+  }
+
   if (options.autoLoad) {
     load()
   }
@@ -387,5 +416,6 @@ export function createTranscriptStore(options: TranscriptStoreOptions = {}): Tra
     save,
     load,
     loadBackend,
+    queryBackend,
   }
 }

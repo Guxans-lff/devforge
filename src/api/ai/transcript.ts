@@ -10,6 +10,16 @@ export interface AiTranscriptEventRecord {
   payloadJson: string
 }
 
+export interface AiTranscriptEventQuery {
+  sessionId: string
+  limit?: number
+  offset?: number
+  eventTypes?: string[]
+  turnId?: string
+  startTime?: number
+  endTime?: number
+}
+
 export function toTranscriptEventRecord(event: AiTranscriptEvent): AiTranscriptEventRecord {
   return {
     id: event.id,
@@ -46,6 +56,34 @@ export async function aiListTranscriptEvents(sessionId: string, limit?: number):
   const records = await invokeAiCommand<AiTranscriptEventRecord[]>('ai_list_transcript_events', {
     sessionId,
     limit: limit ?? null,
+  }, { source: 'AI', silent: true })
+
+  return records
+    .map(toTranscriptEvent)
+    .filter((event): event is AiTranscriptEvent => Boolean(event))
+}
+
+export async function aiQueryTranscriptEvents(query: AiTranscriptEventQuery): Promise<AiTranscriptEvent[]> {
+  const records = await invokeAiCommand<AiTranscriptEventRecord[]>('ai_query_transcript_events', {
+    query: {
+      sessionId: query.sessionId,
+      limit: query.limit ?? null,
+      offset: query.offset ?? null,
+      eventTypes: query.eventTypes ?? null,
+      turnId: query.turnId ?? null,
+      startTime: query.startTime ?? null,
+      endTime: query.endTime ?? null,
+    },
+  }, { source: 'AI', silent: true })
+
+  return records
+    .map(toTranscriptEvent)
+    .filter((event): event is AiTranscriptEvent => Boolean(event))
+}
+
+export async function aiExportTranscriptEvents(sessionId: string): Promise<AiTranscriptEvent[]> {
+  const records = await invokeAiCommand<AiTranscriptEventRecord[]>('ai_export_transcript_events', {
+    sessionId,
   }, { source: 'AI', silent: true })
 
   return records
