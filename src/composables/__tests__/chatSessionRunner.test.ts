@@ -3,6 +3,7 @@ import { reactive, ref } from 'vue'
 import { runAiChatSessionTurn } from '@/composables/ai/chatSessionRunner'
 import { handleStreamEvent, type AiChatStreamState } from '@/composables/ai/chatStreamEvents'
 import type { AiMessage, AiStreamEvent, ModelConfig, ProviderConfig } from '@/types/ai'
+import { resetRateLimiters } from '@/ai-gateway/rateLimiter'
 
 const { aiChatStreamMock, aiAbortStreamMock, aiSaveMessageMock } = vi.hoisted(() => ({
   aiChatStreamMock: vi.fn(),
@@ -24,33 +25,46 @@ vi.mock('@/api/ai', () => ({
   aiSaveMessage: aiSaveMessageMock,
 }))
 
-function makeProvider(): ProviderConfig {
+vi.mock('@/api/connection', () => ({
+  getCredential: vi.fn(async () => 'fallback-key'),
+}))
+
+function makeProvider(overrides: Partial<ProviderConfig> = {}): ProviderConfig {
   return {
     id: 'provider-1',
     name: 'Provider 1',
-    providerType: 'openai',
+    providerType: 'openai_compat',
     endpoint: 'https://api.example.com',
     models: [makeModel()],
     isDefault: true,
     createdAt: 1,
+    ...overrides,
   }
 }
 
-function makeModel(): ModelConfig {
+function makeModel(overrides: Partial<ModelConfig> = {}): ModelConfig {
   return {
     id: 'model-1',
     name: 'Model 1',
     capabilities: {
-      stream: true,
+      streaming: true,
       toolUse: false,
       vision: false,
+      thinking: false,
       maxContext: 32000,
       maxOutput: 4096,
     },
+    ...overrides,
   }
 }
 
-function createHarness(options?: { signal?: AbortSignal; summaryMode?: 'brief' | 'normal' }) {
+function createHarness(options?: {
+  signal?: AbortSignal
+  summaryMode?: 'brief' | 'normal'
+  aiStore?: Record<string, unknown>
+  provider?: ProviderConfig
+  model?: ModelConfig
+}) {
   const messages = ref<AiMessage[]>([])
   const isStreaming = ref(false)
   const error = ref<string | null>(null)
@@ -110,14 +124,16 @@ function createHarness(options?: { signal?: AbortSignal; summaryMode?: 'brief' |
     run: () => runAiChatSessionTurn({
       sessionId: 'session-runner-1',
       content: 'please inspect',
-      provider: makeProvider(),
-      model: makeModel(),
+      provider: options?.provider ?? makeProvider(),
+      model: options?.model ?? makeModel(),
       apiKey: 'key',
       workDir,
       aiStore: {
         sessions: [],
+        providers: [options?.provider ?? makeProvider()],
         currentWorkspaceConfig: null,
         saveSession: vi.fn().mockResolvedValue(undefined),
+        ...(options?.aiStore ?? {}),
       } as any,
       memoryStore: {
         currentWorkspaceId: '_global',
@@ -181,6 +197,7 @@ function createHarness(options?: { signal?: AbortSignal; summaryMode?: 'brief' |
 describe('runAiChatSessionTurn', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    resetRateLimiters()
     aiSaveMessageMock.mockResolvedValue(undefined)
     aiAbortStreamMock.mockResolvedValue(true)
   })
@@ -293,7 +310,12 @@ describe('runAiChatSessionTurn', () => {
       })
 
     const harness = createHarness()
-    harness.forceCompact.mockImplementation(async (messages: AiMessage[]) => messages)
+    harness.forceCompact.mockImplementation(async () => [{
+      id: 'compact-user',
+      role: 'user',
+      content: 'compacted prompt',
+      timestamp: Date.now(),
+    } satisfies AiMessage])
 
     const result = await harness.run()
 
@@ -315,7 +337,12 @@ describe('runAiChatSessionTurn', () => {
       })
 
     const harness = createHarness()
-    harness.forceCompact.mockImplementation(async (messages: AiMessage[]) => messages)
+    harness.forceCompact.mockImplementation(async () => [{
+      id: 'compact-user',
+      role: 'user',
+      content: 'compacted prompt',
+      timestamp: Date.now(),
+    } satisfies AiMessage])
     await harness.run()
 
     expect(harness.onPendingToolQueueLength).toHaveBeenCalledWith(1)
@@ -329,5 +356,50 @@ describe('runAiChatSessionTurn', () => {
 
     expect(result.status).toBe('error')
     expect(harness.onResponseComplete).not.toHaveBeenCalled()
+  })
+
+  it('uses workspace gateway policy to constrain fallback routing', async () => {
+    aiChatStreamMock.mockImplementation(async (request, onEvent: (event: AiStreamEvent) => void) => {
+      if (request.model === 'model-1') {
+        throw new Error('network timeout while streaming')
+      }
+      onEvent({ type: 'TextDelta', delta: 'policy ok' })
+      onEvent({ type: 'Done', finish_reason: 'stop' })
+      return {}
+    })
+
+    const primary = makeProvider({
+      id: 'provider-1',
+      models: [makeModel()],
+    })
+    const blockedFallback = makeProvider({
+      id: 'provider-2',
+      models: [makeModel({ id: 'blocked-model' })],
+    })
+    const allowedFallback = makeProvider({
+      id: 'provider-3',
+      models: [makeModel({ id: 'allowed-model' })],
+    })
+    const harness = createHarness({
+      provider: primary,
+      model: primary.models[0],
+      aiStore: {
+        providers: [primary, blockedFallback, allowedFallback],
+        currentWorkspaceConfig: {
+          gatewayPolicy: { fallbackProviderIds: ['provider-3'] },
+        },
+      },
+    })
+
+    const result = await harness.run()
+
+    expect(result.status).toBe('done')
+    expect(aiChatStreamMock).toHaveBeenCalledTimes(2)
+    expect(aiChatStreamMock.mock.calls[0]?.[0]).toMatchObject({ model: 'model-1' })
+    expect(aiChatStreamMock.mock.calls[1]?.[0]).toMatchObject({
+      model: 'allowed-model',
+      apiKey: 'fallback-key',
+    })
+    expect(aiChatStreamMock.mock.calls.map(call => call[0]?.model)).not.toContain('blocked-model')
   })
 })

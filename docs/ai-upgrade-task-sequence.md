@@ -92,10 +92,11 @@
 - ✅ Provider Profile Bundle 支持 JSON 导出/导入，便于团队共享配置包；导入前有覆盖确认，导出内容不包含 API Key。
 - ✅ Output Style 已从 Profile Bundle 进入主对话链路，会在 `chatSendPreparation` 中注入系统提示，不再只是配置字段。
 - ✅ Provider 级 `security` 已接入后端 Provider 持久化，SSRF allowlist / localhost / private IP 策略可随 Provider 保存并被 Gateway preflight 读取。
+- ✅ Provider Profile 级 Gateway 策略已产品化：Profile 可配置 fallback 开关、允许 fallback Provider、路由偏好和限流覆盖，并随 Profile 应用到 chat / compact / prompt optimize。
 
 当前边界：
 - ⚠️ Provider Profile Bundle 当前是后端 KV 镜像 + localStorage 兜底；尚未升级为专用 SQLite 表或 workspace 文件级配置，跨设备冲突合并、团队权限和迁移回填仍待做。
-- ⚠️ SSRF allowlist 已能随 Provider 保存；fallback keys 和更细的 Profile 级策略仍需要进一步产品化。
+- ⚠️ SSRF allowlist、fallback keys 和 Profile 级 Gateway 策略已进入主链路；后续仍需补团队级策略模板、按 Profile 的诊断筛选和冲突合并。
 - ⚠️ Gateway Dashboard 已能展示实际路由和拦截原因；后续仍可继续做成本趋势、按 Profile 过滤和团队级 SLA 报表。
 
 ### 14.4 阶段四：AI 产品化能力
@@ -152,8 +153,8 @@
 | 阶段二 | 对话区体验稳定 | ✅ 主体完成 | `AiChatShell.vue`、`AiMessageListVirtual.vue`、`AiInputArea.vue`、`AiChatView.interaction.test.ts` | 重点守住大会话性能，不再恢复预加载会话类逻辑。 |
 | 阶段三 | Gateway 统一入口 | ✅ MVP 完成 | `AiGateway.ts`、`types.ts`、`router.ts`、`rateLimiter.ts`、`usageTracker.ts` | 仍需产品化配置管理和诊断展示。 |
 | 阶段三 | Chat / Compact / Prompt Optimize 覆盖 | ✅ 已覆盖 | `chatSessionRunner.ts`、`chatToolLoop.ts`、`useAutoCompact.ts`、`promptOptimizer.ts`、`gatewayCoverage.test.ts` | 后续新增模型调用必须继续统一走 Gateway。 |
-| 阶段三 | fallback key / rate limit / SSRF | 🟡 基础完成 | `fallbackKeys.ts`、`rateLimiter.ts`、`security.ts`、`AiGateway.test.ts`、`session_store.rs` | SSRF allowlist 已可随 Provider 保存；fallback keys 和更细粒度 Profile 策略还未产品化。 |
-| 阶段三 | Provider Profile Bundle | 🟡 前端 MVP 完成 | `providerProfileBundle.ts`、`provider-profile-bundle.ts`、`AiProviderProfileBundlePanel.vue` | 已有 CRUD、预览、应用、备份、回滚，且 Output Style / Provider security 已影响主链路；缺 Profile 本体后端持久化、导入导出、迁移回填、团队共享和冲突处理。 |
+| 阶段三 | fallback key / rate limit / SSRF | ✅ 主体完成 | `fallbackKeys.ts`、`rateLimiter.ts`、`security.ts`、`gatewayPolicy.ts`、`AiGateway.test.ts`、`session_store.rs` | 已覆盖 chat / compact / prompt optimize；后续补按 Profile 的诊断筛选、团队策略模板和 SLA 报表。 |
+| 阶段三 | Provider Profile Bundle | 🟡 产品化闭环完成 | `providerProfileBundle.ts`、`provider-profile-bundle.ts`、`AiProviderProfileBundlePanel.vue`、`gatewayPolicy.ts` | 已有 CRUD、预览、应用、备份、回滚、后端 KV 镜像、JSON 导入导出，且 Output Style / Provider security / Gateway 策略已影响主链路；缺专用 SQLite 表、workspace 文件迁移、团队共享冲突处理。 |
 | 阶段四 | Workspace Prompt / Skill / Output Style | 🟡 MVP 完成 | `workspaceSkills.ts`、`useOutputStyles.ts`、`chatSendPreparation.ts`、`AiProviderProfileBundlePanel.vue` | Prompt / Output Style 已能随 Profile Bundle 生效；Skill 仍缺独立选择器、团队治理和审计。 |
 | 阶段四 | Team Memory | 🟡 基础完成 | `ai-memory.ts`、`AiMemoryDrawer.vue`、`Team Memory Review` 相关入口 | 缺团队级检索、冲突处理、审计和权限策略。 |
 | 阶段四 | Plan / Transcript / Workflow | 🟡 MVP 完成 | `planStore.ts`、`transcriptStore.ts`、`workflowRuntime.ts`、`workflowPersistence.ts`、`AiWorkflowRuntimePanel.vue` | Workflow 仍是前端轻量 runtime，不是后端长期任务编排。 |

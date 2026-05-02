@@ -1,12 +1,14 @@
 import type {
   AiProviderProfileBackup,
   AiProviderProfileBundle,
+  AiGatewayPolicyConfig,
   AiProviderProfilePreview,
   ProviderConfig,
   WorkspaceConfig,
 } from '@/types/ai'
 import type { OutputStyle } from '@/composables/useOutputStyles'
 import { normalizeWorkspaceSkills, validateWorkspaceSkills } from '@/ai-gui/workspaceSkills'
+import { describeGatewayPolicyValue, normalizeGatewayPolicy } from '@/ai-gateway/gatewayPolicy'
 
 const STORAGE_KEY = 'devforge.ai.providerProfileBundles.v1'
 const BACKUP_STORAGE_KEY = 'devforge.ai.providerProfileBackups.v1'
@@ -32,6 +34,7 @@ export interface ProviderProfileBundleDraft {
   outputStyleId?: string
   workspaceConfig?: WorkspaceConfig
   security?: ProviderConfig['security']
+  gatewayPolicy?: AiGatewayPolicyConfig
   tags?: string[]
 }
 
@@ -52,6 +55,11 @@ function safeParseArray<T>(raw: string | null): T[] {
 function cloneWorkspaceConfig(config?: WorkspaceConfig): WorkspaceConfig | undefined {
   if (!config) return undefined
   return JSON.parse(JSON.stringify(config)) as WorkspaceConfig
+}
+
+function cloneGatewayPolicy(policy?: AiGatewayPolicyConfig): AiGatewayPolicyConfig | undefined {
+  const normalized = normalizeGatewayPolicy(policy)
+  return normalized ? JSON.parse(JSON.stringify(normalized)) as AiGatewayPolicyConfig : undefined
 }
 
 function normalizeTags(tags?: string[]): string[] | undefined {
@@ -78,6 +86,7 @@ export function normalizeProviderProfileBundle(
     outputStyleId: draft.outputStyleId?.trim() || undefined,
     workspaceConfig: cloneWorkspaceConfig(draft.workspaceConfig),
     security: draft.security ? { ...draft.security } : undefined,
+    gatewayPolicy: cloneGatewayPolicy(draft.gatewayPolicy),
     tags: normalizeTags(draft.tags),
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
@@ -241,6 +250,12 @@ export function buildProviderProfilePreview(input: {
     { key: 'allowLocalhost', label: '允许 localhost' },
     { key: 'allowPrivateIP', label: '允许私网地址' },
   ]
+  const gatewayPolicyKeys: Array<{ key: 'fallbackEnabled' | 'fallbackProviderIds' | 'routingStrategy' | 'rateLimit'; label: string }> = [
+    { key: 'fallbackEnabled', label: 'Fallback 开关' },
+    { key: 'fallbackProviderIds', label: 'Fallback Provider' },
+    { key: 'routingStrategy', label: '路由策略' },
+    { key: 'rateLimit', label: '限流策略' },
+  ]
 
   const workspaceChanges = workspaceKeys.map(item => {
     const before = workspaceValue(input.currentWorkspaceConfig, item.key)
@@ -250,6 +265,11 @@ export function buildProviderProfilePreview(input: {
   const securityChanges = securityKeys.map(item => {
     const before = securityValue(provider?.security, item.key)
     const after = securityValue(input.profile.security, item.key)
+    return { ...item, before, after, changed: before !== after }
+  })
+  const gatewayPolicyChanges = gatewayPolicyKeys.map(item => {
+    const before = describeGatewayPolicyValue(input.currentWorkspaceConfig?.gatewayPolicy, item.key, input.providers)
+    const after = describeGatewayPolicyValue(input.profile.gatewayPolicy, item.key, input.providers)
     return { ...item, before, after, changed: before !== after }
   })
   const warnings: AiProviderProfilePreview['warnings'] = []
@@ -269,6 +289,18 @@ export function buildProviderProfilePreview(input: {
   if (input.profile.security?.allowPrivateIP) {
     warnings.push({ key: 'private-ip', level: 'warning', message: 'Profile 允许私网地址，请确认只用于可信内网 Provider。' })
   }
+  if (input.profile.gatewayPolicy?.fallbackEnabled === false) {
+    warnings.push({ key: 'fallback-disabled', level: 'warning', message: 'Profile 已关闭 fallback，Provider 瞬时故障时不会自动切换备用模型。' })
+  }
+  const missingFallbackProviderIds = (input.profile.gatewayPolicy?.fallbackProviderIds ?? [])
+    .filter(providerId => !input.providers.some(provider => provider.id === providerId))
+  if (missingFallbackProviderIds.length > 0) {
+    warnings.push({
+      key: 'missing-fallback-provider',
+      level: 'warning',
+      message: `Fallback Provider 不存在：${missingFallbackProviderIds.join(', ')}`,
+    })
+  }
 
   return {
     profileId: input.profile.id,
@@ -278,6 +310,7 @@ export function buildProviderProfilePreview(input: {
     outputStyleName: outputStyle?.name,
     workspaceChanges,
     securityChanges,
+    gatewayPolicyChanges,
     warnings,
   }
 }
@@ -298,6 +331,7 @@ export function applyProviderProfileBundle(input: {
     ...(input.profile.workspaceConfig ?? {}),
     preferredModel: input.profile.modelId,
     outputStyleId: input.profile.outputStyleId,
+    gatewayPolicy: cloneGatewayPolicy(input.profile.gatewayPolicy),
   }
   const providerConfig = input.profile.security
     ? { ...provider, security: { ...input.profile.security } }

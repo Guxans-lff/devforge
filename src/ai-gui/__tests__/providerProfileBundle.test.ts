@@ -73,6 +73,12 @@ describe('providerProfileBundle', () => {
         skills: [{ id: 'deploy', name: 'Deploy', permissions: ['execute'], enabled: true }],
       },
       security: { allowlist: ['api.openai.com'], allowPrivateIP: true },
+      gatewayPolicy: {
+        fallbackEnabled: false,
+        fallbackProviderIds: ['provider-2'],
+        routingStrategy: 'cost',
+        rateLimit: { windowMs: 60000, maxRequests: 8 },
+      },
     }, undefined, 100)
 
     const preview = buildProviderProfilePreview({
@@ -91,10 +97,18 @@ describe('providerProfileBundle', () => {
       changed: true,
     })
     expect(preview.securityChanges.find(item => item.key === 'allowlist')?.after).toBe('api.openai.com')
+    expect(preview.gatewayPolicyChanges.find(item => item.key === 'fallbackEnabled')).toMatchObject({
+      before: '启用',
+      after: '关闭',
+      changed: true,
+    })
+    expect(preview.gatewayPolicyChanges.find(item => item.key === 'rateLimit')?.after).toBe('60000ms / 8 次')
     expect(preview.warnings.map(item => item.key)).toEqual(expect.arrayContaining([
       'skill-missing_path-deploy',
       'skill-risky_permission-deploy',
       'private-ip',
+      'fallback-disabled',
+      'missing-fallback-provider',
     ]))
   })
 
@@ -109,6 +123,12 @@ describe('providerProfileBundle', () => {
         planGateEnabled: true,
       },
       security: { allowlist: ['api.openai.com'] },
+      gatewayPolicy: {
+        fallbackEnabled: true,
+        fallbackProviderIds: ['provider-2'],
+        routingStrategy: 'speed',
+        rateLimit: { windowMs: 30000, maxRequests: 5 },
+      },
     }, undefined, 100)
 
     const result = applyProviderProfileBundle({
@@ -127,6 +147,12 @@ describe('providerProfileBundle', () => {
       dispatcherAutoRetryCount: 2,
       dispatcherMaxParallel: 5,
       planGateEnabled: true,
+      gatewayPolicy: {
+        fallbackEnabled: true,
+        fallbackProviderIds: ['provider-2'],
+        routingStrategy: 'speed',
+        rateLimit: { windowMs: 30000, maxRequests: 5 },
+      },
     } satisfies Partial<WorkspaceConfig>)
     expect(result.providerConfig?.security?.allowlist).toEqual(['api.openai.com'])
     expect(result.backup.reason).toBe('before-apply')

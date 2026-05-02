@@ -1,6 +1,7 @@
 import { aiAbortStream } from '@/api/ai'
 import { executeGatewayRequest } from '@/ai-gateway/AiGateway'
 import type { FallbackCandidate } from '@/ai-gateway/router'
+import type { RateLimitConfig } from '@/ai-gateway/rateLimiter'
 import type { AiStreamEvent, ModelConfig, ProviderConfig, ProviderType } from '@/types/ai'
 import { getPromptOptimizerTemplate, renderTemplate, type PromptOptimizerTemplate } from '@/composables/ai/promptOptimizerTemplates'
 
@@ -15,6 +16,7 @@ export interface OptimizePromptInput {
   modelConfig?: ModelConfig
   apiKeysByProvider?: Record<string, string | undefined>
   fallbackChain?: FallbackCandidate[]
+  rateLimit?: RateLimitConfig
   sessionId?: string
   signal?: AbortSignal
 }
@@ -31,6 +33,7 @@ export interface IteratePromptInput {
   modelConfig?: ModelConfig
   apiKeysByProvider?: Record<string, string | undefined>
   fallbackChain?: FallbackCandidate[]
+  rateLimit?: RateLimitConfig
   sessionId?: string
   signal?: AbortSignal
 }
@@ -68,6 +71,7 @@ export async function optimizePrompt(
     modelConfig: input.modelConfig,
     apiKeysByProvider: input.apiKeysByProvider,
     fallbackChain: input.fallbackChain,
+    rateLimit: input.rateLimit,
     systemPrompt,
     userMessage,
     signal: input.signal,
@@ -98,6 +102,7 @@ export async function iteratePrompt(
     modelConfig: input.modelConfig,
     apiKeysByProvider: input.apiKeysByProvider,
     fallbackChain: input.fallbackChain,
+    rateLimit: input.rateLimit,
     systemPrompt,
     userMessage,
     signal: input.signal,
@@ -115,6 +120,7 @@ async function runPromptOptimization(
     modelConfig?: ModelConfig
     apiKeysByProvider?: Record<string, string | undefined>
     fallbackChain?: FallbackCandidate[]
+    rateLimit?: RateLimitConfig
     systemPrompt: string
     userMessage: string
     signal?: AbortSignal
@@ -155,6 +161,7 @@ async function runPromptOptimization(
           apiKey: input.apiKey,
           apiKeysByProvider: input.apiKeysByProvider,
           fallbackChain: input.fallbackChain,
+          rateLimit: input.rateLimit,
           systemPrompt: input.systemPrompt,
           enableTools: false,
           source: 'prompt_optimize',
@@ -178,6 +185,7 @@ async function runPromptOptimization(
           apiKey: input.apiKey,
           apiKeysByProvider,
           fallbackChain,
+          rateLimit: input.rateLimit,
           systemPrompt: input.systemPrompt,
           enableTools: false,
           source: 'prompt_optimize',

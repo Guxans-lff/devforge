@@ -57,6 +57,12 @@ const form = reactive({
   providerId: '',
   modelId: '',
   outputStyleId: '',
+  fallbackEnabled: true,
+  fallbackProviderIdsText: '',
+  routingStrategy: 'default' as 'default' | 'cost' | 'speed' | 'capability',
+  rateLimitEnabled: false,
+  rateLimitWindowMs: 60000,
+  rateLimitMaxRequests: 30,
   systemPromptExtra: '',
   planGateEnabled: false,
   dispatcherMaxParallel: 3,
@@ -111,6 +117,12 @@ function resetFormFromCurrent(): void {
   form.providerId = provider?.id ?? ''
   form.modelId = model?.id ?? ''
   form.outputStyleId = props.currentOutputStyleId ?? outputStyles.getDefaultStyle().id
+  form.fallbackEnabled = config.gatewayPolicy?.fallbackEnabled !== false
+  form.fallbackProviderIdsText = config.gatewayPolicy?.fallbackProviderIds?.join(', ') ?? ''
+  form.routingStrategy = config.gatewayPolicy?.routingStrategy ?? 'default'
+  form.rateLimitEnabled = !!config.gatewayPolicy?.rateLimit
+  form.rateLimitWindowMs = config.gatewayPolicy?.rateLimit?.windowMs ?? 60000
+  form.rateLimitMaxRequests = config.gatewayPolicy?.rateLimit?.maxRequests ?? 30
   form.systemPromptExtra = config.systemPromptExtra ?? ''
   form.planGateEnabled = config.planGateEnabled === true
   form.dispatcherMaxParallel = config.dispatcherMaxParallel ?? 3
@@ -127,6 +139,12 @@ function loadProfileToForm(profile: AiProviderProfileBundle): void {
   form.providerId = profile.providerId
   form.modelId = profile.modelId
   form.outputStyleId = profile.outputStyleId ?? outputStyles.getDefaultStyle().id
+  form.fallbackEnabled = profile.gatewayPolicy?.fallbackEnabled !== false
+  form.fallbackProviderIdsText = profile.gatewayPolicy?.fallbackProviderIds?.join(', ') ?? ''
+  form.routingStrategy = profile.gatewayPolicy?.routingStrategy ?? 'default'
+  form.rateLimitEnabled = !!profile.gatewayPolicy?.rateLimit
+  form.rateLimitWindowMs = profile.gatewayPolicy?.rateLimit?.windowMs ?? 60000
+  form.rateLimitMaxRequests = profile.gatewayPolicy?.rateLimit?.maxRequests ?? 30
   form.systemPromptExtra = profile.workspaceConfig?.systemPromptExtra ?? ''
   form.planGateEnabled = profile.workspaceConfig?.planGateEnabled === true
   form.dispatcherMaxParallel = profile.workspaceConfig?.dispatcherMaxParallel ?? 3
@@ -150,6 +168,20 @@ function buildWorkspaceConfig(): WorkspaceConfig {
   }
 }
 
+function buildGatewayPolicy() {
+  return {
+    fallbackEnabled: form.fallbackEnabled,
+    fallbackProviderIds: form.fallbackProviderIdsText.split(',').map(item => item.trim()).filter(Boolean),
+    routingStrategy: form.routingStrategy,
+    rateLimit: form.rateLimitEnabled
+      ? {
+          windowMs: Math.max(1000, Math.trunc(form.rateLimitWindowMs || 1000)),
+          maxRequests: Math.max(1, Math.trunc(form.rateLimitMaxRequests || 1)),
+        }
+      : undefined,
+  }
+}
+
 function saveProfile(): void {
   const profile = store.saveProfile({
     id: selectedProfile.value?.id,
@@ -159,6 +191,7 @@ function saveProfile(): void {
     modelId: form.modelId,
     outputStyleId: form.outputStyleId,
     workspaceConfig: buildWorkspaceConfig(),
+    gatewayPolicy: buildGatewayPolicy(),
     security: {
       allowlist: form.allowlist.split(',').map(item => item.trim()).filter(Boolean),
       allowLocalhost: form.allowLocalhost,
@@ -363,6 +396,55 @@ onMounted(() => {
           </label>
         </div>
 
+        <div class="space-y-3 rounded-xl border border-border/30 bg-muted/15 p-3">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="text-xs font-medium">Gateway 策略</div>
+              <p class="mt-1 text-[11px] text-muted-foreground">
+                随 Profile 应用到 chat / compact / prompt optimize，控制 fallback、路由偏好和限流。
+              </p>
+            </div>
+            <label class="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+              <input v-model="form.fallbackEnabled" type="checkbox" class="h-3.5 w-3.5">
+              启用 fallback
+            </label>
+          </div>
+          <div class="grid gap-3 md:grid-cols-3">
+            <div class="space-y-1.5">
+              <Label class="text-xs">路由策略</Label>
+              <Select :model-value="form.routingStrategy" @update:model-value="(value: unknown) => form.routingStrategy = String(value) as 'default' | 'cost' | 'speed' | 'capability'">
+                <SelectTrigger class="h-9 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">默认策略</SelectItem>
+                  <SelectItem value="cost">成本优先</SelectItem>
+                  <SelectItem value="speed">速度优先</SelectItem>
+                  <SelectItem value="capability">能力优先</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-1.5 md:col-span-2">
+              <Label class="text-xs">允许 fallback Provider ID</Label>
+              <Input v-model="form.fallbackProviderIdsText" class="h-9 text-sm font-mono" placeholder="留空表示自动选择，多个用英文逗号分隔" />
+            </div>
+          </div>
+          <label class="flex min-h-10 items-center gap-2 rounded-lg border border-border/30 bg-background/40 px-3 py-2 text-xs">
+            <input v-model="form.rateLimitEnabled" type="checkbox" class="h-3.5 w-3.5">
+            启用 Profile 限流覆盖
+          </label>
+          <div v-if="form.rateLimitEnabled" class="grid gap-3 md:grid-cols-2">
+            <div class="space-y-1.5">
+              <Label class="text-xs">窗口毫秒</Label>
+              <Input v-model.number="form.rateLimitWindowMs" type="number" min="1000" class="h-9 text-sm" />
+            </div>
+            <div class="space-y-1.5">
+              <Label class="text-xs">窗口内最大请求数</Label>
+              <Input v-model.number="form.rateLimitMaxRequests" type="number" min="1" class="h-9 text-sm" />
+            </div>
+          </div>
+        </div>
+
         <div class="grid gap-3 md:grid-cols-3">
           <div class="space-y-1.5">
             <Label class="text-xs">Dispatcher 并发</Label>
@@ -463,6 +545,14 @@ onMounted(() => {
           <div class="space-y-2">
             <div class="font-medium">安全策略变化</div>
             <div v-for="item in preview.securityChanges.filter(change => change.changed)" :key="item.key" class="rounded border border-border/30 p-2">
+              <div class="font-medium">{{ item.label }}</div>
+              <div class="mt-1 text-muted-foreground">当前：{{ item.before }}</div>
+              <div class="text-foreground">应用后：{{ item.after }}</div>
+            </div>
+          </div>
+          <div class="space-y-2">
+            <div class="font-medium">Gateway 策略变化</div>
+            <div v-for="item in preview.gatewayPolicyChanges.filter(change => change.changed)" :key="item.key" class="rounded border border-border/30 p-2">
               <div class="font-medium">{{ item.label }}</div>
               <div class="mt-1 text-muted-foreground">当前：{{ item.before }}</div>
               <div class="text-foreground">应用后：{{ item.after }}</div>

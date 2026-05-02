@@ -77,6 +77,18 @@ export interface AiWorkspaceIsolationConfig {
   blockedPaths?: string[]
 }
 
+export type AiGatewayRoutingStrategy = 'default' | 'cost' | 'speed' | 'capability'
+
+export interface AiGatewayPolicyConfig {
+  fallbackEnabled?: boolean
+  fallbackProviderIds?: string[]
+  routingStrategy?: AiGatewayRoutingStrategy
+  rateLimit?: {
+    windowMs: number
+    maxRequests: number
+  }
+}
+
 /** 单个模型配置 */
 export interface ModelConfig {
   /** 模型 ID（API 调用使用） */
@@ -114,6 +126,7 @@ export interface AiProviderProfileBundle {
   outputStyleId?: string
   workspaceConfig?: WorkspaceConfig
   security?: ProviderConfig['security']
+  gatewayPolicy?: AiGatewayPolicyConfig
   tags?: string[]
   createdAt: number
   updatedAt: number
@@ -142,6 +155,13 @@ export interface AiProviderProfilePreview {
   }>
   securityChanges: Array<{
     key: 'allowlist' | 'allowLocalhost' | 'allowPrivateIP'
+    label: string
+    before: string
+    after: string
+    changed: boolean
+  }>
+  gatewayPolicyChanges: Array<{
+    key: 'fallbackEnabled' | 'fallbackProviderIds' | 'routingStrategy' | 'rateLimit'
     label: string
     before: string
     after: string
@@ -523,6 +543,8 @@ export interface WorkspaceConfig {
   permissionRules?: AiPermissionRuleConfig[]
   /** Project 级 Workspace 强隔离边界 */
   workspaceIsolation?: AiWorkspaceIsolationConfig
+  /** Project/Profile 级 Gateway 策略 */
+  gatewayPolicy?: AiGatewayPolicyConfig
   features?: Record<string, boolean>
   skills?: WorkspaceSkillConfig[]
 }

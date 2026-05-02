@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import type { ProviderConfig, ModelConfig } from '@/types/ai'
 import { getCredential } from '@/api/connection'
 import { useAiChatStore } from '@/stores/ai-chat'
-import { buildFallbackChain } from '@/ai-gateway/router'
+import { buildPolicyFallbackChain, resolveGatewayRateLimit } from '@/ai-gateway/gatewayPolicy'
 import { collectFallbackApiKeys } from '@/ai-gateway/fallbackKeys'
 import { iteratePrompt, optimizePrompt } from '@/composables/ai/promptOptimizer'
 import type { PromptOptimizerTemplate } from '@/composables/ai/promptOptimizerTemplates'
@@ -93,7 +93,13 @@ async function runEnhance() {
       return
     }
     const providers = aiStore.providers.length > 0 ? aiStore.providers : [props.provider]
-    const fallbackChain = buildFallbackChain(providers, props.provider, props.model)
+    const gatewayPolicy = aiStore.currentWorkspaceConfig?.gatewayPolicy
+    const fallbackChain = buildPolicyFallbackChain({
+      providers,
+      primaryProvider: props.provider,
+      primaryModel: props.model,
+      policy: gatewayPolicy,
+    })
     const apiKeysByProvider = await collectFallbackApiKeys(props.provider.id, fallbackChain)
     if (requestId !== activeRequestId || controller.signal.aborted) return
 
@@ -108,6 +114,7 @@ async function runEnhance() {
         modelConfig: props.model,
         apiKeysByProvider,
         fallbackChain,
+        rateLimit: resolveGatewayRateLimit(gatewayPolicy),
         templateId: selectedTemplateId.value,
         sessionId: `prompt-enhance-${Date.now()}-${requestId}`,
         signal: controller.signal,
@@ -154,7 +161,13 @@ async function runIterate() {
       return
     }
     const providers = aiStore.providers.length > 0 ? aiStore.providers : [props.provider]
-    const fallbackChain = buildFallbackChain(providers, props.provider, props.model)
+    const gatewayPolicy = aiStore.currentWorkspaceConfig?.gatewayPolicy
+    const fallbackChain = buildPolicyFallbackChain({
+      providers,
+      primaryProvider: props.provider,
+      primaryModel: props.model,
+      policy: gatewayPolicy,
+    })
     const apiKeysByProvider = await collectFallbackApiKeys(props.provider.id, fallbackChain)
     if (requestId !== activeRequestId || controller.signal.aborted) return
 
@@ -171,6 +184,7 @@ async function runIterate() {
         modelConfig: props.model,
         apiKeysByProvider,
         fallbackChain,
+        rateLimit: resolveGatewayRateLimit(gatewayPolicy),
         sessionId: `prompt-iterate-${Date.now()}-${requestId}`,
         signal: controller.signal,
       },

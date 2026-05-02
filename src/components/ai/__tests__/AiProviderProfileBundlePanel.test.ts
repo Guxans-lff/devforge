@@ -51,9 +51,30 @@ function makeProvider(): ProviderConfig {
   }
 }
 
+function makeFallbackProvider(): ProviderConfig {
+  return {
+    ...makeProvider(),
+    id: 'provider-2',
+    name: 'Fallback',
+    isDefault: false,
+    models: [{
+      id: 'fallback-model',
+      name: 'Fallback Model',
+      capabilities: {
+        streaming: true,
+        vision: false,
+        thinking: false,
+        toolUse: true,
+        maxContext: 128000,
+        maxOutput: 8192,
+      },
+    }],
+  }
+}
+
 const stubs = {
   Button: { template: '<button><slot /></button>' },
-  Input: { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
+  Input: { props: ['modelValue'], emits: ['update:modelValue'], template: '<input v-bind="$attrs" :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' },
   Label: { template: '<label><slot /></label>' },
   Select: { template: '<div><slot /></div>' },
   SelectTrigger: { template: '<button><slot /></button>' },
@@ -94,6 +115,10 @@ describe('AiProviderProfileBundlePanel', () => {
     expect(store.profiles[0]).toMatchObject({
       providerId: 'provider-1',
       modelId: 'gpt-5.4',
+      gatewayPolicy: {
+        fallbackEnabled: true,
+        routingStrategy: 'default',
+      },
     })
   })
 
@@ -115,7 +140,37 @@ describe('AiProviderProfileBundlePanel', () => {
       selectedModelId: 'gpt-5.4',
       workspaceConfig: {
         preferredModel: 'gpt-5.4',
+        gatewayPolicy: {
+          fallbackEnabled: true,
+          routingStrategy: 'default',
+        },
       },
+    })
+  })
+
+  it('shows gateway policy controls and includes policy in saved profile', async () => {
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider(), makeFallbackProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    const inputs = wrapper.findAll('input')
+    await inputs.find(input => input.attributes('placeholder')?.includes('留空表示自动选择'))!.setValue('provider-2')
+    await wrapper.findAll('input[type="checkbox"]').at(4)!.setValue(true)
+    const refreshedInputs = wrapper.findAll('input')
+    await refreshedInputs.find(input => input.attributes('min') === '1000')!.setValue('30000')
+    await refreshedInputs.find(input => input.attributes('min') === '1' && input.attributes('type') === 'number')!.setValue('5')
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+
+    const store = useProviderProfileBundleStore()
+    expect(wrapper.text()).toContain('Gateway 策略')
+    expect(store.profiles[0]?.gatewayPolicy).toMatchObject({
+      fallbackProviderIds: ['provider-2'],
+      rateLimit: { windowMs: 30000, maxRequests: 5 },
     })
   })
 

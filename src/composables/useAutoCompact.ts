@@ -13,7 +13,7 @@ import { aiSaveCompaction } from '@/api/ai-memory'
 import { aiSaveMessage } from '@/api/ai'
 import { executeGatewayRequest } from '@/ai-gateway/AiGateway'
 import { collectFallbackApiKeys } from '@/ai-gateway/fallbackKeys'
-import { buildFallbackChain } from '@/ai-gateway/router'
+import { buildPolicyFallbackChain, resolveGatewayRateLimit } from '@/ai-gateway/gatewayPolicy'
 import { createLogger } from '@/utils/logger'
 import { COMPACT_BOUNDARY_CONTENT_TYPE, serializeCompactBoundaryPayload } from './ai/chatCompactBoundaryRecord'
 import type { AiMessage, AiMemory, AiMessageRecord, AiStreamEvent, ProviderConfig, ModelConfig, CompactRule, AiCompaction } from '@/types/ai'
@@ -242,7 +242,13 @@ export function useAutoCompact() {
 
     // 调用 AI 生成摘要（非流式收集完整结果）
     let summary = ''
-    const fallbackChain = buildFallbackChain(aiStore.providers, provider, model)
+    const gatewayPolicy = aiStore.currentWorkspaceConfig?.gatewayPolicy
+    const fallbackChain = buildPolicyFallbackChain({
+      providers: aiStore.providers.length > 0 ? aiStore.providers : [provider],
+      primaryProvider: provider,
+      primaryModel: model,
+      policy: gatewayPolicy,
+    })
     const apiKeysByProvider = await collectFallbackApiKeys(provider.id, fallbackChain)
 
     await executeGatewayRequest(
@@ -254,6 +260,7 @@ export function useAutoCompact() {
         apiKey,
         apiKeysByProvider,
         fallbackChain,
+        rateLimit: resolveGatewayRateLimit(gatewayPolicy),
         maxTokens: Math.min(model.capabilities.maxOutput, 4096),
         systemPrompt: '你是一个专业的对话压缩助手，严格按照规则压缩对话内容。',
         enableTools: false,

@@ -1,6 +1,7 @@
 import { aiSaveMessage, type ChatMessage } from '@/api/ai'
 import { executeGatewayRequest } from '@/ai-gateway/AiGateway'
 import type { FallbackCandidate } from '@/ai-gateway/router'
+import type { RateLimitConfig } from '@/ai-gateway/rateLimiter'
 import type { AiMessage, AiMessageRecord, AiStreamEvent, ModelConfig, ProviderConfig, ToolCallInfo, ToolResultInfo } from '@/types/ai'
 import type { Logger } from '@/utils/logger'
 import { genId, hashArgs, resolveRequestMaxTokens, thinkingEffortToBudget } from './chatHelpers'
@@ -14,6 +15,7 @@ export interface StreamWithToolLoopParams {
   apiKey: string
   apiKeysByProvider?: Record<string, string | undefined>
   fallbackChain?: FallbackCandidate[]
+  rateLimit?: RateLimitConfig
   systemPrompt?: string
   enableTools: boolean
   log: Logger
@@ -70,6 +72,7 @@ export async function streamWithToolLoop({
   apiKey,
   apiKeysByProvider,
   fallbackChain,
+  rateLimit,
   systemPrompt,
   enableTools,
   log,
@@ -134,6 +137,7 @@ export async function streamWithToolLoop({
         apiKey,
         apiKeysByProvider,
         fallbackChain,
+        rateLimit,
         maxTokens: resolveRequestMaxTokens(model, { enableTools: currentEnableTools }),
         systemPrompt,
         enableTools: currentEnableTools,

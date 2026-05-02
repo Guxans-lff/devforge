@@ -2,8 +2,9 @@ import { aiAbortStream, type ChatMessage } from '@/api/ai'
 import type { useAiChatStore } from '@/stores/ai-chat'
 import type { useAiMemoryStore } from '@/stores/ai-memory'
 import type { AiMessage, AiStreamEvent, FileAttachment, ModelConfig, ProviderConfig, ToolCallInfo, ToolResultInfo } from '@/types/ai'
-import { buildFallbackChain, type FallbackCandidate } from '@/ai-gateway/router'
+import type { FallbackCandidate } from '@/ai-gateway/router'
 import { collectFallbackApiKeys } from '@/ai-gateway/fallbackKeys'
+import { buildPolicyFallbackChain, resolveGatewayRateLimit } from '@/ai-gateway/gatewayPolicy'
 import { ensureErrorString, readStructuredRetryable } from '@/types/error'
 import type { Logger } from '@/utils/logger'
 import type { AgentRuntime } from './AgentRuntime'
@@ -155,6 +156,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
   let prepared: Awaited<ReturnType<typeof prepareSendContext>> | null = null
   let gatewayFallbackChain: FallbackCandidate[] | undefined
   let gatewayApiKeysByProvider: Record<string, string | undefined> | undefined
+  let gatewayRateLimit: ReturnType<typeof resolveGatewayRateLimit> | undefined
 
   try {
     const turnId = params.agentRuntime?.startTurn({
@@ -191,7 +193,14 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
     const availableProviders = Array.isArray(params.aiStore.providers) && params.aiStore.providers.length > 0
       ? params.aiStore.providers
       : [params.provider]
-    gatewayFallbackChain = params.fallbackChain ?? buildFallbackChain(availableProviders, params.provider, params.model)
+    const gatewayPolicy = params.aiStore.currentWorkspaceConfig?.gatewayPolicy
+    gatewayRateLimit = resolveGatewayRateLimit(gatewayPolicy)
+    gatewayFallbackChain = params.fallbackChain ?? buildPolicyFallbackChain({
+      providers: availableProviders,
+      primaryProvider: params.provider,
+      primaryModel: params.model,
+      policy: gatewayPolicy,
+    })
     gatewayApiKeysByProvider = params.apiKeysByProvider
       ?? await collectFallbackApiKeys(params.provider.id, gatewayFallbackChain)
 
@@ -211,6 +220,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
       apiKey,
       apiKeysByProvider: gatewayApiKeysByProvider,
       fallbackChain: gatewayFallbackChain,
+      rateLimit: gatewayRateLimit,
       systemPrompt,
       enableTools,
       log: params.log,
@@ -295,6 +305,7 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
           apiKey,
           apiKeysByProvider: gatewayApiKeysByProvider,
           fallbackChain: gatewayFallbackChain,
+          rateLimit: gatewayRateLimit,
           systemPrompt,
           enableTools,
           log: params.log,
