@@ -158,9 +158,8 @@ describe('AiProviderProfileBundlePanel', () => {
       global: { stubs },
     })
 
-    const inputs = wrapper.findAll('input')
-    await inputs.find(input => input.attributes('placeholder')?.includes('留空表示自动选择'))!.setValue('provider-2')
-    await wrapper.findAll('input[type="checkbox"]').at(4)!.setValue(true)
+    await wrapper.findAll('label').find(label => label.text().includes('provider-2'))!.find('input[type="checkbox"]').setValue(true)
+    await wrapper.findAll('label').find(label => label.text().includes('启用 Profile 限流覆盖'))!.find('input[type="checkbox"]').setValue(true)
     const refreshedInputs = wrapper.findAll('input')
     await refreshedInputs.find(input => input.attributes('min') === '1000')!.setValue('30000')
     await refreshedInputs.find(input => input.attributes('min') === '1' && input.attributes('type') === 'number')!.setValue('5')

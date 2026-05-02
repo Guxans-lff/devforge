@@ -84,6 +84,15 @@ const selectedProvider = computed(() =>
 )
 
 const availableModels = computed(() => selectedProvider.value?.models ?? [])
+const selectedFallbackProviderIds = computed(() => parseProviderIdsText(form.fallbackProviderIdsText))
+const fallbackProviderOptions = computed(() =>
+  props.providers.filter(provider => provider.id !== form.providerId),
+)
+const unknownFallbackProviderIds = computed(() =>
+  selectedFallbackProviderIds.value.filter(providerId =>
+    !props.providers.some(provider => provider.id === providerId),
+  ),
+)
 
 const preview = computed(() => {
   if (!selectedProfile.value) return null
@@ -168,10 +177,14 @@ function buildWorkspaceConfig(): WorkspaceConfig {
   }
 }
 
+function parseProviderIdsText(value: string): string[] {
+  return [...new Set(value.split(',').map(item => item.trim()).filter(Boolean))]
+}
+
 function buildGatewayPolicy() {
   return {
     fallbackEnabled: form.fallbackEnabled,
-    fallbackProviderIds: form.fallbackProviderIdsText.split(',').map(item => item.trim()).filter(Boolean),
+    fallbackProviderIds: parseProviderIdsText(form.fallbackProviderIdsText),
     routingStrategy: form.routingStrategy,
     rateLimit: form.rateLimitEnabled
       ? {
@@ -180,6 +193,17 @@ function buildGatewayPolicy() {
         }
       : undefined,
   }
+}
+
+function toggleFallbackProvider(providerId: string, enabled: boolean): void {
+  const ids = new Set(selectedFallbackProviderIds.value)
+  if (enabled) ids.add(providerId)
+  else ids.delete(providerId)
+  form.fallbackProviderIdsText = [...ids].join(', ')
+}
+
+function clearFallbackProviders(): void {
+  form.fallbackProviderIdsText = ''
 }
 
 function saveProfile(): void {
@@ -425,8 +449,46 @@ onMounted(() => {
               </Select>
             </div>
             <div class="space-y-1.5 md:col-span-2">
-              <Label class="text-xs">允许 fallback Provider ID</Label>
-              <Input v-model="form.fallbackProviderIdsText" class="h-9 text-sm font-mono" placeholder="留空表示自动选择，多个用英文逗号分隔" />
+              <div class="flex items-center justify-between gap-2">
+                <Label class="text-xs">允许 fallback Provider</Label>
+                <button
+                  v-if="selectedFallbackProviderIds.length"
+                  type="button"
+                  class="text-[11px] text-muted-foreground hover:text-foreground"
+                  @click="clearFallbackProviders"
+                >
+                  清空，改为自动选择
+                </button>
+              </div>
+              <div class="rounded-lg border border-border/30 bg-background/35 p-2">
+                <div v-if="fallbackProviderOptions.length" class="grid gap-2 md:grid-cols-2">
+                  <label
+                    v-for="provider in fallbackProviderOptions"
+                    :key="provider.id"
+                    class="flex min-h-9 items-center gap-2 rounded-md border border-border/20 bg-muted/15 px-2.5 py-2 text-xs"
+                  >
+                    <input
+                      type="checkbox"
+                      class="h-3.5 w-3.5"
+                      :checked="selectedFallbackProviderIds.includes(provider.id)"
+                      @change="toggleFallbackProvider(provider.id, ($event.target as HTMLInputElement).checked)"
+                    >
+                    <span class="min-w-0 flex-1 truncate">{{ provider.name }}</span>
+                    <span class="shrink-0 font-mono text-[10px] text-muted-foreground">{{ provider.id }}</span>
+                  </label>
+                </div>
+                <div v-else class="text-[11px] text-muted-foreground">
+                  暂无可选备用 Provider；留空时 Gateway 会尝试同 Provider 降级模型。
+                </div>
+                <div v-if="unknownFallbackProviderIds.length" class="mt-2 rounded border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                  未找到的 Provider ID：{{ unknownFallbackProviderIds.join(', ') }}。保存后预览会继续提示，请检查团队共享配置。
+                </div>
+                <Input
+                  v-model="form.fallbackProviderIdsText"
+                  class="mt-2 h-8 text-xs font-mono"
+                  placeholder="高级：手动填写 Provider ID，多个用英文逗号分隔；留空表示自动选择"
+                />
+              </div>
             </div>
           </div>
           <label class="flex min-h-10 items-center gap-2 rounded-lg border border-border/30 bg-background/40 px-3 py-2 text-xs">

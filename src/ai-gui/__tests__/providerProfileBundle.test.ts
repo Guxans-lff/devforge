@@ -112,6 +112,46 @@ describe('providerProfileBundle', () => {
     ]))
   })
 
+  it('warns about weak gateway fallback policy', () => {
+    const profile = normalizeProviderProfileBundle({
+      name: '弱 fallback',
+      providerId: 'provider-1',
+      modelId: 'gpt-5.4',
+      gatewayPolicy: {
+        fallbackEnabled: true,
+        fallbackProviderIds: ['provider-1', 'provider-2'],
+        rateLimit: { windowMs: 5000, maxRequests: 100 },
+      },
+    }, undefined, 100)
+    const weakFallback = makeProvider({
+      id: 'provider-2',
+      name: '弱模型 Provider',
+      models: [{
+        id: 'tiny-model',
+        name: 'Tiny',
+        capabilities: {
+          streaming: false,
+          vision: false,
+          thinking: false,
+          toolUse: false,
+          maxContext: 4096,
+          maxOutput: 1024,
+        },
+      }],
+    })
+
+    const preview = buildProviderProfilePreview({
+      profile,
+      providers: [makeProvider(), weakFallback],
+    })
+
+    expect(preview.warnings.map(item => item.key)).toEqual(expect.arrayContaining([
+      'primary-fallback-provider',
+      'weak-fallback-capability',
+      'aggressive-rate-limit',
+    ]))
+  })
+
   it('applies profile to selected route and workspace config', () => {
     const profile = normalizeProviderProfileBundle({
       name: '编码',
