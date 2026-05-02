@@ -84,6 +84,7 @@ export interface AiChatSessionRunnerParams {
   onPrepareComplete?: () => void
   onRequestStart?: (messageId?: string) => void
   onRecovery?: () => void
+  onTurnStart?: (turnId: string) => void
   agentRuntime?: AgentRuntime
   signal?: AbortSignal
   summaryMode?: 'brief' | 'normal'
@@ -155,11 +156,14 @@ export async function runAiChatSessionTurn(params: AiChatSessionRunnerParams): P
   let gatewayApiKeysByProvider: Record<string, string | undefined> | undefined
 
   try {
-    params.agentRuntime?.startTurn({
+    const turnId = params.agentRuntime?.startTurn({
       sessionId: sid,
       model: params.model.id,
       provider: params.provider.id,
     })
+    if (turnId) {
+      params.onTurnStart?.(turnId)
+    }
     params.error.value = null
     prepared = await prepareSendContext({
       content: params.content,

@@ -92,4 +92,73 @@ describe('agentRuntimeTranscriptBridge', () => {
     expect(endEvents).toHaveLength(1)
     expect(endEvents[0]!.payload.data.status).toBe('error')
   })
+
+  it('uses turn start timestamp for terminal duration', () => {
+    const store = createTranscriptStore()
+    const bridge = createAgentRuntimeTranscriptBridge({
+      sessionId: 's1',
+      transcriptStore: store,
+      log,
+    })
+
+    bridge.appendTransition({
+      id: 'transition-1',
+      turnId: 'turn-1',
+      from: 'idle',
+      to: 'preparing',
+      reason: 'send_start',
+      timestamp: 1000,
+    })
+    bridge.appendTransition({
+      id: 'transition-2',
+      turnId: 'turn-1',
+      from: 'streaming',
+      to: 'completed',
+      reason: 'response_complete',
+      timestamp: 1750,
+    })
+
+    const endEvent = store.getLatestEvent('s1', 'turn_end')
+    expect(endEvent?.payload.data.durationMs).toBe(750)
+  })
+
+  it('deduplicates streamed and execution tool call transitions', () => {
+    const store = createTranscriptStore()
+    const bridge = createAgentRuntimeTranscriptBridge({
+      sessionId: 's1',
+      transcriptStore: store,
+      log,
+    })
+
+    bridge.appendTransition({
+      id: 'transition-1',
+      turnId: 'turn-1',
+      from: 'idle',
+      to: 'preparing',
+      reason: 'send_start',
+      timestamp: 1000,
+    })
+    bridge.appendTransition({
+      id: 'transition-2',
+      turnId: 'turn-1',
+      from: 'streaming',
+      to: 'streaming',
+      reason: 'tool_queue',
+      timestamp: 1100,
+      data: { toolCallId: 'tool-1', toolName: 'read_file' },
+    })
+    bridge.appendTransition({
+      id: 'transition-3',
+      turnId: 'turn-1',
+      from: 'streaming',
+      to: 'tool_executing',
+      reason: 'tool_start',
+      timestamp: 1200,
+      data: { toolCallIds: ['tool-1'], toolNames: ['read_file'] },
+    })
+
+    const toolEvents = store.getEventsByType('s1', ['tool_call'])
+    expect(toolEvents).toHaveLength(1)
+    expect(toolEvents[0]!.payload.data.toolCallId).toBe('tool-1')
+  })
 })

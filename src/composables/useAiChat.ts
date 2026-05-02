@@ -702,25 +702,29 @@ export function useAiChat(options: UseAiChatOptions) {
     invalidateChatHistoryCache(sid)
     observability.markSendStart()
     userScrolled.value = false
-    transcriptStore.appendEvent({
-      sessionId: sid,
-      turnId: agentRuntime.state.value.turnId || undefined,
-      type: 'user_message',
-      timestamp: Date.now(),
-      payload: {
+    const appendUserMessageEvent = (turnId?: string) => {
+      transcriptStore.appendEvent({
+        sessionId: sid,
+        turnId,
         type: 'user_message',
-        data: {
-          contentPreview: content.length > 200 ? `${content.slice(0, 200).trimEnd()}...` : content,
-          attachmentCount: attachments?.length ?? 0,
-          attachmentNames: attachments && attachments.length > 0
-            ? attachments.map(attachment => attachment.name)
-            : undefined,
+        timestamp: Date.now(),
+        payload: {
+          type: 'user_message',
+          data: {
+            contentPreview: content.length > 200 ? `${content.slice(0, 200).trimEnd()}...` : content,
+            attachmentCount: attachments?.length ?? 0,
+            attachmentNames: attachments && attachments.length > 0
+              ? attachments.map(attachment => attachment.name)
+              : undefined,
+          },
         },
-      },
-    })
-    transcriptEventsVersion.value += 1
+      })
+      transcriptEventsVersion.value += 1
+    }
 
     configureStreamWatchdog(model)
+    let userMessageRecorded = false
+    let startedTurnId: string | undefined
     try {
       const result = await runAiChatSessionTurn({
         sessionId: sid,
@@ -758,6 +762,11 @@ export function useAiChat(options: UseAiChatOptions) {
         onRecovery: () => observability.markRecovery(),
         onResponseComplete: () => observability.markResponseComplete(),
         onCompactTriggered: () => observability.markCompactTriggered(),
+        onTurnStart: (turnId) => {
+          startedTurnId = turnId
+          appendUserMessageEvent(turnId)
+          userMessageRecorded = true
+        },
         agentRuntime,
       })
       const latestAssistant = [...messages.value].reverse().find(message => message.role === 'assistant' && message.content.trim())
@@ -782,6 +791,9 @@ export function useAiChat(options: UseAiChatOptions) {
       }
       return result
     } finally {
+      if (!userMessageRecorded) {
+        appendUserMessageEvent(startedTurnId)
+      }
       configureStreamWatchdog()
     }
   }

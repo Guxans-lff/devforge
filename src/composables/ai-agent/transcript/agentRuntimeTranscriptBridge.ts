@@ -27,16 +27,11 @@ function asStringArray(value: unknown): string[] {
     : []
 }
 
-function durationMs(transition: AgentRuntimeTransition): number {
-  const startedAt = typeof transition.data?.startedAt === 'number'
-    ? transition.data.startedAt
-    : transition.timestamp
-  return Math.max(0, transition.timestamp - startedAt)
-}
-
 export function createAgentRuntimeTranscriptBridge(options: AgentRuntimeTranscriptBridgeOptions) {
   const { transcriptStore, log } = options
   const endedTurns = new Set<string>()
+  const startedAtByTurn = new Map<string, number>()
+  const recordedToolCalls = new Set<string>()
 
   function appendTransition(transition: AgentRuntimeTransition): void {
     const sessionId = resolveSessionId(options.sessionId)
@@ -46,6 +41,7 @@ export function createAgentRuntimeTranscriptBridge(options: AgentRuntimeTranscri
       switch (transition.reason) {
         case 'send_start':
           endedTurns.delete(transition.turnId)
+          startedAtByTurn.set(transition.turnId, transition.timestamp)
           transcriptStore.appendEvent({
             sessionId,
             turnId: transition.turnId,
@@ -85,6 +81,9 @@ export function createAgentRuntimeTranscriptBridge(options: AgentRuntimeTranscri
             : asStringArray(transition.data?.toolNames)
 
           toolCallIds.forEach((toolCallId, index) => {
+            const dedupeKey = `${transition.turnId}:${toolCallId}`
+            if (recordedToolCalls.has(dedupeKey)) return
+            recordedToolCalls.add(dedupeKey)
             transcriptStore.appendEvent({
               sessionId,
               turnId: transition.turnId,
@@ -147,6 +146,7 @@ export function createAgentRuntimeTranscriptBridge(options: AgentRuntimeTranscri
 
       if (terminalTransitions.has(transition.reason) && !endedTurns.has(transition.turnId)) {
         endedTurns.add(transition.turnId)
+        const startedAt = startedAtByTurn.get(transition.turnId) ?? transition.timestamp
         const status = transition.reason === 'response_complete'
           ? 'done'
           : transition.reason === 'aborted'
@@ -162,10 +162,11 @@ export function createAgentRuntimeTranscriptBridge(options: AgentRuntimeTranscri
             data: {
               turnId: transition.turnId,
               status,
-              durationMs: durationMs(transition),
+              durationMs: Math.max(0, transition.timestamp - startedAt),
             },
           },
         })
+        startedAtByTurn.delete(transition.turnId)
       }
     } catch (error) {
       log.warn('agent_runtime_transcript_bridge_failed', {
