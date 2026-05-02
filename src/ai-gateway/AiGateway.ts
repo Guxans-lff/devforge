@@ -203,6 +203,33 @@ function preflightGatewayRequest(request: AiGatewayRequest, requestId: string): 
   return estimateAndAssertTokenBudget(request, requestId)
 }
 
+function recordGatewayError(params: {
+  request: AiGatewayRequest
+  requestId: string
+  startedAt: number
+  error: AiGatewayError
+  context?: AiGatewayContext
+}): void {
+  const finishedAt = Date.now()
+  params.context && (params.context.finishedAt = finishedAt)
+  recordUsage({
+    requestId: params.requestId,
+    sessionId: params.request.sessionId,
+    source: params.request.source,
+    kind: params.request.kind,
+    providerId: params.request.provider.id,
+    model: params.request.model.id,
+    primaryProviderId: params.context?.primaryProviderId,
+    primaryModel: params.context?.primaryModel,
+    fallbackReason: params.context?.fallbackReason,
+    retryIndex: params.context?.retryIndex,
+    startedAt: params.startedAt,
+    finishedAt,
+    status: params.error.type === 'cancelled' ? 'cancelled' : 'error',
+    error: params.error,
+  })
+}
+
 /**
  * 执行单条流式请求（内部使用）
  */
@@ -313,6 +340,7 @@ async function executeSingleRequest(
       fallbackReason: context.fallbackReason,
       retryIndex: context.retryIndex,
       startedAt,
+      firstTokenAt: context.firstTokenAt,
       finishedAt,
       status: 'success',
       usage,
@@ -363,6 +391,7 @@ async function executeSingleRequest(
       fallbackReason: context.fallbackReason,
       retryIndex: context.retryIndex,
       startedAt,
+      firstTokenAt: context.firstTokenAt,
       finishedAt,
       status: gatewayError.type === 'cancelled' ? 'cancelled' : 'error',
       error: gatewayError,
@@ -401,10 +430,18 @@ export async function executeGatewayRequest(
   onEvent: AiGatewayEventHandler,
 ): Promise<AiGatewayResult> {
   const requestId = request.requestId ?? generateRequestId()
+  const requestStartedAt = Date.now()
 
   request = applyRequestOverrides(request, requestId)
 
-  const tokenEstimate = preflightGatewayRequest(request, requestId)
+  let tokenEstimate: TokenEstimateResult
+  try {
+    tokenEstimate = preflightGatewayRequest(request, requestId)
+  } catch (err) {
+    const gatewayError = err instanceof AiGatewayError ? err : classifyError(err)
+    recordGatewayError({ request, requestId, startedAt: requestStartedAt, error: gatewayError })
+    throw gatewayError
+  }
 
   const context = buildContext(request, requestId)
   context.tokenEstimate = tokenEstimate
@@ -412,11 +449,13 @@ export async function executeGatewayRequest(
   const limitResult = consumeQuota(request.provider.id, request.rateLimit)
   if (!limitResult.allowed) {
     log.warn('gateway_rate_limited', { requestId, providerId: request.provider.id })
-    throw new AiGatewayError(
+    const gatewayError = new AiGatewayError(
       'rate_limit',
       `Rate limit exceeded for provider ${request.provider.name}: ${limitResult.currentCount}/${limitResult.remaining + limitResult.currentCount} requests`,
       true,
     )
+    recordGatewayError({ request, requestId, startedAt: requestStartedAt, error: gatewayError, context })
+    throw gatewayError
   }
 
   try {
@@ -468,10 +507,35 @@ export async function executeGatewayRequest(
       fallbackContext.fallbackChainId = `${request.provider.id}->${candidate.provider.id}`
 
       try {
-        fallbackContext.tokenEstimate = preflightGatewayRequest(fallbackRequest, requestId)
+        const fallbackStartedAt = Date.now()
+        try {
+          fallbackContext.tokenEstimate = preflightGatewayRequest(fallbackRequest, requestId)
+        } catch (preflightErr) {
+          const preflightError = preflightErr instanceof AiGatewayError ? preflightErr : classifyError(preflightErr)
+          recordGatewayError({
+            request: fallbackRequest,
+            requestId,
+            startedAt: fallbackStartedAt,
+            error: preflightError,
+            context: fallbackContext,
+          })
+          throw preflightError
+        }
 
         const fbLimit = consumeQuota(candidate.provider.id, request.rateLimit)
         if (!fbLimit.allowed) {
+          const rateLimitError = new AiGatewayError(
+            'rate_limit',
+            `Rate limit exceeded for fallback provider ${candidate.provider.name}: ${fbLimit.currentCount}/${fbLimit.remaining + fbLimit.currentCount} requests`,
+            true,
+          )
+          recordGatewayError({
+            request: fallbackRequest,
+            requestId,
+            startedAt: fallbackStartedAt,
+            error: rateLimitError,
+            context: fallbackContext,
+          })
           log.warn('gateway_fallback_rate_limited', {
             requestId,
             fallbackProvider: candidate.provider.id,

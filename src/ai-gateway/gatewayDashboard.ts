@@ -12,7 +12,12 @@ export interface GatewayDashboardRoute {
   kind: string
   status: AiGatewayUsageRecord['status']
   startedAt: number
+  durationMs: number
+  firstTokenLatencyMs: number | null
   finishedAt: number
+  fallback: boolean
+  errorType?: string
+  errorMessage?: string
 }
 
 export interface GatewayDashboardFallback {
@@ -25,6 +30,9 @@ export interface GatewayDashboardFallback {
   reason: string
   retryIndex: number
   status: AiGatewayUsageRecord['status']
+  durationMs: number
+  errorType?: string
+  errorMessage?: string
   finishedAt: number
 }
 
@@ -64,6 +72,7 @@ export interface GatewayDashboardSecurityBlock {
   providerName: string
   model: string
   reason: string
+  errorType?: string
   finishedAt: number
 }
 
@@ -134,6 +143,7 @@ export function buildGatewayDashboardSnapshot(options: BuildGatewayDashboardOpti
         providerName: providerName(providerNames, record.providerId),
         model: record.model,
         reason: extractSecurityReason(record),
+        errorType: record.error?.type,
         finishedAt: record.finishedAt,
       })),
     providerSummaries: summarizeProviders(records, providerNames),
@@ -216,7 +226,12 @@ function toRoute(record: AiGatewayUsageRecord | undefined, providerNames: Map<st
     kind: record.kind,
     status: record.status,
     startedAt: record.startedAt,
+    durationMs: Math.max(0, record.finishedAt - record.startedAt),
+    firstTokenLatencyMs: record.firstTokenAt ? Math.max(0, record.firstTokenAt - record.startedAt) : null,
     finishedAt: record.finishedAt,
+    fallback: isFallbackRecord(record),
+    errorType: record.error?.type,
+    errorMessage: record.error?.message,
   }
 }
 
@@ -231,6 +246,9 @@ function toFallback(record: AiGatewayUsageRecord, providerNames: Map<string, str
     reason: record.fallbackReason ?? 'fallback',
     retryIndex: record.retryIndex ?? 0,
     status: record.status,
+    durationMs: Math.max(0, record.finishedAt - record.startedAt),
+    errorType: record.error?.type,
+    errorMessage: record.error?.message,
     finishedAt: record.finishedAt,
   }
 }

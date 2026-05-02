@@ -85,6 +85,7 @@
 - ✅ `src/ai-gateway/AiGateway.ts`、`router.ts`、`rateLimiter.ts`、`usageTracker.ts`、`security.ts`、`types.ts` 已存在。
 - ✅ Chat / Compact / Prompt Optimize / Tool Loop 均可看到 Gateway 接入证据，不再只是“类型设计”阶段。
 - ✅ Gateway 已具备 fallback、rate limit、usage record、endpoint security、token estimate 等基础治理能力。
+- ✅ Gateway Dashboard 已补齐 preflight 失败记录：SSRF / token budget / 主 fallback 限流会进入 usage record，诊断面板可看到实际 provider/model、fallback 状态、耗时、首 token、错误类型和安全拦截原因。
 - ✅ Bridge API 模块化、`AiBridgeError`、Provider Capability / Permission Mapper 等治理基础已存在。
 - ✅ Provider Profile Bundle 前端闭环已落地：支持 Provider / Model / Output Style / Workspace Prompt / Dispatcher / SSRF 安全策略打包、预览、应用、备份、回滚。
 - ✅ Provider Profile Bundle 已接入后端 `app_state` 快照镜像：启动时可从后端水合，保存/备份/回滚/导入后会同步后端；localStorage 保留为本地兜底。
@@ -95,7 +96,7 @@
 当前边界：
 - ⚠️ Provider Profile Bundle 当前是后端 KV 镜像 + localStorage 兜底；尚未升级为专用 SQLite 表或 workspace 文件级配置，跨设备冲突合并、团队权限和迁移回填仍待做。
 - ⚠️ SSRF allowlist 已能随 Provider 保存；fallback keys 和更细的 Profile 级策略仍需要进一步产品化。
-- ⚠️ Gateway 诊断信息已有记录能力，但 UI 对“实际落到哪个 provider/model”的显性展示仍可继续增强。
+- ⚠️ Gateway Dashboard 已能展示实际路由和拦截原因；后续仍可继续做成本趋势、按 Profile 过滤和团队级 SLA 报表。
 
 ### 14.4 阶段四：AI 产品化能力
 

@@ -1,6 +1,6 @@
 ﻿import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { executeGatewayRequest, abortGatewayRequest } from '@/ai-gateway/AiGateway'
-import { clearUsageRecords, getRecentFallbackRecords } from '@/ai-gateway/usageTracker'
+import { clearUsageRecords, getRecentFallbackRecords, getUsageRecords } from '@/ai-gateway/usageTracker'
 import { clearGatewayOverrides, setGatewayOverride } from '@/ai-gateway/override'
 import type { AiGatewayRequest } from '@/ai-gateway/types'
 import type { AiStreamEvent, ProviderConfig, ModelConfig } from '@/types/ai'
@@ -227,6 +227,12 @@ describe('AiGateway', () => {
       message: expect.stringContaining('Endpoint security check failed'),
     })
     expect(aiChatStreamMock).not.toHaveBeenCalled()
+    expect(getUsageRecords()[0]).toMatchObject({
+      requestId: 'req-1',
+      providerId: 'test-provider',
+      status: 'error',
+      error: { type: 'provider_error' },
+    })
   })
 
   it('checks fallback provider endpoint security before streaming', async () => {
@@ -246,6 +252,14 @@ describe('AiGateway', () => {
     })
 
     expect(aiChatStreamMock).toHaveBeenCalledTimes(1)
+    expect(getUsageRecords().at(-1)).toMatchObject({
+      providerId: 'fallback-provider',
+      model: 'fallback-model',
+      primaryProviderId: 'test-provider',
+      retryIndex: 1,
+      status: 'error',
+      error: { type: 'provider_error' },
+    })
   })
 
   it('checks fallback model token budget before streaming', async () => {

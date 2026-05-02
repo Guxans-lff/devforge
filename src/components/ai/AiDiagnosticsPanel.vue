@@ -681,6 +681,20 @@ function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
                 <span class="text-muted-foreground/65">{{ t('ai.diagnostics.status') }}</span>
                 <span class="font-mono text-foreground/85">{{ gatewaySnapshot.currentRoute.status }}</span>
               </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-muted-foreground/65">耗时</span>
+                <span class="font-mono text-foreground/85">{{ formatMs(gatewaySnapshot.currentRoute.durationMs) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-muted-foreground/65">首 token</span>
+                <span class="font-mono text-foreground/85">{{ formatMs(gatewaySnapshot.currentRoute.firstTokenLatencyMs) }}</span>
+              </div>
+              <div v-if="gatewaySnapshot.currentRoute.fallback" class="rounded border border-amber-500/20 bg-amber-500/8 px-2 py-1 text-[10px] text-amber-300/85">
+                当前请求由 fallback 路由承接
+              </div>
+              <div v-if="gatewaySnapshot.currentRoute.errorType" class="rounded border border-rose-500/20 bg-rose-500/8 px-2 py-1 text-[10px] text-rose-300/85">
+                {{ gatewaySnapshot.currentRoute.errorType }} · {{ gatewaySnapshot.currentRoute.errorMessage }}
+              </div>
             </div>
             <div v-else class="text-[11px] text-muted-foreground/55">
               {{ t('ai.diagnostics.gatewayNoRoute') }}
@@ -727,8 +741,11 @@ function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
                   <span class="font-mono text-foreground/85">{{ item.providerName }} / {{ item.model }}</span>
                 </div>
                 <div class="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/55">
-                  <span>{{ item.reason }}</span>
-                  <span>{{ formatDateTime(item.finishedAt) }}</span>
+                  <span>{{ item.reason }} · {{ item.status }} · {{ formatMs(item.durationMs) }}</span>
+                  <span>{{ item.errorType ?? formatDateTime(item.finishedAt) }}</span>
+                </div>
+                <div v-if="item.errorMessage" class="mt-1 truncate text-[10px] text-rose-300/75">
+                  {{ item.errorMessage }}
                 </div>
               </div>
               <div v-if="gatewaySnapshot.recentFallbacks.length === 0" class="text-[11px] text-muted-foreground/55">

@@ -26,8 +26,9 @@ function makeRecord(overrides: Partial<AiGatewayUsageRecord> = {}): AiGatewayUsa
     kind: 'chat_completions',
     providerId: 'provider-1',
     model: 'model-1',
-    startedAt: 100,
-    finishedAt: 200,
+      startedAt: 100,
+      firstTokenAt: 130,
+      finishedAt: 200,
     status: 'success',
     ...overrides,
   }
@@ -94,6 +95,7 @@ describe('gatewayDashboard', () => {
       providerName: '备用服务',
       reason: 'switch_provider',
       retryIndex: 1,
+      durationMs: 100,
     })
     expect(snapshot.rateLimits[0]).toMatchObject({
       providerId: 'provider-1',
@@ -130,8 +132,31 @@ describe('gatewayDashboard', () => {
       requestId: 'req-security',
       providerName: '主服务',
       reason: 'Private IP is not allowed',
+      errorType: 'provider_error',
     })
     expect(snapshot.summary.errorCount).toBe(1)
+  })
+
+  it('projects route latency and error detail for failed requests', () => {
+    recordUsage(makeRecord({
+      requestId: 'req-error',
+      status: 'error',
+      error: new AiGatewayError('rate_limit', 'Rate limit exceeded', true),
+      startedAt: 100,
+      firstTokenAt: undefined,
+      finishedAt: 180,
+    }))
+
+    const snapshot = buildGatewayDashboardSnapshot()
+
+    expect(snapshot.currentRoute).toMatchObject({
+      requestId: 'req-error',
+      durationMs: 80,
+      firstTokenLatencyMs: null,
+      fallback: false,
+      errorType: 'rate_limit',
+      errorMessage: 'Rate limit exceeded',
+    })
   })
 
   it('can scope records by session', () => {

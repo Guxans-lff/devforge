@@ -19,6 +19,7 @@ export interface AiGatewayUsageRecord {
   fallbackReason?: string
   retryIndex?: number
   startedAt: number
+  firstTokenAt?: number
   finishedAt: number
   status: 'success' | 'error' | 'cancelled'
   usage?: AiGatewayUsage

@@ -1,10 +1,16 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AiDiagnosticsPanel from '@/components/ai/AiDiagnosticsPanel.vue'
 import { setupTestPinia } from '@/__tests__/helpers'
 import { useSettingsStore } from '@/stores/settings'
+import { clearUsageRecords, recordUsage } from '@/ai-gateway/usageTracker'
+import { AiGatewayError } from '@/ai-gateway/types'
 
 describe('AiDiagnosticsPanel', () => {
+  beforeEach(() => {
+    clearUsageRecords()
+  })
+
   it('renders localized diagnostics and expands to show trend, history, and export action', async () => {
     setupTestPinia()
     const settingsStore = useSettingsStore()
@@ -130,6 +136,88 @@ describe('AiDiagnosticsPanel', () => {
     expect(wrapper.text()).toContain('ai.diagnostics.timeouts')
     expect(wrapper.text()).toContain('420 ms')
     expect(wrapper.vm.$props.runtimeSnapshot?.turnId).toBe('turn-1')
+  })
+
+  it('renders Gateway route latency, fallback, and error details', async () => {
+    setupTestPinia()
+    recordUsage({
+      requestId: 'req-gateway-error',
+      sessionId: 'session-gateway',
+      source: 'chat',
+      kind: 'chat_completions',
+      providerId: 'provider-fallback',
+      model: 'model-fallback',
+      primaryProviderId: 'provider-primary',
+      primaryModel: 'model-primary',
+      fallbackReason: 'switch_provider',
+      retryIndex: 1,
+      startedAt: 100,
+      firstTokenAt: 140,
+      finishedAt: 220,
+      status: 'error',
+      error: new AiGatewayError('provider_error', 'Endpoint security check failed: Private IP is not allowed', false),
+    })
+
+    const wrapper = mount(AiDiagnosticsPanel, {
+      props: {
+        metrics: {
+          sessionStartedAt: 1000,
+          prepareCompletedAt: 1100,
+          prepareDurationMs: 100,
+          requestStartedAt: 1200,
+          requestCount: 1,
+          recoveryCount: 0,
+          firstTokenAt: 1300,
+          firstTokenLatencyMs: 100,
+          requestFirstTokenLatencyMs: 100,
+          responseCompletedAt: 1800,
+          responseDurationMs: 600,
+          loadHistoryStartedAt: null,
+          loadHistoryDurationMs: null,
+          historyRestoreCount: 0,
+          compactTriggeredCount: 0,
+          providerRerouteCount: 0,
+          autoDowngradeCount: 0,
+          autoSwitchProviderCount: 0,
+          lastRoutingReason: null,
+          pendingToolQueueLength: 0,
+          lastToolRun: {
+            totalCalls: 0,
+            successCount: 0,
+            errorCount: 0,
+            cancelledCount: 0,
+            timeoutCount: 0,
+            retryCount: 0,
+            totalDurationMs: 0,
+            maxDurationMs: 0,
+            averageDurationMs: 0,
+          },
+          trend: {
+            sampleCount: 0,
+            firstTokenAverageMs: null,
+            requestFirstTokenAverageMs: null,
+            responseAverageMs: null,
+            toolRunAverageMs: null,
+            lastFirstTokenDeltaMs: null,
+            lastRequestFirstTokenDeltaMs: null,
+            lastResponseDeltaMs: null,
+            lastToolRunDeltaMs: null,
+          },
+          sessionHistory: [],
+          errorBreakdown: [],
+        },
+      },
+    })
+
+    await wrapper.find('button').trigger('click')
+
+    expect(wrapper.text()).toContain('provider-fallback')
+    expect(wrapper.text()).toContain('model-fallback')
+    expect(wrapper.text()).toContain('120 ms')
+    expect(wrapper.text()).toContain('40 ms')
+    expect(wrapper.text()).toContain('当前请求由 fallback 路由承接')
+    expect(wrapper.text()).toContain('provider_error')
+    expect(wrapper.text()).toContain('Private IP is not allowed')
   })
 
   it('copies full transcript when backend export loader is provided', async () => {
