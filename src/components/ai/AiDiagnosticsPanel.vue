@@ -6,9 +6,13 @@ import type { AgentRuntimeSnapshot } from '@/composables/ai/AgentRuntimeSnapshot
 import { useSettingsStore } from '@/stores/settings'
 import { useAiChatStore } from '@/stores/ai-chat'
 import { buildGatewayDashboardSnapshot, type GatewayDashboardSnapshot } from '@/ai-gateway/gatewayDashboard'
+import type { AiGatewayRequestKind, AiGatewaySource } from '@/ai-gateway/types'
+import type { AiGatewayUsageRecord } from '@/ai-gateway/usageTracker'
 import { describeGatewayPolicyValue } from '@/ai-gateway/gatewayPolicy'
 import { auditGatewayPolicy } from '@/ai-gateway/gatewayPolicyAudit'
 import { buildCompactBoundaryProjection } from '@/composables/ai-agent/context/compactBoundary'
+import { generateTranscriptDiagnosticReportFromEvents } from '@/composables/ai-agent/transcript/diagnosticExport'
+import { redactDiagnosticPayload } from '@/composables/ai-agent/transcript/diagnosticRedaction'
 import type { AgentRuntimeGovernanceSnapshot, AiTranscriptEvent, AiTranscriptEventOf } from '@/composables/ai-agent/transcript/transcriptTypes'
 import { Activity, ChevronRight, Clock3, Copy, History, Route, ShieldAlert, TrendingUp, Wrench } from 'lucide-vue-next'
 
@@ -28,13 +32,31 @@ const aiChatStore = useAiChatStore()
 const expanded = ref(false)
 const copied = ref(false)
 const gatewayTick = ref(0)
+const selectedGatewayProfileId = ref('')
+const selectedGatewayProviderId = ref('')
+const selectedGatewaySource = ref('')
+const selectedGatewayKind = ref('')
+const selectedGatewayStatus = ref('')
 let gatewayTimer: ReturnType<typeof setInterval> | null = null
 const thresholds = computed(() => settingsStore.settings.aiDiagnosticsThresholds)
+
+const gatewayProfileOptionsSnapshot = computed<GatewayDashboardSnapshot>(() => {
+  gatewayTick.value
+  return buildGatewayDashboardSnapshot({
+    sessionId: aiChatStore.activeSessionId,
+    providers: aiChatStore.providers,
+  })
+})
 
 const gatewaySnapshot = computed<GatewayDashboardSnapshot>(() => {
   gatewayTick.value
   return buildGatewayDashboardSnapshot({
     sessionId: aiChatStore.activeSessionId,
+    providerProfileIds: selectedGatewayProfileId.value ? [selectedGatewayProfileId.value] : undefined,
+    providerIds: selectedGatewayProviderId.value ? [selectedGatewayProviderId.value] : undefined,
+    sources: selectedGatewaySource.value ? [selectedGatewaySource.value as AiGatewaySource] : undefined,
+    kinds: selectedGatewayKind.value ? [selectedGatewayKind.value as AiGatewayRequestKind] : undefined,
+    statuses: selectedGatewayStatus.value ? [selectedGatewayStatus.value as AiGatewayUsageRecord['status']] : undefined,
     providers: aiChatStore.providers,
   })
 })
@@ -157,6 +179,79 @@ const gatewaySummary = computed(() => {
   ]
 })
 
+const gatewayCostTrend = computed(() =>
+  (gatewaySnapshot.value.costTrend ?? [])
+    .slice()
+    .reverse()
+    .slice(0, 4)
+    .map((item, index) => ({
+      key: `${item.bucketStart}-${index}`,
+      label: formatDateTime(item.bucketStart),
+      value: `${formatCost(item.totalCost, item.currency)} / ${formatNumber(item.totalTokens)} Token`,
+      hint: `${item.requestCount} 次 · ${formatPercent(item.requestCount > 0 ? item.successCount / item.requestCount : 1)}`,
+    })),
+)
+
+const gatewaySourceSummaries = computed(() => gatewaySnapshot.value.sourceSummaries ?? [])
+const gatewayKindSummaries = computed(() => gatewaySnapshot.value.kindSummaries ?? [])
+const gatewayErrorSummaries = computed(() => gatewaySnapshot.value.errorSummaries ?? [])
+const gatewayModelSummaries = computed(() => gatewaySnapshot.value.modelSummaries ?? [])
+const gatewayProfileSummaries = computed(() => gatewaySnapshot.value.profileSummaries ?? [])
+const gatewayProfileFilterOptions = computed(() => {
+  const profileIds = new Set<string>()
+  for (const item of gatewayProfileOptionsSnapshot.value.profileSummaries ?? []) {
+    if (item.providerProfileId) profileIds.add(item.providerProfileId)
+  }
+  if (selectedGatewayProfileId.value) profileIds.add(selectedGatewayProfileId.value)
+  return Array.from(profileIds).sort()
+})
+const gatewayProviderFilterOptions = computed(() =>
+  (gatewayProfileOptionsSnapshot.value.providerSummaries ?? [])
+    .map(item => ({ id: item.providerId, name: item.providerName }))
+    .filter((item, index, items) => item.id && items.findIndex(other => other.id === item.id) === index)
+    .sort((a, b) => a.name.localeCompare(b.name)),
+)
+const gatewaySourceFilterOptions = computed(() => {
+  const sources = new Set<string>()
+  for (const item of gatewayProfileOptionsSnapshot.value.sourceSummaries ?? []) {
+    if (item.source) sources.add(item.source)
+  }
+  if (selectedGatewaySource.value) sources.add(selectedGatewaySource.value)
+  return Array.from(sources).sort()
+})
+const gatewayKindFilterOptions = computed(() => {
+  const kinds = new Set<string>()
+  for (const item of gatewayProfileOptionsSnapshot.value.kindSummaries ?? []) {
+    if (item.kind) kinds.add(item.kind)
+  }
+  if (selectedGatewayKind.value) kinds.add(selectedGatewayKind.value)
+  return Array.from(kinds).sort()
+})
+const gatewayStatusFilterOptions = computed(() => {
+  const statuses = new Set<string>()
+  const summary = gatewayProfileOptionsSnapshot.value.summary
+  if (summary.successCount > 0) statuses.add('success')
+  if (summary.errorCount > 0) statuses.add('error')
+  if (summary.cancelledCount > 0) statuses.add('cancelled')
+  if (selectedGatewayStatus.value) statuses.add(selectedGatewayStatus.value)
+  return Array.from(statuses).sort()
+})
+const gatewaySla = computed(() => gatewaySnapshot.value.sla ?? null)
+const gatewaySlaSummary = computed(() => {
+  const sla = gatewaySla.value
+  if (!sla) return []
+  return [
+    { label: 'SLA', value: sla.status },
+    { label: '成功率', value: formatPercent(sla.successRate) },
+    { label: 'Fallback', value: formatPercent(sla.fallbackRate) },
+    { label: '错误率', value: formatPercent(sla.errorRate) },
+    { label: 'P95 首 token', value: formatMs(sla.p95FirstTokenLatencyMs) },
+    { label: 'P95 耗时', value: formatMs(sla.p95DurationMs) },
+    { label: '限流 Provider', value: sla.throttledProviderCount },
+    { label: '熔断 Provider', value: sla.openCircuitCount },
+  ]
+})
+
 const gatewayPolicySummary = computed(() => {
   const policy = aiChatStore.currentWorkspaceConfig?.gatewayPolicy
   return [
@@ -191,6 +286,9 @@ const gatewayPolicyIssues = computed<Array<{ key: string; tone: Tone; message: s
 
 const gatewayHealthTone = computed<Tone>(() => {
   const snapshot = gatewaySnapshot.value
+  if (snapshot.sla?.status === 'critical') return 'danger'
+  if (snapshot.sla?.status === 'watch') return 'warn'
+  if (snapshot.sla?.status === 'healthy') return 'ok'
   if (
     snapshot.securityBlocks.length > 0
     || snapshot.circuitBreakers.some(item => item.open)
@@ -290,35 +388,45 @@ const summaryText = computed(() => [
   `${t('ai.diagnostics.providerReroutes')} ${props.metrics.providerRerouteCount} / ${t('ai.diagnostics.autoDowngrades')} ${props.metrics.autoDowngradeCount} / ${t('ai.diagnostics.autoProviderSwitches')} ${props.metrics.autoSwitchProviderCount}`,
 ].join(' | '))
 
-const exportPayload = computed(() => JSON.stringify({
-  exportedAt: Date.now(),
-  current: {
-    prepareDurationMs: props.metrics.prepareDurationMs,
-    requestStartedAt: props.metrics.requestStartedAt,
-    requestCount: props.metrics.requestCount,
-    recoveryCount: props.metrics.recoveryCount,
-    firstTokenLatencyMs: props.metrics.firstTokenLatencyMs,
-    requestFirstTokenLatencyMs: props.metrics.requestFirstTokenLatencyMs,
-    responseDurationMs: props.metrics.responseDurationMs,
-    loadHistoryDurationMs: props.metrics.loadHistoryDurationMs,
-    pendingToolQueueLength: props.metrics.pendingToolQueueLength,
-    compactTriggeredCount: props.metrics.compactTriggeredCount,
-    providerRerouteCount: props.metrics.providerRerouteCount,
-    autoDowngradeCount: props.metrics.autoDowngradeCount,
-    autoSwitchProviderCount: props.metrics.autoSwitchProviderCount,
-    lastRoutingReason: props.metrics.lastRoutingReason,
-    lastToolRun: props.metrics.lastToolRun,
-  },
-  trend: props.metrics.trend,
-  sessionHistory: props.metrics.sessionHistory,
-  errorBreakdown: props.metrics.errorBreakdown,
-  gateway: gatewaySnapshot.value,
-  gatewayPolicy: aiChatStore.currentWorkspaceConfig?.gatewayPolicy ?? null,
-  gatewayPolicyIssues: gatewayPolicyIssues.value,
-  runtimeSnapshot: props.runtimeSnapshot,
-  agentRuntimeContext: props.agentRuntimeContext?.payload.data,
-  agentRuntimeGovernance: props.agentRuntimeGovernance,
-}, null, 2))
+function buildBaseExportPayload() {
+  gatewayTick.value += 1
+  return {
+    schemaVersion: 2,
+    exportedAt: Date.now(),
+    session: {
+      sessionId: aiChatStore.activeSessionId ?? null,
+      workDir: aiChatStore.currentWorkDir ?? null,
+      providerId: aiChatStore.activeSession?.providerId ?? null,
+      modelId: aiChatStore.activeSession?.model ?? null,
+    },
+    current: {
+      prepareDurationMs: props.metrics.prepareDurationMs,
+      requestStartedAt: props.metrics.requestStartedAt,
+      requestCount: props.metrics.requestCount,
+      recoveryCount: props.metrics.recoveryCount,
+      firstTokenLatencyMs: props.metrics.firstTokenLatencyMs,
+      requestFirstTokenLatencyMs: props.metrics.requestFirstTokenLatencyMs,
+      responseDurationMs: props.metrics.responseDurationMs,
+      loadHistoryDurationMs: props.metrics.loadHistoryDurationMs,
+      pendingToolQueueLength: props.metrics.pendingToolQueueLength,
+      compactTriggeredCount: props.metrics.compactTriggeredCount,
+      providerRerouteCount: props.metrics.providerRerouteCount,
+      autoDowngradeCount: props.metrics.autoDowngradeCount,
+      autoSwitchProviderCount: props.metrics.autoSwitchProviderCount,
+      lastRoutingReason: props.metrics.lastRoutingReason,
+      lastToolRun: props.metrics.lastToolRun,
+    },
+    trend: props.metrics.trend,
+    sessionHistory: props.metrics.sessionHistory,
+    errorBreakdown: props.metrics.errorBreakdown,
+    gateway: gatewaySnapshot.value,
+    gatewayPolicy: aiChatStore.currentWorkspaceConfig?.gatewayPolicy ?? null,
+    gatewayPolicyIssues: gatewayPolicyIssues.value,
+    runtimeSnapshot: props.runtimeSnapshot,
+    agentRuntimeContext: props.agentRuntimeContext?.payload.data,
+    agentRuntimeGovernance: props.agentRuntimeGovernance,
+  }
+}
 
 onMounted(() => {
   gatewayTimer = setInterval(() => {
@@ -334,28 +442,49 @@ onBeforeUnmount(() => {
 })
 
 async function copySnapshot(): Promise<void> {
-  let payload = exportPayload.value
+  const basePayload = buildBaseExportPayload()
+  let payloadData: Record<string, unknown> = {
+    ...basePayload,
+    transcriptDiagnosticReport: generateTranscriptDiagnosticReportFromEvents(
+      aiChatStore.activeSessionId ?? '',
+      [],
+      { gatewayDashboard: gatewaySnapshot.value },
+    ),
+  }
   if (props.loadFullTranscript) {
     try {
       const transcript = await props.loadFullTranscript()
       const transcriptEvents = transcript.filter(isTranscriptEvent)
-      payload = JSON.stringify({
-        ...JSON.parse(exportPayload.value),
+      payloadData = {
+        ...basePayload,
         fullTranscript: {
           eventCount: transcript.length,
           events: transcript,
           compactBoundaryProjection: buildCompactBoundaryProjection(transcriptEvents),
         },
-      }, null, 2)
+        transcriptDiagnosticReport: generateTranscriptDiagnosticReportFromEvents(
+          aiChatStore.activeSessionId ?? '',
+          transcriptEvents,
+          { gatewayDashboard: gatewaySnapshot.value },
+        ),
+      }
     } catch {
-      payload = JSON.stringify({
-        ...JSON.parse(exportPayload.value),
+      payloadData = {
+        ...basePayload,
         fullTranscript: {
           error: 'full_transcript_export_failed',
         },
-      }, null, 2)
+        transcriptDiagnosticReport: {
+          sessionId: aiChatStore.activeSessionId ?? '',
+          exportedAt: Date.now(),
+          eventCount: 0,
+          error: 'full_transcript_export_failed',
+          gatewayDashboard: gatewaySnapshot.value,
+        },
+      }
     }
   }
+  const payload = JSON.stringify(redactDiagnosticPayload(payloadData), null, 2)
   await navigator.clipboard.writeText(payload)
   copied.value = true
   setTimeout(() => {
@@ -679,9 +808,96 @@ function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
             <Route class="h-3.5 w-3.5" />
             <span class="text-[10px] uppercase tracking-[0.16em]">{{ t('ai.diagnostics.gatewayDashboard') }}</span>
           </div>
-          <span class="rounded-full bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground">
-            {{ toneLabel(gatewayHealthTone) }}
-          </span>
+          <div class="flex items-center gap-2">
+            <label class="flex items-center gap-1 text-[10px] text-muted-foreground/65">
+              <span>Profile</span>
+              <select
+                v-model="selectedGatewayProfileId"
+                class="h-6 max-w-[180px] rounded border border-border/30 bg-background/80 px-2 text-[10px] text-foreground outline-none"
+                data-testid="gateway-profile-filter"
+              >
+                <option value="">全部</option>
+                <option
+                  v-for="profileId in gatewayProfileFilterOptions"
+                  :key="profileId"
+                  :value="profileId"
+                >
+                  {{ profileId }}
+                </option>
+              </select>
+            </label>
+            <label class="flex items-center gap-1 text-[10px] text-muted-foreground/65">
+              <span>Provider</span>
+              <select
+                v-model="selectedGatewayProviderId"
+                class="h-6 max-w-[150px] rounded border border-border/30 bg-background/80 px-2 text-[10px] text-foreground outline-none"
+                data-testid="gateway-provider-filter"
+              >
+                <option value="">全部</option>
+                <option
+                  v-for="provider in gatewayProviderFilterOptions"
+                  :key="provider.id"
+                  :value="provider.id"
+                >
+                  {{ provider.name }}
+                </option>
+              </select>
+            </label>
+            <label class="flex items-center gap-1 text-[10px] text-muted-foreground/65">
+              <span>来源</span>
+              <select
+                v-model="selectedGatewaySource"
+                class="h-6 max-w-[140px] rounded border border-border/30 bg-background/80 px-2 text-[10px] text-foreground outline-none"
+                data-testid="gateway-source-filter"
+              >
+                <option value="">全部</option>
+                <option
+                  v-for="source in gatewaySourceFilterOptions"
+                  :key="source"
+                  :value="source"
+                >
+                  {{ source }}
+                </option>
+              </select>
+            </label>
+            <label class="flex items-center gap-1 text-[10px] text-muted-foreground/65">
+              <span>类型</span>
+              <select
+                v-model="selectedGatewayKind"
+                class="h-6 max-w-[150px] rounded border border-border/30 bg-background/80 px-2 text-[10px] text-foreground outline-none"
+                data-testid="gateway-kind-filter"
+              >
+                <option value="">全部</option>
+                <option
+                  v-for="kind in gatewayKindFilterOptions"
+                  :key="kind"
+                  :value="kind"
+                >
+                  {{ kind }}
+                </option>
+              </select>
+            </label>
+            <label class="flex items-center gap-1 text-[10px] text-muted-foreground/65">
+              <span>状态</span>
+              <select
+                v-model="selectedGatewayStatus"
+                class="h-6 max-w-[120px] rounded border border-border/30 bg-background/80 px-2 text-[10px] text-foreground outline-none"
+                data-testid="gateway-status-filter"
+              >
+                <option value="">全部</option>
+                <option
+                  v-for="status in gatewayStatusFilterOptions"
+                  :key="status"
+                  :value="status"
+                >
+                  {{ status }}
+                </option>
+              </select>
+            </label>
+            <span class="rounded-full bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground">
+              {{ toneLabel(gatewayHealthTone) }}
+            </span>
+          </div>
         </div>
 
         <div class="grid gap-x-4 gap-y-2 md:grid-cols-6">
@@ -698,9 +914,36 @@ function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
         <div class="mt-3 grid gap-3 md:grid-cols-2">
           <div class="rounded-lg border border-border/20 bg-background/60 px-3 py-2">
             <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
+              成本趋势
+            </div>
+            <div class="space-y-2">
+              <div
+                v-for="item in gatewayCostTrend"
+                :key="item.key"
+                class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 text-[11px]"
+              >
+                <span class="truncate text-muted-foreground/65">{{ item.label }}</span>
+                <span class="font-mono text-foreground/85">{{ item.value }}</span>
+                <span class="text-[10px] text-muted-foreground/55">{{ item.hint }}</span>
+              </div>
+              <div v-if="gatewayCostTrend.length === 0" class="text-[11px] text-muted-foreground/55">
+                暂无成本趋势
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+            <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
               {{ t('ai.diagnostics.gatewayActualRoute') }}
             </div>
             <div v-if="gatewaySnapshot.currentRoute" class="space-y-1 text-[11px]">
+              <div
+                v-if="gatewaySnapshot.currentRoute.providerProfileId"
+                class="flex items-center justify-between gap-2"
+              >
+                <span class="text-muted-foreground/65">Profile</span>
+                <span class="font-mono text-foreground/85">{{ gatewaySnapshot.currentRoute.providerProfileId }}</span>
+              </div>
               <div class="flex items-center justify-between gap-2">
                 <span class="text-muted-foreground/65">{{ t('ai.diagnostics.provider') }}</span>
                 <span class="font-mono text-foreground/85">{{ gatewaySnapshot.currentRoute.providerName }}</span>
@@ -708,6 +951,19 @@ function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
               <div class="flex items-center justify-between gap-2">
                 <span class="text-muted-foreground/65">{{ t('ai.diagnostics.model') }}</span>
                 <span class="font-mono text-foreground/85">{{ gatewaySnapshot.currentRoute.model }}</span>
+              </div>
+              <div
+                v-if="gatewaySnapshot.currentRoute.primaryProviderId"
+                class="flex items-center justify-between gap-2"
+              >
+                <span class="text-muted-foreground/65">主 Provider</span>
+                <span class="font-mono text-foreground/85">
+                  {{ gatewaySnapshot.currentRoute.primaryProviderId }} / {{ gatewaySnapshot.currentRoute.primaryModel }}
+                </span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-muted-foreground/65">Retry</span>
+                <span class="font-mono text-foreground/85">{{ gatewaySnapshot.currentRoute.retryIndex }}</span>
               </div>
               <div class="flex items-center justify-between gap-2">
                 <span class="text-muted-foreground/65">{{ t('ai.diagnostics.source') }}</span>
@@ -725,8 +981,29 @@ function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
                 <span class="text-muted-foreground/65">首 token</span>
                 <span class="font-mono text-foreground/85">{{ formatMs(gatewaySnapshot.currentRoute.firstTokenLatencyMs) }}</span>
               </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-muted-foreground/65">Token</span>
+                <span class="font-mono text-foreground/85">
+                  {{ formatNumber(gatewaySnapshot.currentRoute.totalTokens) }}
+                  <span class="text-muted-foreground/45">
+                    ({{ formatNumber(gatewaySnapshot.currentRoute.promptTokens) }} / {{ formatNumber(gatewaySnapshot.currentRoute.completionTokens) }})
+                  </span>
+                </span>
+              </div>
+              <div class="flex items-center justify-between gap-2">
+                <span class="text-muted-foreground/65">成本</span>
+                <span class="font-mono text-foreground/85">
+                  {{ formatCost(gatewaySnapshot.currentRoute.totalCost, gatewaySnapshot.currentRoute.currency) }}
+                </span>
+              </div>
               <div v-if="gatewaySnapshot.currentRoute.fallback" class="rounded border border-amber-500/20 bg-amber-500/8 px-2 py-1 text-[10px] text-amber-300/85">
                 当前请求由 fallback 路由承接
+                <span v-if="gatewaySnapshot.currentRoute.fallbackReason">
+                  · {{ gatewaySnapshot.currentRoute.fallbackReason }}
+                </span>
+                <span v-if="gatewaySnapshot.currentRoute.fallbackChainId">
+                  · {{ gatewaySnapshot.currentRoute.fallbackChainId }}
+                </span>
               </div>
               <div v-if="gatewaySnapshot.currentRoute.errorType" class="rounded border border-rose-500/20 bg-rose-500/8 px-2 py-1 text-[10px] text-rose-300/85">
                 {{ gatewaySnapshot.currentRoute.errorType }} · {{ gatewaySnapshot.currentRoute.errorMessage }}
@@ -745,16 +1022,164 @@ function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
               <div
                 v-for="item in gatewaySnapshot.providerSummaries.slice(0, 4)"
                 :key="item.providerId"
-                class="flex items-center justify-between gap-2 text-[11px]"
+                class="rounded border border-border/15 bg-background/50 px-2 py-1.5 text-[11px]"
               >
-                <span class="truncate text-muted-foreground/65">{{ item.providerName }}</span>
-                <span class="font-mono text-foreground/85">
-                  {{ item.requestCount }} / {{ formatCost(item.totalCost, item.currency) }}
-                </span>
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-muted-foreground/65">{{ item.providerName }}</span>
+                  <span class="font-mono text-foreground/85">
+                    {{ item.requestCount }} 次 · {{ formatPercent(item.successRate) }}
+                  </span>
+                </div>
+                <div class="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/55">
+                  <span>TTFB {{ formatMs(item.avgFirstTokenLatencyMs) }} · 耗时 {{ formatMs(item.avgDurationMs) }}</span>
+                  <span>{{ formatCost(item.totalCost, item.currency) }} · err {{ item.errorCount }} · fb {{ item.fallbackCount }}</span>
+                </div>
+              </div>
+              <div
+                v-for="item in gatewaySnapshot.providerSummaries.filter(summary => summary.providerProfileId).slice(0, 2)"
+                :key="`profile-${item.providerId}-${item.providerProfileId}`"
+                class="flex items-center justify-between gap-2 text-[10px] text-muted-foreground/55"
+              >
+                <span class="truncate">Profile</span>
+                <span class="truncate font-mono">{{ item.providerProfileId }}</span>
               </div>
               <div v-if="gatewaySnapshot.providerSummaries.length === 0" class="text-[11px] text-muted-foreground/55">
                 {{ t('ai.diagnostics.gatewayNoProviderSummary') }}
               </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+            <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
+              Profile 汇总
+            </div>
+            <div class="space-y-2">
+              <div
+                v-for="item in gatewayProfileSummaries.slice(0, 4)"
+                :key="item.providerProfileId"
+                class="rounded border border-border/15 bg-background/50 px-2 py-1.5 text-[11px]"
+                data-testid="gateway-profile-summary-card"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate font-mono text-muted-foreground/75">{{ item.providerProfileId }}</span>
+                  <span class="font-mono text-foreground/85">{{ item.requestCount }} 次 · {{ formatPercent(item.successRate) }}</span>
+                </div>
+                <div class="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/55">
+                  <span>{{ item.providerCount }} Provider / {{ item.modelCount }} Model</span>
+                  <span>{{ formatCost(item.totalCost, item.currency) }} · err {{ item.errorCount }} · fb {{ item.fallbackCount }}</span>
+                </div>
+              </div>
+              <div v-if="gatewayProfileSummaries.length === 0" class="text-[11px] text-muted-foreground/55">
+                暂无 Profile 汇总
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+            <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
+              来源聚合
+            </div>
+            <div class="space-y-2">
+              <div
+                v-for="item in gatewaySourceSummaries.slice(0, 4)"
+                :key="item.source"
+                class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 text-[11px]"
+              >
+                <span class="truncate text-muted-foreground/65">{{ item.source }}</span>
+                <span class="font-mono text-foreground/85">
+                  {{ item.requestCount }} 次 / {{ formatNumber(item.totalTokens) }} Token
+                </span>
+                <span class="text-[10px] text-muted-foreground/55">
+                  err {{ item.errorCount }} · fb {{ item.fallbackCount }}
+                </span>
+              </div>
+              <div v-if="gatewaySourceSummaries.length === 0" class="text-[11px] text-muted-foreground/55">
+                暂无来源聚合
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+            <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
+              请求类型
+            </div>
+            <div class="space-y-2">
+              <div
+                v-for="item in gatewayKindSummaries.slice(0, 4)"
+                :key="item.kind"
+                class="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 text-[11px]"
+              >
+                <span class="truncate text-muted-foreground/65">{{ item.kind }}</span>
+                <span class="font-mono text-foreground/85">
+                  {{ item.requestCount }} 次 · {{ formatPercent(item.successRate) }}
+                </span>
+                <span class="text-[10px] text-muted-foreground/55">
+                  {{ formatCost(item.totalCost, item.currency) }} · fb {{ item.fallbackCount }}
+                </span>
+              </div>
+              <div v-if="gatewayKindSummaries.length === 0" class="text-[11px] text-muted-foreground/55">
+                暂无请求类型数据
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+            <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">
+              模型路由
+            </div>
+            <div class="space-y-2">
+              <div
+                v-for="item in gatewayModelSummaries.slice(0, 4)"
+                :key="item.key"
+                class="rounded border border-border/15 bg-background/50 px-2 py-1.5 text-[11px]"
+              >
+                <div class="flex items-center justify-between gap-2">
+                  <span class="truncate text-muted-foreground/65">{{ item.providerName }} / {{ item.model }}</span>
+                  <span class="font-mono text-foreground/85">{{ item.requestCount }} 次 · {{ formatPercent(item.successRate) }}</span>
+                </div>
+                <div class="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/55">
+                  <span>TTFB {{ formatMs(item.avgFirstTokenLatencyMs) }} · 耗时 {{ formatMs(item.avgDurationMs) }}</span>
+                  <span>{{ formatCost(item.totalCost, item.currency) }} · fb {{ item.fallbackCount }}</span>
+                </div>
+              </div>
+              <div v-if="gatewayModelSummaries.length === 0" class="text-[11px] text-muted-foreground/55">
+                暂无模型路由数据
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="gatewaySlaSummary.length" class="mt-3 rounded-lg border border-border/20 bg-background/60 px-3 py-2">
+          <div class="mb-2 flex items-center justify-between gap-2">
+            <span class="text-[10px] uppercase tracking-[0.16em] text-muted-foreground/65">SLA 报表</span>
+            <span
+              class="rounded-full px-2 py-0.5 text-[10px]"
+              :class="gatewaySla?.status === 'critical'
+                ? 'bg-rose-500/15 text-rose-200'
+                : gatewaySla?.status === 'watch'
+                  ? 'bg-amber-500/15 text-amber-200'
+                  : 'bg-emerald-500/15 text-emerald-200'"
+            >
+              {{ gatewaySla?.status }}
+            </span>
+          </div>
+          <div class="grid gap-x-4 gap-y-2 md:grid-cols-4">
+            <div
+              v-for="item in gatewaySlaSummary"
+              :key="item.label"
+              class="flex items-center justify-between gap-2 text-[11px]"
+            >
+              <span class="text-muted-foreground/65">{{ item.label }}</span>
+              <span class="font-mono text-foreground/85">{{ item.value }}</span>
+            </div>
+          </div>
+          <div v-if="gatewaySla?.recommendations.length" class="mt-2 space-y-1">
+            <div
+              v-for="recommendation in gatewaySla.recommendations"
+              :key="recommendation"
+              class="rounded border border-amber-500/20 bg-amber-500/8 px-2 py-1 text-[10px] text-amber-200/85"
+            >
+              {{ recommendation }}
             </div>
           </div>
         </div>
@@ -779,6 +1204,18 @@ function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
                 <div class="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/55">
                   <span>{{ item.reason }} · {{ item.status }} · {{ formatMs(item.durationMs) }}</span>
                   <span>{{ item.errorType ?? formatDateTime(item.finishedAt) }}</span>
+                </div>
+                <div class="mt-1 flex items-center justify-between gap-2 text-[10px] text-muted-foreground/55">
+                  <span>
+                    Token {{ formatNumber(item.totalTokens) }}
+                    <span class="text-muted-foreground/45">
+                      ({{ formatNumber(item.promptTokens) }} / {{ formatNumber(item.completionTokens) }})
+                    </span>
+                  </span>
+                  <span>{{ formatCost(item.totalCost, item.currency) }}</span>
+                </div>
+                <div v-if="item.fallbackChainId" class="mt-1 truncate font-mono text-[10px] text-amber-300/80">
+                  {{ item.fallbackChainId }}
                 </div>
                 <div v-if="item.errorMessage" class="mt-1 truncate text-[10px] text-rose-300/75">
                   {{ item.errorMessage }}
@@ -822,6 +1259,31 @@ function isTranscriptEvent(value: unknown): value is AiTranscriptEvent {
               >
                 {{ t('ai.diagnostics.gatewayNoRateLimit') }}
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="gatewayErrorSummaries.length > 0" class="mt-3 rounded-lg border border-rose-500/20 bg-rose-500/8 px-3 py-2">
+          <div class="mb-2 text-[10px] uppercase tracking-[0.16em] text-rose-300/85">
+            错误聚合
+          </div>
+          <div class="space-y-2">
+            <div
+              v-for="item in gatewayErrorSummaries.slice(0, 4)"
+              :key="item.key"
+              class="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 text-[11px]"
+            >
+              <div class="min-w-0">
+                <div class="truncate font-mono text-rose-100">
+                  {{ item.errorType }} · {{ item.source }} · {{ item.providerName }}
+                </div>
+                <div v-if="item.latestMessage" class="mt-0.5 truncate text-[10px] text-rose-200/70">
+                  {{ item.latestMessage }}
+                </div>
+              </div>
+              <span class="font-mono text-rose-100">
+                {{ item.count }} / retry {{ item.retryableCount }}
+              </span>
             </div>
           </div>
         </div>

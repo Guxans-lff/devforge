@@ -1,13 +1,86 @@
 import { describe, expect, it } from 'vitest'
 import { createTranscriptStore } from '../transcriptStore'
 import { generateTranscriptDiagnosticReport } from '../diagnosticExport'
+import { clearUsageRecords, recordUsage } from '@/ai-gateway/usageTracker'
 import type { AiTranscriptEvent } from '../transcriptTypes'
+import type { ProviderConfig } from '@/types/ai'
 
 function makeEvent(partial: Omit<AiTranscriptEvent, 'id'>): Omit<AiTranscriptEvent, 'id'> {
   return partial
 }
 
 describe('diagnosticExport', () => {
+  it('exports optional Gateway dashboard snapshot scoped by session', () => {
+    clearUsageRecords()
+    const store = createTranscriptStore()
+    recordUsage({
+      requestId: 'req-s1',
+      sessionId: 's1',
+      source: 'chat',
+      kind: 'chat_completions',
+      providerProfileId: 'profile-a',
+      providerId: 'provider-a',
+      model: 'model-a',
+      startedAt: 1000,
+      firstTokenAt: 1040,
+      finishedAt: 1120,
+      status: 'success',
+      usage: { promptTokens: 20, completionTokens: 10, totalTokens: 30 },
+      cost: { inputCost: 0.01, outputCost: 0.02, totalCost: 0.03, currency: 'USD' },
+    })
+    recordUsage({
+      requestId: 'req-s2',
+      sessionId: 's2',
+      source: 'compact',
+      kind: 'compact',
+      providerId: 'provider-b',
+      model: 'model-b',
+      startedAt: 1200,
+      finishedAt: 1300,
+      status: 'error',
+    })
+
+    const defaultReport = generateTranscriptDiagnosticReport(store, 's1')
+    const report = generateTranscriptDiagnosticReport(store, 's1', {
+      includeGatewayDashboard: true,
+      gatewayDashboardOptions: {
+        providers: [{
+          id: 'provider-a',
+          name: 'Provider A',
+          providerType: 'openai_compat',
+          endpoint: 'https://api.provider-a.example.com',
+          models: [],
+          isDefault: true,
+          createdAt: 1,
+        } satisfies ProviderConfig],
+      },
+    })
+
+    expect(defaultReport.gatewayDashboard).toBeUndefined()
+    expect(report.gatewayDashboard?.appliedFilters.sessionId).toBe('s1')
+    expect(report.gatewayDashboard?.summary).toMatchObject({
+      requestCount: 1,
+      successCount: 1,
+      totalTokens: 30,
+      totalCost: 0.03,
+    })
+    expect(report.gatewayDashboard?.currentRoute).toMatchObject({
+      requestId: 'req-s1',
+      providerProfileId: 'profile-a',
+      providerName: 'Provider A',
+      model: 'model-a',
+      totalTokens: 30,
+    })
+    expect(report.gatewayDashboard?.kindSummaries).toEqual([
+      expect.objectContaining({
+        kind: 'chat_completions',
+        requestCount: 1,
+      }),
+    ])
+    expect(report.gatewayDashboard?.currentRoute?.requestId).not.toBe('req-s2')
+    clearUsageRecords()
+  })
+
   it('exports P2 Agent Runtime context history', () => {
     const store = createTranscriptStore()
     store.appendEvent(makeEvent({
@@ -134,5 +207,61 @@ describe('diagnosticExport', () => {
       projectedToolResultCount: 0,
       unpairedToolCallIds: ['tc-1'],
     })
+  })
+
+  it('exports routing fallback diagnostics', () => {
+    const store = createTranscriptStore()
+    store.appendEvent(makeEvent({
+      sessionId: 's1',
+      turnId: 't1',
+      type: 'routing',
+      timestamp: 1400,
+      payload: {
+        type: 'routing',
+        data: {
+          reason: 'route_resolved',
+          fromProviderId: 'deepseek',
+          fromModel: 'deepseek-v4-flash',
+          resolvedProviderId: 'kimi',
+          resolvedModelId: 'kimi-k2',
+          requestId: 'req-1',
+          retryIndex: 1,
+          fallbackUsed: true,
+          fallbackReason: 'network',
+          promptTokens: 100,
+          completionTokens: 50,
+          totalTokens: 150,
+          cost: 0.001,
+          currency: 'USD',
+        },
+      },
+    }))
+
+    const report = generateTranscriptDiagnosticReport(store, 's1')
+
+    expect(report.routingHistory).toEqual([{
+      timestamp: 1400,
+      reason: 'route_resolved',
+      fromProviderId: 'deepseek',
+      toProviderId: undefined,
+      fromModel: 'deepseek-v4-flash',
+      toModel: undefined,
+      fallbackCount: undefined,
+      fallbackProviderIds: undefined,
+      rateLimitEnabled: undefined,
+      requestId: 'req-1',
+      resolvedProviderId: 'kimi',
+      resolvedModelId: 'kimi-k2',
+      upstreamModel: undefined,
+      retryIndex: 1,
+      fallbackUsed: true,
+      fallbackReason: 'network',
+      fallbackChainId: undefined,
+      promptTokens: 100,
+      completionTokens: 50,
+      totalTokens: 150,
+      cost: 0.001,
+      currency: 'USD',
+    }])
   })
 })

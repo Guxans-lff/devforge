@@ -86,6 +86,8 @@
 - ✅ Chat / Compact / Prompt Optimize / Tool Loop 均可看到 Gateway 接入证据，不再只是“类型设计”阶段。
 - ✅ Gateway 已具备 fallback、rate limit、usage record、endpoint security、token estimate 等基础治理能力。
 - ✅ Gateway Dashboard 已补齐 preflight 失败记录：SSRF / token budget / 主 fallback 限流会进入 usage record，诊断面板可看到实际 provider/model、fallback 状态、耗时、首 token、错误类型和安全拦截原因。
+- ✅ Gateway Dashboard 已补齐 Profile / Provider / 来源 / 请求类型 / 状态筛选，以及成本趋势、SLA、模型路由、错误聚合和 Provider 健康汇总。
+- ✅ Transcript 诊断导出可选携带按 session 过滤的 Gateway Dashboard 快照，排障包可同时看到事件流、实际路由、fallback、成本、SLA 和请求类型聚合。
 - ✅ Bridge API 模块化、`AiBridgeError`、Provider Capability / Permission Mapper 等治理基础已存在。
 - ✅ Provider Profile Bundle 前端闭环已落地：支持 Provider / Model / Output Style / Workspace Prompt / Dispatcher / SSRF 安全策略打包、预览、应用、备份、回滚。
 - ✅ Provider Profile Bundle 已接入后端 `app_state` 快照镜像：启动时可从后端水合，保存/备份/回滚/导入后会同步后端；localStorage 保留为本地兜底。
@@ -96,8 +98,8 @@
 
 当前边界：
 - ⚠️ Provider Profile Bundle 当前是后端 KV 镜像 + localStorage 兜底；尚未升级为专用 SQLite 表或 workspace 文件级配置，跨设备冲突合并、团队权限和迁移回填仍待做。
-- ⚠️ SSRF allowlist、fallback keys 和 Profile 级 Gateway 策略已进入主链路；后续仍需补团队级策略模板、按 Profile 的诊断筛选和冲突合并。
-- ⚠️ Gateway Dashboard 已能展示实际路由和拦截原因；后续仍可继续做成本趋势、按 Profile 过滤和团队级 SLA 报表。
+- ⚠️ SSRF allowlist、fallback keys、Profile 级 Gateway 策略和 Dashboard 诊断筛选已进入主链路；后续仍需补团队级策略模板和配置冲突合并。
+- ⚠️ Gateway Dashboard 已能展示实际路由、拦截原因、成本趋势和 SLA；后续仍可继续做持久化历史、团队级聚合报表和异常告警。
 
 ### 14.4 阶段四：AI 产品化能力
 
@@ -151,9 +153,9 @@
 | 阶段二 | Background Job Runtime | 🟡 MVP 完成 | `background-job.ts`、`useJobWorker.ts`、`AiBackgroundJobsPanel.vue` | 不是完整后端 daemon/supervisor，跨进程长期运行能力不足。 |
 | 阶段二 | 权限、路径安全、风险摘要 | ✅ 主体完成 | `approvalRisk.ts`、`pathSafety.ts`、`workspaceIsolation.ts`、各风险工具测试 | 仍需更多异常进程、跨窗口、刷新恢复压力测试。 |
 | 阶段二 | 对话区体验稳定 | ✅ 主体完成 | `AiChatShell.vue`、`AiMessageListVirtual.vue`、`AiInputArea.vue`、`AiChatView.interaction.test.ts` | 重点守住大会话性能，不再恢复预加载会话类逻辑。 |
-| 阶段三 | Gateway 统一入口 | ✅ MVP 完成 | `AiGateway.ts`、`types.ts`、`router.ts`、`rateLimiter.ts`、`usageTracker.ts` | 仍需产品化配置管理和诊断展示。 |
+| 阶段三 | Gateway 统一入口 | ✅ MVP 完成，P1 诊断增强完成 | `AiGateway.ts`、`types.ts`、`router.ts`、`rateLimiter.ts`、`usageTracker.ts`、`gatewayDashboard.ts` | 仍需团队级配置模板、持久化历史和异常告警。 |
 | 阶段三 | Chat / Compact / Prompt Optimize 覆盖 | ✅ 已覆盖 | `chatSessionRunner.ts`、`chatToolLoop.ts`、`useAutoCompact.ts`、`promptOptimizer.ts`、`gatewayCoverage.test.ts` | 后续新增模型调用必须继续统一走 Gateway。 |
-| 阶段三 | fallback key / rate limit / SSRF | ✅ 主体完成 | `fallbackKeys.ts`、`rateLimiter.ts`、`security.ts`、`gatewayPolicy.ts`、`AiGateway.test.ts`、`session_store.rs` | 已覆盖 chat / compact / prompt optimize；后续补按 Profile 的诊断筛选、团队策略模板和 SLA 报表。 |
+| 阶段三 | fallback key / rate limit / SSRF | ✅ 主体完成 | `fallbackKeys.ts`、`rateLimiter.ts`、`security.ts`、`gatewayPolicy.ts`、`AiGateway.test.ts`、`session_store.rs` | 已覆盖 chat / compact / prompt optimize，并补齐 Profile/Provider/Kind 诊断筛选与 SLA 报表；后续补团队策略模板。 |
 | 阶段三 | Provider Profile Bundle | 🟡 产品化闭环完成 | `providerProfileBundle.ts`、`provider-profile-bundle.ts`、`AiProviderProfileBundlePanel.vue`、`gatewayPolicy.ts` | 已有 CRUD、预览、应用、备份、回滚、后端 KV 镜像、JSON 导入导出，且 Output Style / Provider security / Gateway 策略已影响主链路；缺专用 SQLite 表、workspace 文件迁移、团队共享冲突处理。 |
 | 阶段四 | Workspace Prompt / Skill / Output Style | 🟡 MVP 完成 | `workspaceSkills.ts`、`useOutputStyles.ts`、`chatSendPreparation.ts`、`AiProviderProfileBundlePanel.vue` | Prompt / Output Style 已能随 Profile Bundle 生效；Skill 仍缺独立选择器、团队治理和审计。 |
 | 阶段四 | Team Memory | 🟡 基础完成 | `ai-memory.ts`、`AiMemoryDrawer.vue`、`Team Memory Review` 相关入口 | 缺团队级检索、冲突处理、审计和权限策略。 |

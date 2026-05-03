@@ -6,6 +6,8 @@
  * are recorded as immutable events for diagnostics, audit, and search.
  */
 
+import type { GatewayDashboardSnapshot } from '@/ai-gateway/gatewayDashboard'
+
 // ─────────────────────────── Event Type Enum ───────────────────────────
 
 export type AiTranscriptEventType =
@@ -109,6 +111,22 @@ export interface RoutingPayload {
   toProviderId?: string
   fromModel?: string
   toModel?: string
+  fallbackCount?: number
+  fallbackProviderIds?: string[]
+  rateLimitEnabled?: boolean
+  requestId?: string
+  resolvedProviderId?: string
+  resolvedModelId?: string
+  upstreamModel?: string
+  retryIndex?: number
+  fallbackUsed?: boolean
+  fallbackReason?: string
+  fallbackChainId?: string
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  cost?: number
+  currency?: string
 }
 
 export interface AgentRuntimeContextPayload {
@@ -208,6 +226,24 @@ export interface RoutingHistoryItem {
   reason: string
   fromProviderId?: string
   toProviderId?: string
+  fromModel?: string
+  toModel?: string
+  fallbackCount?: number
+  fallbackProviderIds?: string[]
+  rateLimitEnabled?: boolean
+  requestId?: string
+  resolvedProviderId?: string
+  resolvedModelId?: string
+  upstreamModel?: string
+  retryIndex?: number
+  fallbackUsed?: boolean
+  fallbackReason?: string
+  fallbackChainId?: string
+  promptTokens?: number
+  completionTokens?: number
+  totalTokens?: number
+  cost?: number
+  currency?: string
 }
 
 export interface PlanHistoryItem {
@@ -295,4 +331,5 @@ export interface TranscriptDiagnosticReport {
   agentRuntimeContextHistory: AgentRuntimeContextHistoryItem[]
   agentRuntimeGovernance: AgentRuntimeGovernanceSnapshot
   compactBoundaryProjection: CompactBoundaryProjectionReport
+  gatewayDashboard?: GatewayDashboardSnapshot
 }

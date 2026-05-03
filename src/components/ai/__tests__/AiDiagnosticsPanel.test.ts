@@ -139,6 +139,107 @@ describe('AiDiagnosticsPanel', () => {
     expect(wrapper.vm.$props.runtimeSnapshot?.turnId).toBe('turn-1')
   })
 
+  it('copies base diagnostics with a standard empty transcript report', async () => {
+    setupTestPinia()
+    const aiStore = useAiChatStore()
+    aiStore.activeSessionId = 's-base-export'
+    aiStore.currentWorkDir = 'D:/Project/devforge'
+    recordUsage({
+      requestId: 'req-base-export',
+      sessionId: 's-base-export',
+      source: 'chat',
+      kind: 'chat_completions',
+      providerId: 'provider-base',
+      model: 'model-base',
+      startedAt: 100,
+      firstTokenAt: 120,
+      finishedAt: 180,
+      status: 'success',
+      usage: { promptTokens: 7, completionTokens: 3, totalTokens: 10 },
+      cost: { inputCost: 0.01, outputCost: 0.01, totalCost: 0.02, currency: 'USD' },
+    })
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+
+    const wrapper = mount(AiDiagnosticsPanel, {
+      props: {
+        metrics: {
+          sessionStartedAt: 1000,
+          prepareCompletedAt: 1100,
+          prepareDurationMs: 100,
+          requestStartedAt: 1200,
+          requestCount: 1,
+          recoveryCount: 0,
+          firstTokenAt: 1300,
+          firstTokenLatencyMs: 100,
+          requestFirstTokenLatencyMs: 100,
+          responseCompletedAt: 1800,
+          responseDurationMs: 600,
+          loadHistoryStartedAt: null,
+          loadHistoryDurationMs: null,
+          historyRestoreCount: 0,
+          compactTriggeredCount: 0,
+          providerRerouteCount: 0,
+          autoDowngradeCount: 0,
+          autoSwitchProviderCount: 0,
+          lastRoutingReason: null,
+          pendingToolQueueLength: 0,
+          lastToolRun: {
+            totalCalls: 0,
+            successCount: 0,
+            errorCount: 0,
+            cancelledCount: 0,
+            timeoutCount: 0,
+            retryCount: 0,
+            totalDurationMs: 0,
+            maxDurationMs: 0,
+            averageDurationMs: 0,
+          },
+          trend: {
+            sampleCount: 0,
+            firstTokenAverageMs: null,
+            requestFirstTokenAverageMs: null,
+            responseAverageMs: null,
+            toolRunAverageMs: null,
+            lastFirstTokenDeltaMs: null,
+            lastRequestFirstTokenDeltaMs: null,
+            lastResponseDeltaMs: null,
+            lastToolRunDeltaMs: null,
+          },
+          sessionHistory: [],
+          errorBreakdown: [],
+        },
+      },
+    })
+
+    await wrapper.find('button').trigger('click')
+    await wrapper.findAll('button')[1]!.trigger('click')
+
+    const copied = JSON.parse(String(writeText.mock.calls.at(-1)?.[0]))
+    expect(copied).toMatchObject({
+      schemaVersion: 2,
+      session: {
+        sessionId: 's-base-export',
+        workDir: 'D:/Project/devforge',
+      },
+      gateway: {
+        summary: {
+          requestCount: 1,
+          totalTokens: 10,
+        },
+      },
+      transcriptDiagnosticReport: {
+        sessionId: 's-base-export',
+        eventCount: 0,
+        gatewayDashboard: {
+          currentRoute: {
+            requestId: 'req-base-export',
+            model: 'model-base',
+          },
+        },
+      },
+    })
+  })
+
   it('renders Gateway route latency, fallback, and error details', async () => {
     setupTestPinia()
     const aiStore = useAiChatStore()
@@ -165,16 +266,20 @@ describe('AiDiagnosticsPanel', () => {
       sessionId: 'session-gateway',
       source: 'chat',
       kind: 'chat_completions',
+      providerProfileId: 'profile-coding',
       providerId: 'provider-fallback',
       model: 'model-fallback',
       primaryProviderId: 'provider-primary',
       primaryModel: 'model-primary',
       fallbackReason: 'switch_provider',
+      fallbackChainId: 'provider-primary->provider-fallback',
       retryIndex: 1,
       startedAt: 100,
       firstTokenAt: 140,
       finishedAt: 220,
       status: 'error',
+      usage: { promptTokens: 80, completionTokens: 20, totalTokens: 100 },
+      cost: { inputCost: 0.01, outputCost: 0.01, totalCost: 0.02, currency: 'USD' },
       error: new AiGatewayError('provider_error', 'Endpoint security check failed: Private IP is not allowed', false),
     })
 
@@ -232,13 +337,29 @@ describe('AiDiagnosticsPanel', () => {
     await wrapper.find('button').trigger('click')
 
     expect(wrapper.text()).toContain('Fallback Provider')
+    expect(wrapper.text()).toContain('profile-coding')
     expect(wrapper.text()).toContain('model-fallback')
+    expect(wrapper.text()).toContain('provider-primary / model-primary')
+    expect(wrapper.text()).toContain('100')
+    expect(wrapper.text()).toContain('(80 / 20)')
+    expect(wrapper.text()).toContain('0.02 USD')
+    expect(wrapper.text()).toContain('Token 100')
     expect(wrapper.text()).toContain('120 ms')
     expect(wrapper.text()).toContain('40 ms')
     expect(wrapper.text()).toContain('当前请求由 fallback 路由承接')
+    expect(wrapper.text()).toContain('switch_provider')
+    expect(wrapper.text()).toContain('provider-primary->provider-fallback')
     expect(wrapper.text()).toContain('provider_error')
     expect(wrapper.text()).toContain('Private IP is not allowed')
     expect(wrapper.text()).toContain('Gateway Profile 策略')
+    expect(wrapper.text()).toContain('SLA 报表')
+    expect(wrapper.text()).toContain('critical')
+    expect(wrapper.text()).toContain('错误率')
+    expect(wrapper.text()).toContain('模型路由')
+    expect(wrapper.text()).toContain('TTFB')
+    expect(wrapper.text()).toContain('err')
+    expect(wrapper.text()).toContain('fb')
+    expect(wrapper.text()).toContain('Profile 汇总')
     expect(wrapper.text()).toContain('备用 Provider')
     expect(wrapper.text()).toContain('Fallback Provider')
     expect(wrapper.text()).toContain('成本优先')
@@ -372,9 +493,261 @@ describe('AiDiagnosticsPanel', () => {
     expect(wrapper.text()).toContain('Profile 限流窗口较短且请求数偏高')
   })
 
+  it('filters Gateway diagnostics by provider profile from the panel', async () => {
+    setupTestPinia()
+    const aiStore = useAiChatStore()
+    aiStore.providers = [
+      {
+        id: 'provider-a',
+        name: 'Provider A',
+        providerType: 'openai_compat',
+        endpoint: 'https://api.a.example.com',
+        models: [],
+        isDefault: true,
+        createdAt: 1,
+      },
+      {
+        id: 'provider-b',
+        name: 'Provider B',
+        providerType: 'openai_compat',
+        endpoint: 'https://api.b.example.com',
+        models: [],
+        isDefault: false,
+        createdAt: 1,
+      },
+    ]
+    recordUsage({
+      requestId: 'req-profile-a',
+      sessionId: 'session-profile-filter',
+      source: 'chat',
+      kind: 'chat_completions',
+      providerProfileId: 'profile-a',
+      providerId: 'provider-a',
+      model: 'model-a',
+      startedAt: 100,
+      firstTokenAt: 120,
+      finishedAt: 180,
+      status: 'success',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      cost: { inputCost: 0.01, outputCost: 0.01, totalCost: 0.02, currency: 'USD' },
+    })
+    recordUsage({
+      requestId: 'req-profile-b',
+      sessionId: 'session-profile-filter',
+      source: 'chat',
+      kind: 'chat_completions',
+      providerProfileId: 'profile-b',
+      providerId: 'provider-b',
+      model: 'model-b',
+      startedAt: 200,
+      firstTokenAt: 240,
+      finishedAt: 320,
+      status: 'success',
+      usage: { promptTokens: 20, completionTokens: 10, totalTokens: 30 },
+      cost: { inputCost: 0.02, outputCost: 0.02, totalCost: 0.04, currency: 'USD' },
+    })
+
+    aiStore.activeSessionId = 'session-profile-filter'
+    const wrapper = mount(AiDiagnosticsPanel, {
+      props: {
+        metrics: {
+          sessionStartedAt: 1000,
+          prepareCompletedAt: 1100,
+          prepareDurationMs: 100,
+          requestStartedAt: 1200,
+          requestCount: 1,
+          recoveryCount: 0,
+          firstTokenAt: 1300,
+          firstTokenLatencyMs: 100,
+          requestFirstTokenLatencyMs: 100,
+          responseCompletedAt: 1800,
+          responseDurationMs: 600,
+          loadHistoryStartedAt: null,
+          loadHistoryDurationMs: null,
+          historyRestoreCount: 0,
+          compactTriggeredCount: 0,
+          providerRerouteCount: 0,
+          autoDowngradeCount: 0,
+          autoSwitchProviderCount: 0,
+          lastRoutingReason: null,
+          pendingToolQueueLength: 0,
+          lastToolRun: {
+            totalCalls: 0,
+            successCount: 0,
+            errorCount: 0,
+            cancelledCount: 0,
+            timeoutCount: 0,
+            retryCount: 0,
+            totalDurationMs: 0,
+            maxDurationMs: 0,
+            averageDurationMs: 0,
+          },
+          trend: {
+            sampleCount: 0,
+            firstTokenAverageMs: null,
+            requestFirstTokenAverageMs: null,
+            responseAverageMs: null,
+            toolRunAverageMs: null,
+            lastFirstTokenDeltaMs: null,
+            lastRequestFirstTokenDeltaMs: null,
+            lastResponseDeltaMs: null,
+            lastToolRunDeltaMs: null,
+          },
+          sessionHistory: [],
+          errorBreakdown: [],
+        },
+      },
+    })
+
+    await wrapper.find('button').trigger('click')
+    expect(wrapper.find('[data-testid="gateway-profile-filter"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="gateway-profile-summary-card"]')).toHaveLength(2)
+
+    await wrapper.find('[data-testid="gateway-profile-filter"]').setValue('profile-b')
+
+    const cards = wrapper.findAll('[data-testid="gateway-profile-summary-card"]')
+    expect(cards).toHaveLength(1)
+    expect(cards[0]?.text()).toContain('profile-b')
+    expect(cards[0]?.text()).not.toContain('profile-a')
+    expect(wrapper.text()).toContain('Provider B')
+    expect(wrapper.text()).not.toContain('Provider A / model-a')
+  })
+
+  it('filters Gateway diagnostics by source and status from the panel', async () => {
+    setupTestPinia()
+    const aiStore = useAiChatStore()
+    aiStore.providers = [
+      {
+        id: 'provider-a',
+        name: 'Provider A',
+        providerType: 'openai_compat',
+        endpoint: 'https://api.a.example.com',
+        models: [],
+        isDefault: true,
+        createdAt: 1,
+      },
+    ]
+    recordUsage({
+      requestId: 'req-chat-success',
+      sessionId: 'session-source-filter',
+      source: 'chat',
+      kind: 'chat_completions',
+      providerProfileId: 'profile-a',
+      providerId: 'provider-a',
+      model: 'model-chat',
+      startedAt: 100,
+      firstTokenAt: 120,
+      finishedAt: 180,
+      status: 'success',
+      usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+      cost: { inputCost: 0.01, outputCost: 0.01, totalCost: 0.02, currency: 'USD' },
+    })
+    recordUsage({
+      requestId: 'req-compact-error',
+      sessionId: 'session-source-filter',
+      source: 'compact',
+      kind: 'compact',
+      providerProfileId: 'profile-a',
+      providerId: 'provider-a',
+      model: 'model-compact',
+      startedAt: 200,
+      finishedAt: 320,
+      status: 'error',
+      error: new AiGatewayError('context_too_long', 'context exceeded', false),
+      usage: { promptTokens: 20, completionTokens: 0, totalTokens: 20 },
+      cost: { inputCost: 0.02, outputCost: 0, totalCost: 0.02, currency: 'USD' },
+    })
+
+    aiStore.activeSessionId = 'session-source-filter'
+    const wrapper = mount(AiDiagnosticsPanel, {
+      props: {
+        metrics: {
+          sessionStartedAt: 1000,
+          prepareCompletedAt: 1100,
+          prepareDurationMs: 100,
+          requestStartedAt: 1200,
+          requestCount: 1,
+          recoveryCount: 0,
+          firstTokenAt: 1300,
+          firstTokenLatencyMs: 100,
+          requestFirstTokenLatencyMs: 100,
+          responseCompletedAt: 1800,
+          responseDurationMs: 600,
+          loadHistoryStartedAt: null,
+          loadHistoryDurationMs: null,
+          historyRestoreCount: 0,
+          compactTriggeredCount: 0,
+          providerRerouteCount: 0,
+          autoDowngradeCount: 0,
+          autoSwitchProviderCount: 0,
+          lastRoutingReason: null,
+          pendingToolQueueLength: 0,
+          lastToolRun: {
+            totalCalls: 0,
+            successCount: 0,
+            errorCount: 0,
+            cancelledCount: 0,
+            timeoutCount: 0,
+            retryCount: 0,
+            totalDurationMs: 0,
+            maxDurationMs: 0,
+            averageDurationMs: 0,
+          },
+          trend: {
+            sampleCount: 0,
+            firstTokenAverageMs: null,
+            requestFirstTokenAverageMs: null,
+            responseAverageMs: null,
+            toolRunAverageMs: null,
+            lastFirstTokenDeltaMs: null,
+            lastRequestFirstTokenDeltaMs: null,
+            lastResponseDeltaMs: null,
+            lastToolRunDeltaMs: null,
+          },
+          sessionHistory: [],
+          errorBreakdown: [],
+        },
+      },
+    })
+
+    await wrapper.find('button').trigger('click')
+    expect(wrapper.find('[data-testid="gateway-source-filter"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="gateway-status-filter"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="gateway-provider-filter"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="gateway-kind-filter"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('请求类型')
+    expect(wrapper.text()).toContain('model-chat')
+    expect(wrapper.text()).toContain('model-compact')
+
+    await wrapper.find('[data-testid="gateway-provider-filter"]').setValue('provider-a')
+    await wrapper.find('[data-testid="gateway-kind-filter"]').setValue('compact')
+    await wrapper.find('[data-testid="gateway-source-filter"]').setValue('compact')
+    await wrapper.find('[data-testid="gateway-status-filter"]').setValue('error')
+
+    expect(wrapper.text()).toContain('model-compact')
+    expect(wrapper.text()).toContain('context_too_long')
+    expect(wrapper.text()).not.toContain('model-chat')
+  })
+
   it('copies full transcript when backend export loader is provided', async () => {
     setupTestPinia()
     const aiStore = useAiChatStore()
+    aiStore.activeSessionId = 's1'
+    recordUsage({
+      requestId: 'req-export-gateway',
+      sessionId: 's1',
+      source: 'chat',
+      kind: 'chat_completions',
+      providerProfileId: 'profile-export',
+      providerId: 'provider-export',
+      model: 'model-export',
+      startedAt: 1000,
+      firstTokenAt: 1050,
+      finishedAt: 1200,
+      status: 'success',
+      usage: { promptTokens: 12, completionTokens: 8, totalTokens: 20 },
+      cost: { inputCost: 0.01, outputCost: 0.02, totalCost: 0.03, currency: 'USD' },
+    })
     await aiStore.saveWorkspaceConfig('D:/Project/devforge', {
       gatewayPolicy: {
         fallbackEnabled: false,
@@ -455,7 +828,7 @@ describe('AiDiagnosticsPanel', () => {
             turnId: 't2',
             type: 'user_message',
             timestamp: 2000,
-            payload: { type: 'user_message', data: { contentPreview: 'new', attachmentCount: 0 } },
+            payload: { type: 'user_message', data: { contentPreview: 'api_key=sk-abcdefghijklmnopqrstuvwxyz', attachmentCount: 0 } },
           },
         ]),
       },
@@ -466,16 +839,138 @@ describe('AiDiagnosticsPanel', () => {
 
     const lastCall = writeText.mock.calls[writeText.mock.calls.length - 1]
     const copied = JSON.parse(String(lastCall?.[0]))
+    expect(copied.schemaVersion).toBe(2)
+    expect(copied.session).toMatchObject({
+      sessionId: 's1',
+      workDir: 'D:/Project/devforge',
+    })
     expect(copied.fullTranscript.eventCount).toBe(2)
     expect(copied.fullTranscript.events[0].id).toBe('evt-1')
+    expect(JSON.stringify(copied)).not.toContain('sk-abcdefghijklmnopqrstuvwxyz')
+    expect(copied.fullTranscript.events[1].payload.data.contentPreview).toBe('api_key=[REDACTED]')
     expect(copied.fullTranscript.compactBoundaryProjection).toMatchObject({
       hasBoundary: true,
       projectedEventCount: 1,
       originalTokens: 12000,
     })
+    expect(copied.transcriptDiagnosticReport).toMatchObject({
+      sessionId: 's1',
+      eventCount: 2,
+      compactBoundaryProjection: {
+        hasBoundary: true,
+        originalTokens: 12000,
+      },
+      gatewayDashboard: {
+        summary: {
+          requestCount: 1,
+          totalTokens: 20,
+          totalCost: 0.03,
+        },
+        currentRoute: {
+          requestId: 'req-export-gateway',
+          providerProfileId: 'profile-export',
+          model: 'model-export',
+        },
+      },
+    })
     expect(copied.gatewayPolicy).toMatchObject({
       fallbackEnabled: false,
       routingStrategy: 'speed',
+    })
+  })
+
+  it('copies diagnostics with Gateway snapshot when full transcript export fails', async () => {
+    setupTestPinia()
+    const aiStore = useAiChatStore()
+    aiStore.activeSessionId = 's-failed-export'
+    recordUsage({
+      requestId: 'req-failed-export',
+      sessionId: 's-failed-export',
+      source: 'chat',
+      kind: 'chat_completions',
+      providerId: 'provider-failed-export',
+      model: 'model-failed-export',
+      startedAt: 100,
+      finishedAt: 200,
+      status: 'error',
+      usage: { promptTokens: 4, completionTokens: 0, totalTokens: 4 },
+      cost: { inputCost: 0.01, outputCost: 0, totalCost: 0.01, currency: 'USD' },
+    })
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue(undefined)
+
+    const wrapper = mount(AiDiagnosticsPanel, {
+      props: {
+        metrics: {
+          sessionStartedAt: 1000,
+          prepareCompletedAt: 1100,
+          prepareDurationMs: 100,
+          requestStartedAt: 1200,
+          requestCount: 1,
+          recoveryCount: 0,
+          firstTokenAt: 1300,
+          firstTokenLatencyMs: 100,
+          requestFirstTokenLatencyMs: 100,
+          responseCompletedAt: 1800,
+          responseDurationMs: 600,
+          loadHistoryStartedAt: null,
+          loadHistoryDurationMs: null,
+          historyRestoreCount: 0,
+          compactTriggeredCount: 0,
+          providerRerouteCount: 0,
+          autoDowngradeCount: 0,
+          autoSwitchProviderCount: 0,
+          lastRoutingReason: null,
+          pendingToolQueueLength: 0,
+          lastToolRun: {
+            totalCalls: 0,
+            successCount: 0,
+            errorCount: 0,
+            cancelledCount: 0,
+            timeoutCount: 0,
+            retryCount: 0,
+            totalDurationMs: 0,
+            maxDurationMs: 0,
+            averageDurationMs: 0,
+          },
+          trend: {
+            sampleCount: 0,
+            firstTokenAverageMs: null,
+            requestFirstTokenAverageMs: null,
+            responseAverageMs: null,
+            toolRunAverageMs: null,
+            lastFirstTokenDeltaMs: null,
+            lastRequestFirstTokenDeltaMs: null,
+            lastResponseDeltaMs: null,
+            lastToolRunDeltaMs: null,
+          },
+          sessionHistory: [],
+          errorBreakdown: [],
+        },
+        loadFullTranscript: vi.fn().mockRejectedValue(new Error('backend down')),
+      },
+    })
+
+    await wrapper.find('button').trigger('click')
+    await wrapper.findAll('button')[1]!.trigger('click')
+
+    const lastCall = writeText.mock.calls[writeText.mock.calls.length - 1]
+    const copied = JSON.parse(String(lastCall?.[0]))
+    expect(copied.fullTranscript).toEqual({ error: 'full_transcript_export_failed' })
+    expect(copied.transcriptDiagnosticReport).toMatchObject({
+      sessionId: 's-failed-export',
+      eventCount: 0,
+      error: 'full_transcript_export_failed',
+      gatewayDashboard: {
+        summary: {
+          requestCount: 1,
+          errorCount: 1,
+          totalTokens: 4,
+        },
+        currentRoute: {
+          requestId: 'req-failed-export',
+          model: 'model-failed-export',
+        },
+      },
     })
   })
 

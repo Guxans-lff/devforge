@@ -7,8 +7,21 @@
 
 import type { AiTranscriptEvent, AiTranscriptEventOf, AiTranscriptEventType, TranscriptDiagnosticReport } from './transcriptTypes'
 import type { TranscriptStore } from './transcriptStore'
+import { buildGatewayDashboardSnapshot, type BuildGatewayDashboardOptions, type GatewayDashboardSnapshot } from '@/ai-gateway/gatewayDashboard'
 import { buildAdvancedAgentGovernanceSnapshot } from '@/ai-gui/advancedAgentGovernance'
 import { buildCompactBoundaryProjection } from '@/composables/ai-agent/context/compactBoundary'
+
+export interface TranscriptDiagnosticExportOptions {
+  includeGatewayDashboard?: boolean
+  gatewayDashboard?: GatewayDashboardSnapshot
+  gatewayDashboardOptions?: Omit<BuildGatewayDashboardOptions, 'sessionId'>
+}
+
+export interface TranscriptDiagnosticReportFromEventsOptions {
+  includeGatewayDashboard?: boolean
+  gatewayDashboard?: GatewayDashboardSnapshot
+  gatewayDashboardOptions?: Omit<BuildGatewayDashboardOptions, 'sessionId'>
+}
 
 function isTranscriptEvent<T extends AiTranscriptEventType>(
   event: AiTranscriptEvent,
@@ -112,6 +125,24 @@ function toRoutingHistory(events: AiTranscriptEvent[]): TranscriptDiagnosticRepo
       reason: e.payload.data.reason,
       fromProviderId: e.payload.data.fromProviderId,
       toProviderId: e.payload.data.toProviderId,
+      fromModel: e.payload.data.fromModel,
+      toModel: e.payload.data.toModel,
+      fallbackCount: e.payload.data.fallbackCount,
+      fallbackProviderIds: e.payload.data.fallbackProviderIds,
+      rateLimitEnabled: e.payload.data.rateLimitEnabled,
+      requestId: e.payload.data.requestId,
+      resolvedProviderId: e.payload.data.resolvedProviderId,
+      resolvedModelId: e.payload.data.resolvedModelId,
+      upstreamModel: e.payload.data.upstreamModel,
+      retryIndex: e.payload.data.retryIndex,
+      fallbackUsed: e.payload.data.fallbackUsed,
+      fallbackReason: e.payload.data.fallbackReason,
+      fallbackChainId: e.payload.data.fallbackChainId,
+      promptTokens: e.payload.data.promptTokens,
+      completionTokens: e.payload.data.completionTokens,
+      totalTokens: e.payload.data.totalTokens,
+      cost: e.payload.data.cost,
+      currency: e.payload.data.currency,
     }))
 }
 
@@ -161,31 +192,56 @@ function toAgentRuntimeContextHistory(events: AiTranscriptEvent[]): TranscriptDi
 export function generateTranscriptDiagnosticReport(
   store: TranscriptStore,
   sessionId: string,
+  options: TranscriptDiagnosticExportOptions = {},
 ): TranscriptDiagnosticReport {
-  const events = store.getEvents(sessionId)
+  return generateTranscriptDiagnosticReportFromEvents(
+    sessionId,
+    store.getEvents(sessionId),
+    options,
+  )
+}
+
+export function generateTranscriptDiagnosticReportFromEvents(
+  sessionId: string,
+  events: readonly AiTranscriptEvent[],
+  options: TranscriptDiagnosticReportFromEventsOptions = {},
+): TranscriptDiagnosticReport {
   const now = Date.now()
-  const agentRuntimeContextHistory = toAgentRuntimeContextHistory(events)
+  const transcriptEvents = events.filter(event => event.sessionId === sessionId)
+  const agentRuntimeContextHistory = toAgentRuntimeContextHistory(transcriptEvents)
+  const gatewayDashboard = options.gatewayDashboard
+    ?? (options.includeGatewayDashboard
+      ? buildGatewayDashboardSnapshot({
+          ...(options.gatewayDashboardOptions ?? {}),
+          sessionId,
+        })
+      : undefined)
 
   return {
     sessionId,
     exportedAt: now,
-    eventCount: events.length,
-    turnTimeline: toTurnTimeline(events),
-    toolCallTimeline: toToolCallTimeline(events),
-    errorTimeline: toErrorTimeline(events),
-    compactHistory: toCompactHistory(events),
-    routingHistory: toRoutingHistory(events),
-    planHistory: toPlanHistory(events),
+    eventCount: transcriptEvents.length,
+    turnTimeline: toTurnTimeline(transcriptEvents),
+    toolCallTimeline: toToolCallTimeline(transcriptEvents),
+    errorTimeline: toErrorTimeline(transcriptEvents),
+    compactHistory: toCompactHistory(transcriptEvents),
+    routingHistory: toRoutingHistory(transcriptEvents),
+    planHistory: toPlanHistory(transcriptEvents),
     agentRuntimeContextHistory,
     agentRuntimeGovernance: buildAdvancedAgentGovernanceSnapshot(agentRuntimeContextHistory),
-    compactBoundaryProjection: buildCompactBoundaryProjection(events),
+    compactBoundaryProjection: buildCompactBoundaryProjection(transcriptEvents),
+    gatewayDashboard,
   }
 }
 
 /**
  * Export diagnostic report as a JSON string (sanitized).
  */
-export function exportTranscriptDiagnostics(store: TranscriptStore, sessionId: string): string {
-  const report = generateTranscriptDiagnosticReport(store, sessionId)
+export function exportTranscriptDiagnostics(
+  store: TranscriptStore,
+  sessionId: string,
+  options: TranscriptDiagnosticExportOptions = {},
+): string {
+  const report = generateTranscriptDiagnosticReport(store, sessionId, options)
   return JSON.stringify(report, null, 2)
 }

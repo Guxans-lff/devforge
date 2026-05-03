@@ -12,11 +12,13 @@ export interface AiGatewayUsageRecord {
   sessionId: string
   source: AiGatewaySource
   kind: AiGatewayRequestKind
+  providerProfileId?: string
   providerId: string
   model: string
   primaryProviderId?: string
   primaryModel?: string
   fallbackReason?: string
+  fallbackChainId?: string
   retryIndex?: number
   startedAt: number
   firstTokenAt?: number
