@@ -225,6 +225,10 @@ function buildSecurityConfig(): NonNullable<ProviderConfig['security']> {
   }
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 function toggleFallbackProvider(providerId: string, enabled: boolean): void {
   const ids = new Set(selectedFallbackProviderIds.value)
   if (enabled) ids.add(providerId)
@@ -237,19 +241,23 @@ function clearFallbackProviders(): void {
 }
 
 function saveProfile(): void {
-  const profile = store.saveProfile({
-    id: selectedProfile.value?.id,
-    name: form.name,
-    description: form.description,
-    providerId: form.providerId,
-    modelId: form.modelId,
-    outputStyleId: form.outputStyleId,
-    workspaceConfig: buildWorkspaceConfig(),
-    gatewayPolicy: buildGatewayPolicy(),
-    security: buildSecurityConfig(),
-  })
-  selectedProfileId.value = profile.id
-  message.value = 'Profile 已保存'
+  try {
+    const profile = store.saveProfile({
+      id: selectedProfile.value?.id,
+      name: form.name,
+      description: form.description,
+      providerId: form.providerId,
+      modelId: form.modelId,
+      outputStyleId: form.outputStyleId,
+      workspaceConfig: buildWorkspaceConfig(),
+      gatewayPolicy: buildGatewayPolicy(),
+      security: buildSecurityConfig(),
+    })
+    selectedProfileId.value = profile.id
+    message.value = 'Profile 已保存'
+  } catch (error) {
+    message.value = `保存 Profile 失败：${errorMessage(error)}`
+  }
 }
 
 function confirmDiscardUnsavedChanges(action: string): boolean {
@@ -300,14 +308,19 @@ function applyProfile(): boolean {
     message.value = '已取消应用 Profile'
     return false
   }
-  const result = store.applyProfile({
-    profileId: profile.id,
-    providers: props.providers,
-    currentWorkspaceConfig: props.currentWorkspaceConfig,
-  })
-  emit('apply', { profile, ...result })
-  message.value = 'Profile 已应用'
-  return true
+  try {
+    const result = store.applyProfile({
+      profileId: profile.id,
+      providers: props.providers,
+      currentWorkspaceConfig: props.currentWorkspaceConfig,
+    })
+    emit('apply', { profile, ...result })
+    message.value = 'Profile 已应用'
+    return true
+  } catch (error) {
+    message.value = `应用 Profile 失败：${errorMessage(error)}`
+    return false
+  }
 }
 
 function applyProfileFromPreview(): void {
@@ -318,8 +331,12 @@ function applyProfileFromPreview(): void {
 
 function backupProfile(): void {
   if (!selectedProfile.value) return
-  store.backupProfile(selectedProfile.value.id)
-  message.value = 'Profile 备份已创建'
+  try {
+    store.backupProfile(selectedProfile.value.id)
+    message.value = 'Profile 备份已创建'
+  } catch (error) {
+    message.value = `备份 Profile 失败：${errorMessage(error)}`
+  }
 }
 
 function rollbackProfile(backupId: string): void {
@@ -329,11 +346,15 @@ function rollbackProfile(backupId: string): void {
     message.value = '已取消回滚 Profile'
     return
   }
-  const restored = store.rollbackProfile(backupId)
-  selectedProfileId.value = restored.id
-  loadProfileToForm(restored)
-  rollbackOpen.value = false
-  message.value = 'Profile 已回滚'
+  try {
+    const restored = store.rollbackProfile(backupId)
+    selectedProfileId.value = restored.id
+    loadProfileToForm(restored)
+    rollbackOpen.value = false
+    message.value = 'Profile 已回滚'
+  } catch (error) {
+    message.value = `回滚 Profile 失败：${errorMessage(error)}`
+  }
 }
 
 function removeProfile(): void {
@@ -343,11 +364,15 @@ function removeProfile(): void {
     message.value = '已取消删除 Profile'
     return
   }
-  store.removeProfile(selectedProfile.value.id)
-  selectedProfileId.value = store.profiles[0]?.id ?? null
-  if (selectedProfile.value) loadProfileToForm(selectedProfile.value)
-  else resetFormFromCurrent()
-  message.value = 'Profile 已删除'
+  try {
+    store.removeProfile(selectedProfile.value.id)
+    selectedProfileId.value = store.profiles[0]?.id ?? null
+    if (selectedProfile.value) loadProfileToForm(selectedProfile.value)
+    else resetFormFromCurrent()
+    message.value = 'Profile 已删除'
+  } catch (error) {
+    message.value = `删除 Profile 失败：${errorMessage(error)}`
+  }
 }
 
 async function exportProfiles(): Promise<void> {
@@ -368,7 +393,7 @@ function importProfiles(): void {
     importText.value = ''
     message.value = 'Profile JSON 已导入'
   } catch (error) {
-    message.value = error instanceof Error ? error.message : String(error)
+    message.value = errorMessage(error)
   }
 }
 

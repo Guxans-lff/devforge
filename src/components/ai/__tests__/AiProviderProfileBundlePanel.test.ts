@@ -143,6 +143,25 @@ describe('AiProviderProfileBundlePanel', () => {
     })
   })
 
+  it('shows readable error when saving profile fails', async () => {
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+    const store = useProviderProfileBundleStore()
+    vi.spyOn(store, 'saveProfile').mockImplementation(() => {
+      throw new Error('写入失败')
+    })
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+
+    expect(wrapper.text()).toContain('保存 Profile 失败：写入失败')
+  })
+
   it('emits apply payload for a saved profile', async () => {
     const wrapper = mount(AiProviderProfileBundlePanel, {
       props: {
@@ -167,6 +186,27 @@ describe('AiProviderProfileBundlePanel', () => {
         },
       },
     })
+  })
+
+  it('shows readable error when applying profile fails', async () => {
+    const wrapper = mount(AiProviderProfileBundlePanel, {
+      props: {
+        providers: [makeProvider()],
+        currentProviderId: 'provider-1',
+        currentModelId: 'gpt-5.4',
+      },
+      global: { stubs },
+    })
+
+    await wrapper.findAll('button').find(button => button.text().includes('保存 Profile'))!.trigger('click')
+    const store = useProviderProfileBundleStore()
+    vi.spyOn(store, 'applyProfile').mockImplementation(() => {
+      throw new Error('Provider 不存在')
+    })
+    await wrapper.findAll('button').find(button => button.text().includes('应用'))!.trigger('click')
+
+    expect(wrapper.text()).toContain('应用 Profile 失败：Provider 不存在')
+    expect(wrapper.emitted('apply')).toBeUndefined()
   })
 
   it('asks confirmation before applying risky profile and can cancel', async () => {
